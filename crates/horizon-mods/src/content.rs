@@ -260,6 +260,7 @@ struct ItemFile {
     #[serde(default)]
     components: BTreeMap<String, serde_json::Value>,
     crafting_remainder: Option<String>,
+    block: Option<String>,
 }
 
 /// An item the mod adds: a vanilla template item's components under a new
@@ -277,6 +278,8 @@ pub struct Item {
     /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
     /// a vanilla item or one of the mod's own.
     pub crafting_remainder: Option<String>,
+    /// The block placed by this item, if any.
+    pub block: Option<String>,
 }
 
 /// `MobEffectCategory`.
@@ -703,6 +706,7 @@ impl Content {
                 rarity: file.rarity,
                 components: file.components,
                 crafting_remainder: file.crafting_remainder,
+                block: file.block,
             };
             check_item(&item).map_err(|e| format!("{name}: {e}"))?;
             if !ids.insert(item.id.clone()) {
@@ -840,6 +844,9 @@ fn check_item(item: &Item) -> Result<(), String> {
             "template {:?} is not a vanilla item (minecraft:...)",
             item.template
         ));
+    }
+    if item.block.as_ref().is_some_and(|id| !namespaced_id(id)) {
+        return Err("block must be a namespaced block id".into());
     }
     if item.max_stack_size.is_some_and(|n| !(1..=99).contains(&n)) {
         return Err("max_stack_size is 1 to 99".into());
@@ -1221,6 +1228,34 @@ capabilities = ["registries"]
         assert_eq!(content.items[0].rarity, Some(Rarity::Uncommon));
         assert!(content.items[0].components.is_empty());
         assert_eq!(content.items[0].crafting_remainder, None);
+    }
+
+    #[test]
+    fn items_name_the_block_they_place() {
+        let file = "data/ruby/horizon/item/seeds.json";
+        let content = hmod(
+            "seeds",
+            MANIFEST_TEXT,
+            &[(
+                file,
+                br#"{"template":"minecraft:wheat_seeds","block":"ruby:crop"}"#,
+            )],
+        )
+        .unwrap();
+        assert_eq!(content.items[0].block.as_deref(), Some("ruby:crop"));
+        let error = hmod(
+            "bad-block",
+            MANIFEST_TEXT,
+            &[(
+                file,
+                br#"{"template":"minecraft:wheat_seeds","block":"crop"}"#,
+            )],
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("block must be a namespaced block id"),
+            "{error}"
+        );
     }
 
     #[test]
