@@ -1809,7 +1809,11 @@ pub trait Hooks: Send + Sync {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
+    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
+    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
+    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
+    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
+    /// native mod is loaded. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -4524,6 +4528,22 @@ pub trait Hooks: Send + Sync {
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn arrow_nock(&self, host: &mut dyn Host, event: &mut ArrowNockEvent<'_>) -> Flow {
         let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
+    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
+    /// block; set `feature` to another key to grow that one. Server-side.
+    /// Mods can use `level.random()` to access the growth random source.
+    /// @API:block_grow_feature@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_grow_feature(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        event: &mut BlockGrowFeatureEvent<'_>,
+    ) -> Flow {
+        let _ = level;
         let _ = event;
         Flow::Continue
     }
@@ -8778,6 +8798,9 @@ pub struct LivingKnockbackEvent<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
     pub strength: f64,
     pub x: f64,
     pub z: f64,
@@ -8789,6 +8812,9 @@ pub fn dispatch_living_knockback(
     damage_type: &str,
     causing: i32,
     direct: i32,
+    attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
     strength: &mut f64,
     x: &mut f64,
     z: &mut f64,
@@ -8803,6 +8829,9 @@ pub fn dispatch_living_knockback(
         damage_type,
         causing,
         direct,
+        attacker,
+        attacker_main,
+        attacker_off,
         strength: *strength,
         x: *x,
         z: *z,
@@ -14851,6 +14880,36 @@ pub fn dispatch_arrow_nock(
     };
     for mod_hook in super::entered(mods, "arrow_nock") {
         if matches!(mod_hook.arrow_nock(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_grow_feature`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockGrowFeatureEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub feature: &'a mut Option<String>,
+}
+pub fn dispatch_block_grow_feature(
+    level: &mut dyn LevelRandomHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    feature: &mut Option<String>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockGrowFeatureEvent {
+        dimension,
+        pos,
+        feature,
+    };
+    for mod_hook in super::entered(mods, "block_grow_feature") {
+        if matches!(mod_hook.block_grow_feature(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }

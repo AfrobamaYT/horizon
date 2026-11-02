@@ -203,6 +203,16 @@ gets its own damage and durability, or a tool its mining speed:
     "!minecraft:repairable": {} } }
 ```
 
+An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
+
+```json
+{ "template": "minecraft:wheat_seeds", "block": "ruby:crop" }
+```
+
+This uses the block's placement state and survival rules and consumes the item outside creative mode. Add seeds to
+`minecraft:villager_plantable_seeds` for farmers to plant them. The mapping does not change what the block drops or
+what Pick Block gives.
+
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
 JSON values become NBT values. Values must fit the network NBT limits and

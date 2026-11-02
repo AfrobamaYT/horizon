@@ -75,7 +75,7 @@ jobs:
   # Python and the Rust cache steps are GitHub's only.
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -156,7 +156,7 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

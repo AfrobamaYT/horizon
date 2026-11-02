@@ -1327,6 +1327,47 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::level_entities_in")
     }
+    /// Resolve an online UUID on this server. During a player swap only the
+    /// acting player is available; other players return None because swaps can
+    /// nest and their records may hold displaced state. API @API:player_read@.
+    fn player(&self, uuid: u128) -> Option<PlayerRef> {
+        let _ = uuid;
+        unimplemented!("Host::player")
+    }
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    fn player_game_mode(&self, player: PlayerRef) -> Option<i32> {
+        let _ = player;
+        unimplemented!("Host::player_game_mode")
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_creative")
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_spectator")
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_may_build")
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+        let _ = player;
+        unimplemented!("Host::player_food")
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+        let _ = player;
+        unimplemented!("Host::player_abilities")
+    }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.
@@ -1388,5 +1429,35 @@ impl LevelRef {
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
         host.level_entities_in(self, min, max)
+    }
+}
+impl PlayerRef {
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    pub fn game_mode(self, host: &dyn Host) -> Option<i32> {
+        host.player_game_mode(self)
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    pub fn is_creative(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_creative(self)
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    pub fn is_spectator(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_spectator(self)
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    pub fn may_build(self, host: &dyn Host) -> Option<bool> {
+        host.player_may_build(self)
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    pub fn food(self, host: &dyn Host) -> Option<NativePlayerFood> {
+        host.player_food(self)
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    pub fn abilities(self, host: &dyn Host) -> Option<NativePlayerAbilities> {
+        host.player_abilities(self)
     }
 }
