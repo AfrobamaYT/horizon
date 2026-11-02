@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "calculate_player_turn",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_calculate_player_turn",
+      "neoforge": "CalculatePlayerTurnEvent",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "replace",
+        "out": "turn"
+      }
+    }
+  ],
+  "rust_summary": "Mouse sensitivity and cinematic camera settings before a player turn (`native_calculate_player_turn`).",
+  "doc_summary": "On the client, `native_calculate_player_turn(turn)` can replace the raw mouse sensitivity and cinematic camera setting independently before mouse turn calculation. Bundles need \"hooks\": @API:calculate_player_turn@."
+}

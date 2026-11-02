@@ -401,7 +401,7 @@ pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativeShake};
+pub use native_hooks::{NativeClock, NativePlayerTurn, NativeShake};
 pub use native_item_energy::ItemEnergyBuffer;
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
@@ -7603,11 +7603,20 @@ impl Game<'_> {
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
     fn apply_mouse_look(&mut self) {
-        let look = self.look_options();
+        let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
         let pointer = self.captured || self.agent_pointer;
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
+        if active && grabbed {
+            let mut turn = native_hooks::NativePlayerTurn {
+                mouse_sensitivity: look.sensitivity,
+                cinematic_camera_enabled: look.smooth_camera,
+            };
+            self.native_calculate_player_turn(&mut turn);
+            look.sensitivity = turn.mouse_sensitivity;
+            look.smooth_camera = turn.cinematic_camera_enabled;
+        }
         if let Some((xo, yo)) = self
             .mouse
             .handle_accumulated_movement(time, active, grabbed, look)

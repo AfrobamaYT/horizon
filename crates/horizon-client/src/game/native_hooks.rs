@@ -529,6 +529,12 @@ pub(super) use horizon_world::level::flags;
 #[allow(dead_code)]
 pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
+/// Settings used to calculate a player's mouse turn on the client.
+pub struct NativePlayerTurn {
+    pub mouse_sensitivity: f64,
+    pub cinematic_camera_enabled: bool,
+}
+
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
     #[inline(always)]
@@ -4943,6 +4949,11 @@ impl Game<'_> {
     pub(super) fn native_item_bar(&self, stack: &ItemStack, bar: &mut Option<(i32, u32)>) {
         mod_api::dispatch_item_bar(self, mod_api::mods(), stack, bar);
     }
+    /// Replace the raw mouse sensitivity and cinematic camera setting before turning.
+    pub(super) fn native_calculate_player_turn(&self, turn: &mut NativePlayerTurn) {
+        let _ = (turn,);
+    }
+
     /// Append an item's custom decorations after its default bar, cooldown and count.
     /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
     /// no item translation is active.
