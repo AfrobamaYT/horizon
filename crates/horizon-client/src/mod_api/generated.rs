@@ -4532,8 +4532,9 @@ pub trait Hooks: Send + Sync {
         Flow::Continue
     }
     /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
-    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
-    /// block; set `feature` to another key to grow that one. Server-side.
+    /// configured `feature`, `None` when vanilla has none to place (a lone dark
+    /// oak sapling). Set `cancel`, or `feature` to `None`, to keep the block;
+    /// set `feature` to another key to grow that one. Server-side.
     /// Mods can use `level.random()` to access the growth random source.
     /// @API:block_grow_feature@.
     ///
@@ -4590,6 +4591,14 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
+    /// @API:item_stacked_on_other@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn item_stacked_on_other(&self, event_: &mut ItemStackedOnOtherEvent<'_, '_>) -> Flow {
+        let _ = event_;
+        Flow::Continue
     }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
@@ -15089,6 +15098,27 @@ pub fn dispatch_item_container(
     for mod_hook in super::entered(mods, "item_container") {
         if let Some(replacement) = mod_hook.item_container(host, &mut event) {
             *slots = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_stacked_on_other`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemStackedOnOtherEvent<'a, 'b> {
+    pub event: &'a mut StackedOnOther<'b>,
+}
+pub fn dispatch_item_stacked_on_other(
+    mods: &[Box<dyn Hooks>],
+    event: &mut StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event_ = ItemStackedOnOtherEvent { event };
+    for mod_hook in super::entered(mods, "item_stacked_on_other") {
+        if matches!(mod_hook.item_stacked_on_other(&mut event_), Flow::Cancel) {
+            *canceled = true;
             break;
         }
     }
