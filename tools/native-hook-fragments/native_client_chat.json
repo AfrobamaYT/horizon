@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "client_chat",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_chat",
+      "neoforge": "ClientChatEvent",
+      "side": "client",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A client sends a chat message or command (`native_client_chat`).",
+  "doc_summary": "Before a client sends chat or a command, `native_client_chat(original_message, message, cancel)` may change the outgoing message or cancel it. Client-owned commands and unattended commands do not pass through this hook. Bundles need \"hooks\": @API:client_chat@."
+}

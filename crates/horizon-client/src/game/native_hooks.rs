@@ -7405,6 +7405,17 @@ impl Game<'_> {
             .and_then(|k| k.get(name));
         chosen.map_or(default, String::as_str).to_owned()
     }
+    /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
+    /// `original_message` is immutable; change `message` or set `cancel` to
+    /// prevent sending. @API:client_chat@.
+    pub(super) fn native_client_chat(
+        &mut self,
+        original_message: &str,
+        message: &mut String,
+        cancel: &mut bool,
+    ) {
+        let _ = (original_message, message, cancel);
+    }
     /// A line in chat from the client.
     pub(super) fn native_chat(&mut self, text: &str) {
         let focused = self.screen == Screen::Chat;

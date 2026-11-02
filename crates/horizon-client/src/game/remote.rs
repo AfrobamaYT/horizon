@@ -8748,6 +8748,13 @@ impl Game<'_> {
         if message.is_empty() || !self.chat_abilities().allows(message) {
             return;
         }
+        let mut outgoing = message.to_owned();
+        let mut cancel = false;
+        self.native_client_chat(message, &mut outgoing, &mut cancel);
+        if cancel {
+            return;
+        }
+        let message = outgoing.as_str();
         if let Some(command) = message.strip_prefix('/') {
             // The player's own RAM limit, which no server has a say in.
             if !self.ram_limit_command(command) {
