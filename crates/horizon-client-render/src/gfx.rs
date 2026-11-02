@@ -2275,7 +2275,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: crate::gfx::pipeline_cache::get(device),
+                cache: crate::gfx::pipeline_cache::get(&device),
             })
         };
         let pipeline = |label: &str,
@@ -2467,7 +2467,7 @@ impl Renderer {
                 })],
             }),
             multiview_mask: None,
-            cache: crate::gfx::pipeline_cache::get(device),
+            cache: crate::gfx::pipeline_cache::get(&device),
         });
         let lines = pipeline(
             "Block outline",
@@ -3128,7 +3128,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: crate::gfx::pipeline_cache::get(device),
+                cache: crate::gfx::pipeline_cache::get(&device),
             })
         };
         let entity_pipeline = |label, cull_mode, depth_write, compare, bias, blend, clouds| {
@@ -3300,7 +3300,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: crate::gfx::pipeline_cache::get(device),
+                cache: crate::gfx::pipeline_cache::get(&device),
             });
         // RenderPipelines.ENERGY_SWIRL: BlendFunction.ADDITIVE (one, one), no culling; no depth
         // writes either: vanilla sorts the quads far to near, so every face passes the test.
