@@ -37,25 +37,42 @@ pub(crate) fn parts() -> &'static Parts {
 }
 
 impl Parts {
-    pub(crate) fn block(&self, id: Option<&str>) -> &[Attached<dyn BlockPart>] {
+    // Each takes the thing's id as a closure: with nothing attached in that scope the id is never
+    // worked out, so a game with no parts pays no registry read on the hot hooks.
+    pub(crate) fn block<'k>(
+        &self,
+        id: impl FnOnce() -> Option<&'k str>,
+    ) -> &[Attached<dyn BlockPart>] {
         attached(&self.blocks, id)
     }
-    pub(crate) fn block_entity(&self, id: Option<&str>) -> &[Attached<dyn BlockEntityPart>] {
+    pub(crate) fn block_entity<'k>(
+        &self,
+        id: impl FnOnce() -> Option<&'k str>,
+    ) -> &[Attached<dyn BlockEntityPart>] {
         attached(&self.block_entities, id)
     }
-    pub(crate) fn item(&self, id: Option<&str>) -> &[Attached<dyn ItemPart>] {
+    pub(crate) fn item<'k>(
+        &self,
+        id: impl FnOnce() -> Option<&'k str>,
+    ) -> &[Attached<dyn ItemPart>] {
         attached(&self.items, id)
     }
-    pub(crate) fn menu(&self, id: Option<&str>) -> &[Attached<dyn MenuPart>] {
+    pub(crate) fn menu<'k>(
+        &self,
+        id: impl FnOnce() -> Option<&'k str>,
+    ) -> &[Attached<dyn MenuPart>] {
         attached(&self.menus, id)
     }
 }
 
-fn attached<'a, P: ?Sized>(
+fn attached<'a, 'k, P: ?Sized>(
     table: &'a HashMap<Box<str>, Vec<Attached<P>>>,
-    id: Option<&str>,
+    id: impl FnOnce() -> Option<&'k str>,
 ) -> &'a [Attached<P>] {
-    id.and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
+    if table.is_empty() {
+        return &[];
+    }
+    id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
 /// What a mod's [`Hooks::register`] attaches its parts with. A thing takes one part of each
@@ -224,6 +241,18 @@ mod tests {
     }
 
     #[test]
+    fn with_no_parts_the_block_is_never_named() {
+        let parts = Parts::default();
+        let named = std::cell::Cell::new(false);
+        let id = || {
+            named.set(true);
+            Some("test:gauge")
+        };
+        assert!(parts.block(id).is_empty());
+        assert!(!named.get(), "an empty table resolved the state's block");
+    }
+
+    #[test]
     fn the_same_part_twice_on_one_block_is_refused() {
         struct Other;
         impl BlockPart for Other {}
@@ -233,7 +262,7 @@ mod tests {
         r.block_part("test:gauge", Other);
         r.block_part("test:gauge", Gauge);
         r.block_part("gauge", Other);
-        assert_eq!(r.parts.block(Some("test:gauge")).len(), 2);
+        assert_eq!(r.parts.block(|| Some("test:gauge")).len(), 2);
         assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
         assert!(r.refused[0].contains("Gauge is attached to test:gauge twice"));
         assert!(r.refused[1].contains("not a namespaced id"));

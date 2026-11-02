@@ -793,7 +793,7 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     "& ModBlockEntity" | "& mut ModBlockEntity" => format!("Some(&*{key}.id)"),
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
-                Some((part_trait, format!("super::parts().{table}({id})")))
+                Some((part_trait, format!("super::parts().{table}(|| {id})")))
             }
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
@@ -1283,16 +1283,28 @@ mod tests {
         Parts
     }
     impl Parts {
-        fn block(&self, _: Option<&str>) -> &'static [&'static dyn BlockPart] {
+        fn block<'k>(
+            &self,
+            _: impl FnOnce() -> Option<&'k str>,
+        ) -> &'static [&'static dyn BlockPart] {
             &[]
         }
-        fn block_entity(&self, _: Option<&str>) -> &'static [&'static dyn BlockEntityPart] {
+        fn block_entity<'k>(
+            &self,
+            _: impl FnOnce() -> Option<&'k str>,
+        ) -> &'static [&'static dyn BlockEntityPart] {
             &[]
         }
-        fn item(&self, _: Option<&str>) -> &'static [&'static dyn ItemPart] {
+        fn item<'k>(
+            &self,
+            _: impl FnOnce() -> Option<&'k str>,
+        ) -> &'static [&'static dyn ItemPart] {
             &[]
         }
-        fn menu(&self, _: Option<&str>) -> &'static [&'static dyn MenuPart] {
+        fn menu<'k>(
+            &self,
+            _: impl FnOnce() -> Option<&'k str>,
+        ) -> &'static [&'static dyn MenuPart] {
             &[]
         }
     }
