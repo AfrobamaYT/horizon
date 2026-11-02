@@ -885,6 +885,57 @@ player killed while leashed drops on its next tick, naming the killer. Bundles t
 
 API 103 adds native mod particle types to `native_send_particles`: `ParticleOptions::named("mymod:spark")` sends a particle of the mod's own type, drawn by Horizon clients from the sprite set in the mod's `assets/<namespace>/particles/<path>.json` (`"textures": ["mymod:spark/1", ...]`, resolved as `particle/<texture>` in the atlas). The name must be namespaced; a client without that file draws nothing for it, vanilla clients (whose brand isn't Horizon's) aren't sent it, and the call still returns true. The type behaves as vanilla's `SimpleParticleType` with a sprite set: a plain billboard, no tint, 20 to 40 ticks, its motion the game's default spread (the speed sets its direction, not how fast it goes). Bundles that use it need `"hooks": 103`.
 
+A mod particle may opt into declarative behaviour in that same particle JSON (no new hook API):
+
+```json
+{
+  "textures": ["mymod:spark"],
+  "horizon:behaviour": {
+    "velocity": [0.0, 0.15, 0.0],
+    "velocity_jitter": [0.02, 0.0, 0.02],
+    "animation": "loop",
+    "frame_ticks": 3,
+    "gravity": 0.5,
+    "friction": 0.96,
+    "lifetime": 40,
+    "size": [0.1, 0.0],
+    "alpha": [1.0, 0.0]
+  }
+}
+```
+
+`animation` chooses how the particle walks through its sprites: `age` (first to last over its
+lifetime), `loop` (cycles every `frame_ticks` ticks, 1..200, only valid with `loop`), `random` (one random
+sprite, kept) or `first` (the first sprite, kept). Without `animation` the particle keeps the sprite it was
+spawned with, as before.
+
+Every field is optional. Omit `horizon:behaviour` (or use `{}`) to keep the existing behaviour,
+including its random draws, unchanged. `velocity` replaces the initial randomized velocity with
+an exact vector in blocks/tick, plus the velocity the spawn call passed; omit it to retain the spawn's default spread. `velocity_jitter` adds a random
+offset per axis, uniform in `-j..=j` (0..16 each, drawn from the particle's seeded generator, so the same
+seed gives the same particle); declaring it alone starts from zero plus the spawn velocity. Each component must
+be finite and within -16..16. `gravity` is the vanilla multiplier: each tick subtracts
+`0.04 * gravity` from vertical velocity before moving (negative rises; range -100..100).
+After movement, `friction` multiplies all velocity components (0..1); normal block collisions
+and the vanilla on-ground horizontal multiplier of 0.7 still apply. Omitted gravity remains 0,
+omitted friction remains the engine default (0.98), and omitted lifetime remains 20..39 ticks.
+`lifetime` is an integer from 1 to 12000; removal uses the existing base tick: it moves that many
+times and is removed on the following tick.
+
+`size` and `alpha` are `[start, end]` linear curves over `age / lifetime`, clamped to their
+endpoints. Size is billboard half-width/half-height in blocks (0..16), not a multiplier;
+alpha is opacity (0..1). The start value applies immediately at spawn, then the curves update
+once per tick, reaching the end after `lifetime` motion ticks. Omitted size keeps the random
+spawn size; omitted alpha stays 1. Fading particles use the blended particle layer.
+Malformed declarations, unknown behaviour fields, non-finite or out-of-range numbers reject the
+whole behaviour object with a log warning, falling back to the existing particle behaviour;
+the sprite set still loads. Vanilla particle JSONs are unaffected. Resource reloads apply new
+declarations to newly spawned particles; live particles keep their spawn-time values.
+The engine copies fixed-size numeric data at spawn and performs no new allocations per particle
+tick. This first slice supports only linear size/opacity curves and constant gravity/friction;
+there is no per-particle code hook.
+
+
 API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`, as `native_key` hands it over; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself, no `native_key` — while its release still arrives, so a `native_key` listener sees that release without its press, and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves. Bundles need "hooks": 104.
 
 API 105 adds `native_push_player([x, y, z])` on a client, added to the local player's velocity as an explosion's knockback is, and `native_set_flying_speed(player, speed)` for server mods, a player's creative flying speed, kept across respawns and game mode changes and saved with the player as vanilla's `abilities.flySpeed` is. Bundles need `"hooks": 105`.
@@ -954,7 +1005,7 @@ ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's are
 Horizon makes another way: a mob's melee push from its attack knockback or a Knockback weapon, an armor stand's and the
 ender dragon's. It has no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the
 server thread), so state a mod shares with its render thread hooks needs
-synchronising.
+synchronising. `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by mob, or 0 when unknown) and `attacker_main` and `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only while a native mod is loaded); an armor stand's sweep fires the hook too. These arguments were added to the hook after it first shipped, so a mixin injection that names `native_living_knockback` as a raw target must take them as well.
 
 Bundles that use it need `"hooks": 125`.
 
@@ -2370,10 +2421,16 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
+- `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
+  `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
+  Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
+  slot as `/item replace entity` does (None or air empties it). Mob equipment writes return false until Horizon can
+  preserve complete stacks for all mob slots.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
 
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags. Bundles need `"hooks": ["level_block_writes"]`.
 
@@ -2936,6 +2993,16 @@ A block entity part names its block entity type and the blocks that hold one, as
 The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
 find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
 block hooks) by block.
+
+`r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
+every member of a tag (its name without `#`). Each game resolves them against its own tags when its world
+opens, again on `/reload`, and when a client joins a server, so the window's game and its server thread each
+answer from the tags they play with; a block that leaves the tag is no longer asked. A mod's parts on one
+thing run in the order it registered them, by key or by tag. A part a tag gives a thing
+that already has that kind of part warns, naming both mods, and the earlier mod's part stays. A tag that
+doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
+doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
+does) can't see tag parts, and warns once.
 
 ### Testing a trait mod
 
