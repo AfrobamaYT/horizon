@@ -401,7 +401,7 @@ pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativePlayerTurn, NativeShake};
+pub use native_hooks::{NativeClock, NativeShake};
 pub use native_item_energy::ItemEnergyBuffer;
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
@@ -7609,12 +7609,7 @@ impl Game<'_> {
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
         if active && grabbed {
-            let mut turn = None;
-            self.native_calculate_player_turn(look.sensitivity, look.smooth_camera, &mut turn);
-            if let Some(turn) = turn {
-                look.sensitivity = turn.mouse_sensitivity;
-                look.smooth_camera = turn.cinematic_camera_enabled;
-            }
+            self.native_calculate_player_turn(&mut look.sensitivity, &mut look.smooth_camera);
         }
         if let Some((xo, yo)) = self
             .mouse

@@ -529,16 +529,6 @@ pub(super) use horizon_world::level::flags;
 #[allow(dead_code)]
 pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
-/// The options `MouseHandler.turnPlayer` reads, as a client mod replaces
-/// them (`native_calculate_player_turn`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NativePlayerTurn {
-    /// The raw mouse sensitivity option, `0.0..=1.0` in the options screen.
-    pub mouse_sensitivity: f64,
-    /// Cinematic camera (smooth turning).
-    pub cinematic_camera_enabled: bool,
-}
-
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
     #[inline(always)]
@@ -4954,16 +4944,15 @@ impl Game<'_> {
         mod_api::dispatch_item_bar(self, mod_api::mods(), stack, bar);
     }
     /// The mouse sensitivity and cinematic camera option a grabbed player's
-    /// mouse turn reads this frame (`MouseHandler.turnPlayer`). Put both in
-    /// `turn` to replace them for this turn only; the options are unchanged.
-    /// Once each frame while turning, client-side. @API:calculate_player_turn@.
+    /// mouse turn reads this frame (`MouseHandler.turnPlayer`). Change either
+    /// for this turn only; the options are unchanged. Client-side.
+    /// @API:calculate_player_turn@.
     pub(super) fn native_calculate_player_turn(
         &self,
-        mouse_sensitivity: f64,
-        cinematic_camera_enabled: bool,
-        turn: &mut Option<NativePlayerTurn>,
+        mouse_sensitivity: &mut f64,
+        cinematic_camera_enabled: &mut bool,
     ) {
-        let _ = (mouse_sensitivity, cinematic_camera_enabled, turn);
+        let _ = (mouse_sensitivity, cinematic_camera_enabled);
     }
     /// Append an item's custom decorations after its default bar, cooldown and count.
     /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
