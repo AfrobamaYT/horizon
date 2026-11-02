@@ -608,7 +608,7 @@ jobs:
           RUSTUP_TOOLCHAIN: stable
         run: python tools/test_float_log_parity.py
   jfr-analysis:
-    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
+    if: github.repository != 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4
