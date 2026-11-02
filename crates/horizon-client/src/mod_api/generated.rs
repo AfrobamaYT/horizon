@@ -4523,6 +4523,23 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's destroy speed for the block at `pos` may be changed or canceled.
+    /// @API:player_break_speed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn player_break_speed(&self, host: &mut dyn Host, event: &mut PlayerBreakSpeedEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player's ability to harvest the block at `pos` may be changed.
+    /// @API:player_harvest_check@.
+    ///
+    /// Every mod gets `event.can_harvest` in order and may add, change or remove can_harvest.
+    fn player_harvest_check(&self, host: &mut dyn Host, event: &mut PlayerHarvestCheckEvent) {
+        let _ = host;
+        let _ = event;
+    }
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
     /// API @API:render_hand_pose@.
@@ -13903,6 +13920,64 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::player_break_speed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerBreakSpeedEvent {
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub original_speed: f32,
+    pub new_speed: f32,
+}
+pub fn dispatch_player_break_speed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    state: u32,
+    original_speed: f32,
+    new_speed: &mut f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = PlayerBreakSpeedEvent {
+        pos,
+        state,
+        original_speed,
+        new_speed: *new_speed,
+    };
+    for mod_hook in super::entered(mods, "player_break_speed") {
+        if matches!(mod_hook.player_break_speed(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *new_speed = event.new_speed;
+}
+/// What [`Hooks::player_harvest_check`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerHarvestCheckEvent {
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub can_harvest: bool,
+}
+pub fn dispatch_player_harvest_check(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    state: u32,
+    can_harvest: &mut bool,
+) {
+    let mut event = PlayerHarvestCheckEvent {
+        pos,
+        state,
+        can_harvest: *can_harvest,
+    };
+    for mod_hook in super::entered(mods, "player_harvest_check") {
+        mod_hook.player_harvest_check(host, &mut event);
+    }
+    *can_harvest = event.can_harvest;
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

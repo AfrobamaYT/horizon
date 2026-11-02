@@ -4590,7 +4590,7 @@ impl Game<'_> {
         state: u32,
         can_harvest: &mut bool,
     ) {
-        let _ = (pos, state, can_harvest);
+        mod_api::dispatch_player_harvest_check(self, mod_api::mods(), pos, state, can_harvest);
     }
 
     /// A player's destroy speed for the block at `pos` may be changed or canceled.
@@ -4603,7 +4603,15 @@ impl Game<'_> {
         new_speed: &mut f32,
         canceled: &mut bool,
     ) {
-        let _ = (pos, state, original_speed, new_speed, canceled);
+        mod_api::dispatch_player_break_speed(
+            self,
+            mod_api::mods(),
+            pos,
+            state,
+            original_speed,
+            new_speed,
+            canceled,
+        );
     }
 
     /// A guest's block inventory lock check at `pos`. `locked` is the
