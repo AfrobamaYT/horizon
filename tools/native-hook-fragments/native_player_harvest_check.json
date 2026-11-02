@@ -7,7 +7,7 @@
       "side": "both",
       "cancellable": false,
       "mod_api": {
-        "contract": "replace",
+        "contract": "collect",
         "out": "can_harvest"
       }
     }
