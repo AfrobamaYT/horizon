@@ -1780,13 +1780,6 @@ impl Game<'_> {
                     if canceled == Some(true) {
                         return;
                     }
-                    let play = host.play.entry(conn).or_default();
-                    play.digging = Some((a.pos, face));
-                    play.dig_start = host.hub.ticks;
-                    play.last_progress = -1;
-                    // The pause between two blocks is the client's (MultiPlayerGameMode's
-                    // destroyDelay); the server digs from the START it receives.
-                    play.destroy_delay = 0;
                     // ServerPlayerGameMode.handleBlockBreakAction: a creative START
                     // destroys the block at once (destroyAndAck "creative destroy"),
                     // so a UseItemOn sent behind it in the same tick (both buttons
@@ -1809,6 +1802,11 @@ impl Game<'_> {
                             return StartDig::Restricted;
                         }
                         if g.res.facts().is_air(g.world.block(pos[0], pos[1], pos[2])) {
+                            g.mining = Some(Mining {
+                                pos,
+                                progress: 0.0,
+                                ticks: 0,
+                            });
                             return StartDig::Air;
                         }
                         let _ = g.attack_block(pos);
@@ -1819,10 +1817,13 @@ impl Game<'_> {
                         });
                         StartDig::Accepted
                     });
-                    if !matches!(start, Some(StartDig::Accepted))
-                        && let Some(play) = host.play.get_mut(&conn)
-                    {
-                        play.digging = None;
+                    if matches!(start, Some(StartDig::Accepted | StartDig::Air)) {
+                        let play = host.play.entry(conn).or_default();
+                        play.digging = Some((pos, face));
+                        play.dig_start = host.hub.ticks;
+                        play.last_progress = -1;
+                        // The pause between blocks is the client's destroyDelay.
+                        play.destroy_delay = 0;
                         if matches!(start, Some(StartDig::Air)) {
                             play.destroy_pos = Some(pos);
                         }
@@ -3679,6 +3680,17 @@ impl Game<'_> {
                 // is taken as soon as it comes.
                 self.guest_die(host, gi, conn);
                 continue;
+            }
+            // ServerPlayerGameMode.tick stops an active destroy when its block is air.
+            if let Some((pos, _)) = host.play.get(&conn).and_then(|play| play.digging)
+                && self
+                    .res
+                    .facts()
+                    .is_air(self.world.block(pos[0], pos[1], pos[2]))
+                && let Some(play) = host.play.get_mut(&conn)
+            {
+                play.digging = None;
+                play.mining = None;
             }
             let play = host.play.entry(conn).or_default();
             // ServerGamePacketListenerImpl.tick's dropSpamThrottler.
