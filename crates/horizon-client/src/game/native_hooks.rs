@@ -1534,6 +1534,17 @@ impl Game<'_> {
     pub(super) fn native_client_level_unload(&mut self, dimension: &str) {
         mod_api::dispatch_client_level_unload(self, mod_api::mods(), dimension);
     }
+    /// Client registry tags were updated from a server packet. The registry
+    /// view contains the synchronized data Horizon currently retains.
+    /// @API:client_tags_updated@.
+    pub(super) fn native_client_tags_updated(
+        &mut self,
+        registries: &horizon_protocol::registry::Dynamic,
+        cause: &str,
+        should_update_static_data: bool,
+    ) {
+        let _ = (registries, cause, should_update_static_data);
+    }
     /// The client accepted a play login and initialized its level and player
     /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
     /// is the server's entity ID and `dimension` is the level key. Client-side,

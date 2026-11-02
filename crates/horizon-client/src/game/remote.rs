@@ -1809,7 +1809,12 @@ impl Game<'_> {
                     name,
                     uuid,
                 } => {
-                    self.set_registries(registries);
+                    self.set_registries(registries.clone());
+                    self.native_client_tags_updated(
+                        &registries,
+                        "client_packet_received",
+                        self.integrated.is_none(),
+                    );
                     self.extras_joined();
                     // handleLogin: the level loading screen replaces any dialog.
                     self.close_dialogs();
@@ -1899,7 +1904,12 @@ impl Game<'_> {
                         r.custom_completions.clear();
                     }
                     self.ui.registries.custom_completions.clear();
-                    self.set_registries(registries);
+                    self.set_registries(registries.clone());
+                    self.native_client_tags_updated(
+                        &registries,
+                        "client_packet_received",
+                        self.integrated.is_none(),
+                    );
                 }
                 // handleTransfer: "Cannot transfer to server from
                 // singleplayer" (no ServerData), so the world just closes.

@@ -837,6 +837,8 @@ API 107 adds biome colours for client mods, for seasons: `native_biome_colors(bi
 foliage and water tints, asked for every biome when a mod calls `native_refresh_biome_colors()`, which rebuilds the
 loaded terrain with them. Bundles that use it need `"hooks": 107`.
 
+`native_client_tags_updated(registries, cause, should_update_static_data)` hears NeoForge's client-side `TagsUpdatedEvent` when configuration registries are installed. `registries` is Horizon's synchronized registry view, `cause` is `client_packet_received`, and `should_update_static_data` is false for single player, where the server updates shared data. Horizon currently retains only dialog tags, not a complete tag registry. This notification cannot be cancelled. Bundles that use it need `"hooks": @API:client_tags_updated@`.
+
 `native_client_player_logging_in(player_id, dimension)` hears NeoForge's `ClientPlayerNetworkEvent.LoggingIn` on the window after the play login initializes the client level and player identity, including for single player. `player_id` is the server's entity ID and `dimension` is the level key. The player's position and movement state arrive in a later packet; this notification cannot be cancelled. Bundles that use it need `"hooks": @API:client_player_logging_in@`.
 
 `native_client_player_logging_out(player_id, connected)` hears NeoForge's `ClientPlayerNetworkEvent.LoggingOut` before client disconnect teardown. `player_id` is optional and `connected` indicates a remote session; the game-mode controller is not exposed. This notification cannot be cancelled. Bundles that use it need `"hooks": @API:client_player_logging_out@`.
