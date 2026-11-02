@@ -3127,12 +3127,6 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
-    /// The local player left-clicks empty space, with any main-hand stack.
-    /// Client-side only; the server does not receive this event.
-    fn left_click_empty(&self, host: &mut dyn Host, event: &mut LeftClickEmptyEvent) {
-        let _ = host;
-        let _ = event;
-    }
     /// A server lightning bolt is about to be created. `cause` is `weather`,
     /// `trident` or `command`; `player` is the responsible player when known.
     /// Set `cancel` to prevent the bolt and its effects. 236.
@@ -4360,12 +4354,6 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// The local player right-clicks empty space with an empty `hand`.
-    /// Client-side only; the server does not receive this event.
-    fn right_click_empty(&self, host: &mut dyn Host, event: &mut RightClickEmptyEvent) {
-        let _ = host;
-        let _ = event;
-    }
     /// A sculk catalyst at `pos` has begun blooming after taking experience.
     /// The catalyst block state has changed. Server-side.
     /// 296.
@@ -4546,6 +4534,12 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// The local player left-clicks empty space, with any main-hand stack.
+    /// Client-side only; the server does not receive this event.
+    fn left_click_empty(&self, host: &mut dyn Host, event: &mut LeftClickEmptyEvent) {
+        let _ = host;
+        let _ = event;
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -4572,6 +4566,12 @@ pub trait Hooks: Send + Sync {
     }
     /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
     fn render_name_tag(&self, host: &dyn Host, event: &mut RenderNameTagEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The local player right-clicks empty space with an empty `hand`.
+    /// Client-side only; the server does not receive this event.
+    fn right_click_empty(&self, host: &mut dyn Host, event: &mut RightClickEmptyEvent) {
         let _ = host;
         let _ = event;
     }
@@ -10756,15 +10756,6 @@ pub fn dispatch_leaves_decay(
         }
     }
 }
-/// What [`Hooks::left_click_empty`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct LeftClickEmptyEvent {}
-pub fn dispatch_left_click_empty(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
-    let mut event = LeftClickEmptyEvent {};
-    for mod_hook in mods {
-        mod_hook.left_click_empty(host, &mut event);
-    }
-}
 /// What [`Hooks::lightning_strike`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct LightningStrikeEvent<'a> {
@@ -13463,17 +13454,6 @@ pub fn dispatch_raid_state_change(
         mod_hook.raid_state_change(host, &mut event);
     }
 }
-/// What [`Hooks::right_click_empty`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct RightClickEmptyEvent {
-    pub hand: Hand,
-}
-pub fn dispatch_right_click_empty(host: &mut dyn Host, mods: &[Box<dyn Hooks>], hand: Hand) {
-    let mut event = RightClickEmptyEvent { hand };
-    for mod_hook in mods {
-        mod_hook.right_click_empty(host, &mut event);
-    }
-}
 /// What [`Hooks::sculk_bloom`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct SculkBloomEvent<'a> {
@@ -13949,6 +13929,15 @@ pub fn dispatch_item_container(
         }
     }
 }
+/// What [`Hooks::left_click_empty`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LeftClickEmptyEvent {}
+pub fn dispatch_left_click_empty(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = LeftClickEmptyEvent {};
+    for mod_hook in super::entered(mods, "left_click_empty") {
+        mod_hook.left_click_empty(host, &mut event);
+    }
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -14098,6 +14087,17 @@ pub fn dispatch_render_name_tag(
         mod_hook.render_name_tag(host, &mut event);
     }
     *visible = event.visible;
+}
+/// What [`Hooks::right_click_empty`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RightClickEmptyEvent {
+    pub hand: Hand,
+}
+pub fn dispatch_right_click_empty(host: &mut dyn Host, mods: &[Box<dyn Hooks>], hand: Hand) {
+    let mut event = RightClickEmptyEvent { hand };
+    for mod_hook in super::entered(mods, "right_click_empty") {
+        mod_hook.right_click_empty(host, &mut event);
+    }
 }
 /// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
