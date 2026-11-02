@@ -8179,8 +8179,10 @@ impl Game<'_> {
     /// the main hand's item, then the off hand's turn (its block, its item).
     /// The server does each packet's part with that packet's hand only.
     fn remote_use_hands(&mut self) {
-        // Nothing in the crosshair: an empty hand's click is heard.
-        let miss = !self.entity_targeted() && self.pick().is_none();
+        // Nothing in the crosshair: an empty hand's click is heard, by mods only.
+        let miss = !horizon_client::mod_api::mods().is_empty()
+            && !self.entity_targeted()
+            && self.pick().is_none();
         if miss && self.held().is_none() {
             self.native_right_click_empty(Hand::Main);
         }
@@ -8559,11 +8561,14 @@ impl Game<'_> {
         } else if !self.entity_targeted()
             && let Some(hit) = self.pick()
         {
-            let air = self
-                .res
-                .facts()
-                .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
-            if air {
+            // A block hit on air falls through to MISS. `instant` below reads the
+            // block again after the dig, which may have broken it.
+            if !horizon_client::mod_api::mods().is_empty()
+                && self
+                    .res
+                    .facts()
+                    .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
+            {
                 self.native_left_click_empty();
             }
             self.remote_mining(true);
@@ -8572,7 +8577,7 @@ impl Game<'_> {
                 .facts()
                 .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
         } else {
-            if !self.entity_targeted() {
+            if !horizon_client::mod_api::mods().is_empty() && !self.entity_targeted() {
                 self.native_left_click_empty();
             }
             if !self.creative {
