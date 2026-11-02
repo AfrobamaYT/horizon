@@ -389,7 +389,10 @@ impl Game<'_> {
                 ("insertion".into(), name.clone().into()),
             ]);
         }
-        horizon_client::lan::hub::native_player_name_format(&Text::literal(&name), &mut displayname);
+        horizon_client::lan::hub::native_player_name_format(
+            &Text::literal(&name),
+            &mut displayname,
+        );
         displayname
     }
     fn source_position(&self) -> [f64; 3] {

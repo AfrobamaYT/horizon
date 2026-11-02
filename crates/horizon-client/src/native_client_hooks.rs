@@ -58,7 +58,10 @@ pub(crate) fn has_mods() -> bool {
     HOOKS.get().is_some_and(|hooks| (hooks.has_mods)())
 }
 
-pub(crate) fn player_name_format(username: &crate::text::Text, displayname: &mut crate::text::Text) {
+pub(crate) fn player_name_format(
+    username: &crate::text::Text,
+    displayname: &mut crate::text::Text,
+) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.player_name_format)(username, displayname);
     }

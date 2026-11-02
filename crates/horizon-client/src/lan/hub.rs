@@ -373,7 +373,10 @@ fn string(s: &str) -> Tag {
 /// A player's display name was formatted. Replace `displayname` to change it.
 /// Both sides. @API:player_name_format@.
 #[inline(never)]
-pub fn native_player_name_format(username: &crate::text::Text, displayname: &mut crate::text::Text) {
+pub fn native_player_name_format(
+    username: &crate::text::Text,
+    displayname: &mut crate::text::Text,
+) {
     crate::native_client_hooks::player_name_format(username, displayname);
 }
 

@@ -211,8 +211,11 @@ impl Game<'_> {
                 None => member,
             };
             // Every frame: build the username only for a mod to read.
-            if player && !horizon_client::mod_api::mods().is_empty() {
-                horizon_client::lan::hub::native_player_name_format(&Text::literal(&name), &mut shown);
+            if player
+                && !horizon_client::mod_api::mods().is_empty()
+                && let Some(uuid) = self.remote_player_uuid(m.id)
+            {
+                shown = self.player_text(&name, uuid);
             }
             let shown = shown.resolve_legacy();
             let mut lines = Vec::new();
