@@ -7668,8 +7668,17 @@ impl Game<'_> {
         let pointer = self.captured || self.agent_pointer;
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
-        if active && grabbed {
-            self.native_calculate_player_turn(&mut look.sensitivity, &mut look.smooth_camera);
+        if active
+            && grabbed
+            && !crate::mod_api::mods().is_empty()
+            && let Some(remote) = &self.remote
+        {
+            self.native_calculate_player_turn(
+                self.own_entity_id(),
+                remote.profile,
+                &mut look.sensitivity,
+                &mut look.smooth_camera,
+            );
         }
         if let Some((xo, yo)) = self
             .mouse

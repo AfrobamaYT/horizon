@@ -4547,6 +4547,14 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// The mouse sensitivity and cinematic camera option a grabbed player's
+    /// mouse turn reads this frame (`MouseHandler.turnPlayer`). Change either
+    /// for this turn only; the options are unchanged. Client-side.
+    /// @API:calculate_player_turn@.
+    fn calculate_player_turn(&self, host: &dyn Host, event: &mut CalculatePlayerTurnEvent) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -14914,6 +14922,34 @@ pub fn dispatch_block_grow_feature(
             break;
         }
     }
+}
+/// What [`Hooks::calculate_player_turn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CalculatePlayerTurnEvent {
+    pub player_entity_id: i32,
+    pub player_uuid: u128,
+    pub mouse_sensitivity: f64,
+    pub cinematic_camera_enabled: bool,
+}
+pub fn dispatch_calculate_player_turn(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_entity_id: i32,
+    player_uuid: u128,
+    mouse_sensitivity: &mut f64,
+    cinematic_camera_enabled: &mut bool,
+) {
+    let mut event = CalculatePlayerTurnEvent {
+        player_entity_id,
+        player_uuid,
+        mouse_sensitivity: *mouse_sensitivity,
+        cinematic_camera_enabled: *cinematic_camera_enabled,
+    };
+    for mod_hook in super::entered(mods, "calculate_player_turn") {
+        mod_hook.calculate_player_turn(host, &mut event);
+    }
+    *mouse_sensitivity = event.mouse_sensitivity;
+    *cinematic_camera_enabled = event.cinematic_camera_enabled;
 }
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
