@@ -8504,6 +8504,7 @@ impl Game<'_> {
                 .facts()
                 .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
         } else {
+            self.native_left_click_empty();
             if !self.creative {
                 self.clicks.miss_time = 10;
             }

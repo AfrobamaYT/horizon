@@ -166,6 +166,9 @@ creative. A mod that cancels it keeps the block: on the server it isn't attacked
 gets it back. The clicking player's own client still predicts the crack until then.
 Bundles that use it need `"hooks": 30`.
 
+`native_left_click_empty` hears the local player left-click empty space with any main-hand stack. It is client-side,
+not cancellable, and does not notify the server; a mod must send its own message if needed.
+
 API 31 adds a player's server tick: `native_player_tick` runs once a tick for every living player in the world, at the
 end of their `ServerPlayer.tick`, with the helpers reading that player. Players still tick while the game is frozen
 (`/tick freeze`), as in vanilla. A dead player isn't called, and neither is one killed earlier in the same tick; it
