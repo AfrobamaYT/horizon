@@ -4,6 +4,10 @@ pub trait Hooks: Send + Sync {
     fn render(&self) -> Option<&dyn RenderHooks> {
         None
     }
+    /// Once, at startup: attach this mod's parts (`r.block_part("mymod:shaft", Shaft)`).
+    fn register(&self, r: &mut Registrar) {
+        let _ = r;
+    }
     /// Once a frame, in a world or not, after Horizon's extras.
     fn frame(&self, host: &mut dyn Host, event: &mut FrameEvent) {
         let _ = host;
@@ -2477,7 +2481,7 @@ pub trait Hooks: Send + Sync {
     /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
     /// with read-only force. Fires on the Game running the bow release, including
     /// LAN guests; a remote client's own release path is not covered. Crossbows
-    /// and `ArrowNockEvent` are not covered. 318.
+    /// are not covered; `native_arrow_nock` is the bow's start. 318.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn arrow_loose(&self, host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> Flow {
@@ -4512,10 +4516,43 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// A player is about to nock `bow` with `hand` (`BowItem.use`, NeoForge's
+    /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
+    /// or the player is in creative. Set `cancel` to fail the use.
+    /// @API:arrow_nock@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn arrow_nock(&self, host: &mut dyn Host, event: &mut ArrowNockEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
         let _ = host;
+        let _ = event;
+    }
+    /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
+    /// `entity` (None for a player, whom `native_acting_player` names):
+    /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
+    /// what is added to the entity's velocity; a player's client is sent the
+    /// same. Wind bursts too, except dragons and end crystals. End crystals
+    /// are also omitted from ordinary blasts: Horizon removes them without a
+    /// velocity to change. Server-side. @API:explosion_knockback@.
+    ///
+    /// Every mod gets `event.knockback_velocity` in order and may add, change or remove knockback_velocity.
+    fn explosion_knockback(&self, host: &mut dyn Host, event: &mut ExplosionKnockbackEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mod's own ingredient kind, matching a concrete stack at craft time:
+    /// the ingredient's `test` calls here with the kind, its JSON and the
+    /// stack being matched, `accept` already true (the load-time list named
+    /// the item). Set `accept` to false to refuse the stack — its components
+    /// are the usual reason. The hook may be called many times a craft; the
+    /// answer must be the same for the same stack. API @API:ingredient_test@.
+    fn ingredient_test(&self, event: &mut IngredientTestEvent<'_>) {
         let _ = event;
     }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
@@ -4542,9 +4579,36 @@ pub trait Hooks: Send + Sync {
         let _ = event_;
         Flow::Continue
     }
+    /// `LivingEntity.getProjectile(weapon)` (NeoForge's
+    /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
+    /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
+    /// load of a pillager or piglin. `projectile` is the vanilla
+    /// ammunition; replace it to choose another. A replaced stack is not taken
+    /// from the inventory. @API:living_get_projectile@.
+    ///
+    /// Every mod gets `event.projectile` in order and may add, change or remove projectile.
+    fn living_get_projectile(&self, host: &mut dyn Host, event: &mut LivingGetProjectileEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
+        let _ = event;
+    }
+    /// A player's display name was formatted. Replace `displayname` to change it.
+    /// Both sides. @API:player_name_format@.
+    ///
+    /// Every mod gets `event.displayname` in order and may add, change or remove displayname.
+    fn player_name_format(&self, event: &mut PlayerNameFormatEvent<'_>) {
+        let _ = event;
+    }
+    /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
+    /// `player`, None to let the client choose it. Replace `display_name` to
+    /// change it. @API:player_tab_list_name_format@.
+    ///
+    /// Every mod gets `event.display_name` in order and may add, change or remove display_name.
+    fn player_tab_list_name_format(&self, event: &mut PlayerTabListNameFormatEvent<'_>) {
         let _ = event;
     }
     /// Additional first-person hand and item pose, including empty arms and maps.
@@ -4566,6 +4630,11 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
+    fn render_name_tag(&self, host: &dyn Host, event: &mut RenderNameTagEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A screen was observed closing, at most once per frame.
     fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
         let _ = host;
@@ -4585,6 +4654,621 @@ pub trait Hooks: Send + Sync {
     /// Stack is None for tooltips not associated with an item.
     fn tooltip_color(&self, host: &dyn Host, event: &mut TooltipColorEvent<'_>) {
         let _ = host;
+        let _ = event;
+    }
+}
+/// A block's part: code attached through [`Registrar`] to one block, a mod's own or vanilla's.
+/// Its methods are the scoped hooks', asked only for the blocks it is attached to, after
+/// every mod's [`Hooks`] method. They may run on the window's thread or the server thread.
+pub trait BlockPart: Send + Sync + 'static {
+    /// An authoritative server is about to deliver `neighborChanged`.
+    /// State and block IDs are valid in this level's registries for this call.
+    fn neighbor_changed(&self, level: &dyn LevelHost, event: &mut NeighborChangedEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// An authoritative server's `ServerLevel.tickChunk` is about to
+    /// random-tick the block `state` at `pos` (`BlockState.randomTick`):
+    /// only blocks that tick randomly, a mod's as its vanilla template block
+    /// does. Bone meal's random ticks (`StemBlock.performBonemeal`) don't
+    /// fire it. Change the block with `native_set_block_property` and set
+    /// `handled` to skip the block's own random tick (a mod crop growing its
+    /// own way); a block changed without `handled` takes its own random tick
+    /// as it is now, if it still ticks randomly. Lava's fluid random tick
+    /// runs either way.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `handled`, and later mods are skipped.
+    fn random_tick(&self, level: &mut dyn LevelWriteHost, event: &mut RandomTickEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An authoritative server's `ServerLevel.tickBlock` is about to run a
+    /// due scheduled tick of the block `state` at `pos` (`BlockState.tick`):
+    /// the block is still the one the tick was scheduled for. Change the
+    /// block with `native_set_block_property` and set `handled` to skip the
+    /// block's own tick; a block changed without `handled` takes its own
+    /// tick as it is now, if it is still the tick's block.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `handled`, and later mods are skipped.
+    fn tick_block(&self, level: &mut dyn LevelWriteHost, event: &mut TickBlockEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An authoritative server is about to compute the state the block
+    /// `state` at `pos` takes now that its neighbour in `direction` is
+    /// `neighbour` (`BlockBehaviour.updateShape`). `state` may not be in the
+    /// world yet (a piston landing it): decide from `state`, not from the
+    /// block at `pos`. Answer only for your own blocks: put the new state in
+    /// `new` (`state` keeps the block as it is; air breaks it, with its drops,
+    /// on a neighbour update) and the block's own `updateShape` doesn't run,
+    /// nor the ticks it would schedule. The level is read-only, as vanilla's
+    /// `LevelReader`; ticks go through `native_schedule_block_tick` and
+    /// `native_schedule_fluid_tick` with `ticks` (`ScheduledTickAccess`). It
+    /// runs often, at least six times per `setBlock` that updates shapes
+    /// (more for redstone wire's diagonals and knock-on updates): keep it
+    /// short.
+    ///
+    /// Return `Some` to set `new`; the first mod returning `Some` wins.
+    fn update_shape(
+        &self,
+        level: &mut dyn LevelTicksHost,
+        event: &mut UpdateShapeEvent,
+    ) -> Option<BlockStateId> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// The redstone signal the block `state` at `pos` gives on its `face`, the
+    /// side that touches the block reading it: `BlockState.getDirectSignal`
+    /// when `direct` (what passes through a block it touches, as a lever's
+    /// does), else `getSignal`. `signal` holds vanilla's answer: change it when
+    /// the block is yours (0 to 15; anything else is clamped). Asked very often,
+    /// from inside the level's update, so answer from your own state: check the
+    /// block first, and don't read or change the world here. When the answer
+    /// changes, and once the block is placed, call
+    /// `native_update_signal_neighbors`. Authoritative servers only. API 38.
+    fn block_signal(&self, level: &dyn LevelHost, event: &mut BlockSignalEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// `BlockState.isSignalSource`: set `source` for a block of yours that
+    /// gives a signal, so redstone wire beside it connects to it. Authoritative
+    /// servers only. API 38.
+    fn is_signal_source(&self, level: &dyn LevelHost, event: &mut IsSignalSourceEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
+    /// that comparators read (how full or far along it is, as a composter's
+    /// level), so they ask `native_analog_output`. Asked from inside the
+    /// level's update: answer from `state` alone. Authoritative servers only.
+    /// API 64.
+    ///
+    /// Every mod gets `event.output` in order and may add, change or remove output.
+    fn has_analog_output(&self, level: &dyn LevelHost, event: &mut HasAnalogOutputEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// `BlockState.getAnalogOutputSignal`: the signal a comparator reads from
+    /// the block `state` at `pos`, `face` the side that touches the comparator
+    /// (or the conductor in front of it). `output` holds vanilla's answer:
+    /// change it when the block is yours (0 to 15; anything else is clamped).
+    /// Asked only for blocks `native_has_analog_output` answered for, from
+    /// inside the level's update: don't change the world here. When the
+    /// answer changes without the block's state changing, call
+    /// `native_update_output_neighbors`; a change of state through
+    /// `native_set_block` or `native_set_block_property` (neighbour updates
+    /// on) tells the comparators itself, as vanilla's `Level.setBlock` does.
+    /// Authoritative servers only. API 64.
+    ///
+    /// Every mod gets `event.output` in order and may add, change or remove output.
+    fn analog_output(&self, level: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// On an authoritative server, `BlockState.canSurvive` for `state` at
+    /// `pos` (`BlockBehaviour.canSurvive`), before the block answers it: as
+    /// it is placed (`BlockItem.canPlace`), from a shape update of a block
+    /// whose template checks it (a plant, a torch, a sign: false breaks the
+    /// block with its drops), and wherever else vanilla asks. `state` may not
+    /// be in the world yet, so decide from `state`. Answer only for your own
+    /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
+    /// the block's own rule doesn't run. The level is read-only. Asked on
+    /// every shape update of such a block: keep it short. API 70.
+    ///
+    /// Return `Some` to set `survives`; the first mod returning `Some` wins.
+    fn can_survive(&self, level: &dyn LevelHost, event: &mut CanSurviveEvent) -> Option<bool> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
+    /// plant `state` on `ground` at `ground_pos`, before the plant answers
+    /// it: the blocks a mod plant (one whose template is a vanilla plant,
+    /// such as a crop) can stand on. Its template's `canSurvive` asks it, so
+    /// the plant is refused there and pops off when its ground changes to
+    /// one it can't stand on. Answer only for your own blocks. The level is
+    /// read-only. API 70.
+    ///
+    /// Return `Some` to set `may`; the first mod returning `Some` wins.
+    fn may_place_on(&self, level: &dyn LevelHost, event: &mut MayPlaceOnEvent) -> Option<bool> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// A block nothing in Horizon knows a `BonemealableBlock` for is about to
+    /// take bone meal: vanilla's `BonemealableBlock.isValidBonemealTarget`,
+    /// `state` the block's own state at `pos`. Answer `valid` for your own
+    /// blocks: the meal is used up on one as vanilla uses it up (the growth
+    /// particles and the sound follow, whether or not the roll below grows
+    /// it), from a player's `BoneMealItem.useOn`, from a dispenser and, on a
+    /// crop (a villager bonemeals only a `CropBlock`), from a villager. Asked
+    /// on both sides, as vanilla asks it on both, so a client predicts the
+    /// use with your answer: say no where you can only grow on a server
+    /// (`is_client_side`). `Some(false)` refuses the meal, even on a block
+    /// whose template takes it (vanilla's `growCrop` then keeps the meal);
+    /// left `None`, the block keeps the `BonemealableBlock` its template gives
+    /// it, or takes no bone meal.
+    /// 72.
+    ///
+    /// Return `Some` to set `valid`; the first mod returning `Some` wins.
+    fn is_valid_bonemeal_target(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut IsValidBonemealTargetEvent,
+    ) -> Option<bool> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// `BonemealableBlock.isBonemealSuccess` for a block that answered
+    /// `native_is_valid_bonemeal_target`, after it did: set `success` to grow
+    /// it this time. Vanilla draws the level's random here
+    /// (`isBonemealSuccess(Level, RandomSource, BlockPos, BlockState)`), so
+    /// draw from `native_level_random` to keep vanilla's order.
+    /// Authoritative servers only. 72.
+    ///
+    /// Every mod gets `event.success` in order and may add, change or remove success.
+    fn is_bonemeal_success(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        event: &mut IsBonemealSuccessEvent,
+    ) {
+        let _ = level;
+        let _ = event;
+    }
+    /// `BonemealableBlock.performBonemeal` for a block that answered
+    /// `native_is_valid_bonemeal_target` and whose `native_is_bonemeal_success`
+    /// said yes: grow it here, `state` its state at `pos`. The meal is used up
+    /// either way. Change the block with the level's
+    /// `native_set_block_property`, and schedule with `native_schedule_block_tick`
+    /// (`ticks` is the hook's). Authoritative servers only. 72.
+    fn perform_bonemeal(&self, level: &mut dyn LevelWriteHost, event: &mut PerformBonemealEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// A block is about to take the state it is placed in
+    /// (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's
+    /// own default state. Answer only for your blocks: put the state you want
+    /// in `answer` as `Some(Some(state))` — a state of that block, as vanilla
+    /// sets properties on its own `defaultBlockState` (another block's is
+    /// ignored) — or refuse the placement with `Some(None)`: the block goes
+    /// nowhere and the stack is kept, as vanilla's `null`. Left empty, the
+    /// block's own placement runs. `context` is
+    /// vanilla's `BlockPlaceContext` (the clicked face, the placer's rotation,
+    /// the clicked position, whether the clicked block is being replaced, the
+    /// item in hand) and `fluid` the fluid in the position the block would go
+    /// in, which a waterlogged block reads. Build the state from `state` with
+    /// `native_state_with_property`, and know whether `state` is yours with
+    /// `native_state_block`. It is asked for every placer that goes
+    /// through vanilla's placement (a player's `BlockItem.place`, a
+    /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
+    /// survival and entity obstruction checks. A trait mod returns
+    /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
+    /// `None` to leave the answer to the next mod or vanilla.
+    /// Authoritative servers only. 76.
+    ///
+    /// Return `Some` to set `answer`; the first mod returning `Some` wins.
+    fn state_for_placement(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut StateForPlacementEvent<'_>,
+    ) -> Option<Option<BlockStateId>> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// On an authoritative server, how fire treats the block `state`
+    /// (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`): put
+    /// `(ignite, burn)` in `odds` for your own blocks, and vanilla's table
+    /// isn't read. Ignite odds above zero let fire stand beside the block and
+    /// spread into the air around it (planks 5, wool 30, leaves 30); burn odds
+    /// are how fast fire destroys it (planks 20, wool 60, leaves 60). `(0, 0)`
+    /// never burns; keep both within vanilla's 0 to 100. A waterlogged state
+    /// never burns and isn't asked. Answer only for your own blocks and leave
+    /// `odds` empty otherwise; the level is read-only. Asked hundreds of times
+    /// per fire tick: keep it short. API 157.
+    ///
+    /// Return `Some` to set `odds`; the first mod returning `Some` wins.
+    fn fire_odds(&self, level: &dyn LevelHost, event: &mut FireOddsEvent) -> Option<(i32, i32)> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
+    /// block `state` under a campfire, as the campfire is placed or the block
+    /// under it changes: `Some(true)` for your own blocks makes the campfire a
+    /// signal fire whose smoke rises higher, as over a hay bale. The level is
+    /// read-only. API 157.
+    ///
+    /// Return `Some` to set `smoke`; the first mod returning `Some` wins.
+    fn smoke_source(&self, level: &dyn LevelHost, event: &mut SmokeSourceEvent) -> Option<bool> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+}
+/// A block's part that also answers for its block entity, and for the block like a [`BlockPart`].
+pub trait BlockEntityPart: BlockPart {
+    /// Block `block` (`mymod:machine`) gets a block entity
+    /// (`EntityBlock.newBlockEntity`): set `entity` to its id and saved
+    /// compound when the block is yours and `entity` is none yet. It works on
+    /// any template: the engine removes the block entity when its block is
+    /// broken or replaced, no piston moves it, and a mod that draws it
+    /// (`native_block_entity_submit`) is asked for it. API 15; before
+    /// 129 the block's template had to have a
+    /// block entity of its own (a chest, a furnace...), or the block got none.
+    ///
+    /// Return `Some` to set `entity`; the first mod returning `Some` wins.
+    fn block_entity(
+        &self,
+        host: &mut dyn Host,
+        event: &mut BlockEntityEvent<'_>,
+    ) -> Option<(String, Compound)> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
+    /// set `ticks` when it is yours. Asked for each of the block's states
+    /// when a world opens. API 15.
+    /// Set `ticks` to true to make it tick, and never clear a value an earlier mod or mixin set.
+    fn block_entity_ticks(&self, host: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server tick of the block entity at `pos`, in vanilla's order among
+    /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
+    /// and change its saved compound `nbt`, its item slots `items` (keep
+    /// their count: as many as its container has, none without one) and the
+    /// data slots its menu shows (`data`). It is out of the world during the
+    /// call (the block entity at `pos` reads as a `Mod` with an empty id, and
+    /// a save leaves it out); if the call removes or replaces it, `entity` is
+    /// dropped. Clients, the window's own in single player included, get
+    /// what `native_block_entity_update_tag` gives when its chunk is sent or
+    /// its block changes. API 17.
+    fn block_entity_tick(&self, host: &mut dyn Host, event: &mut BlockEntityTickEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// What clients get of the block entity at `pos` when its `id` is
+    /// yours (`BlockEntity.getUpdateTag`): set `tag` to it, read from
+    /// `entity` alone. Asked on the server whenever a chunk holding it is
+    /// sent and whenever its block changes, on the server thread or, for a
+    /// saved chunk sent past the view distance (`lan::far`), another one; a client's copy of the block
+    /// entity (made by `native_block_entity` there) merges it into its `nbt`.
+    /// Leave it unset to send nothing. API 45.
+    ///
+    /// Return `Some` to set `tag`; the first mod returning `Some` wins.
+    fn block_entity_update_tag(
+        &self,
+        event: &mut BlockEntityUpdateTagEvent<'_>,
+    ) -> Option<Compound> {
+        let _ = event;
+        None
+    }
+    /// A menu opens on this client for block `block`, a mod's: set `screen`
+    /// when the block is yours, to lay its screen out (`native_screen_draw`
+    /// draws it). The server asks it too: a slot it hides is not in the menu
+    /// there either, so shift-clicks never fill it. API 19.
+    ///
+    /// Return `Some` to set `screen`; the first mod returning `Some` wins.
+    fn screen(&self, host: &dyn Host, event: &mut ScreenEvent<'_>) -> Option<NativeScreen> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
+    /// over a plain panel with its slots' frames and under the items and
+    /// labels, from the menu's data slots `data` (the block entity's `data`
+    /// on the server): data slots are 16-bit on the wire as in vanilla (a
+    /// bigger value wraps), and `data` is empty until the server's first
+    /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
+    /// `native_text`. API 19.
+    fn screen_draw(&self, host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A left or right (`right`) press at `at` (GUI pixels from the screen's
+    /// top left, so outside it too) on block `block`'s screen, a mod's, over
+    /// no slot: set `button` to a menu button id when it is on one of yours.
+    /// Horizon sends it to the server (`ContainerButtonClick`,
+    /// `native_menu_button` there) and the press goes no further. API 20.
+    ///
+    /// Return `Some` to set `button`; the first mod returning `Some` wins.
+    fn screen_click(&self, host: &dyn Host, event: &mut ScreenClickEvent<'_>) -> Option<i32> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// The tooltip at `at` (as in `native_screen_click`) on block `block`'s
+    /// screen, a mod's, over no item: push its lines when it is over
+    /// something of yours. Legacy colour codes (§) work. API 20.
+    ///
+    /// Every mod gets `event.lines` in order and may add, change or remove lines.
+    fn screen_tooltip(&self, host: &dyn Host, event: &mut ScreenTooltipEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player pressed menu button `id` on the menu of the mod block entity
+    /// at `pos` (`AbstractContainerMenu.clickMenuButton`), on the server:
+    /// change `entity` when its id is yours. It is out of the world during
+    /// the call, as in `native_block_entity_tick`. API 20.
+    fn menu_button(&self, host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `AbstractContainerMenu.clickMenuButton(Player, int)`'s other half:
+    /// the acting player's cursor stack, `getCarried()`/`setCarried()`,
+    /// which `native_menu_button` cannot reach. Fires right after it, same
+    /// moment, same `pos`/`entity`/`id`; change `carried` when its id is
+    /// yours. On the server. API 51.
+    fn menu_button_v2(&self, host: &mut dyn Host, event: &mut MenuButtonV2Event<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Draw the mod block entity at `pos`, of block `block`
+    /// (`mymod:machine`), on this client: once a frame while it is in view
+    /// (vanilla's `BlockEntityRenderer.submit`: within 64 blocks, its chunk
+    /// faded in, and its bounds, `native_block_entity_render_bounding_box`,
+    /// in the frustum), when its `id` is yours. `state` is the block's state
+    /// (`blockEntity.getBlockState()`: read its `facing` with
+    /// `native_block_state_property`), `entity` holds what the server sent
+    /// (`native_block_entity_update_tag`). Add geometry with
+    /// `native_draw_quad`, `native_draw_cube`, `native_draw_block` and
+    /// `native_draw_item` under `draw`'s pose stack, which starts at the
+    /// block's lower north-west corner, in blocks; `draw` also has the partial
+    /// tick, the game time and the block's light. API 71.
+    fn block_entity_submit(&self, host: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Where the mod block entity at `pos` draws, for culling
+    /// (NeoForge's `getRenderBoundingBox`): `bounds` is min x, y, z then max
+    /// x, y, z, in blocks from the block's lower north-west corner. It starts
+    /// as the block with a block of margin around it; widen it when your
+    /// `native_block_entity_submit` draws further (a tall shaft, a beam), or
+    /// set an infinite value for one never culled. Asked once a frame for each
+    /// within 64 blocks whose chunk is drawn. API 71.
+    ///
+    /// Every mod gets `event.bounds` in order and may add, change or remove bounds.
+    fn block_entity_render_bounding_box(
+        &self,
+        host: &dyn Host,
+        event: &mut BlockEntityRenderBoundingBoxEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player shift-clicked slot `slot` of the menu of the mod block
+    /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
+    /// Java menu overrides), on the server, before the game's own routing:
+    /// move the stack where your block wants it. `slot` is the menu's index:
+    /// below `container_slots` it is the block's own slot (`entity.items`),
+    /// from there on the player's inventory (27 main slots, then the hotbar).
+    /// `stack` is a copy of what the slot holds; take what you move out of
+    /// it (put it in `entity.items`, or in another block with
+    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// the game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, `entity.items` goes back to what it held and
+    /// the game moves the stack as for any container; a later mod sees what
+    /// an earlier one did to `stack`.
+    /// For a mod container on a vanilla menu type and on a mod menu type,
+    /// the left or right button, a slot that holds something and that the
+    /// mod's screen shows; not for a spectator or a dead player, a menu no
+    /// longer valid, nor during a drag.
+    /// Asked once per click, where vanilla asks `quickMoveStack` again while
+    /// it keeps moving the same item. The player's state is swapped in, so
+    /// `native_acting_player` names them; `entity` is out of the world
+    /// during the call, as in `native_menu_button`.
+    /// API 309.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `handled`, and later mods are skipped.
+    fn menu_quick_move(&self, host: &mut dyn Host, event: &mut MenuQuickMoveEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+}
+/// An item's part.
+pub trait ItemPart: Send + Sync + 'static {
+    /// An item's tooltip, wherever the game shows one (slots, the creative
+    /// tabs, the recipe book, chat's hover): the stack, with its components
+    /// (`stack.data()`: a shulker box's contents...), and its lines, the name
+    /// first, each with a colour as `rgba` packs it (`u32::MAX` keeps the
+    /// text's own). Add, change or take out lines; `Text::legacy` reads `§`
+    /// codes. Asked each frame the tooltip shows, never for one the stack
+    /// hides. API 12.
+    ///
+    /// Every mod gets `event.lines` in order and may add, change or remove lines.
+    fn tooltip(&self, host: &dyn Host, event: &mut TooltipEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player uses `stack` (right click) with `self.hand` on the block at
+    /// `pos`, `face` the face clicked (`[0, 1, 0]` is the top), once the
+    /// block itself let the click through (a chest still opens): where
+    /// `ItemStack.useOn` starts. Set `claimed` to take the use: the hand
+    /// swings and neither the item's `useOn` nor its `use` runs.
+    /// Server-side, for every player of the world (the helpers read the
+    /// acting one); an item on cooldown is never used. API 13.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `claimed`, and later mods are skipped.
+    fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player uses `stack` (right click) with `self.hand`: in the air, or
+    /// on a block once `native_use_item_on` let it through, where `Item.use`
+    /// starts. Each click reaches it once. Set `claimed` to take the use: the
+    /// hand swings and the item's own use doesn't run. Server-side, for every
+    /// player of the world; an item on cooldown is never used. API 13.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `claimed`, and later mods are skipped.
+    fn use_item(&self, host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player's hit landed on the mob `entity` of type `kind`
+    /// (`minecraft:zombie`), holding `stack`: where `Item.hurtEnemy` is called,
+    /// before the post-attack enchantments and the weapon's wear. It only
+    /// hears. Another player as the target isn't told yet. Server-side, for
+    /// every player of the world (the helpers read the acting one). API 39.
+    fn hurt_enemy(&self, host: &mut dyn Host, event: &mut HurtEnemyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The small bar `GuiGraphicsExtractor.itemDecorations` draws under an
+    /// item, wherever the game shows one: `bar` arrives holding vanilla's value
+    /// (the damage bar, or a bundle's fullness already applied) and may be
+    /// replaced (width `0..=13`, colour `rgb`) or set to `None` to hide it.
+    /// Asked each frame a stack is drawn. Client-side. 60.
+    fn item_bar(&self, host: &dyn Host, event: &mut ItemBarEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
+    /// including vanilla items, on the authoritative server (not droppers).
+    /// Leave answer None for vanilla. Otherwise answer `(remainder, event)`:
+    /// a remainder of None empties the slot, `Some(stack)` replaces it (the hook
+    /// owns consumption: no extra item is removed afterwards). `event` is the
+    /// level event the dispenser plays with its smoke: 1000 the click, 1001 the
+    /// fail sound (`OptionalDispenseItemBehavior` without success), or 0 for
+    /// nothing at all (`DispenseItemBehavior.NOOP`). To drop one normally,
+    /// answer `(native_dispense_default(..), 1000)`. API 67.
+    ///
+    /// Return `Some` to set `answer`; the first mod returning `Some` wins.
+    fn dispense_item(
+        &self,
+        host: &mut dyn Host,
+        event: &mut DispenseItemEvent<'_>,
+    ) -> Option<NativeDispensed> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// Client-side image component for this stack's tooltip. Answer its width/height
+    /// in GUI pixels; finite positive dimensions reserve space after text and any
+    /// vanilla bundle component. None keeps the vanilla tooltip unchanged.
+    ///
+    /// Return `Some` to set `size`; the first mod returning `Some` wins.
+    fn tooltip_component(
+        &self,
+        host: &dyn Host,
+        event: &mut TooltipComponentEvent<'_>,
+    ) -> Option<[f32; 2]> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// Render the measured component at origin, inside the tooltip background.
+    /// Stack is the component's data. Use native_sprite/native_fill/native_text;
+    /// size is the measurement returned by native_tooltip_component this frame.
+    fn tooltip_component_draw(&self, host: &dyn Host, event: &mut TooltipComponentDrawEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Append an item's custom decorations after its default bar, cooldown and count.
+    /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
+    /// no item translation is active.
+    /// Runs wherever the shared item-decoration path is used (hotbar, menus, tooltips,
+    /// and the other screens that draw item icons: advancements, beacon, stats, trading).
+    fn item_decorations(&self, host: &dyn Host, event: &mut ItemDecorationsEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Item.getUseDuration` of `stack`, in ticks: `duration` arrives with
+    /// vanilla's (a consumable's time, 72000 for a shield, a spear, a bow,
+    /// 0 for an item with no use over time). A mod's own item (outside
+    /// `minecraft:`) with no `consumable`, `blocks_attacks` or kinetic
+    /// weapon that answers above 0 is used over time on a right click, as an
+    /// `Item.use` that calls `startUsingItem`, until it is let go or the time
+    /// runs out (`native_living_entity_use_item_finish`). A consumable's time
+    /// changes too, potions and the other vanilla items keep their own.
+    /// Asked when a use starts, each tick a mod's item is in use, and each
+    /// frame the hand draws one in use, on both sides. It has no user, as
+    /// it is asked so often: answer from the stack alone. API 90.
+    fn use_duration(&self, host: &dyn Host, event: &mut UseDurationEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
+    /// `animation` arrives with its consumable's (`eat`, `drink`), else
+    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
+    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
+    /// Asked each frame the hand draws an item in use, for an item with no
+    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
+    /// theirs). Client-side. API 90.
+    fn use_animation(&self, host: &dyn Host, event: &mut UseAnimationEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Item.onUseTick` of `stack`, used by `entity` with `remaining` ticks
+    /// left, always above 0: what a mod's own item does each tick it is used
+    /// (cook, charge, drain). It comes where `ItemStack.onUseTick` calls the
+    /// item, once `native_living_entity_use_item_tick` let the use go on:
+    /// after a consumable's crumbs, for consumables, shields and mods' items
+    /// (vanilla's other items do their own, and a kinetic weapon has none on
+    /// the server). Both sides, as `native_living_entity_use_item_tick`:
+    /// change the world only where this `Game` runs the world, not on a
+    /// server's client. Runs every tick of every use: check the item first.
+    /// API 131.
+    fn on_use_tick(&self, host: &mut dyn Host, event: &mut OnUseTickEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Item.releaseUsing` of `stack`: `entity` let it go with `time_left`
+    /// ticks of its `native_use_duration` left, so it was held for
+    /// `duration - time_left` (a bow-like item shoots by that charge). Set
+    /// `used` as vanilla's return, and the stack's use cooldown starts
+    /// (`ItemStack.releaseUsing`). After the vanilla item's own release, once
+    /// `native_living_entity_use_item_stop` let it through. Both sides, as
+    /// vanilla's: change the world only where this `Game` runs the world,
+    /// not on a server's client. API 131.
+    fn release_using(&self, host: &mut dyn Host, event: &mut ReleaseUsingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+}
+/// A mod menu type's part.
+pub trait MenuPart: Send + Sync + 'static {
+    /// Hook point for native mods (docs/native-mods.md, listed in `native-hooks.json`
+    /// with the game's): container slot `slot` of the content mod menu type `menu`
+    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
+    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
+    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
+    /// `results`, true elsewhere, and 99): change them for your own menu types.
+    /// `max_stack` is kept to 1 to 99,
+    /// and the item's own stack size still caps it. Asked on the server, for each
+    /// click, drag and shift-click that puts an item in a slot, several times for
+    /// one shift-click: answer from `stack` alone, and fast. API
+    /// 130.
+    fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
         let _ = event;
     }
 }
@@ -4772,6 +5456,7 @@ pub fn dispatch_neighbor_changed(
     changed: BlockId,
     moved: bool,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = NeighborChangedEvent {
         dimension,
         pos,
@@ -4781,6 +5466,9 @@ pub fn dispatch_neighbor_changed(
     };
     for mod_hook in super::entered(mods, "neighbor_changed") {
         mod_hook.neighbor_changed(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "neighbor_changed") {
+        part.neighbor_changed(level, &mut event);
     }
 }
 /// What [`Hooks::random_tick`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -4801,15 +5489,24 @@ pub fn dispatch_random_tick(
     if *handled {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = RandomTickEvent {
         dimension,
         pos,
         state,
     };
-    for mod_hook in super::entered(mods, "random_tick") {
-        if matches!(mod_hook.random_tick(level, &mut event), Flow::Cancel) {
-            *handled = true;
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "random_tick") {
+            if matches!(mod_hook.random_tick(level, &mut event), Flow::Cancel) {
+                *handled = true;
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "random_tick") {
+            if matches!(part.random_tick(level, &mut event), Flow::Cancel) {
+                *handled = true;
+                break 'hook;
+            }
         }
     }
 }
@@ -4831,15 +5528,24 @@ pub fn dispatch_tick_block(
     if *handled {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = TickBlockEvent {
         dimension,
         pos,
         state,
     };
-    for mod_hook in super::entered(mods, "tick_block") {
-        if matches!(mod_hook.tick_block(level, &mut event), Flow::Cancel) {
-            *handled = true;
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "tick_block") {
+            if matches!(mod_hook.tick_block(level, &mut event), Flow::Cancel) {
+                *handled = true;
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "tick_block") {
+            if matches!(part.tick_block(level, &mut event), Flow::Cancel) {
+                *handled = true;
+                break 'hook;
+            }
         }
     }
 }
@@ -4867,6 +5573,7 @@ pub fn dispatch_update_shape(
     if new.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = UpdateShapeEvent {
         dimension,
         pos,
@@ -4875,10 +5582,18 @@ pub fn dispatch_update_shape(
         neighbour_pos,
         neighbour,
     };
-    for mod_hook in super::entered(mods, "update_shape") {
-        if let Some(replacement) = mod_hook.update_shape(level, &mut event) {
-            *new = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "update_shape") {
+            if let Some(replacement) = mod_hook.update_shape(level, &mut event) {
+                *new = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "update_shape") {
+            if let Some(replacement) = part.update_shape(level, &mut event) {
+                *new = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -5080,11 +5795,20 @@ pub fn dispatch_block_entity(
     if entity.is_some() {
         return;
     }
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = BlockEntityEvent { block };
-    for mod_hook in super::entered(mods, "block_entity") {
-        if let Some(replacement) = mod_hook.block_entity(host, &mut event) {
-            *entity = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "block_entity") {
+            if let Some(replacement) = mod_hook.block_entity(host, &mut event) {
+                *entity = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "block_entity") {
+            if let Some(replacement) = part.block_entity(host, &mut event) {
+                *entity = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -5100,12 +5824,16 @@ pub fn dispatch_block_entity_ticks(
     block: &str,
     ticks: &mut bool,
 ) {
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = BlockEntityTicksEvent {
         block,
         ticks: *ticks,
     };
     for mod_hook in super::entered(mods, "block_entity_ticks") {
         mod_hook.block_entity_ticks(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "block_entity_ticks") {
+        part.block_entity_ticks(host, &mut event);
     }
     *ticks = event.ticks;
 }
@@ -5121,9 +5849,13 @@ pub fn dispatch_block_entity_tick(
     pos: [i32; 3],
     entity: &mut ModBlockEntity,
 ) {
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityTickEvent { pos, entity };
     for mod_hook in super::entered(mods, "block_entity_tick") {
         mod_hook.block_entity_tick(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "block_entity_tick") {
+        part.block_entity_tick(host, &mut event);
     }
 }
 /// What [`Hooks::block_entity_update_tag`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -5141,11 +5873,20 @@ pub fn dispatch_block_entity_update_tag(
     if tag.is_some() {
         return;
     }
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityUpdateTagEvent { pos, entity };
-    for mod_hook in super::entered(mods, "block_entity_update_tag") {
-        if let Some(replacement) = mod_hook.block_entity_update_tag(&mut event) {
-            *tag = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "block_entity_update_tag") {
+            if let Some(replacement) = mod_hook.block_entity_update_tag(&mut event) {
+                *tag = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "block_entity_update_tag") {
+            if let Some(replacement) = part.block_entity_update_tag(&mut event) {
+                *tag = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -5185,11 +5926,20 @@ pub fn dispatch_screen(
     if screen.is_some() {
         return;
     }
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = ScreenEvent { block };
-    for mod_hook in super::entered(mods, "screen") {
-        if let Some(replacement) = mod_hook.screen(host, &mut event) {
-            *screen = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "screen") {
+            if let Some(replacement) = mod_hook.screen(host, &mut event) {
+                *screen = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "screen") {
+            if let Some(replacement) = part.screen(host, &mut event) {
+                *screen = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -5209,6 +5959,7 @@ pub fn dispatch_screen_draw(
     batch: &mut HudBatch,
     origin: [f32; 2],
 ) {
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = ScreenDrawEvent {
         block,
         data,
@@ -5217,6 +5968,9 @@ pub fn dispatch_screen_draw(
     };
     for mod_hook in super::entered(mods, "screen_draw") {
         mod_hook.screen_draw(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "screen_draw") {
+        part.screen_draw(host, &mut event);
     }
 }
 /// What [`Hooks::screen_click`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -5239,16 +5993,25 @@ pub fn dispatch_screen_click(
     if button.is_some() {
         return;
     }
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = ScreenClickEvent {
         block,
         data,
         at,
         right,
     };
-    for mod_hook in super::entered(mods, "screen_click") {
-        if let Some(replacement) = mod_hook.screen_click(host, &mut event) {
-            *button = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "screen_click") {
+            if let Some(replacement) = mod_hook.screen_click(host, &mut event) {
+                *button = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "screen_click") {
+            if let Some(replacement) = part.screen_click(host, &mut event) {
+                *button = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -5268,6 +6031,7 @@ pub fn dispatch_screen_tooltip(
     at: [f32; 2],
     lines: &mut Vec<String>,
 ) {
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = ScreenTooltipEvent {
         block,
         data,
@@ -5276,6 +6040,9 @@ pub fn dispatch_screen_tooltip(
     };
     for mod_hook in super::entered(mods, "screen_tooltip") {
         mod_hook.screen_tooltip(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "screen_tooltip") {
+        part.screen_tooltip(host, &mut event);
     }
 }
 /// What [`Hooks::menu_button`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -5292,9 +6059,13 @@ pub fn dispatch_menu_button(
     entity: &mut ModBlockEntity,
     id: i32,
 ) {
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonEvent { pos, entity, id };
     for mod_hook in super::entered(mods, "menu_button") {
         mod_hook.menu_button(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "menu_button") {
+        part.menu_button(host, &mut event);
     }
 }
 /// What [`Hooks::register_commands`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -5389,9 +6160,13 @@ pub fn dispatch_tooltip(
     stack: &ItemStack,
     lines: &mut Vec<(Text, u32)>,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = TooltipEvent { stack, lines };
     for mod_hook in super::entered(mods, "tooltip") {
         mod_hook.tooltip(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "tooltip") {
+        part.tooltip(host, &mut event);
     }
 }
 /// What [`Hooks::use_item_on`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -5412,11 +6187,20 @@ pub fn dispatch_use_item_on(
     if *claimed {
         return;
     }
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = UseItemOnEvent { stack, pos, face };
-    for mod_hook in super::entered(mods, "use_item_on") {
-        if matches!(mod_hook.use_item_on(host, &mut event), Flow::Cancel) {
-            *claimed = true;
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "use_item_on") {
+            if matches!(mod_hook.use_item_on(host, &mut event), Flow::Cancel) {
+                *claimed = true;
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "use_item_on") {
+            if matches!(part.use_item_on(host, &mut event), Flow::Cancel) {
+                *claimed = true;
+                break 'hook;
+            }
         }
     }
 }
@@ -5434,11 +6218,20 @@ pub fn dispatch_use_item(
     if *claimed {
         return;
     }
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = UseItemEvent { stack };
-    for mod_hook in super::entered(mods, "use_item") {
-        if matches!(mod_hook.use_item(host, &mut event), Flow::Cancel) {
-            *claimed = true;
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "use_item") {
+            if matches!(mod_hook.use_item(host, &mut event), Flow::Cancel) {
+                *claimed = true;
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "use_item") {
+            if matches!(part.use_item(host, &mut event), Flow::Cancel) {
+                *claimed = true;
+                break 'hook;
+            }
         }
     }
 }
@@ -5824,6 +6617,7 @@ pub fn dispatch_hurt_enemy(
     entity: u32,
     kind: &str,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = HurtEnemyEvent {
         stack,
         entity,
@@ -5831,6 +6625,9 @@ pub fn dispatch_hurt_enemy(
     };
     for mod_hook in super::entered(mods, "hurt_enemy") {
         mod_hook.hurt_enemy(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "hurt_enemy") {
+        part.hurt_enemy(host, &mut event);
     }
 }
 /// What [`Hooks::inventory_tick`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -5887,6 +6684,7 @@ pub fn dispatch_block_signal(
     direct: bool,
     signal: &mut i32,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = BlockSignalEvent {
         dimension,
         pos,
@@ -5897,6 +6695,9 @@ pub fn dispatch_block_signal(
     };
     for mod_hook in super::entered(mods, "block_signal") {
         mod_hook.block_signal(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "block_signal") {
+        part.block_signal(level, &mut event);
     }
     *signal = event.signal;
 }
@@ -5912,12 +6713,16 @@ pub fn dispatch_is_signal_source(
     state: BlockStateId,
     source: &mut bool,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = IsSignalSourceEvent {
         state,
         source: *source,
     };
     for mod_hook in super::entered(mods, "is_signal_source") {
         mod_hook.is_signal_source(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "is_signal_source") {
+        part.is_signal_source(level, &mut event);
     }
     *source = event.source;
 }
@@ -6103,6 +6908,7 @@ pub fn dispatch_menu_button_v2(
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonV2Event {
         pos,
         entity,
@@ -6111,6 +6917,9 @@ pub fn dispatch_menu_button_v2(
     };
     for mod_hook in super::entered(mods, "menu_button_v2") {
         mod_hook.menu_button_v2(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "menu_button_v2") {
+        part.menu_button_v2(host, &mut event);
     }
 }
 /// What [`Hooks::entity_leave_level`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -6347,9 +7156,13 @@ pub fn dispatch_item_bar(
     stack: &ItemStack,
     bar: &mut Option<(i32, u32)>,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = ItemBarEvent { stack, bar };
     for mod_hook in super::entered(mods, "item_bar") {
         mod_hook.item_bar(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "item_bar") {
+        part.item_bar(host, &mut event);
     }
 }
 /// What [`Hooks::has_analog_output`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -6364,12 +7177,16 @@ pub fn dispatch_has_analog_output(
     state: BlockStateId,
     output: &mut bool,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = HasAnalogOutputEvent {
         state,
         output: *output,
     };
     for mod_hook in super::entered(mods, "has_analog_output") {
         mod_hook.has_analog_output(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "has_analog_output") {
+        part.has_analog_output(level, &mut event);
     }
     *output = event.output;
 }
@@ -6391,6 +7208,7 @@ pub fn dispatch_analog_output(
     face: Direction,
     output: &mut i32,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = AnalogOutputEvent {
         dimension,
         pos,
@@ -6400,6 +7218,9 @@ pub fn dispatch_analog_output(
     };
     for mod_hook in super::entered(mods, "analog_output") {
         mod_hook.analog_output(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "analog_output") {
+        part.analog_output(level, &mut event);
     }
     *output = event.output;
 }
@@ -6434,16 +7255,25 @@ pub fn dispatch_dispense_item(
     if answer.is_some() {
         return;
     }
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = DispenseItemEvent {
         dimension,
         pos,
         facing,
         stack,
     };
-    for mod_hook in super::entered(mods, "dispense_item") {
-        if let Some(replacement) = mod_hook.dispense_item(host, &mut event) {
-            *answer = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "dispense_item") {
+            if let Some(replacement) = mod_hook.dispense_item(host, &mut event) {
+                *answer = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "dispense_item") {
+            if let Some(replacement) = part.dispense_item(host, &mut event) {
+                *answer = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -6461,11 +7291,20 @@ pub fn dispatch_tooltip_component(
     if size.is_some() {
         return;
     }
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = TooltipComponentEvent { stack };
-    for mod_hook in super::entered(mods, "tooltip_component") {
-        if let Some(replacement) = mod_hook.tooltip_component(host, &mut event) {
-            *size = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "tooltip_component") {
+            if let Some(replacement) = mod_hook.tooltip_component(host, &mut event) {
+                *size = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "tooltip_component") {
+            if let Some(replacement) = part.tooltip_component(host, &mut event) {
+                *size = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -6485,6 +7324,7 @@ pub fn dispatch_tooltip_component_draw(
     origin: [f32; 2],
     size: [f32; 2],
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = TooltipComponentDrawEvent {
         stack,
         batch,
@@ -6493,6 +7333,9 @@ pub fn dispatch_tooltip_component_draw(
     };
     for mod_hook in super::entered(mods, "tooltip_component_draw") {
         mod_hook.tooltip_component_draw(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "tooltip_component_draw") {
+        part.tooltip_component_draw(host, &mut event);
     }
 }
 /// What [`Hooks::can_survive`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -6513,15 +7356,24 @@ pub fn dispatch_can_survive(
     if survives.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = CanSurviveEvent {
         dimension,
         pos,
         state,
     };
-    for mod_hook in super::entered(mods, "can_survive") {
-        if let Some(replacement) = mod_hook.can_survive(level, &mut event) {
-            *survives = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "can_survive") {
+            if let Some(replacement) = mod_hook.can_survive(level, &mut event) {
+                *survives = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "can_survive") {
+            if let Some(replacement) = part.can_survive(level, &mut event) {
+                *survives = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -6545,16 +7397,25 @@ pub fn dispatch_may_place_on(
     if may.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = MayPlaceOnEvent {
         dimension,
         state,
         ground,
         ground_pos,
     };
-    for mod_hook in super::entered(mods, "may_place_on") {
-        if let Some(replacement) = mod_hook.may_place_on(level, &mut event) {
-            *may = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "may_place_on") {
+            if let Some(replacement) = mod_hook.may_place_on(level, &mut event) {
+                *may = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "may_place_on") {
+            if let Some(replacement) = part.may_place_on(level, &mut event) {
+                *may = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -6576,6 +7437,7 @@ pub fn dispatch_block_entity_submit(
     entity: &ModBlockEntity,
     draw: &mut BlockEntityDraw,
 ) {
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = BlockEntitySubmitEvent {
         pos,
         block,
@@ -6585,6 +7447,9 @@ pub fn dispatch_block_entity_submit(
     };
     for mod_hook in super::entered(mods, "block_entity_submit") {
         mod_hook.block_entity_submit(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "block_entity_submit") {
+        part.block_entity_submit(host, &mut event);
     }
 }
 /// What [`Hooks::block_entity_render_bounding_box`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -6605,6 +7470,7 @@ pub fn dispatch_block_entity_render_bounding_box(
     entity: &ModBlockEntity,
     bounds: &mut [f32; 6],
 ) {
+    let parts = super::parts().block_entity(|| Some(block));
     let mut event = BlockEntityRenderBoundingBoxEvent {
         pos,
         block,
@@ -6614,6 +7480,9 @@ pub fn dispatch_block_entity_render_bounding_box(
     };
     for mod_hook in super::entered(mods, "block_entity_render_bounding_box") {
         mod_hook.block_entity_render_bounding_box(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "block_entity_render_bounding_box") {
+        part.block_entity_render_bounding_box(host, &mut event);
     }
 }
 /// What [`Hooks::is_valid_bonemeal_target`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -6634,15 +7503,24 @@ pub fn dispatch_is_valid_bonemeal_target(
     if valid.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = IsValidBonemealTargetEvent {
         dimension,
         pos,
         state,
     };
-    for mod_hook in super::entered(mods, "is_valid_bonemeal_target") {
-        if let Some(replacement) = mod_hook.is_valid_bonemeal_target(level, &mut event) {
-            *valid = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "is_valid_bonemeal_target") {
+            if let Some(replacement) = mod_hook.is_valid_bonemeal_target(level, &mut event) {
+                *valid = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "is_valid_bonemeal_target") {
+            if let Some(replacement) = part.is_valid_bonemeal_target(level, &mut event) {
+                *valid = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -6662,6 +7540,7 @@ pub fn dispatch_is_bonemeal_success(
     state: BlockStateId,
     success: &mut bool,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = IsBonemealSuccessEvent {
         dimension,
         pos,
@@ -6670,6 +7549,9 @@ pub fn dispatch_is_bonemeal_success(
     };
     for mod_hook in super::entered(mods, "is_bonemeal_success") {
         mod_hook.is_bonemeal_success(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "is_bonemeal_success") {
+        part.is_bonemeal_success(level, &mut event);
     }
     *success = event.success;
 }
@@ -6687,6 +7569,7 @@ pub fn dispatch_perform_bonemeal(
     pos: BlockPos,
     state: BlockStateId,
 ) {
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = PerformBonemealEvent {
         dimension,
         pos,
@@ -6694,6 +7577,9 @@ pub fn dispatch_perform_bonemeal(
     };
     for mod_hook in super::entered(mods, "perform_bonemeal") {
         mod_hook.perform_bonemeal(level, &mut event);
+    }
+    for part in super::entered_parts(parts, "perform_bonemeal") {
+        part.perform_bonemeal(level, &mut event);
     }
 }
 /// What [`Hooks::block_step_on`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -6853,16 +7739,25 @@ pub fn dispatch_state_for_placement(
     if answer.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = StateForPlacementEvent {
         dimension,
         state,
         context,
         fluid,
     };
-    for mod_hook in super::entered(mods, "state_for_placement") {
-        if let Some(replacement) = mod_hook.state_for_placement(level, &mut event) {
-            *answer = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "state_for_placement") {
+            if let Some(replacement) = mod_hook.state_for_placement(level, &mut event) {
+                *answer = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "state_for_placement") {
+            if let Some(replacement) = part.state_for_placement(level, &mut event) {
+                *answer = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -7119,9 +8014,13 @@ pub fn dispatch_item_decorations(
     y: f32,
     batch: &mut HudBatch,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = ItemDecorationsEvent { stack, x, y, batch };
     for mod_hook in super::entered(mods, "item_decorations") {
         mod_hook.item_decorations(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "item_decorations") {
+        part.item_decorations(host, &mut event);
     }
 }
 /// What [`Hooks::use_duration`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -7136,12 +8035,16 @@ pub fn dispatch_use_duration(
     stack: &ItemStack,
     duration: &mut i32,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = UseDurationEvent {
         stack,
         duration: *duration,
     };
     for mod_hook in super::entered(mods, "use_duration") {
         mod_hook.use_duration(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "use_duration") {
+        part.use_duration(host, &mut event);
     }
     *duration = event.duration;
 }
@@ -7157,9 +8060,13 @@ pub fn dispatch_use_animation(
     stack: &ItemStack,
     animation: &mut UseAnimation,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = UseAnimationEvent { stack, animation };
     for mod_hook in super::entered(mods, "use_animation") {
         mod_hook.use_animation(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "use_animation") {
+        part.use_animation(host, &mut event);
     }
 }
 /// What [`Hooks::can_eat`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -7996,6 +8903,7 @@ pub fn dispatch_menu_slot_rules(
     may_place: &mut bool,
     max_stack: &mut u32,
 ) {
+    let parts = super::parts().menu(|| Some(menu));
     let mut event = MenuSlotRulesEvent {
         menu,
         slot,
@@ -8005,6 +8913,9 @@ pub fn dispatch_menu_slot_rules(
     };
     for mod_hook in super::entered(mods, "menu_slot_rules") {
         mod_hook.menu_slot_rules(&mut event);
+    }
+    for part in super::entered_parts(parts, "menu_slot_rules") {
+        part.menu_slot_rules(&mut event);
     }
     *may_place = event.may_place;
     *max_stack = event.max_stack;
@@ -8060,6 +8971,7 @@ pub fn dispatch_on_use_tick(
     entity: Option<i32>,
     remaining: i32,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = OnUseTickEvent {
         stack,
         entity,
@@ -8067,6 +8979,9 @@ pub fn dispatch_on_use_tick(
     };
     for mod_hook in super::entered(mods, "on_use_tick") {
         mod_hook.on_use_tick(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "on_use_tick") {
+        part.on_use_tick(host, &mut event);
     }
 }
 /// What [`Hooks::living_entity_use_item_stop`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -8121,6 +9036,7 @@ pub fn dispatch_release_using(
     time_left: i32,
     used: &mut bool,
 ) {
+    let parts = super::parts().item(|| Some(&*stack.item));
     let mut event = ReleaseUsingEvent {
         stack,
         entity,
@@ -8129,6 +9045,9 @@ pub fn dispatch_release_using(
     };
     for mod_hook in super::entered(mods, "release_using") {
         mod_hook.release_using(host, &mut event);
+    }
+    for part in super::entered_parts(parts, "release_using") {
+        part.release_using(host, &mut event);
     }
     *used = event.used;
 }
@@ -10257,11 +11176,20 @@ pub fn dispatch_fire_odds(
     if odds.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = FireOddsEvent { dimension, state };
-    for mod_hook in super::entered(mods, "fire_odds") {
-        if let Some(replacement) = mod_hook.fire_odds(level, &mut event) {
-            *odds = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "fire_odds") {
+            if let Some(replacement) = mod_hook.fire_odds(level, &mut event) {
+                *odds = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "fire_odds") {
+            if let Some(replacement) = part.fire_odds(level, &mut event) {
+                *odds = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -10281,11 +11209,20 @@ pub fn dispatch_smoke_source(
     if smoke.is_some() {
         return;
     }
+    let parts = super::parts().block(|| level.state_block(state));
     let mut event = SmokeSourceEvent { dimension, state };
-    for mod_hook in super::entered(mods, "smoke_source") {
-        if let Some(replacement) = mod_hook.smoke_source(level, &mut event) {
-            *smoke = Some(replacement);
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "smoke_source") {
+            if let Some(replacement) = mod_hook.smoke_source(level, &mut event) {
+                *smoke = Some(replacement);
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "smoke_source") {
+            if let Some(replacement) = part.smoke_source(level, &mut event) {
+                *smoke = Some(replacement);
+                break 'hook;
+            }
         }
     }
 }
@@ -10795,6 +11732,7 @@ pub fn dispatch_menu_quick_move(
     if *handled {
         return;
     }
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuQuickMoveEvent {
         pos,
         entity,
@@ -10802,10 +11740,18 @@ pub fn dispatch_menu_quick_move(
         slot,
         stack,
     };
-    for mod_hook in super::entered(mods, "menu_quick_move") {
-        if matches!(mod_hook.menu_quick_move(host, &mut event), Flow::Cancel) {
-            *handled = true;
-            break;
+    'hook: {
+        for mod_hook in super::entered(mods, "menu_quick_move") {
+            if matches!(mod_hook.menu_quick_move(host, &mut event), Flow::Cancel) {
+                *handled = true;
+                break 'hook;
+            }
+        }
+        for part in super::entered_parts(parts, "menu_quick_move") {
+            if matches!(part.menu_quick_move(host, &mut event), Flow::Cancel) {
+                *handled = true;
+                break 'hook;
+            }
         }
     }
 }
@@ -13874,6 +14820,42 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
         mod_hook.living_jump(&mut event);
     }
 }
+/// What [`Hooks::arrow_nock`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArrowNockEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub bow: &'a ItemStack,
+    pub hand: Hand,
+    pub has_ammo: bool,
+}
+pub fn dispatch_arrow_nock(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    bow: &ItemStack,
+    hand: Hand,
+    has_ammo: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ArrowNockEvent {
+        player,
+        name,
+        bow,
+        hand,
+        has_ammo,
+    };
+    for mod_hook in super::entered(mods, "arrow_nock") {
+        if matches!(mod_hook.arrow_nock(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -13897,6 +14879,61 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExplosionKnockbackEvent<'a> {
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub blocks: &'a [[i32; 3]],
+    pub entity: Option<u32>,
+    pub knockback_velocity: &'a mut [f64; 3],
+}
+pub fn dispatch_explosion_knockback(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    center: [f64; 3],
+    blocks: &[[i32; 3]],
+    entity: Option<u32>,
+    knockback_velocity: &mut [f64; 3],
+) {
+    let mut event = ExplosionKnockbackEvent {
+        dimension,
+        center,
+        blocks,
+        entity,
+        knockback_velocity,
+    };
+    for mod_hook in super::entered(mods, "explosion_knockback") {
+        mod_hook.explosion_knockback(host, &mut event);
+    }
+}
+/// What [`Hooks::ingredient_test`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct IngredientTestEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a serde_json::Map<String, Value>,
+    pub stack: &'a ItemStack,
+    pub accept: bool,
+}
+pub fn dispatch_ingredient_test(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    let mut event = IngredientTestEvent {
+        kind,
+        data,
+        stack,
+        accept: *accept,
+    };
+    for mod_hook in super::entered(mods, "ingredient_test") {
+        mod_hook.ingredient_test(&mut event);
+    }
+    *accept = event.accept;
 }
 /// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13941,6 +14978,38 @@ pub fn dispatch_item_stacked_on_other(
         }
     }
 }
+/// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingGetProjectileEvent<'a> {
+    pub player: Option<u128>,
+    pub name: &'a str,
+    pub entity: Option<u32>,
+    pub kind: &'a str,
+    pub weapon: &'a ItemStack,
+    pub projectile: &'a mut Option<ItemStack>,
+}
+pub fn dispatch_living_get_projectile(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    name: &str,
+    entity: Option<u32>,
+    kind: &str,
+    weapon: &ItemStack,
+    projectile: &mut Option<ItemStack>,
+) {
+    let mut event = LivingGetProjectileEvent {
+        player,
+        name,
+        entity,
+        kind,
+        weapon,
+        projectile,
+    };
+    for mod_hook in super::entered(mods, "living_get_projectile") {
+        mod_hook.living_get_projectile(host, &mut event);
+    }
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -13970,6 +15039,47 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::player_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerNameFormatEvent<'a> {
+    pub username: &'a Text,
+    pub displayname: &'a mut Text,
+}
+pub fn dispatch_player_name_format(
+    mods: &[Box<dyn Hooks>],
+    username: &Text,
+    displayname: &mut Text,
+) {
+    let mut event = PlayerNameFormatEvent {
+        username,
+        displayname,
+    };
+    for mod_hook in super::entered(mods, "player_name_format") {
+        mod_hook.player_name_format(&mut event);
+    }
+}
+/// What [`Hooks::player_tab_list_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTabListNameFormatEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub display_name: &'a mut Option<Text>,
+}
+pub fn dispatch_player_tab_list_name_format(
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    display_name: &mut Option<Text>,
+) {
+    let mut event = PlayerTabListNameFormatEvent {
+        player,
+        name,
+        display_name,
+    };
+    for mod_hook in super::entered(mods, "player_tab_list_name_format") {
+        mod_hook.player_tab_list_name_format(&mut event);
+    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -14060,6 +15170,36 @@ pub fn dispatch_render_item_in_frame(
             break;
         }
     }
+}
+/// What [`Hooks::render_name_tag`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderNameTagEvent<'a> {
+    pub entity_id: u32,
+    pub kind: &'a str,
+    pub vanilla_visible: bool,
+    pub visible: bool,
+    pub text: &'a mut Option<String>,
+}
+pub fn dispatch_render_name_tag(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity_id: u32,
+    kind: &str,
+    vanilla_visible: bool,
+    visible: &mut bool,
+    text: &mut Option<String>,
+) {
+    let mut event = RenderNameTagEvent {
+        entity_id,
+        kind,
+        vanilla_visible,
+        visible: *visible,
+        text,
+    };
+    for mod_hook in super::entered(mods, "render_name_tag") {
+        mod_hook.render_name_tag(host, &mut event);
+    }
+    *visible = event.visible;
 }
 /// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

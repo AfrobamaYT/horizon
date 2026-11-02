@@ -345,7 +345,7 @@ pub enum NativeAuthority {
 }
 
 /// One open attempt of one world; it rejects a previous open's commands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeWorldEpoch(u64);
 
 impl NativeWorldEpoch {
@@ -357,6 +357,58 @@ impl NativeWorldEpoch {
     /// Read the epoch number.
     pub fn get(self) -> u64 {
         self.0
+    }
+}
+
+/// An entity of the open world, for the `Host` methods that read or change one
+/// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
+/// are shared by every level and never reused while the world is open, and an
+/// entity that changes dimension gets a new one, as in vanilla. A handle from an
+/// earlier open, of an entity that is gone, or used on a client reads as `None`
+/// and changes nothing. `Host::entity` makes one from an event's entity id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EntityRef {
+    epoch: NativeWorldEpoch,
+    id: u32,
+}
+
+impl EntityRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, id: u32) -> Self {
+        Self { epoch, id }
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.id
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+}
+
+/// A level of the open world, by its dimension (`minecraft:the_nether`).
+/// `Host::level` makes one, and `entity.level(host)` gives an entity's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LevelRef {
+    epoch: NativeWorldEpoch,
+    dimension: &'static str,
+}
+
+impl LevelRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
+        Self { epoch, dimension }
+    }
+    /// The level's dimension (`minecraft:overworld`).
+    pub fn dimension(self) -> &'static str {
+        self.dimension
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
     }
 }
 
@@ -443,6 +495,39 @@ fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     }
 }
 
+/// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
+/// type, so a panic in it names the mod, the hook and the part.
+fn entered_parts<'a, P: ?Sized>(
+    parts: &'a [Attached<P>],
+    hook: &'static str,
+) -> impl Iterator<Item = &'a P> {
+    let mut guard = None;
+    parts.iter().map(move |attached| {
+        // The last part's mark goes first, as in `Entered`.
+        drop(guard.take());
+        guard = Some(crate::crash::enter_native_mod(
+            crate::crash::NativeModCall {
+                id: MOD_IDS
+                    .get()
+                    .and_then(|ids| ids.get(attached.mod_index))
+                    .copied(),
+                index: attached.mod_index,
+                hook,
+                part: Some(attached.type_name),
+            },
+        ));
+        &*attached.part
+    })
+}
+
+/// Mod `index` of [`mods`] by its `[mod] id`, or by its place when the build didn't name them.
+fn mod_name(index: usize) -> String {
+    MOD_IDS
+        .get()
+        .and_then(|ids| ids.get(index))
+        .map_or_else(|| format!("native mod #{index}"), |id| (*id).to_owned())
+}
+
 struct Entered<'a> {
     mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
     hook: &'static str,
@@ -461,6 +546,7 @@ impl<'a> Iterator for Entered<'a> {
                 id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
                 index,
                 hook: self.hook,
+                part: None,
             },
         ));
         Some(hooks)
@@ -494,6 +580,9 @@ pub trait LevelHost {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
     /// `Level.isClientSide`, through `LevelAccess::is_client_side`.
     fn is_client_side(&self) -> bool;
+    /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
+    /// unknown state.
+    fn state_block(&self, state: BlockStateId) -> Option<&str>;
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
@@ -554,6 +643,10 @@ macro_rules! level_attachment_host {
     )+ };
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
+
+mod part_table;
+pub use part_table::{Attached, Parts, Registrar};
+pub(crate) use part_table::{install_parts, parts};
 
 mod generated;
 pub use generated::Hooks;

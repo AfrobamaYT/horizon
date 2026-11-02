@@ -1,0 +1,29 @@
+name: upstream sync
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'arismoko/horizon' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      issues: write
+      # GITHUB_TOKEN pushes do not start checks; dispatch and monitor them explicitly.
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Verify upstream merge before advancing main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/upstream_sync.py

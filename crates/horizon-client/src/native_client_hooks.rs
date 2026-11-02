@@ -10,10 +10,14 @@ pub struct NativeClientHooks {
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
+    pub has_mods: fn() -> bool,
+    pub player_name_format: fn(&crate::text::Text, &mut crate::text::Text),
+    pub player_tab_list_name_format: fn(u128, &str, &mut Option<crate::text::Text>),
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
+    pub ingredient_test: fn(&str, &Map<String, Value>, &ItemStack, &mut bool),
 }
 
 static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
@@ -66,6 +70,29 @@ pub(crate) fn living_breathe(
     }
 }
 
+pub(crate) fn has_mods() -> bool {
+    HOOKS.get().is_some_and(|hooks| (hooks.has_mods)())
+}
+
+pub(crate) fn player_name_format(
+    username: &crate::text::Text,
+    displayname: &mut crate::text::Text,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.player_name_format)(username, displayname);
+    }
+}
+
+pub(crate) fn player_tab_list_name_format(
+    player: u128,
+    name: &str,
+    display_name: &mut Option<crate::text::Text>,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.player_tab_list_name_format)(player, name, display_name);
+    }
+}
+
 pub(crate) fn living_drown(
     entity: u32,
     kind: &str,
@@ -107,5 +134,16 @@ pub(crate) fn living_jump(entity: u32, kind: &str) {
 pub(crate) fn ingredient(kind: &str, data: &Map<String, Value>, items: &mut Vec<String>) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.ingredient)(kind, data, items);
+    }
+}
+
+pub(crate) fn ingredient_test(
+    kind: &str,
+    data: &Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.ingredient_test)(kind, data, stack, accept);
     }
 }
