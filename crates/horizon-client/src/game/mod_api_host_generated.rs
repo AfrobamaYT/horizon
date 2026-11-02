@@ -519,6 +519,24 @@ impl Host for super::Game<'_> {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         self.native_entity_level(entity)
     }
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        self.native_item_container_slots(stack)
+    }
+    fn item_container_insert(
+        &self,
+        stack: &ItemStack,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        self.native_item_container_insert(stack, item)
+    }
+    fn item_container_extract(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        max: u32,
+    ) -> Option<(Option<ItemStack>, ItemStack)> {
+        self.native_item_container_extract(stack, slot, max)
+    }
     fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
         self.native_level_block_state(level, pos)
     }
@@ -557,5 +575,8 @@ impl Host for super::Game<'_> {
     }
     fn level_is_thundering(&self, level: LevelRef) -> Option<bool> {
         self.native_level_is_thundering(level)
+    }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
     }
 }
