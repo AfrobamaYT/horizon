@@ -25,20 +25,6 @@ use horizon_world::{
 };
 use std::{collections::BTreeMap, fs, path::Path};
 
-/// Mutable values exposed by the flyable-player fall notification.
-#[derive(Clone, Copy, Debug)]
-pub struct PlayerFlyableFall {
-    pub distance: f32,
-    pub multiplier: f32,
-}
-
-/// Called when a player with mayfly reaches `Player.causeFallDamage`.
-/// @API:player_flyable_fall@.
-#[inline(never)]
-pub fn native_player_flyable_fall(player: i32, fall: &mut PlayerFlyableFall) {
-    crate::native_client_hooks::player_flyable_fall(player, fall);
-}
-
 /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
 /// change the distance and damage multiplier, or cancel fall handling.
 /// 357.
@@ -302,13 +288,6 @@ impl MotionWorld<'_, '_, '_> {
         // Player.causeFallDamage exempts players with the mayfly ability,
         // including creative players who are currently walking.
         if self.player.may_fly {
-            if !self.player.replaying {
-                let mut fall = PlayerFlyableFall {
-                    distance: distance as f32,
-                    multiplier,
-                };
-                native_player_flyable_fall(self.player.entity_id, &mut fall);
-            }
             if let Some((state, position, original_distance)) = contact {
                 self.mod_block_fall(state, position, original_distance, 0.0);
             }

@@ -8,7 +8,6 @@ pub struct NativeClientHooks {
     pub has_mods: fn() -> bool,
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
-    pub player_flyable_fall: fn(i32, &mut crate::landing::PlayerFlyableFall),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
@@ -64,12 +63,6 @@ pub(crate) fn living_breathe(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_breathe)(entity, kind, can_breathe, consume, refill);
-    }
-}
-
-pub(crate) fn player_flyable_fall(player: i32, fall: &mut crate::landing::PlayerFlyableFall) {
-    if let Some(hooks) = HOOKS.get() {
-        (hooks.player_flyable_fall)(player, fall);
     }
 }
 

@@ -1069,7 +1069,6 @@ mod tests {
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct StackedOnOther<'a>(pub &'a ());
-        pub(super) struct PlayerFlyableFall;
         pub(super) struct Corners;
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
         pub(super) struct ItemEnergyBuffer;

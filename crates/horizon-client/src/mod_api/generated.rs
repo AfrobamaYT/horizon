@@ -4547,13 +4547,6 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// Called when a player with mayfly reaches `Player.causeFallDamage`.
-    /// @API:player_flyable_fall@.
-    ///
-    /// Every mod gets `event.fall` in order and may add, change or remove fall.
-    fn player_flyable_fall(&self, event: &mut PlayerFlyableFallEvent<'_>) {
-        let _ = event;
-    }
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
     /// API @API:render_hand_pose@.
@@ -13977,22 +13970,6 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
-}
-/// What [`Hooks::player_flyable_fall`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct PlayerFlyableFallEvent<'a> {
-    pub player: i32,
-    pub fall: &'a mut PlayerFlyableFall,
-}
-pub fn dispatch_player_flyable_fall(
-    mods: &[Box<dyn Hooks>],
-    player: i32,
-    fall: &mut PlayerFlyableFall,
-) {
-    let mut event = PlayerFlyableFallEvent { player, fall };
-    for mod_hook in super::entered(mods, "player_flyable_fall") {
-        mod_hook.player_flyable_fall(&mut event);
-    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
