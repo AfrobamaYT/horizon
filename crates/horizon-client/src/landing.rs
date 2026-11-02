@@ -35,7 +35,7 @@ pub struct PlayerFlyableFall {
 /// Called when a player with mayfly reaches `Player.causeFallDamage`.
 #[inline(never)]
 pub fn native_player_flyable_fall(
-    player: u32,
+    player: i32,
     distance: f32,
     multiplier: f32,
     replacement: &mut Option<PlayerFlyableFall>,

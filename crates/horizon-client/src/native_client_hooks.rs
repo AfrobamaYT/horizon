@@ -8,7 +8,7 @@ pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
-    pub player_flyable_fall: fn(u32, f32, f32, &mut Option<crate::landing::PlayerFlyableFall>),
+    pub player_flyable_fall: fn(i32, f32, f32, &mut Option<crate::landing::PlayerFlyableFall>),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
 }
 
@@ -53,7 +53,7 @@ pub(crate) fn living_breathe(
 }
 
 pub(crate) fn player_flyable_fall(
-    player: u32,
+    player: i32,
     distance: f32,
     multiplier: f32,
     replacement: &mut Option<crate::landing::PlayerFlyableFall>,
