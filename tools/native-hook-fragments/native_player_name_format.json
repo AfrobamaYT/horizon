@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_name_format",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_name_format",
+      "side": "both",
+      "cancellable": false,
+      "neoforge": "PlayerEvent.NameFormat",
+      "mod_api": {
+        "contract": "replace",
+        "out": "displayname"
+      }
+    }
+  ],
+  "rust_summary": "Player display name formatting (`native_player_name_format`).",
+  "doc_summary": "A player's display name is formatted: `native_player_name_format(username, displayname)` can replace the display name component. Bundles need \"hooks\": @API:player_name_format@."
+}
