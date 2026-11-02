@@ -20,6 +20,9 @@ impl Game<'_> {
             return None;
         }
         let id = i32::try_from(entity.id()).ok()?;
+        if id == 0 {
+            return None;
+        }
         let player = self
             .lan
             .iter()
@@ -214,6 +217,9 @@ mod tests {
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
         let level = game.native_level(game.dim.id()).unwrap();
+        game.armor_stands
+            .push(ArmorStand::new(0, Vec3::new(0.5, 0.0, 0.0), 0.0));
+        assert!(game.native_entity(0).is_none());
         game.armor_stands
             .push(ArmorStand::new(12, Vec3::new(1.0, 0.0, 0.0), 0.0));
         let found = game
