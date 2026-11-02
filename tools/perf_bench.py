@@ -411,7 +411,10 @@ def wait_loaded(control, near, limit, min_chunks=0):
     only remesh in short bursts. Older builds fall back to meshing going quiet
     (fewer than QUIET_MESHES_PER_S section meshes in a second), which also
     waits through that tail. (pending_chunks alone misses work the threads have
-    already taken, and sections waiting for their neighbours' light.)"""
+    already taken, and sections waiting for their neighbours' light.) Builds
+    that report `meshing_in_view` are drawn once the sections the camera sees
+    are, as vanilla's driver counts its compile queue (`isQueueEmpty`), which
+    only holds sections in view (`LevelExtractor.extract`)."""
     deadline = time.time() + limit
     last, changed, previous, meshing = None, time.time(), None, time.time()
     # Right after a teleport (and at spawn) Horizon reports nothing queued and steady counts for over a second
@@ -441,7 +444,11 @@ def wait_loaded(control, near, limit, min_chunks=0):
             sample = (now, s["meshed_sections"])
             if stages is not None:
                 # Protos outside the view distance wait for neighbours that are never generated.
-                if any(v for k, v in stages.items() if k != "protos"):
+                # Builds that count the sections in the camera's view still to mesh are drawn once
+                # those are (vanilla's driver waits for its compile queue, which holds only the
+                # sections it sees); the ones behind the camera mesh after them.
+                idle = {"protos", "queued", "meshing"} if "meshing_in_view" in stages else {"protos"}
+                if any(v for k, v in stages.items() if k not in idle):
                     meshing = now
                 quiet = 0.5
             else:

@@ -244,6 +244,30 @@ pub enum Done {
     /// A proto chunk back from `Job::LightView`, with its view.
     LightView(i32, i32, Proto, Option<Chunk>),
 }
+/// What a mesh job for a section the camera doesn't see adds to its
+/// priority: such sections wait for every one it sees (their distances
+/// stay far below it).
+const OUT_OF_VIEW: i64 = 1 << 32;
+/// The camera's view frustum (camera-relative, `Renderer::camera_frustum`)
+/// and where the camera is.
+#[derive(Clone, Copy, Debug)]
+pub struct CameraView {
+    pub frustum: crate::gfx::Frustum,
+    pub eye: [f64; 3],
+}
+impl CameraView {
+    /// Whether the block box `min..max` is at least partly in view.
+    fn sees(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+        let rel = |p: [i32; 3]| {
+            glam::Vec3::new(
+                (f64::from(p[0]) - self.eye[0]) as f32,
+                (f64::from(p[1]) - self.eye[1]) as f32,
+                (f64::from(p[2]) - self.eye[2]) as f32,
+            )
+        };
+        self.frustum.intersects(rel(min), rel(max))
+    }
+}
 struct Queued {
     priority: i64,
     /// The column the job is for and what it adds to the column's distance
@@ -416,6 +440,14 @@ pub struct Streaming {
     deferred: Vec<Done>,
     sequence: u64,
     pub center: (i32, i32),
+    /// The camera's view: the sections in it mesh before the rest, as vanilla
+    /// compiles only the sections it sees (`LevelExtractor.extract` walks
+    /// `LevelRenderer.visibleSections`). None (no camera yet): nearest first.
+    pub view: Option<CameraView>,
+    /// Sections in `view` that the last `update` left ready to mesh, being
+    /// meshed, or meshed and not yet handed over: vanilla's compile queue
+    /// (`SectionRenderDispatcher.isQueueEmpty`).
+    view_pending: usize,
     /// The view distance around `center`; below 0, no area there (a dedicated
     /// server nobody is on).
     pub radius: i32,
@@ -917,6 +949,8 @@ impl Streaming {
             deferred: Vec::new(),
             sequence: 0,
             center: (0, 0),
+            view: None,
+            view_pending: 0,
             radius: 8,
             forced: HashSet::new(),
             paused: false,
@@ -1236,6 +1270,22 @@ impl Streaming {
     fn distance(&self, x: i32, z: i32) -> i64 {
         self.ranges().priority(x, z, self.loading)
     }
+    /// Whether the camera sees any of column (x, z) (true without a view).
+    fn column_seen(&self, world: &World, x: i32, z: i32) -> bool {
+        let layout = world.layout();
+        self.view.is_none_or(|view| {
+            view.sees(
+                [x * 16, layout.min_y(), z * 16],
+                [x * 16 + 16, layout.max_y() + 1, z * 16 + 16],
+            )
+        })
+    }
+    /// Whether the camera sees any of section (x, sy, z) (true without a view).
+    fn section_seen(&self, world: &World, x: i32, sy: i32, z: i32) -> bool {
+        let y = world.layout().section_y(sy as usize);
+        self.view
+            .is_none_or(|view| view.sees([x * 16, y, z * 16], [x * 16 + 16, y + 16, z * 16 + 16]))
+    }
     /// The 3x3 a light job reads: the finished columns, and for a neighbour
     /// that will not finish (past the area), its decorated proto chunk, as
     /// vanilla lights its last FULL ring against neighbours at FEATURES.
@@ -1385,7 +1435,7 @@ impl Streaming {
     }
     /// How much work each stage holds: queued jobs, then what is in flight or
     /// waiting at each step from generation to meshing.
-    pub fn stages(&self) -> [(&'static str, usize); 7] {
+    pub fn stages(&self) -> [(&'static str, usize); 8] {
         [
             ("queued", self.pending()),
             ("generating", self.generating.len()),
@@ -1397,6 +1447,7 @@ impl Streaming {
             ("finishing", self.finishing.len()),
             ("lighting", self.lighting.len()),
             ("meshing", self.meshing.len()),
+            ("meshing_in_view", self.view_pending),
         ]
     }
     /// Advance streaming: collect finished work, then schedule more.
@@ -1805,6 +1856,7 @@ impl Streaming {
         // Column by column: the checks below hold for all of a column's
         // sections, and columns waiting for light cost one look per frame.
         let mut candidates: Vec<(i64, i32, i32, SectionMask)> = Vec::new();
+        let mut view_pending = 0;
         let columns: Vec<_> = world.dirty_sections.columns().collect();
         for ((x, z), sections) in columns {
             if !world.chunks.contains_key(&(x, z)) {
@@ -1833,9 +1885,15 @@ impl Streaming {
             if !ready {
                 continue;
             }
-            candidates.push((self.distance(x, z), x, z, sections));
+            let seen = self.column_seen(world, x, z);
+            if seen {
+                view_pending += sections.iter().count();
+            }
+            let rank = self.distance(x, z) * 4 + if seen { 0 } else { OUT_OF_VIEW };
+            candidates.push((rank, x, z, sections));
         }
-        // Nearest first, and only as many sections as the workers can chew.
+        // What the camera sees first, then nearest first, and only as many
+        // sections as the workers can chew.
         // Every ready column used to be submitted at once, so at a wide
         // render distance the queue — and `meshing`, and each job's 3x3
         // region snapshot — grew with the number of loaded columns and the
@@ -1844,18 +1902,23 @@ impl Streaming {
         // capacity frees; `requeue` then has a small queue to keep close.
         let room = (self.workers * 32).saturating_sub(self.meshing.len());
         nearest_first(&mut candidates, room);
-        for (_, x, z, sections) in candidates {
+        for (rank, x, z, sections) in candidates {
             let Some(region) = Self::region(world, x, z) else {
                 continue;
             };
             world.dirty_sections.take_column(x, z);
+            if rank < OUT_OF_VIEW {
+                // Counted above as ready; counted below as meshing.
+                view_pending -= sections.iter().count();
+            }
             for sy in sections.iter().map(|sy| sy as i32) {
                 let first = self.meshed.insert((x, z));
                 self.sequence += 1;
                 self.meshing.insert((x, sy, z), self.sequence);
+                let seen = self.section_seen(world, x, sy, z);
                 self.submit(
                     Some((x, z)),
-                    if first { 2 } else { 0 },
+                    if first { 2 } else { 0 } + if seen { 0 } else { OUT_OF_VIEW },
                     Job::Mesh(
                         x,
                         sy,
@@ -1876,6 +1939,12 @@ impl Streaming {
                 );
             }
         }
+        view_pending += self
+            .meshing
+            .keys()
+            .filter(|&&(x, sy, z)| self.section_seen(world, x, sy, z))
+            .count();
+        self.view_pending = view_pending;
         (uploads, removed)
     }
     fn schedule_generation(&mut self, world: &World, workers: usize) {
@@ -2653,6 +2722,100 @@ fn same_values(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A remote client's columns all arrive at once around a camera looking
+    /// east: every section it sees meshes before any behind it, and the
+    /// count of sections in view still to mesh falls to 0 with them.
+    #[test]
+    fn sections_in_the_camera_view_mesh_before_those_behind_it() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let assets = Arc::new(crate::assets::Assets::load(&root).unwrap());
+        let render = Arc::new(assets.reload(&root).unwrap());
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
+        let biomes = Arc::new(crate::biome::Biomes::load(&root).unwrap());
+        let context = Arc::new(WorkerContext {
+            tables: Arc::new(
+                crate::mesher::MeshTables::new(&assets, &render, &facts, visibility).unwrap(),
+            ),
+            light: Arc::new(
+                crate::light::LightTables::load(&root, assets.registry, &facts).unwrap(),
+            ),
+            biomes: biomes.clone(),
+            assets: assets.clone(),
+            render,
+        });
+        let terrain = crate::testgen::TestTerrain::new(assets.registry, &biomes).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
+        // One section high, so a column the camera sees is a section it sees.
+        let shape = crate::chunk::LevelShape::new(0, 16, 16, true).unwrap();
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        world.shape = shape;
+        // One worker: sections mesh in the order the queue gives them.
+        let mut streaming = Streaming::new(Arc::new(terrain), context, 1);
+        streaming.remote = true;
+        // Far enough that every column is in the view distance.
+        streaming.radius = 12;
+        let eye = [8.0, 8.0, 8.0];
+        let view = CameraView {
+            frustum: crate::gfx::Frustum::of_view(&crate::gfx::View::screen(
+                -90.0,
+                0.0,
+                70.0,
+                16.0 / 9.0,
+                512.0,
+            )),
+            eye,
+        };
+        streaming.view = Some(view);
+        for x in -7..=7 {
+            for z in -7..=7 {
+                let mut chunk = Chunk::with_layout(x, z, shape.column());
+                chunk.set(3, 2, 5, stone);
+                chunk.lit = true;
+                streaming.insert_remote(&mut world, chunk);
+            }
+        }
+        let seen = |&(x, sy, z): &(i32, i32, i32)| {
+            let y = sy * 16;
+            view.sees([x * 16, y, z * 16], [x * 16 + 16, y + 16, z * 16 + 16])
+        };
+        let mut order = Vec::new();
+        let mut pending_in_view = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            assert!(std::time::Instant::now() < deadline, "meshing never ended");
+            let (uploads, _) = streaming.update(&mut world);
+            let stages: FxHashMap<_, _> = streaming.stages().into_iter().collect();
+            pending_in_view.push((stages["meshing_in_view"], stages["meshing"]));
+            order.extend(uploads.iter().map(|(key, _)| *key));
+            streaming.free(uploads);
+            if !streaming.busy() && world.dirty_sections.columns().next().is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        // The columns with all their neighbours: 13 x 13.
+        assert_eq!(order.len(), 169);
+        let first_behind = order.iter().position(|k| !seen(k)).expect("some behind");
+        assert!(first_behind > 0, "some in view");
+        assert!(
+            order[first_behind..].iter().all(|k| !seen(k)),
+            "a section in view meshed after one behind: {order:?}"
+        );
+        // Once the sections in view are done the count is 0 while those behind still mesh.
+        assert!(
+            pending_in_view
+                .iter()
+                .any(|&(in_view, all)| in_view == 0 && all > 0)
+        );
+        assert_eq!(pending_in_view.last(), Some(&(0, 0)));
+    }
 
     #[test]
     fn a_resent_column_keeps_its_sections_but_takes_new_biomes() {

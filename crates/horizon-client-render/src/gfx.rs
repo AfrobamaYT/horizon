@@ -8926,6 +8926,13 @@ pub struct Frustum {
     planes: [Vec4; 6],
 }
 impl Frustum {
+    /// A view's frustum, without bobbing (`Renderer::camera_frustum`'s with
+    /// no renderer to take the aspect from).
+    pub fn of_view(view: &View) -> Self {
+        Self {
+            planes: frustum(view.view_proj(Mat4::IDENTITY)),
+        }
+    }
     /// Whether the camera-relative box `min..max` is at least partly inside.
     pub fn intersects(&self, min: Vec3, max: Vec3) -> bool {
         !self.planes.iter().any(|p| {

@@ -194,6 +194,22 @@ class WaitLoadedTests(unittest.TestCase):
         tail = [self.status(901, 20000 + 20 * i, stages=40 if i % 40 == 0 else 0) for i in range(400)]
         self.assertAlmostEqual(self.run_script(loading + tail), 1.0, places=6)
 
+    def test_sections_behind_the_camera_do_not_hold_the_load(self):
+        # A build that counts the sections in view is loaded once those are meshed, though the
+        # ones behind the camera mesh for 2 s more: vanilla's driver waits only for what it sees.
+        def status(chunks, in_view, meshing):
+            s = self.status(chunks, 0, stages=meshing)
+            s["streaming"].update(queued=meshing, meshing_in_view=in_view)
+            return s
+        loading = [status(900, 300, 500) for _ in range(20)]
+        behind = [status(901, 0, 400) for _ in range(40)]
+        quiet = [status(901, 0, 0) for _ in range(40)]
+        self.assertAlmostEqual(self.run_script(loading + behind + quiet), 1.0, places=6)
+        # Without the count, the same game is loaded when every section is meshed.
+        for s in loading + behind + quiet:
+            del s["streaming"]["meshing_in_view"]
+        self.assertAlmostEqual(self.run_script(loading + behind + quiet), 2.95, places=6)
+
     def test_old_builds_wait_for_meshing_to_go_quiet(self):
         busy = [self.status(901, 1000 * i) for i in range(20)]
         quiet = [self.status(901, 20000 + i) for i in range(40)]

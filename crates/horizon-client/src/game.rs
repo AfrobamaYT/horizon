@@ -16305,6 +16305,14 @@ impl Game<'_> {
                 (p.position.z.floor() as i32) >> 4,
             );
         }
+        // The sections the camera saw last frame mesh first, as vanilla compiles only those.
+        self.streaming.view =
+            self.view_frustum
+                .zip(self.locator_camera)
+                .map(|(frustum, camera)| horizon_client::streaming::CameraView {
+                    frustum,
+                    eye: camera.0,
+                });
         // The loading screen's chunk map fills ring by ring, as vanilla's.
         self.streaming.loading =
             self.options.execution_role.is_client() && self.loading_reason().is_some();
