@@ -7416,22 +7416,23 @@ impl Game<'_> {
     ) {
         let _ = (original_message, message, cancel);
     }
-    /// NeoForge's `ClientChatReceivedEvent`: change or suppress a received line.
-    /// @API:client_chat_received@.
+    /// NeoForge's `ClientChatReceivedEvent`: change or suppress a received line;
+    /// `overlay` for the action bar. @API:client_chat_received@.
     pub(super) fn native_client_chat_received(
         &mut self,
         message: &mut Text,
+        overlay: bool,
         cancel: &mut bool,
     ) {
-        let _ = (message, cancel);
+        let _ = (message, overlay, cancel);
     }
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
-    /// @API:client_pause_change_pre@.
+    /// @API:client_pause_change@.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
         let _ = (paused, cancel);
     }
     /// NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.
-    /// @API:client_pause_change_post@.
+    /// @API:client_pause_change@.
     pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
         let _ = (paused,);
     }

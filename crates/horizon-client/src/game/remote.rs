@@ -4429,20 +4429,18 @@ impl Game<'_> {
             C::SystemChat(p) => {
                 // The component as sent, translated in the client's own
                 // language. ChatListener.handleOverlay for the action bar.
-                let text = remote_text(&p.content);
+                let mut text = remote_text(&p.content);
+                let mut cancel = false;
+                self.native_client_chat_received(&mut text, p.overlay, &mut cancel);
+                if cancel {
+                    return Ok(());
+                }
                 if p.overlay {
                     self.say_system_queued(&text);
                     self.titles.set_overlay(text, false);
-                } else {
-                    let mut text = text;
-                    let mut cancel = false;
-                    self.native_client_chat_received(&mut text, &mut cancel);
-                    if !cancel
-                        && self.chat_line(text.clone(), horizon_client::chat::ChatSource::Server)
-                    {
-                        // handleSystemMessage: said once the chat takes it.
-                        self.say_system_chat_queued(&text);
-                    }
+                } else if self.chat_line(text.clone(), horizon_client::chat::ChatSource::Server) {
+                    // handleSystemMessage: said once the chat takes it.
+                    self.say_system_chat_queued(&text);
                 }
             }
             C::PlayerChat(p) => {
@@ -4554,7 +4552,7 @@ impl Game<'_> {
                 }
                 let mut line = line;
                 let mut cancel = false;
-                self.native_client_chat_received(&mut line, &mut cancel);
+                self.native_client_chat_received(&mut line, false, &mut cancel);
                 if cancel {
                     if let Some(signature) = &signature {
                         self.mark_message_processed(signature, false);
@@ -4570,7 +4568,7 @@ impl Game<'_> {
                     .plain();
                 let mut line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
                 let mut cancel = false;
-                self.native_client_chat_received(&mut line, &mut cancel);
+                self.native_client_chat_received(&mut line, false, &mut cancel);
                 if !cancel {
                     self.handle_player_chat(line, None, ChatTrust::Secure, narration);
                 }
@@ -4614,15 +4612,15 @@ impl Game<'_> {
                     }
                 }
                 for e in p.entries {
-                    if let Some(mode) = e.game_mode {
-                        let info = self
+                    if let Some(mode) = e.game_mode
+                        && !horizon_client::mod_api::mods().is_empty()
+                        && let Some(info) = self
                             .remote
                             .as_ref()
                             .and_then(|r| r.tab_players.get(&e.uuid))
-                            .cloned();
-                        if let Some(info) = info {
-                            self.native_client_player_change_game_type(&info, info.game_mode, mode);
-                        }
+                            .cloned()
+                    {
+                        self.native_client_player_change_game_type(&info, info.game_mode, mode);
                     }
                     if let Some(r) = self.remote.as_mut() {
                         if let Some(t) = r.tab_players.get_mut(&e.uuid) {

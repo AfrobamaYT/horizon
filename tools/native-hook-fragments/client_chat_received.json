@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "A client receives a chat message (`native_client_chat_received`).",
-  "doc_summary": "A client can change or suppress a received chat line with `native_client_chat_received(message, cancel)`. Bundles need \"hooks\": @API:client_chat_received@."
+  "doc_summary": "A client can change or suppress a received chat line with `native_client_chat_received(message, overlay, cancel)`, `overlay` for the action bar. Bundles need \"hooks\": @API:client_chat_received@."
 }
