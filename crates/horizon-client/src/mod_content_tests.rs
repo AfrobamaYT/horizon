@@ -2543,6 +2543,112 @@ fn block_base_of(tag: &str, declarations: &[&str], facts: &str) -> (PathBuf, Vec
     (base, mods)
 }
 
+#[test]
+fn tuple_shapes_follow_final_state_order_and_separate_collision() {
+    let declaration = r#"{"template":"minecraft:test","item":false,
+      "state_properties":{"active":{"type":"boolean"}},
+      "shapes":{"properties":["axis","active"],
+        "values":{"x,true":[[0,0,0,0.5,1,1]]},"default":[[0,0,0,1,1,1]]},
+      "collision_shapes":{"properties":["active","axis"],
+        "values":{"true,x":[[0,0,0,0.25,1,1]]},"default":[]}}"#;
+    let (base, mods) = block_base("tuple-shapes", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let block = &plan.blocks[0];
+    let shapes = block.shapes.as_ref().unwrap();
+    let collisions = block.collision_shapes.as_ref().unwrap();
+    assert_eq!(shapes.len(), 4);
+    assert_eq!(collisions.len(), 4);
+    for (index, (template, combo)) in block.state_combinations().enumerate() {
+        let special = template == 0
+            && combo
+                .iter()
+                .any(|(name, value)| name == "active" && value == "true");
+        assert_eq!(
+            shapes[index].bounds().unwrap().max(Axis::X),
+            if special { 0.5 } else { 1.0 }
+        );
+        assert_eq!(collisions[index].is_empty(), !special);
+        if special {
+            assert_eq!(collisions[index].bounds().unwrap().max(Axis::X), 0.25);
+        }
+    }
+    let mut gameplay: J =
+        serde_json::from_slice(&fs::read(base.join("gameplay-facts.json")).unwrap()).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    for (index, row) in rows[2..].iter().enumerate() {
+        assert_eq!(row.get("full_collision"), Some(&J::Bool(false)));
+        let Some(J::Arr(outline)) = row.get("outline") else {
+            panic!("outline")
+        };
+        assert_eq!(outline.len(), shapes[index].boxes().len());
+    }
+    let mut tag = Tag::Compound(Compound::from([
+        (
+            JavaString::from("states"),
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (JavaString::from("shapes"), Tag::List(Vec::new())),
+        (
+            JavaString::from("cached_shapes"),
+            Tag::IntArray(vec![-1, -1]),
+        ),
+    ]));
+    plan.nbt(&mut tag);
+    plan.collision_shapes(&mut tag).unwrap();
+    let Some(Tag::List(entries)) = tag.get("shapes") else {
+        panic!("shapes")
+    };
+    let Some(Tag::IntArray(mapping)) = tag.get("cached_shapes") else {
+        panic!("mapping")
+    };
+    for (index, shape) in collisions.iter().enumerate() {
+        assert_eq!(entries[mapping[2 + index] as usize], encode_shape(shape));
+    }
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn collision_only_preserves_outline_and_shape_typos_are_errors() {
+    let declaration = r#"{"template":"minecraft:test","collision_shapes":{"default":[]}}"#;
+    let (base, mods) = block_base("collision-only", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    assert!(plan.blocks[0].shapes.is_none());
+    assert!(
+        plan.blocks[0]
+            .collision_shapes
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(VoxelShape::is_empty)
+    );
+    let mut gameplay: J =
+        serde_json::from_str(r#"{"states":[{"outline":[[0,0,0,1,1,1]]},{"outline":[]}]}"#).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[0].get("outline"), rows[2].get("outline"));
+    assert_eq!(rows[1].get("outline"), rows[3].get("outline"));
+    assert_eq!(rows[2].get("full_collision"), Some(&J::Bool(false)));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    for (index, table) in [
+        r#"{"properties":["axis","typo"],"default":[]}"#,
+        r#"{"properties":["axis"],"values":{"bad":[]},"default":[]}"#,
+        r#"{"properties":["axis"],"values":{"x":[]}}"#,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let declaration = format!(r#"{{"template":"minecraft:test","collision_shapes":{table}}}"#);
+        let (base, mods) = block_base(&format!("collision-typo-{index}"), &[&declaration]);
+        assert!(Plan::new(&base, &mods).is_err(), "{table}");
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
+}
+
 /// A block's states are its template's times the combinations of the state
 /// properties it declares, in a fixed order with every default first.
 #[test]
@@ -3117,7 +3223,7 @@ fn zinc_mod(dir: &Path, modifiers: &[(&str, &str)]) -> ContentMod {
     let mut files = vec![
         ("horizon-mod.toml".to_owned(), manifest("zinc", "")),
         (
-            "data/zinc/worldgen/configured_feature/ore_zinc.json".to_owned(),
+            "data/zinc/worldgen/feature/ore_zinc.json".to_owned(),
             r#"{"type":"minecraft:ore","config":{}}"#.to_owned(),
         ),
         (
@@ -3249,6 +3355,46 @@ fn biome_modifiers_place_mod_features_in_vanilla_biomes() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+/// 26.3's feature directory feeds the configured-feature bundle and command
+/// registry, including nested paths; the old documented path warns instead.
+#[test]
+fn configured_features_load_from_the_26_3_path() {
+    let base = biome_base("feature-paths");
+    let scratch = base.parent().unwrap();
+    fs::write(
+        base.join("command-registries.json"),
+        r#"{"blocks":{},"items":[],"by_registry":{"minecraft:worldgen/feature":{"ids":[]}}}"#,
+    )
+    .unwrap();
+    let feature = r#"{"type":"minecraft:simple_block","config":{}}"#;
+    let m = folder_mod(
+        &scratch.join("zinc"),
+        &[
+            ("horizon-mod.toml", &manifest("zinc", "")),
+            ("data/zinc/worldgen/feature/nested/new.json", feature),
+            ("data/zinc/worldgen/configured_feature/old.json", feature),
+        ],
+    );
+    let root = scratch.join("out");
+    build(&base, &[m], &root).unwrap();
+    let bundle: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/features.json")).unwrap()).unwrap();
+    assert_eq!(
+        bundle,
+        BTreeMap::from([("zinc:nested/new".into(), feature.into())])
+    );
+    let commands: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("command-registries.json")).unwrap()).unwrap();
+    let ids = commands["by_registry"]["minecraft:worldgen/feature"]["ids"]
+        .as_array()
+        .unwrap();
+    assert_eq!(ids, &[serde_json::json!("zinc:nested/new")]);
+    let warnings = fs::read_to_string(root.join(WARNINGS)).unwrap();
+    assert!(warnings.contains("data/zinc/worldgen/configured_feature/old.json"));
+    assert!(warnings.contains("use worldgen/feature/ in 26.3"));
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 /// A mod with features but no modifier leaves vanilla's biome bundle alone.
 #[test]
 fn biome_modifiers_none_keep_the_vanilla_biomes() {
@@ -3345,7 +3491,7 @@ fn content_root_generates_a_biome_modifier_ore() {
                 r#"{"template": "minecraft:iron_ore"}"#.to_owned(),
             ),
             (
-                "data/zinc/worldgen/configured_feature/ore_zinc.json",
+                "data/zinc/worldgen/feature/ore_zinc.json",
                 r##"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
                     "targets": [{"target": {"predicate_type": "minecraft:tag_match",
                         "tag": "minecraft:stone_ore_replaceables"},
@@ -3713,7 +3859,7 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
                 r#"{"template": "minecraft:oak_sign"}"#,
             ),
             (
-                "data/post/worldgen/configured_feature/notice.json",
+                "data/post/worldgen/feature/notice.json",
                 r#"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
                     "targets": [{"target": {"predicate_type": "minecraft:tag_match",
                         "tag": "minecraft:stone_ore_replaceables"},
