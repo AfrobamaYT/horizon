@@ -1894,7 +1894,10 @@ impl ParticleEngine {
             );
             if let Some(behaviour) = behaviour {
                 behaviour.apply(&mut q, v, &mut r);
-                if behaviour.animation == Some(ModAnimation::First) {
+                if matches!(
+                    behaviour.animation,
+                    Some(ModAnimation::First | ModAnimation::Age | ModAnimation::Loop)
+                ) {
                     q.sprite = Sprite::Index(sprites[0]);
                 }
             }
@@ -4760,6 +4763,41 @@ mod tests {
             .unwrap()
             .apply(&mut kept, [0.0; 3], &mut LegacyRandom::new(1));
         assert_eq!(kept.set, None);
+    }
+
+    #[test]
+    fn mod_animated_particles_start_on_the_first_sprite() {
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.set_sprites.push(vec![10, 11, 12]);
+        for animation in ["age", "loop"] {
+            for curves in [false, true] {
+                let mut declaration = serde_json::json!({"animation": animation});
+                if animation == "loop" {
+                    declaration["frame_ticks"] = serde_json::json!(2);
+                }
+                if curves {
+                    declaration["size"] = serde_json::json!([0.5, 0.0]);
+                }
+                engine.mod_sets.insert(
+                    "mymod:spark".into(),
+                    (0, Some(ModBehaviour::parse(&declaration).unwrap())),
+                );
+                for seed in 0..16 {
+                    let particle = engine
+                        .make(
+                            &ParticleOptions::named("mymod:spark"),
+                            [0.0; 3],
+                            [0.0; 3],
+                            seed,
+                        )
+                        .unwrap();
+                    assert!(
+                        matches!(particle.sprite, Sprite::Index(10)),
+                        "{animation}, curves={curves}, seed={seed}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
