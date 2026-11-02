@@ -2421,6 +2421,11 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
+- `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
+  `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
+  Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
+  slot as `/item replace entity` does (None or air empties it). Mob equipment writes return false until Horizon can
+  preserve complete stacks for all mob slots.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2986,6 +2991,16 @@ A block entity part names its block entity type and the blocks that hold one, as
 The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
 find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
 block hooks) by block.
+
+`r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
+every member of a tag (its name without `#`). Each game resolves them against its own tags when its world
+opens, again on `/reload`, and when a client joins a server, so the window's game and its server thread each
+answer from the tags they play with; a block that leaves the tag is no longer asked. A mod's parts on one
+thing run in the order it registered them, by key or by tag. A part a tag gives a thing
+that already has that kind of part warns, naming both mods, and the earlier mod's part stays. A tag that
+doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
+doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
+does) can't see tag parts, and warns once.
 
 ### Testing a trait mod
 
