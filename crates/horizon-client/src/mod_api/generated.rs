@@ -4535,7 +4535,7 @@ pub trait Hooks: Send + Sync {
         None
     }
     /// The local player left-clicks empty space, with any main-hand stack.
-    /// Client-side only; the server does not receive this event.
+    /// Client-side only; the server does not receive this event. @API:left_click_empty@.
     fn left_click_empty(&self, host: &mut dyn Host, event: &mut LeftClickEmptyEvent) {
         let _ = host;
         let _ = event;
@@ -4570,7 +4570,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// The local player right-clicks empty space with an empty `hand`.
-    /// Client-side only; the server does not receive this event.
+    /// Client-side only; the server does not receive this event. @API:right_click_empty@.
     fn right_click_empty(&self, host: &mut dyn Host, event: &mut RightClickEmptyEvent) {
         let _ = host;
         let _ = event;
