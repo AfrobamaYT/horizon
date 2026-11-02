@@ -1809,7 +1809,7 @@ const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
     ("processor_list", "worldgen/processor_lists.json"),
-    ("configured_feature", "worldgen/features.json"),
+    ("feature", "worldgen/features.json"),
     ("placed_feature", "worldgen/placed_features.json"),
 ];
 
@@ -2339,6 +2339,15 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         let declarations = format!("data/{}/horizon/", m.id);
         let mut reader = m.content.reader()?;
         for file in &m.content.files {
+            if let Some((_, path)) = file.strip_prefix("data/").and_then(|p| p.split_once('/'))
+                && path.starts_with("worldgen/configured_feature/")
+            {
+                warnings.push(format!(
+                    "mod {}: {file}: use worldgen/feature/ in 26.3; file ignored",
+                    m.id
+                ));
+                continue;
+            }
             let bytes = reader.read(file)?;
             let is_tag = file.starts_with("data/") && file.contains("/tags/");
             if is_tag && file.ends_with(".json") {
