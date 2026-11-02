@@ -1212,6 +1212,57 @@ pub trait Host {
         let _ = pos;
         unimplemented!("Host::block_collision")
     }
+    /// The entity `id` (the id events carry) as a handle for the `entity_*`
+    /// methods: None on a client, with no world open, or for no such entity
+    /// in the level in place or among the server's players. API
+    /// @API:entity_handles@.
+    fn entity(&self, id: u32) -> Option<EntityRef> {
+        let _ = id;
+        unimplemented!("Host::entity")
+    }
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
+    /// client, with no world open, or for a dimension the server hasn't
+    /// loaded. API @API:entity_handles@.
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        let _ = dimension;
+        unimplemented!("Host::level")
+    }
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_position")
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_block_position")
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
+        let _ = entity;
+        unimplemented!("Host::entity_rotation")
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+        let _ = entity;
+        unimplemented!("Host::entity_kind")
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        let _ = entity;
+        unimplemented!("Host::entity_uuid")
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+        let _ = entity;
+        unimplemented!("Host::entity_level")
+    }
     /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
     /// empty ones included, kept in its `minecraft:container`. None for an
     /// item without slots, and for an empty stack.
@@ -1251,5 +1302,115 @@ pub trait Host {
         let _ = slot;
         let _ = max;
         unimplemented!("Host::item_container_extract")
+    }
+    /// Resolve an online UUID on this server. During a player swap only the
+    /// acting player is available; other players return None because swaps can
+    /// nest and their records may hold displaced state. API @API:player_read@.
+    fn player(&self, uuid: u128) -> Option<PlayerRef> {
+        let _ = uuid;
+        unimplemented!("Host::player")
+    }
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    fn player_game_mode(&self, player: PlayerRef) -> Option<i32> {
+        let _ = player;
+        unimplemented!("Host::player_game_mode")
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_creative")
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_spectator")
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_may_build")
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+        let _ = player;
+        unimplemented!("Host::player_food")
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+        let _ = player;
+        unimplemented!("Host::player_abilities")
+    }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
+}
+impl EntityRef {
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    pub fn position(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_position(self)
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    pub fn block_position(self, host: &dyn Host) -> Option<[i32; 3]> {
+        host.entity_block_position(self)
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    pub fn rotation(self, host: &dyn Host) -> Option<[f32; 2]> {
+        host.entity_rotation(self)
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    pub fn kind(self, host: &dyn Host) -> Option<String> {
+        host.entity_kind(self)
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    pub fn uuid(self, host: &mut dyn Host) -> Option<u128> {
+        host.entity_uuid(self)
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
+        host.entity_level(self)
+    }
+}
+impl PlayerRef {
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    pub fn game_mode(self, host: &dyn Host) -> Option<i32> {
+        host.player_game_mode(self)
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    pub fn is_creative(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_creative(self)
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    pub fn is_spectator(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_spectator(self)
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    pub fn may_build(self, host: &dyn Host) -> Option<bool> {
+        host.player_may_build(self)
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    pub fn food(self, host: &dyn Host) -> Option<NativePlayerFood> {
+        host.player_food(self)
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    pub fn abilities(self, host: &dyn Host) -> Option<NativePlayerAbilities> {
+        host.player_abilities(self)
     }
 }
