@@ -12098,6 +12098,10 @@ impl Game<'_> {
         if self.title.is_some() || self.saved_for_exit {
             return Ok(());
         }
+        // exitWorldAndClose disconnects the client from its world.
+        if self.remote.is_some() {
+            self.client_logging_out();
+        }
         if let Some(server) = self.integrated.take() {
             // The server thread saves the world.
             server.stop()?;

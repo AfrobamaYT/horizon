@@ -1100,16 +1100,22 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
-    pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
-        if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
-            return self.begin_closing_save(false);
-        }
+    /// Minecraft.disconnect's `ClientPlayerNetworkEvent.LoggingOut`: on
+    /// leaving a world, and on quitting the game from one.
+    pub(super) fn client_logging_out(&mut self) {
         let player_id = self
             .player
             .as_ref()
             .and_then(|_| self.remote.as_ref().map(|r| r.entity_id));
         self.native_client_player_logging_out(player_id, self.remote.is_some());
+    }
+
+    /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
+    pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
+        if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
+            return self.begin_closing_save(false);
+        }
+        self.client_logging_out();
         self.finish_perf();
         if reason.is_none() {
             // Leaving on purpose: nothing for auto-reconnect to retry.
