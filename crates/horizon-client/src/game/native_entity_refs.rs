@@ -61,8 +61,9 @@ impl Game<'_> {
         Some(LevelRef::new(epoch, dim.id()))
     }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
-    /// Face-only contact does not intersect. Returns None on a client, for a
-    /// stale handle, or when this level is parked: its entity handles cannot
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or when this level is
+    /// parked: its entity handles cannot
     /// resolve until the level is in place. The walk is in entity-list order
     /// followed by players; each overlap requires a handle lookup, so cost grows
     /// with the box's contents. Tridents cannot yet resolve; frames, paintings,
@@ -98,11 +99,17 @@ impl Game<'_> {
             if !guest.placed || guest.dimension != level.dimension() {
                 continue;
             }
-            let body = if self.lan_acting == Some(guest.conn) {
-                self.player
-                    .as_ref()
-                    .map_or_else(|| guest.bounds(), |p| p.bounds())
+            let body = if self.lan_acting == Some(guest.conn)
+                && let Some(player) = &self.player
+            {
+                if self.mode_id() == 3 {
+                    continue;
+                }
+                player.bounds()
             } else {
+                if guest.game_mode == 3 {
+                    continue;
+                }
                 guest.bounds()
             };
             if bounds.intersects(body)

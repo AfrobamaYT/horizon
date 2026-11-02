@@ -1304,8 +1304,9 @@ pub trait Host {
         unimplemented!("Host::item_container_extract")
     }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
-    /// Face-only contact does not intersect. Returns None on a client, for a
-    /// stale handle, or when this level is parked: its entity handles cannot
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or when this level is
+    /// parked: its entity handles cannot
     /// resolve until the level is in place. The walk is in entity-list order
     /// followed by players; each overlap requires a handle lookup, so cost grows
     /// with the box's contents. Tridents cannot yet resolve; frames, paintings,
@@ -1361,8 +1362,9 @@ impl EntityRef {
 }
 impl LevelRef {
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
-    /// Face-only contact does not intersect. Returns None on a client, for a
-    /// stale handle, or when this level is parked: its entity handles cannot
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or when this level is
+    /// parked: its entity handles cannot
     /// resolve until the level is in place. The walk is in entity-list order
     /// followed by players; each overlap requires a handle lookup, so cost grows
     /// with the box's contents. Tridents cannot yet resolve; frames, paintings,
