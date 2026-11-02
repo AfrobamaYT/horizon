@@ -1334,6 +1334,20 @@ pub trait Host {
         let _ = entity;
         unimplemented!("Host::living")
     }
+    /// The effective value of an attribute on a living entity. None for an
+    /// unknown or absent attribute, an unavailable entity, or on a client.
+    /// API @API:living_refs@.
+    fn living_attribute_value(&mut self, living: LivingRef, id: &str) -> Option<f64> {
+        let _ = living;
+        let _ = id;
+        unimplemented!("Host::living_attribute_value")
+    }
+    /// The base value of an attribute, before modifiers. API @API:living_refs@.
+    fn living_attribute_base(&mut self, living: LivingRef, id: &str) -> Option<f64> {
+        let _ = living;
+        let _ = id;
+        unimplemented!("Host::living_attribute_base")
+    }
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
     /// None when it is empty, the entity has no such slot (a player has no
     /// body or saddle slot), or the handle is stale. API @API:living_refs@.
@@ -1470,6 +1484,16 @@ impl LevelRef {
     }
 }
 impl LivingRef {
+    /// The effective value of an attribute on a living entity. None for an
+    /// unknown or absent attribute, an unavailable entity, or on a client.
+    /// API @API:living_refs@.
+    pub fn attribute_value(self, host: &mut dyn Host, id: &str) -> Option<f64> {
+        host.living_attribute_value(self, id)
+    }
+    /// The base value of an attribute, before modifiers. API @API:living_refs@.
+    pub fn attribute_base(self, host: &mut dyn Host, id: &str) -> Option<f64> {
+        host.living_attribute_base(self, id)
+    }
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
     /// None when it is empty, the entity has no such slot (a player has no
     /// body or saddle slot), or the handle is stale. API @API:living_refs@.

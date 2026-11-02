@@ -548,6 +548,12 @@ impl Host for super::Game<'_> {
     fn living(&self, entity: EntityRef) -> Option<LivingRef> {
         self.native_living(entity)
     }
+    fn living_attribute_value(&mut self, living: LivingRef, id: &str) -> Option<f64> {
+        self.native_living_attribute_value(living, id)
+    }
+    fn living_attribute_base(&mut self, living: LivingRef, id: &str) -> Option<f64> {
+        self.native_living_attribute_base(living, id)
+    }
     fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
         self.native_living_equipment(living, slot)
     }
