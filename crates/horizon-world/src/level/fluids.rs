@@ -548,7 +548,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && b.is_water_fluid(self.fluid_at(pos).kind())
         {
             if b.instance_of(state, Class::Liquid) {
-                self.set_block_and_update(pos, b.default_of(b.named.stone));
+                let liquid_pos = rel(pos, direction.opposite());
+                if let Some(state) =
+                    self.level
+                        .fluid_place_block(pos, liquid_pos, b.default_of(b.named.stone))
+                {
+                    self.set_block_and_update(pos, state);
+                }
             }
             self.level_event(1501, pos, 0);
             return;
@@ -697,7 +703,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 return false;
             }
             if over_soul_soil && b.is_block(self.state(neighbour), b.named.blue_ice) {
-                if let Some(state) = self.level.fluid_place_block(pos, pos, b.default_of(b.named.basalt)) {
+                if let Some(state) =
+                    self.level
+                        .fluid_place_block(pos, pos, b.default_of(b.named.basalt))
+                {
                     self.set_block_and_update(pos, state);
                 }
                 self.level_event(1501, pos, 0);
@@ -745,7 +754,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             return;
                         }
                         let fire = self.fire_state_for(test);
-                        self.set_block_and_update(test, fire);
+                        if let Some(state) = self.level.fluid_place_block(test, pos, fire) {
+                            self.set_block_and_update(test, state);
+                        }
                         return;
                     }
                 } else if self
@@ -769,7 +780,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         continue;
                     }
                     let fire = self.fire_state_for(test);
-                    self.set_block_and_update(above(test), fire);
+                    if let Some(state) = self.level.fluid_place_block(above(test), pos, fire) {
+                        self.set_block_and_update(above(test), state);
+                    }
                 }
             }
         }

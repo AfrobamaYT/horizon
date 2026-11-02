@@ -1162,7 +1162,11 @@ impl LevelAccess for GameLevel<'_> {
                 self.dimension, pos, liquid_pos, state, &mut new_state, &mut cancel,
             );
         }
-        if cancel { None } else { Some(new_state) }
+        if cancel {
+            None
+        } else {
+            Some(new_state)
+        }
     }
     fn allow_fluid_level_change(
         &self,
