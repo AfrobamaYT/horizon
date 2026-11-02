@@ -519,4 +519,12 @@ impl Host for super::Game<'_> {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         self.native_entity_level(entity)
     }
+    fn level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        self.native_level_entities_in(level, min, max)
+    }
 }

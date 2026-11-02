@@ -5,8 +5,13 @@
 //! with no world open, or for a handle of an earlier open, they return `None`.
 //! The entities are those of the level in place (the one a hook runs in) and
 //! the server's players, whatever their level.
-use super::{Dim, Game, commands::Target};
+use super::{
+    Dim, Game,
+    commands::Target,
+    entity::{Entity as _, entity_lists_of, for_each_entity},
+};
 use horizon_client::mod_api::{EntityRef, LevelRef};
+use horizon_core::geometry::{Aabb, Vec3};
 
 impl Game<'_> {
     /// What a handle names now, or None for a stale or foreign one.
@@ -54,6 +59,64 @@ impl Game<'_> {
             .chain(self.levels.parked_dims())
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.id()))
+    }
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect. Returns None on a client, for a
+    /// stale handle, or when this level is parked: its entity handles cannot
+    /// resolve until the level is in place. The walk is in entity-list order
+    /// followed by players; each overlap requires a handle lookup, so cost grows
+    /// with the box's contents. Tridents cannot yet resolve; frames, paintings,
+    /// other special entities and the dragon are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    pub(super) fn native_level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        if self.remote.is_some()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || level.dimension() != self.dim.id()
+        {
+            return None;
+        }
+        let bounds = Aabb::new(
+            Vec3::new(min[0], min[1], min[2]),
+            Vec3::new(max[0], max[1], max[2]),
+        );
+        let mut ids = Vec::new();
+        for_each_entity!(entity_lists_of!(self), entity => {
+            if !entity.is_removed() && bounds.intersects(entity.bounds()) {
+                ids.push(entity.id());
+            }
+        });
+        for guest in self.lan.iter().flat_map(|h| &h.hub.guests) {
+            if !guest.placed || guest.dimension != level.dimension() {
+                continue;
+            }
+            let body = if self.lan_acting == Some(guest.conn) {
+                self.player
+                    .as_ref()
+                    .map_or_else(|| guest.bounds(), |p| p.bounds())
+            } else {
+                guest.bounds()
+            };
+            if bounds.intersects(body)
+                && let Ok(id) = u32::try_from(guest.entity_id)
+            {
+                ids.push(id);
+            }
+        }
+        Some(
+            ids.into_iter()
+                .map(|id| EntityRef::new(level.epoch(), id))
+                .filter(|handle| self.native_entity_target(*handle).is_some())
+                .collect(),
+        )
     }
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.
@@ -103,6 +166,72 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entities_in_returns_readable_handles_and_intersects_boxes() {
+        use super::super::{
+            Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+        };
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::mod_api::{LevelRef, NativeAuthority, NativeWorldEpoch};
+        use horizon_core::geometry::Vec3;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.native_lifecycle
+            .begin_open(NativeAuthority::IntegratedServer);
+        let level = game.native_level(game.dim.id()).unwrap();
+        game.armor_stands
+            .push(ArmorStand::new(12, Vec3::new(1.0, 0.0, 0.0), 0.0));
+        let found = game
+            .native_level_entities_in(level, [0.0, 0.0, -1.0], [0.8, 1.0, 1.0])
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(game.native_entity_position(found[0]), Some([1.0, 0.0, 0.0]));
+        assert_eq!(
+            game.native_entity_kind(found[0]).as_deref(),
+            Some("minecraft:armor_stand")
+        );
+        assert!(
+            game.native_level_entities_in(level, [0.0, 0.0, -1.0], [0.75, 1.0, 1.0])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            game.native_level_entities_in(
+                LevelRef::new(NativeWorldEpoch::new(0), game.dim.id()),
+                [0.0; 3],
+                [2.0; 3]
+            )
+            .is_none()
+        );
+    }
+
     #[test]
     fn uuid_words_are_most_significant_first() {
         let words = [0x0102_0304, -1, 0, 0x7fff_ffff];
