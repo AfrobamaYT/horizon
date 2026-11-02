@@ -1157,8 +1157,9 @@ impl GameLevel<'_> {
     }
 
     /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
-    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
-    /// block; set `feature` to another key to grow that one. Server-side.
+    /// configured `feature`, `None` when vanilla has none to place (a lone dark
+    /// oak sapling). Set `cancel`, or `feature` to `None`, to keep the block;
+    /// set `feature` to another key to grow that one. Server-side.
     /// Mods can use `level.random()` to access the growth random source.
     /// @API:block_grow_feature@.
     #[inline(always)]
