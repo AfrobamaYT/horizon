@@ -7701,9 +7701,10 @@ impl Game<'_> {
             if !self.spectator() {
                 // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
                 let host_entity = self.lan.as_ref().map_or(0, |h| h.host_entity) as u32;
-                let attacker = self.combat.last_attacker_id().and_then(|a| {
-                    self.lan.as_ref().and_then(|h| h.player_uuid_of_entity(a))
-                });
+                let attacker = self
+                    .combat
+                    .take_hurt_by_player(self.world.game_time)
+                    .and_then(|c| c.uuid(self.lan.as_ref()));
                 let reward = self.living_experience_drop(
                     host_entity,
                     "minecraft:player",

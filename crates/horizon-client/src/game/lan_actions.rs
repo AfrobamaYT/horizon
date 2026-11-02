@@ -3798,11 +3798,12 @@ impl Game<'_> {
             // ServerPlayer.die: a spectator never reaches dropAllDeathLoot.
             if drops.is_some() {
                 // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+                let now = self.world.game_time;
                 let attacker = self
                     .guest_combat
-                    .get(&conn)
-                    .and_then(|c| c.last_attacker_id())
-                    .and_then(|a| host.player_uuid_of_entity(a));
+                    .get_mut(&conn)
+                    .and_then(|c| c.take_hurt_by_player(now))
+                    .and_then(|c| c.uuid(Some(&*host)));
                 let reward = self.living_experience_drop(
                     id as u32,
                     "minecraft:player",

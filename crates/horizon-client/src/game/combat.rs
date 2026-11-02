@@ -38,10 +38,28 @@ pub(super) struct Stuck {
     remove_arrow_time: i32,
     remove_stinger_time: i32,
 }
+/// Who `LivingEntity.resolvePlayerResponsibleForDamage` credits: a player by
+/// entity id, or the owner of a tamed animal by UUID.
+#[derive(Clone, Copy)]
+pub(super) enum PlayerCredit {
+    Entity(u32),
+    Owner(u128),
+}
+impl PlayerCredit {
+    /// The credited player's UUID; `host` finds a player by entity id.
+    pub(super) fn uuid(self, host: Option<&super::lan::LanHost>) -> Option<u128> {
+        match self {
+            Self::Entity(id) => host?.player_uuid_of_entity(id),
+            Self::Owner(uuid) => Some(uuid),
+        }
+    }
+}
 impl CombatTracker {
-    /// The entity id of whoever caused the last recorded damage.
-    pub(super) fn last_attacker_id(&self) -> Option<u32> {
-        self.entries.last()?.attacker.as_ref().map(|(id, _)| *id)
+    /// `LivingEntity.lastHurtByPlayer`, remembered for 100 ticks (taken, as a
+    /// dead player's memory goes with them).
+    pub(super) fn take_hurt_by_player(&mut self, now: i64) -> Option<PlayerCredit> {
+        let (credit, at) = self.last_hurt_by_player.take()?;
+        (now - at <= 100).then_some(credit)
     }
 }
 impl Stuck {
@@ -91,6 +109,8 @@ pub(super) struct CombatTracker {
     noted_since: Option<(usize, usize)>,
     /// `LivingEntity.lastHurtByMob` and its timestamp (the kill credit).
     last_hurt_by: Option<((u32, Text), i64)>,
+    /// `LivingEntity.lastHurtByPlayer` and its timestamp.
+    last_hurt_by_player: Option<(PlayerCredit, i64)>,
     /// The mob the player last hurt (`getLastHurtMob`) and when.
     pub(super) last_hurt_mob: Option<(u32, i64)>,
     /// The mob whose projectile is hitting the player now.
@@ -315,6 +335,18 @@ impl Game<'_> {
             let now = self.world.game_time;
             if let Some(a) = &attacker {
                 self.combat.last_hurt_by = Some((a.clone(), now));
+                // A tamed animal's hit names its owner; other mobs name no one.
+                let credit = match self.mobs.iter().find(|m| m.id == a.0) {
+                    Some(m) => m
+                        .extra
+                        .owner
+                        .filter(|_| m.extra.tame)
+                        .map(|o| PlayerCredit::Owner(horizon_client::lan::playerdata::ints_uuid(o))),
+                    None => Some(PlayerCredit::Entity(a.0)),
+                };
+                if let Some(credit) = credit {
+                    self.combat.last_hurt_by_player = Some((credit, now));
+                }
                 if !self.combat.in_combat {
                     self.combat.in_combat = true;
                 }

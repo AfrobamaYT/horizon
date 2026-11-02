@@ -1172,12 +1172,6 @@ impl Game<'_> {
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
         let by_player = killer.is_some() || m.ai.last_hurt_by_player > 0;
-        // LAST_DAMAGE_PLAYER only while the player-hurt memory lasts
-        // (LivingEntity.dropFromLootTable's playerKilled): a mob that dies to
-        // the environment long after a player's hit names no player.
-        let player = killer
-            .filter(|_| m.ai.last_hurt_by_player > 0)
-            .and_then(|conn| self.killer_uuid(conn));
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
@@ -1185,17 +1179,15 @@ impl Game<'_> {
         // never dropped, so living_experience_drop does not hear of it.
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
-        let consumed = self.catalyst_takes_experience(
-            [m.position.x, m.position.y, m.position.z],
-            |_| {
+        let consumed =
+            self.catalyst_takes_experience([m.position.x, m.position.y, m.position.z], |_| {
                 catalyst_xp = if horizon_client::mobs::drops::drops_experience(&dying) {
-                    horizon_client::mobs::drops::base_experience(&mut dying) as u32
+                    horizon_client::mobs::drops::base_experience(&mut dying).max(0) as u32
                 } else {
                     0
                 };
                 catalyst_xp
-            },
-        );
+            });
         // CatalystListener: with experience to take, the player who last hurt
         // the mob gets KILL_MOB_NEAR_SCULK_CATALYST.
         if consumed && catalyst_xp > 0 {
@@ -1244,6 +1236,12 @@ impl Game<'_> {
         self.villager_murdered(m, slain_by_player, killer.flatten());
         let pos = [m.position.x, m.position.y + 0.5, m.position.z];
         let killer_entity = self.killer_loot_entity(killer.flatten());
+        // LAST_DAMAGE_PLAYER only while the player-hurt memory lasts
+        // (LivingEntity.dropFromLootTable's playerKilled): a mob that dies to
+        // the environment long after a player's hit names no player.
+        let player = killer
+            .filter(|_| m.ai.last_hurt_by_player > 0)
+            .and_then(|conn| self.killer_uuid(conn));
         if let Some(player) = player.filter(|_| m.extra.leash.is_some()) {
             self.lead_killers.insert(m.id, (player, self.dim));
         }
