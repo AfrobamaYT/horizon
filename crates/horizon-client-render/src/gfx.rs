@@ -3400,7 +3400,7 @@ impl Renderer {
                 })],
             }),
             multiview_mask: None,
-            cache: crate::gfx::pipeline_cache::get(device),
+            cache: crate::gfx::pipeline_cache::get(&device),
         };
         let additive_pipeline = kept.create_render_pipeline(&additive_descriptor);
         // `RenderPipelines.DRAGON_RAYS` uses DepthStencilState.DEFAULT:
@@ -3496,7 +3496,7 @@ impl Renderer {
                 })],
             }),
             multiview_mask: None,
-            cache: crate::gfx::pipeline_cache::get(device),
+            cache: crate::gfx::pipeline_cache::get(&device),
         });
         drop(entity_step);
         // WorldBorderRenderer: misc/forcefield.png as a MipmappedTexture
@@ -3666,7 +3666,7 @@ impl Renderer {
                 })],
             }),
             multiview_mask: None,
-            cache: crate::gfx::pipeline_cache::get(device),
+            cache: crate::gfx::pipeline_cache::get(&device),
         });
         let screen_shader = kept.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horizon screen effects"),
@@ -3738,7 +3738,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: crate::gfx::pipeline_cache::get(device),
+                cache: crate::gfx::pipeline_cache::get(&device),
             })
         });
         let screen_capacity = 64;

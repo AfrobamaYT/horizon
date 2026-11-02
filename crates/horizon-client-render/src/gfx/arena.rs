@@ -1013,7 +1013,7 @@ mod tests {
                     targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
                 }),
                 multiview_mask: None,
-                cache: crate::gfx::pipeline_cache::get(device),
+                cache: crate::gfx::pipeline_cache::get(&device),
             })
         };
         let mut flat = flat::Flat::new(&device, &terrain_layout, 4 * GRAIN, 0, pipeline);
