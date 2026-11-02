@@ -91,7 +91,8 @@ impl Game<'_> {
         );
         let mut ids = Vec::new();
         for_each_entity!(entity_lists_of!(self), entity => {
-            if !entity.is_removed() && bounds.intersects(entity.bounds()) {
+            // The join flush assigns zero IDs later; a handle could alias another entity.
+            if entity.id() != 0 && !entity.is_removed() && bounds.intersects(entity.bounds()) {
                 ids.push(entity.id());
             }
         });
