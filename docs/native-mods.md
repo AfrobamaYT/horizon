@@ -2851,6 +2851,12 @@ naming the thing it is about, has a method on that scope's trait: `BlockPart`, `
 thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
+A block entity part names its block entity type and the blocks that hold one, as vanilla's
+`BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
+The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
+find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
+block hooks) by block.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements

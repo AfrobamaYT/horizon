@@ -23,7 +23,11 @@ pub struct Attached<P: ?Sized> {
 pub struct Parts {
     /// Block parts, and block entity parts as the block parts they also are.
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
+    /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
     block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    /// Block entity parts by block entity type, for the hooks asked by the entity
+    /// (`block_entity_tick`, `menu_button`): its type id need not be its block's id.
+    block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
 }
@@ -50,6 +54,12 @@ impl Parts {
         id: impl FnOnce() -> Option<&'k str>,
     ) -> &[Attached<dyn BlockEntityPart>] {
         attached(&self.block_entities, id)
+    }
+    pub(crate) fn block_entity_kind<'k>(
+        &self,
+        id: impl FnOnce() -> Option<&'k str>,
+    ) -> &[Attached<dyn BlockEntityPart>] {
+        attached(&self.block_entity_kinds, id)
     }
     pub(crate) fn item<'k>(
         &self,
@@ -87,27 +97,45 @@ pub struct Registrar {
 impl Registrar {
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
     pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
-        self.attach::<P, dyn BlockPart>(block, Arc::new(part));
+        self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
     }
-    /// Attach `part` to block `block` and its block entity. It answers the block's hooks too.
-    pub fn block_entity_part<P: BlockEntityPart>(&mut self, block: &str, part: P) {
+    /// Attach `part` to the mod block entity type `kind` (the id a `block_entity` hook gives the
+    /// entity, `mymod:press`) and to `blocks`, the blocks that hold one. It answers the hooks
+    /// asked by the entity (`block_entity_tick`, `menu_button`), those asked by block
+    /// (`block_entity`, `screen`) and every block hook of those blocks.
+    pub fn block_entity_part<P: BlockEntityPart>(&mut self, kind: &str, blocks: &[&str], part: P) {
         let part = Arc::new(part);
-        // Every block entity part is a block part too, so a second one is found there.
-        if self.attach::<P, dyn BlockPart>(block, part.clone()) {
-            self.attach::<P, dyn BlockEntityPart>(block, part);
+        if !self.attach::<P, dyn BlockEntityPart>(|p| &mut p.block_entity_kinds, kind, part.clone())
+        {
+            return;
+        }
+        for block in blocks {
+            // Every block entity part is a block part too, so a second one is found there.
+            if self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, part.clone()) {
+                self.attach::<P, dyn BlockEntityPart>(
+                    |p| &mut p.block_entities,
+                    block,
+                    part.clone(),
+                );
+            }
         }
     }
     /// Attach `part` to item `item` (`mymod:wrench`).
     pub fn item_part<P: ItemPart>(&mut self, item: &str, part: P) {
-        self.attach::<P, dyn ItemPart>(item, Arc::new(part));
+        self.attach::<P, dyn ItemPart>(|p| &mut p.items, item, Arc::new(part));
     }
     /// Attach `part` to the mod menu type `menu`.
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
-        self.attach::<P, dyn MenuPart>(menu, Arc::new(part));
+        self.attach::<P, dyn MenuPart>(|p| &mut p.menus, menu, Arc::new(part));
     }
 
-    /// Attach `part`, of kind `K`, to `id`; false if it is refused.
-    fn attach<K: 'static, P: ?Sized + Table>(&mut self, id: &str, part: Arc<P>) -> bool {
+    /// Attach `part`, of kind `K`, to `id` in `table`; false if it is refused.
+    fn attach<K: 'static, P: ?Sized>(
+        &mut self,
+        table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
+        id: &str,
+        part: Arc<P>,
+    ) -> bool {
         let name = type_name::<K>();
         let namespaced = id
             .split_once(':')
@@ -119,7 +147,7 @@ impl Registrar {
             ));
             return false;
         }
-        let list = P::table(&mut self.parts).entry(id.into()).or_default();
+        let list = table(&mut self.parts).entry(id.into()).or_default();
         if let Some(other) = list.iter().find(|a| a.kind == TypeId::of::<K>()) {
             self.refused.push(format!(
                 "{name} is attached to {id} twice, by {} and {}",
@@ -136,27 +164,6 @@ impl Registrar {
         });
         true
     }
-}
-
-/// The table of [`Parts`] that holds parts of type `Self`.
-trait Table {
-    fn table(parts: &mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<Self>>>;
-}
-
-macro_rules! table {
-    ($($part:ident: $field:ident;)+) => {$(
-        impl Table for dyn $part {
-            fn table(parts: &mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<Self>>> {
-                &mut parts.$field
-            }
-        }
-    )+};
-}
-table! {
-    BlockPart: blocks;
-    BlockEntityPart: block_entities;
-    ItemPart: items;
-    MenuPart: menus;
 }
 
 /// Builds the parts from every mod's [`Hooks::register`], in dispatch order. Once, at startup;
@@ -188,11 +195,28 @@ mod tests {
         }
     }
 
-    /// Doubles every comparator reading, and attaches `Gauge` to `test:gauge`.
+    /// The block entity of type `test:press_entity`, held by block `test:press`: it ticks, and
+    /// each tick adds a data slot.
+    struct Press;
+    impl BlockPart for Press {}
+    impl BlockEntityPart for Press {
+        fn block_entity_ticks(&self, _: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
+            event.ticks = true;
+        }
+        fn block_entity_tick(&self, _: &mut dyn Host, event: &mut BlockEntityTickEvent<'_>) {
+            event.entity.data.push(1);
+        }
+    }
+    struct NoHost;
+    impl Host for NoHost {}
+
+    /// Doubles every comparator reading, and attaches `Gauge` to `test:gauge` and `Press` to
+    /// `test:press`.
     struct Doubler;
     impl Hooks for Doubler {
         fn register(&self, r: &mut Registrar) {
             r.block_part("test:gauge", Gauge);
+            r.block_entity_part("test:press_entity", &["test:press"], Press);
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output *= 2;
@@ -238,6 +262,29 @@ mod tests {
         // Doubled by the mod, then 5 more from the part: (1 * 2) + 5.
         assert_eq!(read(1), 7);
         assert_eq!(read(2), 2);
+    }
+
+    #[test]
+    fn a_block_entity_part_answers_by_block_and_by_entity_type() {
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Doubler)];
+        install_parts(&mods).unwrap();
+        let ticks = |block| {
+            let mut ticks = false;
+            dispatch_block_entity_ticks(&NoHost, &mods, block, &mut ticks);
+            ticks
+        };
+        // The ticker is asked by block: the type id is not a block.
+        assert!(ticks("test:press"));
+        assert!(!ticks("test:press_entity"));
+        let tick = |kind: &str| {
+            let mut entity = ModBlockEntity::default();
+            entity.id = kind.into();
+            dispatch_block_entity_tick(&mut NoHost, &mods, [0, 64, 0], &mut entity);
+            entity.data.len()
+        };
+        // The tick is asked by the entity's type, which differs from its block's id.
+        assert_eq!(tick("test:press_entity"), 1);
+        assert_eq!(tick("test:press"), 0);
     }
 
     #[test]

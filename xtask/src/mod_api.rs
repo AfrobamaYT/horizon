@@ -781,6 +781,7 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     .iter()
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
+                let mut table = table;
                 let id = match ty.to_token_stream().to_string().as_str() {
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
@@ -790,7 +791,11 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     }
                     "& ItemStack" => format!("Some(&*{key}.item)"),
                     "& str" => format!("Some({key})"),
-                    "& ModBlockEntity" | "& mut ModBlockEntity" => format!("Some(&*{key}.id)"),
+                    // An entity's type id need not be its block's: its own table.
+                    "& ModBlockEntity" | "& mut ModBlockEntity" => {
+                        table = "block_entity_kind";
+                        format!("Some(&*{key}.id)")
+                    }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
                 Some((part_trait, format!("super::parts().{table}(|| {id})")))
@@ -1290,6 +1295,12 @@ mod tests {
             &[]
         }
         fn block_entity<'k>(
+            &self,
+            _: impl FnOnce() -> Option<&'k str>,
+        ) -> &'static [&'static dyn BlockEntityPart] {
+            &[]
+        }
+        fn block_entity_kind<'k>(
             &self,
             _: impl FnOnce() -> Option<&'k str>,
         ) -> &'static [&'static dyn BlockEntityPart] {

@@ -5776,7 +5776,7 @@ pub fn dispatch_block_entity_tick(
     pos: [i32; 3],
     entity: &mut ModBlockEntity,
 ) {
-    let parts = super::parts().block_entity(|| Some(&*entity.id));
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityTickEvent { pos, entity };
     for mod_hook in super::entered(mods, "block_entity_tick") {
         mod_hook.block_entity_tick(host, &mut event);
@@ -5800,7 +5800,7 @@ pub fn dispatch_block_entity_update_tag(
     if tag.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(&*entity.id));
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityUpdateTagEvent { pos, entity };
     'hook: {
         for mod_hook in super::entered(mods, "block_entity_update_tag") {
@@ -5986,7 +5986,7 @@ pub fn dispatch_menu_button(
     entity: &mut ModBlockEntity,
     id: i32,
 ) {
-    let parts = super::parts().block_entity(|| Some(&*entity.id));
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonEvent { pos, entity, id };
     for mod_hook in super::entered(mods, "menu_button") {
         mod_hook.menu_button(host, &mut event);
@@ -6835,7 +6835,7 @@ pub fn dispatch_menu_button_v2(
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
-    let parts = super::parts().block_entity(|| Some(&*entity.id));
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonV2Event {
         pos,
         entity,
@@ -11659,7 +11659,7 @@ pub fn dispatch_menu_quick_move(
     if *handled {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(&*entity.id));
+    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuQuickMoveEvent {
         pos,
         entity,
