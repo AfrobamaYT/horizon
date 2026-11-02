@@ -4521,9 +4521,17 @@ impl Game<'_> {
             .res
             .facts()
             .is_air(self.world.block(pos[0], pos[1], pos[2]));
-        let per_tick = self
-            .as_guest(host, conn, |g| g.destroy_progress(pos))
-            .unwrap_or(0.0);
+        let per_tick = if !air
+            && host
+                .play
+                .get(&conn)
+                .is_some_and(|p| p.dig_start_for(pos).is_some())
+        {
+            self.as_guest(host, conn, |g| g.destroy_progress(pos))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
         let decision = {
             let play = host.play.entry(conn).or_default();
             play.dig_ended();
