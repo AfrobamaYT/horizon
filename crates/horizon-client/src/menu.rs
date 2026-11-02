@@ -3574,7 +3574,6 @@ pub(crate) mod tests {
     fn installed_slot_rules_change_mod_menu_placement() {
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
-                has_mods: || false,
                 menu_slot_rules: |menu, slot, _, may_place, max_stack| {
                     if menu == "test:rules" && slot == 0 {
                         *may_place = false;
@@ -3582,7 +3581,6 @@ pub(crate) mod tests {
                     }
                 },
                 item_stacked_on_other: |_, _| {},
-                player_flyable_fall: |_, _| {},
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
                 has_mods: || false,
