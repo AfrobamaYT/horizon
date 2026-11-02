@@ -4524,7 +4524,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// A player's display name was formatted. Replace `displayname` to change it.
-    /// Both sides. @API:player_name_format@.
+    /// Both sides. @API:native_player_name_format@.
     ///
     /// Every mod gets `event.displayname` in order and may add, change or remove displayname.
     fn player_name_format(&self, event: &mut PlayerNameFormatEvent<'_>) {

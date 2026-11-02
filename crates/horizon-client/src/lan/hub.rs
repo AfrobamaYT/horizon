@@ -371,7 +371,7 @@ fn string(s: &str) -> Tag {
 }
 
 /// A player's display name was formatted. Replace `displayname` to change it.
-/// Both sides. @API:player_name_format@.
+/// Both sides. @API:native_player_name_format@.
 #[inline(never)]
 pub fn native_player_name_format(
     username: &crate::text::Text,
