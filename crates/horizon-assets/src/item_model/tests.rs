@@ -101,3 +101,13 @@ fn custom_condition_validates_its_name_and_both_branches() {
     assert!(matches!(node("example:charged", empty).unwrap(),
         ItemModelNode::Condition { property: ConditionProperty::Custom(name), .. } if name == "example:charged"));
 }
+
+#[test]
+fn a_mods_tint_source_is_untinted_and_an_unknown_vanilla_one_fails() {
+    let tint = |json: &str| TintSource::decode(&serde_json::from_str(json).unwrap());
+    assert_eq!(
+        tint(r#"{"type":"ae2:storage_cell_state"}"#).unwrap(),
+        TintSource::Constant(-1)
+    );
+    assert!(tint(r#"{"type":"minecraft:nonsense"}"#).is_err());
+}

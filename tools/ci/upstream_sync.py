@@ -85,6 +85,14 @@ def sync():
         head = command("git", "rev-parse", "HEAD")
         workflows = command("git", "diff", "--name-only", base, head, "--", ".github/workflows")
         if workflows:
+            if issue is not None:
+                thread = json.loads(command("gh", "issue", "view", str(issue), "--repo", repo,
+                                            "--json", "body,comments"))
+                reports = [thread["body"], *(comment["body"] for comment in thread["comments"])]
+                if any(upstream in report for report in reports):
+                    print(f"Workflow-file handoff for {upstream} already reported in issue {issue}; nothing pushed.",
+                          file=sys.stderr)
+                    return 1
             raise RuntimeError("Upstream changed workflow files; an agent must push this one. "
                                "upstream-sync prepares the merge branch, and root pushes main from hermeslab. "
                                "GITHUB_TOKEN cannot update .github/workflows/ without workflows permission."
