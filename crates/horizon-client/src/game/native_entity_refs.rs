@@ -297,6 +297,22 @@ mod tests {
         };
         assert_eq!(items[0].as_ref().unwrap().count, 3);
         assert!(game.dropped.is_empty());
+        let sensor = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:sculk_sensor")
+            .unwrap();
+        assert!(game.native_level_set_block(level, [0, 64, 0], sensor, flags));
+        assert!(matches!(
+            game.world.block_entities.get(&(0, 64, 0)),
+            Some(super::super::BlockEntity::Sculk(_))
+        ));
+        assert!(game.native_level_set_block(level, [0, 64, 0], chest, flags));
+        assert!(matches!(
+            game.world.block_entities.get(&(0, 64, 0)),
+            Some(super::super::BlockEntity::Chest(_))
+        ));
         assert!(
             game.enter_command_level(super::super::Dim::Nether)
                 .is_some()
