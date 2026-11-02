@@ -3602,6 +3602,15 @@ impl Renderer {
             panorama::Panorama::new(&device, config.format.remove_srgb_suffix(), panorama_faces);
         drop(pipelines_step);
         reuse.finish(generation);
+        // The first blurred screen's blur, compiled beside the startup rather than in that frame.
+        let blur_format = config.format.remove_srgb_suffix();
+        reuse.menu_blur.start("Menu blur build", blur_format, {
+            let device = device.clone();
+            move || {
+                let _step = crate::spans::startup::step("renderer.menu_blur");
+                crate::menu_blur::MenuBlurPipeline::new(&device, blur_format)
+            }
+        });
         if previous.is_some() {
             log::info!(
                 "Horizon renderer: rebuilt on the same device ({} shader modules, layouts and pipelines kept)",
@@ -8592,11 +8601,16 @@ impl Renderer {
             timing.as_mut(),
         );
         if let Some(radius) = menu_blur {
-            let format = self.config.format;
-            let device = &self.device;
+            let format = self.config.format.remove_srgb_suffix();
+            let (device, reuse) = (&self.device, &self.reuse);
             let software = is_software(self.info.device_type);
             self.menu_blur
-                .get_or_insert_with(|| crate::menu_blur::MenuBlur::new(device, format, software))
+                .get_or_insert_with(|| {
+                    let shared = reuse.menu_blur.get(format, || {
+                        crate::menu_blur::MenuBlurPipeline::new(device, format)
+                    });
+                    crate::menu_blur::MenuBlur::with(device, shared, software)
+                })
                 .apply(
                     &self.device,
                     &self.queue,

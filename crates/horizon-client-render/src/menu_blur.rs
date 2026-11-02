@@ -28,24 +28,31 @@ struct Uniform {
     radius: [f32; 4],
 }
 
-pub struct MenuBlur {
+/// The blur's shader, pipeline and sampler for one swapchain format: what a
+/// blur compiles, built once per device and shared by its renderers
+/// (`gfx::reuse`).
+#[derive(Clone)]
+pub struct MenuBlurPipeline {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
+    format: wgpu::TextureFormat,
+}
+
+pub struct MenuBlur {
+    shared: MenuBlurPipeline,
     /// One per pass, then the half-size copy's.
     uniforms: Vec<wgpu::Buffer>,
     /// The copied frame (`minecraft:main`) and `swap`; at half size, then the
     /// frame copied at full size.
     targets: Vec<(wgpu::Texture, wgpu::TextureView)>,
     size: [u32; 2],
-    format: wgpu::TextureFormat,
     /// Blur at half size (`new`'s `software`).
     half: bool,
 }
-impl MenuBlur {
-    /// `format` is the swapchain's; the blur works in its non-sRGB view. `software`:
-    /// the adapter renders on the CPU, so the blur runs at half size.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, software: bool) -> Self {
+impl MenuBlurPipeline {
+    /// `format` is the swapchain's; the blur works in its non-sRGB view.
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let format = format.remove_srgb_suffix();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Menu blur"),
@@ -121,6 +128,22 @@ impl MenuBlur {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
+        Self {
+            layout,
+            pipeline,
+            sampler,
+            format,
+        }
+    }
+}
+impl MenuBlur {
+    /// `format` is the swapchain's; the blur works in its non-sRGB view. `software`:
+    /// the adapter renders on the CPU, so the blur runs at half size.
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, software: bool) -> Self {
+        Self::with(device, MenuBlurPipeline::new(device, format), software)
+    }
+    /// A blur through a pipeline built already (`MenuBlurPipeline::new`).
+    pub fn with(device: &wgpu::Device, shared: MenuBlurPipeline, software: bool) -> Self {
         let uniforms = (0..=PASSES.len())
             .map(|_| {
                 device.create_buffer(&wgpu::BufferDescriptor {
@@ -132,13 +155,10 @@ impl MenuBlur {
             })
             .collect();
         Self {
-            layout,
-            pipeline,
-            sampler,
+            shared,
             uniforms,
             targets: Vec::new(),
             size: [0, 0],
-            format,
             half: software,
         }
     }
@@ -174,7 +194,7 @@ impl MenuBlur {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: self.format,
+                    format: self.shared.format,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::RENDER_ATTACHMENT
                         | wgpu::TextureUsages::COPY_DST,
@@ -276,7 +296,7 @@ impl MenuBlur {
         queue.write_buffer(&self.uniforms[slot], 0, bytemuck::bytes_of(&data));
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Menu blur pass"),
-            layout: &self.layout,
+            layout: &self.shared.layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -284,7 +304,7 @@ impl MenuBlur {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    resource: wgpu::BindingResource::Sampler(&self.shared.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -307,7 +327,7 @@ impl MenuBlur {
             color_attachments: &attachments,
             ..Default::default()
         });
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(&self.shared.pipeline);
         pass.set_bind_group(0, &group, &[]);
         pass.draw(0..3, 0..1);
     }

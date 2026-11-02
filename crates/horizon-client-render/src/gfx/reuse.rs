@@ -69,6 +69,56 @@ pub struct Reuse {
     bind_group_layouts: Kept<wgpu::BindGroupLayout>,
     pipeline_layouts: Kept<wgpu::PipelineLayout>,
     render: Kept<wgpu::RenderPipeline>,
+    /// The menu blur's, for the swapchain format it was built for.
+    pub menu_blur: Later<wgpu::TextureFormat, crate::menu_blur::MenuBlurPipeline>,
+}
+
+/// An object no frame needs until later (the menu blur, at the first blurred
+/// screen), built on a worker thread when a renderer is, so the frame that
+/// first needs it doesn't wait on its compile; vanilla compiles the blur with
+/// the resources too. Kept for the device's later renderers, under the key
+/// (the format) it was built for.
+pub struct Later<K, T> {
+    slot: Mutex<Option<(K, Building<T>)>>,
+}
+enum Building<T> {
+    Started(std::thread::JoinHandle<T>),
+    Done(T),
+}
+impl<K, T> Default for Later<K, T> {
+    fn default() -> Self {
+        Self {
+            slot: Mutex::new(None),
+        }
+    }
+}
+impl<K: PartialEq, T: Clone + Send + 'static> Later<K, T> {
+    /// Start building `key`'s on a worker thread, unless it is built or
+    /// being built.
+    pub fn start(&self, name: &str, key: K, make: impl FnOnce() -> T + Send + 'static) {
+        let mut slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
+        if slot.as_ref().is_some_and(|(k, _)| *k == key) {
+            return;
+        }
+        *slot = std::thread::Builder::new()
+            .name(name.into())
+            .spawn(make)
+            .ok()
+            .map(|thread| (key, Building::Started(thread)));
+    }
+    /// `key`'s object: the worker's (waited for if it is still compiling),
+    /// else `make`'s, kept.
+    pub fn get(&self, key: K, make: impl FnOnce() -> T) -> T {
+        let mut slot = self.slot.lock().unwrap_or_else(PoisonError::into_inner);
+        let built = match slot.take() {
+            Some((k, Building::Started(thread))) if k == key => thread.join().ok(),
+            Some((k, Building::Done(object))) if k == key => Some(object),
+            _ => None,
+        };
+        let object = built.unwrap_or_else(make);
+        *slot = Some((key, Building::Done(object.clone())));
+        object
+    }
 }
 
 impl Reuse {
@@ -155,7 +205,30 @@ impl On<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::Kept;
+    use super::{Kept, Later};
+
+    /// What the worker built is what the first use gets, without building it
+    /// again; a use under another key builds its own, which is kept.
+    #[test]
+    fn a_later_object_is_the_workers_for_its_key() {
+        let later = Later::<u8, u32>::default();
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        later.start("test", 1, move || {
+            // Still compiling when the first frame asks: it waits.
+            wait.recv().unwrap();
+            10
+        });
+        // Started again for the same key: nothing new is built.
+        later.start("test", 1, || unreachable!("built twice"));
+        go.send(()).unwrap();
+        assert_eq!(later.get(1, || unreachable!("built on the frame")), 10);
+        assert_eq!(later.get(1, || unreachable!("built on the frame")), 10);
+        // The swapchain's format changed (HDR): built now, and kept.
+        assert_eq!(later.get(2, || 20), 20);
+        assert_eq!(later.get(2, || unreachable!("built twice")), 20);
+        // Never started: built at the first use.
+        assert_eq!(Later::<u8, u32>::default().get(1, || 30), 30);
+    }
 
     /// A key asked for again gets the kept object without making one; what
     /// the latest generation did not ask for is let go when it finishes.
