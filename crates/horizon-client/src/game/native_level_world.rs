@@ -6,6 +6,18 @@ use super::Game;
 use horizon_client::command::vanilla::DIFFICULTIES;
 use horizon_client::mod_api::{GameRuleValue, LevelRef};
 
+fn weather_for_level(
+    shape: horizon_client::chunk::LevelShape,
+    is_end: bool,
+    levels: (f32, f32),
+) -> (f32, f32) {
+    if shape.sky_light && !shape.has_ceiling && !is_end {
+        levels
+    } else {
+        (0.0, 0.0)
+    }
+}
+
 /// `Level.isRaining` and `isThundering` from the rain and thunder levels.
 fn weather_flags((rain, thunder): (f32, f32)) -> (bool, bool) {
     (rain > 0.2, thunder > 0.9)
@@ -40,10 +52,11 @@ impl Game<'_> {
     /// and the End. API @API:level_world@.
     pub(super) fn native_level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
         let world = self.native_level_world(level)?;
-        if level.dimension() != super::Dim::Overworld.id() {
-            return Some((0.0, 0.0));
-        }
-        Some(world.weather.levels(1.0))
+        Some(weather_for_level(
+            world.shape,
+            level.dimension() == super::Dim::End.id(),
+            world.weather.levels(1.0),
+        ))
     }
     /// Whether it rains (`Level.isRaining`: a rain level above 0.2). API
     /// @API:level_world@.
@@ -59,6 +72,31 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn weather_requires_skylight_no_ceiling_and_not_end() {
+        use horizon_client::chunk::LevelShape;
+        let rain = (1.0, 0.5);
+        assert_eq!(
+            super::weather_for_level(LevelShape::OVERWORLD, false, rain),
+            rain
+        );
+        assert_eq!(
+            super::weather_for_level(LevelShape::NETHER, false, rain),
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            super::weather_for_level(LevelShape::END, true, rain),
+            (0.0, 0.0)
+        );
+        let mut skyless = LevelShape::OVERWORLD;
+        skyless.sky_light = false;
+        assert_eq!(super::weather_for_level(skyless, false, rain), (0.0, 0.0));
+        assert_eq!(
+            super::weather_for_level(LevelShape::OVERWORLD.with_ceiling(true), false, rain),
+            (0.0, 0.0)
+        );
+    }
+
     #[test]
     fn rain_and_thunder_start_above_vanillas_thresholds() {
         assert_eq!(super::weather_flags((0.2, 0.0)), (false, false));
