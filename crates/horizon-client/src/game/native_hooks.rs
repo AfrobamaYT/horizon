@@ -881,8 +881,8 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::mod_api::{
-    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeRespawn,
-    NativeServerPlayer, ServerTickPhase, WorldPhase,
+    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
+    ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -6285,26 +6285,14 @@ impl Game<'_> {
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
     /// Before a new server level selects its initial world spawn
-    /// (NeoForge's `LevelEvent.CreateSpawnPosition`).
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
     pub(super) fn native_create_spawn_position(
         &mut self,
         position: &mut [i32; 3],
         rotation: &mut [f32; 2],
         cancel: &mut bool,
     ) {
-        let _ = (position, rotation, cancel);
-    }
-    /// `player` respawns at the world spawn, having no respawn point
-    /// (NeoForge's `PlayerRespawnPositionEvent`): `original` is
-    /// `TeleportTransition.createDefault`'s level, world spawn and angle,
-    /// before the player is placed. Only the vanilla levels can be chosen.
-    pub(super) fn native_player_respawn_position(
-        &mut self,
-        player: u128,
-        original: &NativeRespawn,
-        respawn: &mut Option<NativeRespawn>,
-    ) {
-        let _ = (player, original, respawn);
+        mod_api::dispatch_create_spawn_position(self, mod_api::mods(), position, rotation, cancel);
     }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,

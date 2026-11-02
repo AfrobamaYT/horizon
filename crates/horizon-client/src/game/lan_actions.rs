@@ -3491,30 +3491,14 @@ impl Game<'_> {
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
-        let mut level = elsewhere.map_or(super::Dim::Overworld, |c| c.dim);
-        let mut spawn = elsewhere.map_or(spawn, |c| {
+        let level = elsewhere.map_or(super::Dim::Overworld, |c| c.dim);
+        let spawn = elsewhere.map_or(spawn, |c| {
             [
                 f64::from(c.pos[0]) + 0.5,
                 f64::from(c.pos[1]),
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
-        // PlayerRespawnPositionEvent, for TeleportTransition.createDefault
-        // only: a respawn point's block is looked up once its level has
-        // loaded (`respawn_trip`).
-        let mut replaced = None;
-        if own.is_none() && host.hub.guests[i].spawn.is_none() {
-            let original = horizon_client::mod_api::NativeRespawn {
-                dimension: level.id().to_owned(),
-                position: spawn,
-                rotation: self.level.world_spawn_angle,
-            };
-            self.native_player_respawn_position(uuid, &original, &mut replaced);
-        }
-        if let Some(r) = &replaced {
-            level = super::Dim::from_id(&r.dimension);
-            spawn = r.position;
-        }
         let back = self.dim;
         let left = super::Dim::from_id(&host.hub.guests[i].dimension);
         let away = server && host.hub.guests[i].dimension != level.id();
@@ -3569,10 +3553,6 @@ impl Game<'_> {
             streaming: Some(&self.streaming),
         };
         host.hub.respawn(i, spawn, &ctx);
-        if let Some(r) = &replaced {
-            [host.hub.guests[i].yaw, host.hub.guests[i].pitch] = r.rotation;
-            host.hub.teleport(i, Some(spawn));
-        }
         // ServerGamePacketListenerImpl.handleClientCommand: a hardcore world's
         // respawned player only watches.
         if self.level.hardcore {
@@ -3591,8 +3571,7 @@ impl Game<'_> {
         }
         if let Some(config) = elsewhere {
             self.respawn_trip(conn, config);
-        } else if replaced.is_none() && in_frame_bed.is_none() && host.hub.guests[i].spawn.is_none()
-        {
+        } else if in_frame_bed.is_none() && host.hub.guests[i].spawn.is_none() {
             // TeleportTransition.createDefault: no point of its own, so the
             // world spawn's free column once its chunks have loaded.
             self.world_spawn_trip(conn);

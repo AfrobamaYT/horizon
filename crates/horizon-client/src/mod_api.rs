@@ -279,15 +279,6 @@ pub struct NativeZoom {
     pub turn: f32,
 }
 
-/// Where a server player respawns (`native_player_respawn_position`): the level, the feet
-/// and the look (`yRot`, `xRot`, in degrees).
-#[derive(Clone, Debug, PartialEq)]
-pub struct NativeRespawn {
-    pub dimension: String,
-    pub position: [f64; 3],
-    pub rotation: [f32; 2],
-}
-
 /// A player on the server, as a server hook sees them.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
