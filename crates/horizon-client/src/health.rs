@@ -889,8 +889,11 @@ impl HurtWorld for Environment<'_> {
             return Ok(0.0);
         };
         self.blocked = block.blocked_damage;
-        // `setShieldDamage` below 0: the item's own `itemDamage` of what is stopped.
-        self.shield_damage = if block.shield_damage < 0 {
+        // `setShieldDamage` is what the item loses if `blocked` holds, whatever
+        // `blocked_damage` says; below 0, the item's own `itemDamage` of what is stopped.
+        self.shield_damage = if !block.blocked {
+            0
+        } else if block.shield_damage < 0 {
             self.blocking
                 .as_ref()
                 .map_or(0, |b| b.rules.item_damage.apply(block.blocked_damage))

@@ -11198,18 +11198,7 @@ impl Game<'_> {
         if let Ok(speed) = p.attribute("minecraft:movement_speed") {
             p.speed = speed as f32;
         }
-        let p = self.player.as_ref()?;
-        let sword = self.held().is_some_and(|s| {
-            self.res
-                .items()
-                .item_tags
-                .get("minecraft:swords")
-                .is_some_and(|tag| tag.contains(&*s.item))
-        });
-        let vanilla = p.is_sweep_attack(scale, crit, sword);
-        let (mut sweeping, mut canceled) = (vanilla, false);
-        self.native_sweep_attack(target, vanilla, &mut sweeping, &mut canceled);
-        if canceled || !sweeping {
+        if !self.sweep_decision(scale, crit, target) {
             return None;
         }
         let p = self.player.as_ref()?;
@@ -11221,6 +11210,25 @@ impl Game<'_> {
             p.position.y + f64::from(p.dimensions.height) * 0.5,
             p.position.z + f64::from(trig::cos(yaw)),
         ])
+    }
+    /// `Player.isSweepAttack` with the player's speed as it is, then
+    /// `native_sweep_attack`, on either side: whether the hit on `target` sweeps.
+    pub(super) fn sweep_decision(&mut self, scale: f32, crit: bool, target: &str) -> bool {
+        let Some(p) = self.player.as_ref() else {
+            return false;
+        };
+        let sword = self.held().is_some_and(|s| {
+            self.res
+                .items()
+                .item_tags
+                .get("minecraft:swords")
+                .is_some_and(|tag| tag.contains(&*s.item))
+        });
+        let vanilla = p.is_sweep_attack(scale, crit, sword);
+        let (mut sweeping, mut canceled) = (vanilla, false);
+        // `setCanceled` skips later mods and keeps the current `sweeping`.
+        self.native_sweep_attack(target, vanilla, &mut sweeping, &mut canceled);
+        sweeping
     }
     /// `Player.doSweepAttack` after a successful hit, in vanilla's order: the
     /// sweep sound, the victims around `target` (its box, and the mob that

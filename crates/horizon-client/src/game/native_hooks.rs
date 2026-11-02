@@ -6106,9 +6106,11 @@ impl Game<'_> {
     /// `target` (`minecraft:zombie`, `minecraft:oak_boat`) is about to sweep or
     /// not, after `native_critical_hit`. `vanilla_sweep` is `Player.isSweepAttack`
     /// (a charged, grounded, not critical sword hit below the speed limit);
-    /// `sweeping` starts as it and may force or stop the sweep, and `canceled`
-    /// stops it whatever `sweeping` says. A critical hit that sweeps has both
-    /// sounds. Fires on the Game that runs the attack. @API:sweep_attack@.
+    /// `sweeping` starts as it and may force or stop the sweep; `canceled` skips
+    /// the later mods and keeps `sweeping` as it is (a mod doing its own sweep
+    /// cancels with `sweeping` false). A critical hit that sweeps has both
+    /// sounds. Fires on the Game that runs the attack, and on the attacking
+    /// client, which only asks. @API:sweep_attack@.
     pub(super) fn native_sweep_attack(
         &mut self,
         target: &str,

@@ -1395,14 +1395,7 @@ impl Game<'_> {
         let sweep = self.sweep_before_hit("minecraft:ender_dragon", false);
         let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
-            self.attack_effects(
-                area,
-                sweep,
-                None,
-                false,
-                super::mace::Spared::Nothing,
-                None,
-            );
+            self.attack_effects(area, sweep, None, false, super::mace::Spared::Nothing, None);
         }
         self.attack_ticks = 0;
         true
