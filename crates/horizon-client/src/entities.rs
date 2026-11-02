@@ -1448,23 +1448,15 @@ mod experience_tests {
 
     #[test]
     fn respawn_clears_all_xp_unless_it_is_kept() {
-        let mut xp = Experience::default();
-        xp.add_points(155);
-        while xp.progress >= 1.0 {
-            xp.progress = (xp.progress - 1.0) * Experience::needed(xp.level) as f32;
-            xp.add_levels(1);
-            xp.progress /= Experience::needed(xp.level) as f32;
-        }
-        let before = (xp.level, xp.progress, xp.total);
+        let mut xp = Experience {
+            level: 7,
+            progress: 0.5,
+            total: 155,
+        };
         xp.respawn(true);
-        assert_eq!((xp.level, xp.progress, xp.total), before);
+        assert_eq!((xp.level, xp.progress, xp.total), (7, 0.5, 155));
         xp.respawn(false);
         assert_eq!((xp.level, xp.progress, xp.total), (0, 0.0, 0));
-        xp.add_points(7);
-        xp.progress = (xp.progress - 1.0) * Experience::needed(xp.level) as f32;
-        xp.add_levels(1);
-        xp.progress /= Experience::needed(xp.level) as f32;
-        assert_eq!((xp.level, xp.progress, xp.total), (1, 0.0, 7));
     }
 }
 

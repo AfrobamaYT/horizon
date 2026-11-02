@@ -311,7 +311,13 @@ pub fn main() -> horizon_client::Result<()> {
                         Ok(())
                     }
                     drops::Drop::Experience(amount) => {
-                        drops::orb_values(amount).try_for_each(|v| writeln!(out, "orb {v}"))
+                        let mut left = amount.max(0) as u32;
+                        while left > 0 {
+                            let v = horizon_world::level::removal::orb_value(left);
+                            left -= v;
+                            let _ = writeln!(out, "orb {v}");
+                        }
+                        Ok(())
                     }
                 };
             }

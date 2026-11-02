@@ -28,7 +28,7 @@ pub enum Drop {
     /// with `enderman::carried_block_tool` (`enderman::carried_block_drops`).
     CarriedBlock(BlockStateId),
     /// The experience the mob is worth (`getExperienceReward`), before
-    /// `orb_values` splits it into orbs.
+    /// `ExperienceOrb.award` splits it into orbs.
     Experience(i32),
 }
 
@@ -423,26 +423,6 @@ pub fn loot_entity(m: &Mob, vehicle: Option<LootEntity>) -> LootEntity {
         .collect();
     e
 }
-/// `ExperienceOrb.award`: the values of the orbs `amount` points are split into.
-pub fn orb_values(mut amount: i32) -> impl Iterator<Item = i32> {
-    std::iter::from_fn(move || {
-        (amount > 0).then(|| {
-            let value = orb_value(amount);
-            amount -= value;
-            value
-        })
-    })
-}
-/// `ExperienceOrb.getExperienceValue`.
-fn orb_value(amount: i32) -> i32 {
-    for v in [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3] {
-        if amount >= v {
-            return v;
-        }
-    }
-    1
-}
-
 /// `LivingEntity.die`'s drops for `m` (equipment it loses is removed from
 /// it). Returns the drops in spawn order and whether a charged creeper
 /// killer dropped a head (`Creeper.droppedSkulls`).

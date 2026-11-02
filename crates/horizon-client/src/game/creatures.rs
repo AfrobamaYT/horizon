@@ -1541,9 +1541,7 @@ impl Game<'_> {
                 }
                 drops::Drop::Experience(reward) if !consumed => {
                     let amount = self.living_experience_drop(m, player_uuid, reward);
-                    for value in drops::orb_values(amount) {
-                        self.spawn_orbs(pos, value as u32);
-                    }
+                    self.spawn_orbs(pos, amount as u32);
                 }
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
