@@ -3257,7 +3257,7 @@ fn configured_features_load_from_the_26_3_path() {
     let scratch = base.parent().unwrap();
     fs::write(
         base.join("command-registries.json"),
-        r#"{"by_registry":{"minecraft:worldgen/feature":{"ids":[]}}}"#,
+        r#"{"blocks":{},"items":[],"by_registry":{"minecraft:worldgen/feature":{"ids":[]}}}"#,
     )
     .unwrap();
     let feature = r#"{"type":"minecraft:simple_block","config":{}}"#;
