@@ -1415,12 +1415,8 @@ impl Game<'_> {
         }
     }
     pub(super) fn prune_entity_memory(&mut self) {
-        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
         // Forget entities that no longer exist.
-        let mut alive: HashSet<u32> = self.entity_ids_off_walk().collect();
-        for_each_entity!(entity_lists_of!(self), entity => {
-            alive.insert(entity.id());
-        });
+        let alive = self.live_entity_ids();
         for (id, uuid) in &self.persist.uuids {
             if !alive.contains(id) {
                 self.entity_attachments.remove(uuid);
