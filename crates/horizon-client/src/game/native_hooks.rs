@@ -7435,6 +7435,16 @@ impl Game<'_> {
     pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
         let _ = (paused,);
     }
+    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe a player info update.
+    /// @API:client_player_change_game_type@.
+    pub(super) fn native_client_player_change_game_type(
+        &mut self,
+        info: &horizon_client::tab_list::TabPlayer,
+        current_game_type: i32,
+        new_game_type: i32,
+    ) {
+        let _ = (info, current_game_type, new_game_type);
+    }
     /// A line in chat from the client.
     pub(super) fn native_chat(&mut self, text: &str) {
         let focused = self.screen == Screen::Chat;

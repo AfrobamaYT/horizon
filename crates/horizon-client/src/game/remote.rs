@@ -4612,7 +4612,19 @@ impl Game<'_> {
                             }
                         }
                     }
-                    for e in p.entries {
+                }
+                for e in p.entries {
+                    if let Some(mode) = e.game_mode {
+                        let info = self
+                            .remote
+                            .as_ref()
+                            .and_then(|r| r.tab_players.get(&e.uuid))
+                            .cloned();
+                        if let Some(info) = info {
+                            self.native_client_player_change_game_type(&info, info.game_mode, mode);
+                        }
+                    }
+                    if let Some(r) = self.remote.as_mut() {
                         if let Some(t) = r.tab_players.get_mut(&e.uuid) {
                             if let Some(mode) = e.game_mode {
                                 t.game_mode = mode;

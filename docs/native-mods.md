@@ -20,6 +20,10 @@ commands and unattended commands do not pass through it. Bundles need "hooks": @
 system chat, but not action-bar overlays. A mod may change the displayed `Text` or set `cancel` to
 suppress it. Bundles need "hooks": @API:client_chat_received@.
 
+`native_client_player_change_game_type(info, current_game_type, new_game_type)` observes a client
+player-info game-type update before it is applied. The game types are protocol IDs and `info` is the
+previous tab-list entry. Bundles need "hooks": @API:client_player_change_game_type@.
+
 `native_client_pause_change_pre(paused, cancel)` fires on the client before a pause-state change;
 `paused` is the proposed state and setting `cancel` prevents the change. After an accepted change,
 `native_client_pause_change_post(paused)` observes the updated state. Neither fires when the state is
