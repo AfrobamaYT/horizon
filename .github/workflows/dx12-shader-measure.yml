@@ -32,7 +32,7 @@ jobs:
           asset=$(gh release view "$tag" --repo microsoft/DirectXShaderCompiler --json assets -q '.assets[].name' | grep -E '^dxc_.*\.zip$' | grep -v -i -E 'pdb|clang|arm' | head -1)
           echo "DXC $tag $asset"
           gh release download "$tag" --repo microsoft/DirectXShaderCompiler --pattern "$asset" --dir "$RUNNER_TEMP"
-          mkdir -p "$RUNNER_TEMP/dxc" && unzip -q "$RUNNER_TEMP/$asset" -d "$RUNNER_TEMP/dxc"
+          7z x -y -o"$RUNNER_TEMP/dxc" "$RUNNER_TEMP/$asset" > /dev/null
           ls "$RUNNER_TEMP/dxc/bin/x64"
       - name: FXC and DXC, three rounds each, alternated
         run: |
@@ -48,6 +48,7 @@ jobs:
           path: ${{ runner.temp }}/compile.jsonl
 
   static-dxc:
+    if: ${{ !contains(github.event.head_commit.message, '[compile-only]') }}
     runs-on: windows-latest
     timeout-minutes: 120
     defaults:
