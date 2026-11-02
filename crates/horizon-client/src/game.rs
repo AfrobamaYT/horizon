@@ -14655,11 +14655,16 @@ impl Game<'_> {
             // LivingEntity.tick's checkBedExists: a sleeper whose bed is
             // gone gets up.
             let bed = self.world.block(head[0], head[1], head[2]);
-            let mut replaced = None;
-            if let Some((player, name)) = self
-                .lan
+            let dead = self
+                .player
                 .as_ref()
-                .map(|host| (host.host_uuid, host.host_name.clone()))
+                .is_none_or(|p| p.health.dead_or_dying());
+            let mut replaced = None;
+            if !dead
+                && let Some((player, name)) = self
+                    .lan
+                    .as_ref()
+                    .map(|host| (host.host_uuid, host.host_name.clone()))
             {
                 self.native_can_continue_sleeping(player, &name, head, &mut replaced);
             }
@@ -14669,10 +14674,7 @@ impl Game<'_> {
             // not get the sleeper up.
             if (self.screen != Screen::Chat && self.keys.contains(&KeyCode::ShiftLeft))
                 || bed_gone
-                || self
-                    .player
-                    .as_ref()
-                    .is_none_or(|p| p.health.dead_or_dying())
+                || dead
             {
                 self.wake_up();
                 return;

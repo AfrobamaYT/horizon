@@ -3388,7 +3388,7 @@ impl Game<'_> {
         mod_api::dispatch_player_bed_leave(self, mod_api::mods(), player, name, pos);
     }
     /// `CanContinueSleepingEvent`: a sleeping server player's bed check, run each tick
-    /// before the dead and health checks. `may_continue` starts empty, meaning
+    /// only for a sleeper the dead and health checks would not already wake. `may_continue` starts empty, meaning
     /// whether the bed still exists; set it true to keep them asleep without a bed, or false
     /// to wake them beside a valid one. The player's state is not swapped in on a guest tick. @API:can_continue_sleeping@.
     pub(super) fn native_can_continue_sleeping(
