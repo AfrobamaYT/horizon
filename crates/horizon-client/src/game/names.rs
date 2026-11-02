@@ -206,11 +206,14 @@ impl Game<'_> {
             };
             // StringDecomposer.iterateFormatted: `§` codes a server leaves
             // inside the team prefix or the name itself apply at draw time.
-            let shown = match team {
+            let mut shown = match team {
                 Some(t) => t.formatted_name(member),
                 None => member,
+            };
+            if player {
+                self.native_player_name_format(&Text::literal(&name), &mut shown);
             }
-            .resolve_legacy();
+            let shown = shown.resolve_legacy();
             let mut lines = Vec::new();
             // EntityRenderer.extractNameTags: the score shows within the
             // below-name distance (10), under the name.

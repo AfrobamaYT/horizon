@@ -363,15 +363,15 @@ impl Game<'_> {
         let mut displayname = self.target_name(Target::Player);
         if let Some(uuid) = self.lan_acting_uuid {
             displayname = displayname.with_component_fields(vec![
-            (
-                "click_event".into(),
-                serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")}),
-            ),
-            (
-                "hover_event".into(),
-                serde_json::json!({"action": "show_entity", "id": "minecraft:player",
-                    "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
-            ),
+                (
+                    "click_event".into(),
+                    serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")}),
+                ),
+                (
+                    "hover_event".into(),
+                    serde_json::json!({"action": "show_entity", "id": "minecraft:player",
+                        "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
+                ),
                 ("insertion".into(), name.clone().into()),
             ]);
         }
