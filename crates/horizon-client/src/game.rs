@@ -6992,10 +6992,13 @@ impl Game<'_> {
             speed *= self.submerged_mining_speed();
         }
         let harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
-        let progress = if facts.hardness == 0.0 {
-            1.0
+        let hardness = facts.hardness;
+        let mut canceled = false;
+        self.native_player_break_speed(hit.pos, state.0, speed, &mut speed, &mut canceled);
+        let progress = if canceled {
+            0.0
         } else {
-            speed / facts.hardness / if harvest { 30.0 } else { 100.0 }
+            speed / hardness / if harvest { 30.0 } else { 100.0 }
         };
         self.swing_arm();
         let m = self.mining.as_mut().ok_or("mining")?;

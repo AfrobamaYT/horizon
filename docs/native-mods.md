@@ -2087,6 +2087,10 @@ is out of the world during the call, as in `native_menu_button`. Only a server's
 thread, LAN guests, a dedicated server) shift-click this way; a native mod's own menus (`native_open_menu`) get their
 clicks already.
 
+### Player break speed
+
+`native_player_break_speed(pos, state, original_speed, new_speed, canceled)` runs on the client and server when a player's destroy progress is calculated. `state` is the block state ID, `original_speed` is the speed after vanilla's modifiers, and `new_speed` starts with that value. Change `new_speed` to replace it, or set `canceled` to prevent breaking. On the server, `native_acting_player` identifies a guest whose state is swapped in. Bundles need "hooks": @API:player_break_speed@.
+
 ### Items' default components
 
 `crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
