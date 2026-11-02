@@ -35,7 +35,7 @@ import nightly_set as ns  # noqa: E402  (the same trusted reviewers and owner)
 PREFIX = "🤖 Claims: "
 STALE = timedelta(days=5)
 LOGIN = re.compile(r"^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))$")
-USAGE = "Use `/claim` or `/unclaim` (the trusted reviewers: `/unclaim @login`)."
+USAGE = "Use `/claim` or `/unclaim` (the repository owner and trusted reviewers: `/unclaim @login`)."
 # The login GitHub shows for this workflow's token: `github-actions[bot]` in REST, `github-actions` in GraphQL.
 BOT_LOGINS = ("github-actions", "github-actions[bot]")
 # Kira's Discord `/claim` marks an issue with this label (horizon-rust/kira, WORK.label): it is taken too.
@@ -78,7 +78,8 @@ def parse(body: str) -> Command | None:
 
 def is_team(login: str, reviewers: ns.Reviewers, repo: str) -> bool:
     """The repository owner, Ludovic, or a listed reviewer while the list isn't paused."""
-    return login.lower() == repo.split('/')[0].lower() or ns.is_owner(login) or (login.lower() in reviewers.logins and not reviewers.paused)
+    return (login.lower() == repo.split("/")[0].lower() or ns.is_owner(login)
+            or (login.lower() in reviewers.logins and not reviewers.paused))
 
 
 def assignees(issue: dict) -> list[str]:
@@ -193,7 +194,8 @@ def run(api, cmd: Command, login: str, number: int, reviewers: ns.Reviewers) -> 
         return None
     who = cmd.who or login
     if who.lower() != login.lower() and not is_team(login, reviewers, api.repo):
-        raise Refused(f"Only the repository owner, Ludovic and the trusted reviewers in `{ns.REVIEWERS}` release someone else's claim.")
+        raise Refused(f"Only the repository owner, Ludovic and the trusted reviewers in `{ns.REVIEWERS}` "
+                      "release someone else's claim.")
     if who.lower() not in held:
         raise Refused("You don't hold this issue." if who.lower() == login.lower() else f"`{safe(who)}` doesn't hold this issue.")
     real = next(h for h in holders if h.lower() == who.lower())
