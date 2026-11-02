@@ -636,7 +636,9 @@ impl GameLevel<'_> {
         mod_api::dispatch_sponge_absorb(self, mod_api::mods(), dimension, pos);
     }
 
-    /// A block at `pos` is about to grow into a feature. Server-side.
+    /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
+    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
+    /// block; set `feature` to another key to grow that one. Server-side.
     /// @API:block_grow_feature@.
     #[inline(always)]
     pub(super) fn native_block_grow_feature(

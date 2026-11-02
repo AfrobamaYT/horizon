@@ -307,6 +307,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             .live_features()
             .is_some_and(|f| f.configured(name).is_some())
     }
+    /// `BlockGrowFeatureEvent`: the feature `pos` grows into once mods may
+    /// cancel or replace `feature`, if it is installed.
+    pub(crate) fn grow_feature_event(&self, pos: BlockPos, feature: &str) -> Option<String> {
+        let mut feature = Some(feature.to_owned());
+        if !self.level.block_grow_feature(pos, &mut feature) {
+            return None;
+        }
+        feature.filter(|name| self.feature_exists(name))
+    }
 
     /// `TreeGrower.hasFlowers`: a flower within 2 blocks horizontally, 1 vertically.
     fn tree_has_flowers(&self, pos: BlockPos) -> bool {
@@ -362,11 +371,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && self.feature_exists(mega)
             && let Some((dx, dz, around)) = self.two_by_two(state, pos)
         {
-            let mut feature = Some(mega.to_owned());
-            if !self.level.block_grow_feature(pos, &mut feature) {
-                return false;
-            }
-            let Some(feature) = feature.filter(|name| self.feature_exists(name)) else {
+            let Some(feature) = self.grow_feature_event(pos, mega) else {
                 return false;
             };
             for &(_, p) in &around {
@@ -392,11 +397,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !self.feature_exists(feature) {
             return false;
         }
-        let mut feature = Some(feature.to_owned());
-        if !self.level.block_grow_feature(pos, &mut feature) {
-            return false;
-        }
-        let Some(feature) = feature.filter(|name| self.feature_exists(name)) else {
+        let Some(feature) = self.grow_feature_event(pos, feature) else {
             return false;
         };
         self.remove_sapling(pos);
@@ -466,11 +467,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !self.feature_exists(&feature) {
             return false;
         }
-        let mut feature = Some(feature);
-        if !self.level.block_grow_feature(pos, &mut feature) {
-            return false;
-        }
-        let Some(feature) = feature.filter(|name| self.feature_exists(name)) else {
+        let Some(feature) = self.grow_feature_event(pos, &feature) else {
             return false;
         };
         self.remove_block(pos, false);

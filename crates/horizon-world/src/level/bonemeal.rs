@@ -486,13 +486,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Kind::Fungus => {
                 if let Some(feature) = b.data(state).feature.clone()
                     && self.feature_exists(&feature)
+                    && let Some(feature) = self.grow_feature_event(pos, &feature)
                 {
-                    let mut feature = Some(feature);
-                    if self.level.block_grow_feature(pos, &mut feature)
-                        && let Some(feature) = feature.filter(|name| self.feature_exists(name))
-                    {
-                        self.place_configured_feature(&feature, pos);
-                    }
+                    self.place_configured_feature(&feature, pos);
                 }
             }
             Kind::Azalea => {
