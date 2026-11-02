@@ -4562,8 +4562,8 @@ pub trait Hooks: Send + Sync {
     /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
     /// spawn near a non-spectator server player, before its difficulty and rest rolls.
     /// `result` starts empty, meaning `Default` (skylight and sea level check); `Allow` skips
-    /// that check and `Deny` stops the attempt. `phantoms` starts empty, meaning vanilla's group size,
-    /// which is drawn later to keep its random order; set it to override the count.
+    /// that check and `Deny` stops the attempt. `phantoms` starts empty, meaning vanilla's group size;
+    /// set it to override the count. Vanilla's size is still drawn at its usual place.
     /// @API:player_spawn_phantoms@.
     ///
     /// Return `Some` to set `result`; the first mod returning `Some` wins.
