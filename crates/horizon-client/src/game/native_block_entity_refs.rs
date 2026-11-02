@@ -91,7 +91,10 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
     if !world.loaded(x, z) {
         return None;
     }
-    world.block_entities.get(&(x, y, z))
+    world
+        .block_entities
+        .get(&(x, y, z))
+        .filter(|entity| !save::block_entity_placeholder(entity))
 }
 
 #[cfg(test)]
@@ -133,5 +136,9 @@ mod tests {
             loaded_block_entity(&world, pos),
             Some(BlockEntity::DaylightDetector)
         ));
+        world
+            .block_entities
+            .insert(key, BlockEntity::Mod(Box::default()));
+        assert!(loaded_block_entity(&world, pos).is_none());
     }
 }
