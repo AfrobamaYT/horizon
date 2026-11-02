@@ -38,6 +38,12 @@ pub(super) struct Stuck {
     remove_arrow_time: i32,
     remove_stinger_time: i32,
 }
+impl CombatTracker {
+    /// The entity id of whoever caused the last recorded damage.
+    pub(super) fn last_attacker_id(&self) -> Option<u32> {
+        self.entries.last()?.attacker.as_ref().map(|(id, _)| *id)
+    }
+}
 impl Stuck {
     /// `AbstractArrow.onHitEntity`: a hit that hurt, from an arrow that
     /// does not pierce, leaves it stuck.

@@ -7697,12 +7697,20 @@ impl Game<'_> {
             let reward = self
                 .experience
                 .death_reward(self.ui.rules.bool("keep_inventory") || self.spectator());
-            // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
-            let host_entity = self.lan.as_ref().map_or(0, |h| h.host_entity) as u32;
-            let reward =
-                self.living_experience_drop(host_entity, "minecraft:player", None, reward as i32);
-            self.spawn_orbs(feet, reward as u32);
+            // ServerPlayer.die: a spectator never reaches dropAllDeathLoot.
             if !self.spectator() {
+                // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+                let host_entity = self.lan.as_ref().map_or(0, |h| h.host_entity) as u32;
+                let attacker = self.combat.last_attacker_id().and_then(|a| {
+                    self.lan.as_ref().and_then(|h| h.player_uuid_of_entity(a))
+                });
+                let reward = self.living_experience_drop(
+                    host_entity,
+                    "minecraft:player",
+                    attacker,
+                    reward as i32,
+                );
+                self.spawn_orbs(feet, reward as u32);
                 self.drop_inventory(at);
             }
             self.audio

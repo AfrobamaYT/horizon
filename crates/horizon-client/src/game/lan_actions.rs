@@ -3795,14 +3795,22 @@ impl Game<'_> {
             if let Some(eyes) = drops {
                 self.as_guest(host, conn, |game| game.drop_inventory(eyes));
             }
-            // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
-            let reward = self.living_experience_drop(
-                id as u32,
-                "minecraft:player",
-                None,
-                reward as i32,
-            );
-            self.spawn_orbs(at, reward as u32);
+            // ServerPlayer.die: a spectator never reaches dropAllDeathLoot.
+            if drops.is_some() {
+                // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+                let attacker = self
+                    .guest_combat
+                    .get(&conn)
+                    .and_then(|c| c.last_attacker_id())
+                    .and_then(|a| host.player_uuid_of_entity(a));
+                let reward = self.living_experience_drop(
+                    id as u32,
+                    "minecraft:player",
+                    attacker,
+                    reward as i32,
+                );
+                self.spawn_orbs(at, reward as u32);
+            }
         }
     }
 

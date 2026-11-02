@@ -202,6 +202,17 @@ pub(super) struct LanHost {
 }
 
 impl LanHost {
+    /// The UUID of the player with entity id `id`: the host or a guest.
+    pub(super) fn player_uuid_of_entity(&self, id: u32) -> Option<u128> {
+        if id as i32 == self.host_entity {
+            return Some(self.host_uuid);
+        }
+        self.hub
+            .guests
+            .iter()
+            .find(|g| g.entity_id as u32 == id)
+            .map(|g| g.uuid)
+    }
     /// `PlayerList.remove`: `player.awardStat(Stats.LEAVE_GAME)` before the
     /// player is saved. Once per guest, however often they are saved.
     pub(super) fn award_leave_game(&mut self, conn: u32) {

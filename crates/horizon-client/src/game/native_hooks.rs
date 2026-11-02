@@ -3457,10 +3457,9 @@ impl Game<'_> {
     }
     /// A dying mob or player `entity` of `kind` is about to drop `original`
     /// points of experience; the vanilla conditions have been checked.
-    /// `attacking_player` is the player who last hurt a mob, if any (none for
-    /// a dying player). Change `amount` (0 or less
-    /// drops nothing), or set `cancel` to drop none. A sculk catalyst that
-    /// takes the experience charges `amount` instead of dropping it.
+    /// `attacking_player` is the player who last hurt it, if any. Change
+    /// `amount` (0 or less drops nothing), or set `cancel` to drop none. A
+    /// sculk catalyst that takes the experience does not call this.
     /// Server-side. @API:living_experience_drop@.
     pub(super) fn native_living_experience_drop(
         &mut self,

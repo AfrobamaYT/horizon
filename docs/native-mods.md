@@ -1330,9 +1330,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
 - **`native_living_experience_drop(entity, kind, attacking_player, original, amount, cancel)`**: a dying mob or player is about
   to drop `original` experience points (NeoForge's `LivingExperienceDropEvent`), after the vanilla conditions
-  (`LivingEntity.dropExperience`): `entity` is its id, `kind` its type, `attacking_player` the player who last hurt a mob (none for a dying player).
+  (`LivingEntity.dropExperience`): `entity` is its id, `kind` its type, `attacking_player` the player who last hurt it (for a dying player, the player whose blow was last recorded).
   Change `amount` (0 or less drops nothing) or set `cancel` to drop none. A sculk catalyst that takes the mob's
-  experience charges the changed `amount`. The Ender Dragon does not call it.
+  experience drops none, so it does not call this hook. A dying spectator and the Ender Dragon do not call it.
 - **`native_player_item_cooldown(player, name, item, ticks, cancel)`**: an item cooldown is about to start for a
   server player, including a used item's cooldown and a shield disabled by a hit. `item` is the item id and `ticks`
   its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound.

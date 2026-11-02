@@ -1181,31 +1181,21 @@ impl Game<'_> {
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
-        // would drop, whoever killed the mob.
+        // would drop, whoever killed the mob. Experience the catalyst takes is
+        // never dropped, so living_experience_drop does not hear of it.
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
-        // LivingEntity.dropExperience's own conditions: the hook only hears of
-        // experience that would drop; the catalyst charges the rest unchanged.
-        let would_drop = by_player && self.ui.rules.bool("mob_drops");
-        let consumed =
-            self.catalyst_takes_experience([m.position.x, m.position.y, m.position.z], |game| {
+        let consumed = self.catalyst_takes_experience(
+            [m.position.x, m.position.y, m.position.z],
+            |_| {
                 catalyst_xp = if horizon_client::mobs::drops::drops_experience(&dying) {
-                    let reward = horizon_client::mobs::drops::base_experience(&mut dying);
-                    if would_drop {
-                        game.living_experience_drop(
-                            dying.id,
-                            &super::native_hooks::mob_kind(&dying),
-                            player,
-                            reward,
-                        ) as u32
-                    } else {
-                        reward as u32
-                    }
+                    horizon_client::mobs::drops::base_experience(&mut dying) as u32
                 } else {
                     0
                 };
                 catalyst_xp
-            });
+            },
+        );
         // CatalystListener: with experience to take, the player who last hurt
         // the mob gets KILL_MOB_NEAR_SCULK_CATALYST.
         if consumed && catalyst_xp > 0 {
@@ -1560,7 +1550,7 @@ impl Game<'_> {
                 drops::Drop::Experience(reward) if !consumed => {
                     let amount = self.living_experience_drop(
                         m.id,
-                        &super::native_hooks::mob_kind(m),
+                        &kind,
                         player_uuid,
                         reward,
                     );
