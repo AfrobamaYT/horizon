@@ -374,14 +374,22 @@ impl Containers<'_> {
             _ => true,
         }
     }
-    /// How many of `stack` slot `slot` takes: `canPlaceItem`, then up to the slot's limit
-    /// (`Container.getMaxStackSize(stack)`: the container's and the item's, the lower).
-    fn fits(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
+    /// How many of `stack` slot `slot` holds when empty: none where `canPlaceItem` refuses it,
+    /// else the slot's limit (`Container.getMaxStackSize(stack)`: the container's and the
+    /// item's, the lower).
+    fn capacity(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         if !self.can_place(view, slot, stack) {
             return 0;
         }
-        let limit = view.slot_limit().min(self.max_stack(stack));
-        room(limit, self.get(view, slot), stack)
+        view.slot_limit().min(self.max_stack(stack))
+    }
+    /// How many of `stack` slot `slot` takes now (`capacity`, less what it holds).
+    fn fits(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
+        room(
+            self.capacity(view, slot, stack),
+            self.get(view, slot),
+            stack,
+        )
     }
     /// `canTakeItemThroughFace` (furnaces and brewing stands restrict it).
     fn can_take(&self, view: &View, slot: usize, stack: &ItemStack, face: Direction) -> bool {

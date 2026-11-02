@@ -3,7 +3,7 @@
 //! sinking, slowing, climbing and freezing are `PlayerMotion`'s
 //! (`crate::motion`); placing it is the powder snow bucket's `BlockItem.place`.
 use super::Game;
-use horizon_client::{Result, items::ItemStack, mobs::Who};
+use horizon_client::{Result, cauldron, items::ItemStack, mobs::Who};
 use horizon_core::{position::BlockPos, random::RandomSource};
 
 impl Game<'_> {
@@ -78,86 +78,42 @@ impl Game<'_> {
     }
     /// `ItemUtils.createFilledResult(held, player, filled)` for the held stack.
     pub(super) fn filled_result(&mut self, filled: ItemStack) {
-        self.filled_result_in(self.held_slot(), filled);
-    }
-    /// `createFilledResult` for the stack in `slot` (`stack_in_mut`'s numbers). What the
-    /// inventory doesn't take is dropped as `Player.drop(stack, false)`: no thrower, statistic
-    /// or drop hook.
-    pub(super) fn filled_result_in(&mut self, slot: usize, filled: ItemStack) {
-        let has = self.creative
-            && self
-                .inventory
-                .iter()
-                .flatten()
-                .any(|s| s.same_item_same_components(&filled));
-        let held = self.stack_in_mut(slot);
-        let (kept, out) = filled_result_split(held.take(), filled, self.creative, has);
-        *self.stack_in_mut(slot) = kept;
-        if let Some(rest) = out.and_then(|out| self.give(out)) {
-            self.drop_plain(rest);
-        }
+        let slot = self.held_slot();
+        cauldron::create_filled_result(&mut HeldSlot { game: self, slot }, filled, true);
     }
 }
 
-/// `createFilledResult` on `held`: what the slot keeps, and the item to give the player. In
-/// creative (`hasInfiniteMaterials`) `held` is kept and `filled` given unless the inventory
-/// `has` it; otherwise one item of `held` becomes `filled`, in place when it was the last.
-pub(super) fn filled_result_split(
-    held: Option<ItemStack>,
-    filled: ItemStack,
-    creative: bool,
-    has: bool,
-) -> (Option<ItemStack>, Option<ItemStack>) {
-    let filled = (filled.count > 0).then_some(filled);
-    if creative {
-        return (held, filled.filter(|_| !has));
-    }
-    match held {
-        Some(held) if held.count > 1 => (
-            Some(ItemStack {
-                count: held.count - 1,
-                ..held
-            }),
-            filled,
-        ),
-        _ => (filled, None),
-    }
+/// The player acting, holding the stack in `slot` (`stack_in_mut`'s numbers), as
+/// `ItemUtils.createFilledResult` and the cauldron see them.
+pub(super) struct HeldSlot<'g, 'a> {
+    pub(super) game: &'g mut Game<'a>,
+    pub(super) slot: usize,
 }
-
-#[cfg(test)]
-mod filled_result_tests {
-    use super::filled_result_split;
-    use horizon_client::items::ItemStack;
-
-    fn stack(item: &str, count: u32) -> ItemStack {
-        ItemStack {
-            item: item.into(),
-            count,
-            damage: 0,
-            extra: None,
-        }
+impl cauldron::Player for HeldSlot<'_, '_> {
+    fn creative(&self) -> bool {
+        self.game.creative
     }
-
-    #[test]
-    fn creative_keeps_the_held_stack_and_gives_the_filled_one_once() {
-        let bucket = || Some(stack("minecraft:bucket", 1));
-        let filled = || stack("minecraft:powder_snow_bucket", 1);
-        assert_eq!(
-            filled_result_split(bucket(), filled(), true, false),
-            (bucket(), Some(filled()))
-        );
-        assert_eq!(
-            filled_result_split(bucket(), filled(), true, true),
-            (bucket(), None)
-        );
-        // Survival: the last item becomes the filled one; from more, one splits off.
-        assert_eq!(
-            filled_result_split(bucket(), filled(), false, false),
-            (Some(filled()), None)
-        );
-        assert_eq!(
-            filled_result_split(Some(stack("minecraft:bucket", 3)), filled(), false, false),
-            (Some(stack("minecraft:bucket", 2)), Some(filled()))
-        );
+    fn hand(&mut self) -> &mut Option<ItemStack> {
+        self.game.stack_in_mut(self.slot)
+    }
+    /// `Inventory.add`: in creative, what finds no slot is cleared.
+    fn add(&mut self, stack: &mut ItemStack) -> bool {
+        let before = stack.count;
+        stack.count = self.game.give(stack.clone()).map_or(0, |rest| rest.count);
+        if stack.count == before && self.game.creative {
+            stack.count = 0;
+            return true;
+        }
+        stack.count < before
+    }
+    fn contains(&self, stack: &ItemStack) -> bool {
+        self.game
+            .inventory
+            .iter()
+            .flatten()
+            .any(|have| have.same_item_same_components(stack))
+    }
+    fn drop_stack(&mut self, stack: ItemStack) {
+        self.game.drop_plain(stack);
     }
 }

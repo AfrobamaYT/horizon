@@ -2959,8 +2959,12 @@ block entity's slot, an item entity, a stack inside another item (`ItemPlace::Ne
 `r.item_capability(&ITEM_ITEMS, "mymod:backpack", Arc::new(Backpack))` answers `ITEM_ITEMS` for an item with a
 `StackItemHandler`; `host.item_capability(&ITEM_ITEMS, &place)` finds it, else the game's own over
 `item_container`. A handler keeps its contents in the stack, and reads and writes it only with
-`host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one)`, all or nothing: a write that
-can't go through changes nothing and hands the stack back. With `one_by_one`, a changed item is split off a
+`host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one, simulate)`. A write plans with
+`simulate` first, then commits: the old stack must come out whole and the new one go in whole (an occupied slot
+answers with `capacity`, NeoForge's `isValid` and `getCapacityAsLong`), or it refuses before anything moves and
+hands the stack back. So a handler's `simulate` must answer exactly as its real call does, as NeoForge's must, and
+pass it on to `set_place_stack`; one whose real call disagrees is a mod bug: what it leaves out goes back, else is
+dropped at the block, and the game warns once, naming the mod. With `one_by_one`, a changed item is split off a
 bigger stack: from a player's hand as vanilla's filled bucket (into the inventory, else dropped with no thrower,
 and in creative the hand is kept), from a block entity's or an item's slot into that container's other slots.
 A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and

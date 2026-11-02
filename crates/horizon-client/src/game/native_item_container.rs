@@ -235,6 +235,25 @@ impl Game<'_> {
         let size = self.item_container_size(&stack.item);
         insert_into(stack, size, slot, item, self.item_container_limit(item))
     }
+    /// `ResourceHandler.isValid` and `getCapacityAsLong`: how many of `item`
+    /// slot `slot` of one item of `stack` holds when empty. None of a shulker
+    /// box, nor into a slot past the item's slots.
+    pub(in crate::game) fn native_item_container_capacity(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        item: &ItemStack,
+    ) -> u32 {
+        let fits = self
+            .item_container_size(&stack.item)
+            .is_some_and(|size| slot < size as usize)
+            && horizon_client::menu::fits_inside_container_items(item);
+        if fits {
+            self.item_container_limit(item)
+        } else {
+            0
+        }
+    }
     /// `ResourceHandler.extract`: up to `max` out of slot `slot` of one item
     /// of `stack`. What came out (none when the slot is empty or past the
     /// item's slots), and the single item it becomes. The stack given is not

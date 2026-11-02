@@ -299,6 +299,24 @@ pub(crate) fn place_provider(provider: &str) -> Option<Arc<dyn PlaceProvider>> {
     Some(provider.clone())
 }
 
+/// The mod that registered `handler` for a capability; none for the game's own.
+pub(crate) fn capability_mod<T: ?Sized + 'static>(handler: &Arc<T>) -> Option<usize> {
+    let keys = &INSTALLED.get()?.keys;
+    let tables = [&keys.capabilities, &keys.item_capabilities];
+    let parts = tables
+        .into_iter()
+        .flat_map(HashMap::values)
+        .flat_map(HashMap::values);
+    parts
+        .into_iter()
+        .find(|part| {
+            part.handler
+                .downcast_ref::<Arc<T>>()
+                .is_some_and(|h| std::ptr::addr_eq(Arc::as_ptr(h), Arc::as_ptr(handler)))
+        })
+        .map(|part| part.mod_index)
+}
+
 fn capability_part<'k, T: ?Sized + 'static>(
     table: &Capabilities,
     name: &str,
@@ -591,6 +609,7 @@ mod tests {
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
+            r.block_entity_capability(&ITEMS, "test:liar", Arc::new(Liar));
             r.item_capability(&ITEM_ITEMS, "test:pouch", Arc::new(Pouch));
             r.item_capability(&ITEM_ITEMS, "test:bag", Arc::new(Bag));
             r.place_provider("test:charms", Arc::new(Charms));
@@ -641,6 +660,16 @@ mod tests {
             _: bool,
         ) -> Option<ItemStack> {
             None
+        }
+        fn capacity(
+            &self,
+            _: &dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: &ItemStack,
+        ) -> u32 {
+            0
         }
     }
 
@@ -724,11 +753,9 @@ mod tests {
             let Some(pouch) = host.place_stack(at) else {
                 return Some(sticks);
             };
-            if simulate {
-                return None;
-            }
             let filled = stack("test:pouch", 1, pouch.damage + sticks.count);
-            host.set_place_stack(at, filled, true).map(|_| sticks)
+            host.set_place_stack(at, filled, true, simulate)
+                .map(|_| sticks)
         }
         fn extract(
             &self,
@@ -739,6 +766,13 @@ mod tests {
             _: bool,
         ) -> Option<ItemStack> {
             None
+        }
+        fn capacity(&self, _: &mut dyn Host, _: &ItemPlace, _: usize, stack: &ItemStack) -> u32 {
+            if &*stack.item == "minecraft:stick" {
+                64
+            } else {
+                0
+            }
         }
     }
 
@@ -763,11 +797,9 @@ mod tests {
         ) -> Option<ItemStack> {
             match host.place_stack(at) {
                 Some(bag) if bag.damage == 0 && &*pouch.item == "test:pouch" => {
-                    if simulate {
-                        return None;
-                    }
                     let full = stack("test:bag", 1, pouch.damage + 1);
-                    host.set_place_stack(at, full, true).map(|_| pouch)
+                    host.set_place_stack(at, full, true, simulate)
+                        .map(|_| pouch)
                 }
                 _ => Some(pouch),
             }
@@ -781,14 +813,16 @@ mod tests {
             simulate: bool,
         ) -> Option<ItemStack> {
             let pouch = self.stack(host, at, slot)?;
-            if !simulate
-                && host
-                    .set_place_stack(at, stack("test:bag", 1, 0), true)
-                    .is_some()
+            if host
+                .set_place_stack(at, stack("test:bag", 1, 0), true, simulate)
+                .is_some()
             {
                 return None;
             }
             Some(pouch)
+        }
+        fn capacity(&self, _: &mut dyn Host, _: &ItemPlace, _: usize, stack: &ItemStack) -> u32 {
+            u32::from(&*stack.item == "test:pouch")
         }
     }
 
@@ -805,12 +839,13 @@ mod tests {
             key: u64,
             stack: ItemStack,
             one_by_one: bool,
+            simulate: bool,
         ) -> bool {
             let place = charm_slot(key);
             if one_by_one && host.game_stack(&place).is_some_and(|held| held.count > 1) {
                 return false;
             }
-            host.set_game_stack(&place, stack, false)
+            host.set_game_stack(&place, stack, false, simulate)
         }
     }
     fn charm_slot(key: u64) -> ItemPlace {
@@ -847,7 +882,15 @@ mod tests {
             place: &ItemPlace,
             stack: ItemStack,
             one_by_one: bool,
+            simulate: bool,
         ) -> bool {
+            let known = matches!(
+                place,
+                ItemPlace::PlayerHand { player: 1, .. } | ItemPlace::PlayerSlot { player: 1, .. }
+            );
+            if !known || simulate {
+                return known;
+            }
             if one_by_one
                 && *place == HAND
                 && let Some(held) = self.main_hand.as_mut().filter(|held| held.count > 1)
@@ -887,10 +930,24 @@ mod tests {
         }
     }
 
-    /// Three shelf slots at (2, 64, 0), answered by the game's handler. A slot takes up to 64
-    /// of one item, and gives at most one item per extract.
+    /// Three shelf slots at (2, 64, 0), answered by the game's handler, else by `Liar`. A slot
+    /// takes up to `limit` of one item, the `output` slot none, and gives at most one item per
+    /// extract.
     struct Shelf {
         slots: [Option<ItemStack>; 3],
+        limit: u32,
+        output: Option<usize>,
+        liar: bool,
+        dropped: Vec<ItemStack>,
+    }
+    fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
+        Shelf {
+            slots,
+            limit: 64,
+            output: None,
+            liar: false,
+            dropped: Vec::new(),
+        }
     }
     const SHELF: [i32; 3] = [2, 64, 0];
     fn shelf_slot(slot: usize) -> ItemPlace {
@@ -902,7 +959,23 @@ mod tests {
     }
     impl Host for Shelf {
         fn block_entity_type(&self, _: [i32; 3]) -> Option<String> {
-            None
+            self.liar.then(|| "test:liar".into())
+        }
+        fn container_capacity(
+            &self,
+            _: [i32; 3],
+            _: Option<Direction>,
+            slot: usize,
+            _: &ItemStack,
+        ) -> u32 {
+            if self.output == Some(slot) {
+                0
+            } else {
+                self.limit
+            }
+        }
+        fn drop_at(&mut self, _: [i32; 3], stack: ItemStack) {
+            self.dropped.push(stack);
         }
         fn container_size(&self, pos: [i32; 3], _: Option<Direction>) -> Option<usize> {
             (pos == SHELF).then_some(3)
@@ -925,9 +998,10 @@ mod tests {
         ) -> Option<ItemStack> {
             let held = self.slots.get(slot)?.clone();
             let room = match &held {
-                None => 64,
+                _ if self.output == Some(slot) => 0,
+                None => self.limit,
                 Some(held) if held.item == stack.item && held.damage == stack.damage => {
-                    64 - held.count
+                    self.limit - held.count
                 }
                 Some(_) => 0,
             };
@@ -967,7 +1041,67 @@ mod tests {
     }
     impl Shelf {
         fn items(&self) -> u32 {
-            items(self.slots.iter().flatten().cloned())
+            items(self.slots.iter().flatten().chain(&self.dropped).cloned())
+        }
+    }
+
+    /// A mod's handler for the shelf whose simulation lies: everything fits and comes out whole,
+    /// while its real calls are the shelf's.
+    struct Liar;
+    impl ItemHandler for Liar {
+        fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            host.container_size(at, side).unwrap_or(0)
+        }
+        fn stack(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+        ) -> Option<ItemStack> {
+            host.container_stack(at, side, slot)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: ItemStack,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            if simulate {
+                return None;
+            }
+            host.container_insert(at, side, slot, stack, false)
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            if simulate {
+                let held = host.container_stack(at, side, slot)?;
+                return Some(ItemStack {
+                    count: max.min(held.count),
+                    ..held
+                });
+            }
+            host.container_extract(at, side, slot, max, false)
+        }
+        fn capacity(
+            &self,
+            _: &dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: &ItemStack,
+        ) -> u32 {
+            u32::MAX
         }
     }
 
@@ -1213,7 +1347,7 @@ mod tests {
         };
         assert!(host.place_stack(&unknown).is_none());
         assert_eq!(
-            host.set_place_stack(&unknown, stack("minecraft:stick", 1, 0), false),
+            host.set_place_stack(&unknown, stack("minecraft:stick", 1, 0), false, false),
             Some(stack("minecraft:stick", 1, 0))
         );
     }
@@ -1222,37 +1356,61 @@ mod tests {
     fn a_write_that_cant_go_through_changes_nothing_and_no_item_is_made_or_lost() {
         game_thread();
         let apples = || stack("minecraft:apple", 10, 0);
-        let bread = || stack("minecraft:bread", 1, 0);
-        let mut shelf = Shelf {
-            slots: [Some(apples()), None, None],
-        };
-        let host: &mut dyn Host = &mut shelf;
-        // The shelf gives one apple per extract: the 10 can't all come out, so they aren't
-        // replaced.
+        let bread = |count| stack("minecraft:bread", count, 0);
+        // The shelf gives one apple per extract: its simulation says the 10 can't all come out,
+        // so they aren't replaced, and nothing moves.
+        let mut shelf_ = shelf([Some(apples()), None, None]);
+        let host: &mut dyn Host = &mut shelf_;
         assert_eq!(
-            host.set_place_stack(&shelf_slot(0), bread(), false),
-            Some(bread())
+            host.set_place_stack(&shelf_slot(0), bread(1), false, false),
+            Some(bread(1))
         );
-        assert_eq!(shelf.slots, [Some(apples()), None, None]);
-        // One by one, one apple becomes the bread, which goes into the next slot.
-        let host: &mut dyn Host = &mut shelf;
+        assert_eq!(shelf_.slots, [Some(apples()), None, None]);
+        // One by one, one apple becomes the bread, which goes into the next slot. Simulated
+        // first, nothing changes.
+        let host: &mut dyn Host = &mut shelf_;
         assert!(
-            host.set_place_stack(&shelf_slot(0), bread(), true)
+            host.set_place_stack(&shelf_slot(0), bread(1), true, true)
+                .is_none()
+        );
+        assert_eq!(shelf_.slots, [Some(apples()), None, None]);
+        let host: &mut dyn Host = &mut shelf_;
+        assert!(
+            host.set_place_stack(&shelf_slot(0), bread(1), true, false)
                 .is_none()
         );
         assert_eq!(
-            shelf.slots,
-            [Some(stack("minecraft:apple", 9, 0)), Some(bread()), None]
+            shelf_.slots,
+            [Some(stack("minecraft:apple", 9, 0)), Some(bread(1)), None]
         );
-        assert_eq!(shelf.items(), 10);
+        assert_eq!(shelf_.items(), 10);
+
+        // An output slot, as a furnace's: its iron comes out, but nothing may go in, so the
+        // iron stays.
+        let iron = || Some(stack("minecraft:iron_ingot", 1, 0));
+        let mut shelf_ = shelf([iron(), None, None]);
+        shelf_.output = Some(0);
+        let host: &mut dyn Host = &mut shelf_;
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(0), bread(1), false, false),
+            Some(bread(1))
+        );
+        assert_eq!(shelf_.slots, [iron(), None, None]);
+        // A slot of 2 takes 2 of 3 bread: refused before any goes in.
+        let mut shelf_ = shelf([None, None, None]);
+        shelf_.limit = 2;
+        let host: &mut dyn Host = &mut shelf_;
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(0), bread(3), false, false),
+            Some(bread(3))
+        );
+        assert_eq!(shelf_.slots, [None, None, None]);
 
         // Two empty pouches on a full shelf: a filled one has nowhere to go, so neither changes
         // and the sticks come back.
         let sticks = || stack("minecraft:stick", 3, 0);
         let stone = || Some(stack("minecraft:stone", 64, 0));
-        let mut shelf = Shelf {
-            slots: [Some(stack("test:pouch", 2, 0)), stone(), stone()],
-        };
+        let mut shelf = shelf([Some(stack("test:pouch", 2, 0)), stone(), stone()]);
         let before = shelf.items();
         let host: &mut dyn Host = &mut shelf;
         let pouch = host
@@ -1314,6 +1472,39 @@ mod tests {
         assert_eq!(player.items(), before);
         assert_eq!(player.slots[&21], stack("test:pouch", 2, 0));
         assert_eq!(player.slots[&22], stack("test:bag", 2, 1));
+    }
+
+    #[test]
+    fn a_handler_whose_simulation_lies_loses_and_makes_nothing_and_is_named() {
+        game_thread();
+        let apples = || Some(stack("minecraft:apple", 10, 0));
+        let stone = || Some(stack("minecraft:stone", 64, 0));
+        // The liar says all 10 apples come out; one does. It goes back, and nothing is replaced.
+        let mut shelf_ = shelf([apples(), stone(), stone()]);
+        shelf_.liar = true;
+        let host: &mut dyn Host = &mut shelf_;
+        let bread = |count| stack("minecraft:bread", count, 0);
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(0), bread(1), false, false),
+            Some(bread(1))
+        );
+        assert_eq!(shelf_.slots, [apples(), stone(), stone()]);
+        assert!(shelf_.dropped.is_empty());
+        // It says 100 bread fit an empty slot of 64: the 36 left out are dropped at the shelf,
+        // and the write stands.
+        shelf_.slots[0] = None;
+        let host: &mut dyn Host = &mut shelf_;
+        assert!(
+            host.set_place_stack(&shelf_slot(0), bread(100), false, false)
+                .is_none()
+        );
+        assert_eq!(shelf_.slots[0], Some(bread(64)));
+        assert_eq!(shelf_.dropped, [bread(36)]);
+        assert_eq!(shelf_.items(), 64 * 3 + 36);
+        // Warned once, naming the mod that registered it.
+        assert!(super::super::item_place::warned_about(
+            &super::super::mod_name(0)
+        ));
     }
 
     #[test]

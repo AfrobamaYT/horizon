@@ -651,8 +651,8 @@ pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, St
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
-    KnownIds, install_parts, item_capability, mark_game_thread, parts, place_provider,
-    resolve_parts,
+    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
+    place_provider, resolve_parts,
 };
 
 mod generated;

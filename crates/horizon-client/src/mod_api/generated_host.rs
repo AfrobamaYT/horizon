@@ -1326,6 +1326,22 @@ pub trait Host {
         let _ = simulate;
         unimplemented!("Host::container_extract")
     }
+    /// How many of `stack` slot `slot` of those `side` reaches at `pos` holds when empty, as
+    /// NeoForge's `isValid` and `getCapacityAsLong` answer: none where it may not go in (a
+    /// furnace's output, `canPlaceItem`), else the slot's limit for it.
+    fn container_capacity(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> u32 {
+        let _ = pos;
+        let _ = side;
+        let _ = slot;
+        let _ = stack;
+        unimplemented!("Host::container_capacity")
+    }
     /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
     /// empty ones included, kept in its `minecraft:container`. None for an
     /// item without slots, and for an empty stack.
@@ -1377,13 +1393,21 @@ pub trait Host {
     /// removes an item entity); false, with nothing changed, where `native_game_stack` reads
     /// nothing for want of the place. With `one_by_one`, `stack` stands for one item of what is
     /// there: from a player's hand it goes as `ItemUtils.createFilledResult` puts a filled
-    /// bucket (in creative the hand is kept); from a player's other places the same, without
-    /// creative's rule; from an item entity of more than one, it's dropped by it. The player's
-    /// screen follows with the tick's sync.
-    fn set_game_stack(&mut self, place: &ItemPlace, stack: ItemStack, one_by_one: bool) -> bool {
+    /// bucket (in creative the hand is kept); from a player's other places it goes into their
+    /// inventory, else is dropped as `Player.drop(stack, false)`; from an item entity of more
+    /// than one, it's dropped by it. These never refuse, so `simulate` only asks whether the
+    /// place is there. The player's screen follows with the tick's sync.
+    fn set_game_stack(
+        &mut self,
+        place: &ItemPlace,
+        stack: ItemStack,
+        one_by_one: bool,
+        simulate: bool,
+    ) -> bool {
         let _ = place;
         let _ = stack;
         let _ = one_by_one;
+        let _ = simulate;
         unimplemented!("Host::set_game_stack")
     }
     /// `ResourceHandler.insert(index, …)`: as `native_item_container_insert`,
@@ -1400,6 +1424,22 @@ pub trait Host {
         let _ = slot;
         let _ = item;
         unimplemented!("Host::item_container_insert_slot")
+    }
+    /// `ResourceHandler.isValid` and `getCapacityAsLong`: how many of `item`
+    /// slot `slot` of one item of `stack` holds when empty. None of a shulker
+    /// box, nor into a slot past the item's slots.
+    fn item_container_capacity(&self, stack: &ItemStack, slot: usize, item: &ItemStack) -> u32 {
+        let _ = stack;
+        let _ = slot;
+        let _ = item;
+        unimplemented!("Host::item_container_capacity")
+    }
+    /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up
+    /// what it can't put back.
+    fn drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
+        let _ = pos;
+        let _ = stack;
+        unimplemented!("Host::drop_at")
     }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.

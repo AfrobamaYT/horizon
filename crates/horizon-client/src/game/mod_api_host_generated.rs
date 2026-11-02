@@ -553,6 +553,15 @@ impl Host for super::Game<'_> {
     ) -> Option<ItemStack> {
         self.native_container_extract(pos, side, slot, max, simulate)
     }
+    fn container_capacity(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> u32 {
+        self.native_container_capacity(pos, side, slot, stack)
+    }
     fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
         self.native_item_container_slots(stack)
     }
@@ -574,8 +583,14 @@ impl Host for super::Game<'_> {
     fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
         self.native_game_stack(place)
     }
-    fn set_game_stack(&mut self, place: &ItemPlace, stack: ItemStack, one_by_one: bool) -> bool {
-        self.native_set_game_stack(place, stack, one_by_one)
+    fn set_game_stack(
+        &mut self,
+        place: &ItemPlace,
+        stack: ItemStack,
+        one_by_one: bool,
+        simulate: bool,
+    ) -> bool {
+        self.native_set_game_stack(place, stack, one_by_one, simulate)
     }
     fn item_container_insert_slot(
         &self,
@@ -584,6 +599,12 @@ impl Host for super::Game<'_> {
         item: &ItemStack,
     ) -> Option<(u32, ItemStack)> {
         self.native_item_container_insert_slot(stack, slot, item)
+    }
+    fn item_container_capacity(&self, stack: &ItemStack, slot: usize, item: &ItemStack) -> u32 {
+        self.native_item_container_capacity(stack, slot, item)
+    }
+    fn drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
+        self.native_drop_at(pos, stack)
     }
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
         self.native_recipe_book_category(kind)

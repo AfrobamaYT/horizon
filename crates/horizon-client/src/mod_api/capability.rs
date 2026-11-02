@@ -44,9 +44,11 @@ pub const ITEMS: CapabilityKey<dyn ItemHandler> = CapabilityKey {
 
 /// The item slots of the block entity at `at` as its side `side` reaches them (none: from no
 /// particular side, every slot), numbered from 0 for that side. `simulate` changes nothing and
-/// answers as the real call would. A move between handlers simulates both ends before doing
-/// either; moves that must succeed together across more handlers need transactions, which are
-/// not here yet (#41 §7).
+/// must answer exactly as the real call would, as NeoForge's handlers must: a write plans with
+/// it, then commits. A handler whose real call disagrees with its own simulation is a mod bug;
+/// the game then puts back what it can, drops the rest at the block and warns once. Moves that
+/// must succeed together across more handlers need transactions, which are not here yet
+/// (#41 §7).
 pub trait ItemHandler: Send + Sync + 'static {
     /// How many slots `side` reaches.
     fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize;
@@ -78,6 +80,18 @@ pub trait ItemHandler: Send + Sync + 'static {
         max: u32,
         simulate: bool,
     ) -> Option<ItemStack>;
+    /// How many of `stack` slot `slot` holds when empty, whatever it holds now: none where
+    /// `stack` may not go in, such as an output slot. NeoForge's `isValid` and
+    /// `getCapacityAsLong` in one; a write that replaces a slot's stack asks it before taking
+    /// anything out.
+    fn capacity(
+        &self,
+        host: &dyn Host,
+        at: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> u32;
 }
 
 /// The game's own [`ITEMS`]: the block entity's slots, by the rules hoppers follow.
@@ -116,6 +130,16 @@ impl ItemHandler for GameItems {
         simulate: bool,
     ) -> Option<ItemStack> {
         host.container_extract(at, side, slot, max, simulate)
+    }
+    fn capacity(
+        &self,
+        host: &dyn Host,
+        at: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> u32 {
+        host.container_capacity(at, side, slot, stack)
     }
 }
 

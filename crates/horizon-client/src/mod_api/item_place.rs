@@ -5,13 +5,16 @@
 //! [`set_place_stack`](dyn Host::set_place_stack), so the inventory holding the stack is the one
 //! changed. Handlers hold no borrow of the game, as block entity capabilities don't (#71).
 //!
-//! A write is all or nothing: it changes the place and puts every item it moves somewhere, or
-//! it changes nothing and hands the stack back. No item is made or lost on the way.
+//! A write plans with `simulate`, then commits: the old stack must come out whole and the new
+//! one go in whole, or it refuses before anything moves and hands the stack back. That holds
+//! while every handler's `simulate` answers as its real call does; one that doesn't is a mod bug,
+//! and what it leaves out is put back, else dropped where it was, never lost or made.
 use super::{Direction, Hand, Host, ITEMS, ItemHandler, ItemStack};
 use std::{
     cell::RefCell,
+    collections::HashSet,
     marker::PhantomData,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 /// Where a stack lives.
@@ -53,8 +56,16 @@ pub trait PlaceProvider: Send + Sync + 'static {
     /// `stack` stands for one item of what is there: from a stack of more than one, `key` keeps
     /// the others and `stack` goes where the mod puts a split-off item, such as the player's
     /// inventory, else the ground (`host.set_game_stack` does both for a player's place). All
-    /// or nothing: false when nothing changed, as where `key` is no longer a place.
-    fn set_stack(&self, host: &mut dyn Host, key: u64, stack: ItemStack, one_by_one: bool) -> bool;
+    /// or nothing: false when nothing changed, as where `key` is no longer a place. `simulate`
+    /// changes nothing and answers as the real call would.
+    fn set_stack(
+        &self,
+        host: &mut dyn Host,
+        key: u64,
+        stack: ItemStack,
+        one_by_one: bool,
+        simulate: bool,
+    ) -> bool;
 }
 
 /// An item capability: its name, the handler trait `T` it answers with, and the game's own
@@ -91,7 +102,8 @@ pub const ITEM_ITEMS: ItemCapabilityKey<dyn StackItemHandler> = ItemCapabilityKe
 /// The slots of the item at `at`, numbered from 0. A change rewrites the item at `at` through
 /// [`set_place_stack`](dyn Host::set_place_stack) with `one_by_one`: from a stack of more than
 /// one, the changed item is split off. When that hands the item back, nothing changed, and the
-/// handler reports nothing moved. `simulate` changes nothing.
+/// handler reports nothing moved. `simulate` changes nothing and must answer exactly as the
+/// real call would, as [`ItemHandler`]'s must: pass it on to `set_place_stack`.
 pub trait StackItemHandler: Send + Sync + 'static {
     fn slots(&self, host: &mut dyn Host, at: &ItemPlace) -> usize;
     fn stack(&self, host: &mut dyn Host, at: &ItemPlace, slot: usize) -> Option<ItemStack>;
@@ -113,6 +125,8 @@ pub trait StackItemHandler: Send + Sync + 'static {
         max: u32,
         simulate: bool,
     ) -> Option<ItemStack>;
+    /// How many of `stack` slot `slot` holds when empty, as [`ItemHandler::capacity`].
+    fn capacity(&self, host: &mut dyn Host, at: &ItemPlace, slot: usize, stack: &ItemStack) -> u32;
 }
 
 /// The game's own [`ITEM_ITEMS`], over the `item_container` helpers.
@@ -141,7 +155,7 @@ impl StackItemHandler for GameItemItems {
         else {
             return Some(stack);
         };
-        if went == 0 || (!simulate && host.set_place_stack(at, changed, true).is_some()) {
+        if went == 0 || host.set_place_stack(at, changed, true, simulate).is_some() {
             return Some(stack);
         }
         (went < stack.count).then(|| ItemStack {
@@ -160,10 +174,14 @@ impl StackItemHandler for GameItemItems {
         let held = host.place_stack(at)?;
         let (out, changed) = host.item_container_extract(&held, slot, max)?;
         let out = out?;
-        if !simulate && host.set_place_stack(at, changed, true).is_some() {
+        if host.set_place_stack(at, changed, true, simulate).is_some() {
             return None;
         }
         Some(out)
+    }
+    fn capacity(&self, host: &mut dyn Host, at: &ItemPlace, slot: usize, stack: &ItemStack) -> u32 {
+        host.place_stack(at)
+            .map_or(0, |held| host.item_container_capacity(&held, slot, stack))
     }
 }
 
@@ -182,11 +200,25 @@ impl Drop for Unstage {
     }
 }
 
+/// The owners of item handlers whose real calls disagreed with their simulation, warned once.
+static BROKEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+#[cfg(test)]
+pub(super) fn warned_about(owner: &str) -> bool {
+    let broken = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
+    broken.as_ref().is_some_and(|owners| owners.contains(owner))
+}
+
 /// The slots a place sits in: a block entity's, through [`ITEMS`], or an item's, through
-/// [`ITEM_ITEMS`].
+/// [`ITEM_ITEMS`] (whose writes are staged).
 enum Container<'p> {
     Block(Arc<dyn ItemHandler>, [i32; 3], Option<Direction>),
     Item(Arc<dyn StackItemHandler>, &'p ItemPlace),
+}
+
+/// Whether `out` is exactly `count` of `old`.
+fn is_exactly(out: Option<&ItemStack>, old: &ItemStack, count: u32) -> bool {
+    out.is_some_and(|out| out.count == count && out.same_item_same_components(old))
 }
 
 impl Container<'_> {
@@ -202,96 +234,187 @@ impl Container<'_> {
             Self::Item(h, at) => h.stack(host, at, slot),
         }
     }
-    fn insert(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) -> Option<ItemStack> {
+    fn insert(
+        &self,
+        host: &mut dyn Host,
+        slot: usize,
+        stack: ItemStack,
+        simulate: bool,
+    ) -> Option<ItemStack> {
         match self {
-            Self::Block(h, pos, side) => h.insert(host, *pos, *side, slot, stack, false),
-            Self::Item(h, at) => h.insert(host, at, slot, stack, false),
+            Self::Block(h, pos, side) => h.insert(host, *pos, *side, slot, stack, simulate),
+            Self::Item(h, at) => h.insert(host, at, slot, stack, simulate),
         }
     }
-    fn extract(&self, host: &mut dyn Host, slot: usize, max: u32) -> Option<ItemStack> {
+    fn extract(
+        &self,
+        host: &mut dyn Host,
+        slot: usize,
+        max: u32,
+        simulate: bool,
+    ) -> Option<ItemStack> {
         match self {
-            Self::Block(h, pos, side) => h.extract(host, *pos, *side, slot, max, false),
-            Self::Item(h, at) => h.extract(host, at, slot, max, false),
+            Self::Block(h, pos, side) => h.extract(host, *pos, *side, slot, max, simulate),
+            Self::Item(h, at) => h.extract(host, at, slot, max, simulate),
         }
     }
-    /// Takes exactly `count` out of `slot`; when less comes out, puts it back and is false.
-    fn take(&self, host: &mut dyn Host, slot: usize, count: u32) -> bool {
-        match self.extract(host, slot, count) {
-            Some(out) if out.count == count => true,
-            Some(out) => {
-                self.put_back(host, slot, out);
-                false
-            }
-            None => false,
+    fn capacity(&self, host: &mut dyn Host, slot: usize, stack: &ItemStack) -> u32 {
+        match self {
+            Self::Block(h, pos, side) => h.capacity(host, *pos, *side, slot, stack),
+            Self::Item(h, at) => h.capacity(host, at, slot, stack),
         }
     }
-    /// Puts what just came out of `slot` back in. A handler that won't take back what it just
-    /// gave breaks its contract, and is named.
-    fn put_back(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) {
-        if let Some(rest) = self.insert(host, slot, stack) {
-            log::error!("Horizon: an item handler refused {rest:?} back into slot {slot}");
-        }
-    }
-    /// Puts all of `stack` into the slots, in order; false, with nothing put in, when it
-    /// doesn't all fit.
-    fn insert_anywhere(&self, host: &mut dyn Host, stack: &ItemStack) -> bool {
-        let mut went = Vec::new();
-        let mut left = stack.clone();
-        for slot in 0..self.slots(host) {
-            let count = left.count;
-            match self.insert(host, slot, left.clone()) {
-                None => return true,
-                Some(rest) => {
-                    went.extend((rest.count < count).then_some((slot, count - rest.count)));
-                    left = rest;
-                }
-            }
-        }
-        for (slot, count) in went {
-            if !self.take(host, slot, count) {
-                log::error!("Horizon: an item handler kept {count} of {stack:?} in slot {slot}");
-            }
-        }
-        false
-    }
-    /// Puts `stack` in `slot` in place of what is there. With `one_by_one`, from a stack of
-    /// more than one, one item comes out and `stack` goes into whichever slots take it
-    /// (`ItemAccess.forHandlerIndex`). All or nothing.
-    fn set(&self, host: &mut dyn Host, slot: usize, stack: ItemStack, one_by_one: bool) -> bool {
+
+    /// Puts `stack` in `slot` in place of what is there, planned with `simulate` first: all of
+    /// the old stack must come out and all of `stack` fit the emptied slot. With `one_by_one`,
+    /// from a stack of more than one, one item comes out and `stack` goes into the other slots
+    /// (`ItemAccess.forHandlerIndex`). With `simulate`, only the plan. All or nothing, while the
+    /// handler's simulation holds (`broken` when it doesn't).
+    fn set(
+        &self,
+        host: &mut dyn Host,
+        place: &ItemPlace,
+        slot: usize,
+        stack: ItemStack,
+        one_by_one: bool,
+        simulate: bool,
+    ) -> bool {
         let old = self.stack(host, slot);
         if one_by_one && let Some(old) = old.as_ref().filter(|old| old.count > 1) {
-            if !self.take(host, slot, 1) {
+            let out = self.extract(host, slot, 1, true);
+            if !is_exactly(out.as_ref(), old, 1) {
                 return false;
             }
-            if stack.count == 0 || self.insert_anywhere(host, &stack) {
+            let Some(plan) = self.plan_into_others(host, slot, &stack) else {
+                return false;
+            };
+            if simulate {
                 return true;
             }
-            let one = ItemStack {
-                count: 1,
-                ..old.clone()
-            };
-            self.put_back(host, slot, one);
-            return false;
+            let out = self.extract(host, slot, 1, false);
+            if !is_exactly(out.as_ref(), old, 1) {
+                self.broken(host, place, slot, out);
+                return false;
+            }
+            let mut left = 0;
+            for (to, count) in plan {
+                let some = ItemStack {
+                    count,
+                    ..stack.clone()
+                };
+                left += self
+                    .insert(host, to, some, false)
+                    .map_or(0, |rest| rest.count);
+            }
+            let left = (left > 0).then_some(ItemStack {
+                count: left,
+                ..stack
+            });
+            return left.is_none() || self.broken(host, place, slot, left);
         }
         if let Some(old) = &old
-            && !self.take(host, slot, old.count)
+            && !is_exactly(
+                self.extract(host, slot, old.count, true).as_ref(),
+                old,
+                old.count,
+            )
         {
             return false;
         }
-        let Some(rest) = (stack.count > 0)
-            .then(|| self.insert(host, slot, stack.clone()))
-            .flatten()
-        else {
+        // An occupied slot can't be asked whether `stack` fits it once emptied: its capacity
+        // answers that, NeoForge's `isValid` and `getCapacityAsLong`.
+        let fits = stack.count == 0
+            || match &old {
+                Some(_) => self.capacity(host, slot, &stack) >= stack.count,
+                None => self.insert(host, slot, stack.clone(), true).is_none(),
+            };
+        if !fits {
+            return false;
+        }
+        if simulate {
             return true;
+        }
+        if let Some(old) = &old {
+            let out = self.extract(host, slot, old.count, false);
+            if !is_exactly(out.as_ref(), old, old.count) {
+                self.broken(host, place, slot, out);
+                return false;
+            }
+        }
+        if stack.count == 0 {
+            return true;
+        }
+        match self.insert(host, slot, stack.clone(), false) {
+            None => true,
+            // Nothing went in: the old stack goes back, and the write is refused.
+            Some(rest) if rest.count >= stack.count => {
+                self.broken(host, place, slot, old);
+                false
+            }
+            rest => self.broken(host, place, slot, rest),
+        }
+    }
+
+    /// Where all of `stack` goes in the slots but `skip`, simulated slot by slot: how many into
+    /// which. None when it doesn't all fit.
+    fn plan_into_others(
+        &self,
+        host: &mut dyn Host,
+        skip: usize,
+        stack: &ItemStack,
+    ) -> Option<Vec<(usize, u32)>> {
+        let mut plan = Vec::new();
+        let mut left = stack.count;
+        for slot in (0..self.slots(host)).filter(|slot| *slot != skip) {
+            if left == 0 {
+                break;
+            }
+            let some = ItemStack {
+                count: left,
+                ..stack.clone()
+            };
+            let rest = self
+                .insert(host, slot, some, true)
+                .map_or(0, |rest| rest.count);
+            if rest < left {
+                plan.push((slot, left - rest));
+                left = rest;
+            }
+        }
+        (left == 0).then_some(plan)
+    }
+
+    /// The handler's real call disagreed with its simulation: a mod bug, warned once per mod.
+    /// In a block entity, `loose` goes back into `slot`, and what it won't take is dropped at
+    /// the block: the write stands as far as it went (true). In an item, the write is staged,
+    /// so it is dropped whole and nothing real changed (false).
+    fn broken(
+        &self,
+        host: &mut dyn Host,
+        place: &ItemPlace,
+        slot: usize,
+        loose: Option<ItemStack>,
+    ) -> bool {
+        let owner = match self {
+            Self::Block(h, ..) => super::capability_mod(h),
+            Self::Item(h, _) => super::capability_mod(h),
         };
-        let went = stack.count - rest.count.min(stack.count);
-        if went > 0 && !self.take(host, slot, went) {
-            log::error!("Horizon: an item handler kept {went} of {stack:?} in slot {slot}");
+        let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
+        let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
+        if warned.get_or_insert_default().insert(owner.clone()) {
+            log::warn!(
+                "Horizon: {owner}'s item handler at {place:?} moved other than its simulation said; \
+                 what it left out is put back or dropped there. Its simulate must answer as its real call does."
+            );
         }
-        if let Some(old) = old {
-            self.put_back(host, slot, old);
+        drop(warned);
+        let Self::Block(_, pos, _) = self else {
+            return false;
+        };
+        if let Some(rest) = loose.and_then(|loose| self.insert(host, slot, loose, false)) {
+            host.drop_at(*pos, rest);
         }
-        false
+        true
     }
 }
 
@@ -344,39 +467,41 @@ impl dyn Host + '_ {
     /// [`PlaceProvider`] puts it. A stack of items holding the place splits the same way: one
     /// of them is rewritten holding the change, and the others stay as they were.
     ///
-    /// All or nothing: None when it's done, Some(`stack`) when it couldn't be and nothing
-    /// changed.
+    /// Planned with `simulate` first, then done: None when it's done, Some(`stack`) when it
+    /// can't be, and nothing moved. `simulate` answers the same, changing nothing.
     pub fn set_place_stack(
         &mut self,
         place: &ItemPlace,
         stack: ItemStack,
         one_by_one: bool,
+        simulate: bool,
     ) -> Option<ItemStack> {
         let staged = STAGED.with_borrow_mut(|staged| {
             let at = staged.iter_mut().rev().find(|(at, _)| at == place);
-            at.map(|(_, held)| *held = stack.clone()).is_some()
+            at.map(|(_, held)| {
+                if !simulate {
+                    *held = stack.clone();
+                }
+            })
+            .is_some()
         });
         let done = staged
             || match place {
                 ItemPlace::BlockEntity { pos, side, slot } => {
                     self.capability(&ITEMS, *pos).is_some_and(|handler| {
-                        Container::Block(handler, *pos, *side).set(
-                            self,
-                            *slot,
-                            stack.clone(),
-                            one_by_one,
-                        )
+                        let container = Container::Block(handler, *pos, *side);
+                        container.set(self, place, *slot, stack.clone(), one_by_one, simulate)
                     })
                 }
                 ItemPlace::Nested { parent, slot } => {
-                    self.set_nested(parent, *slot, stack.clone(), one_by_one)
+                    self.set_nested(parent, *slot, stack.clone(), one_by_one, simulate)
                 }
                 ItemPlace::Mod { provider, key } => {
                     super::place_provider(provider).is_some_and(|provider| {
-                        provider.set_stack(self, *key, stack.clone(), one_by_one)
+                        provider.set_stack(self, *key, stack.clone(), one_by_one, simulate)
                     })
                 }
-                _ => self.set_game_stack(place, stack.clone(), one_by_one),
+                _ => self.set_game_stack(place, stack.clone(), one_by_one, simulate),
             };
         (!done).then_some(stack)
     }
@@ -384,13 +509,14 @@ impl dyn Host + '_ {
     /// Writes slot `slot` of the item at `parent` on one item of it, staged, then writes that
     /// one item back to `parent` with `one_by_one`: from a stack of them, it splits off holding
     /// the change. Nothing real changes before that last write, so a refusal anywhere changes
-    /// nothing.
+    /// nothing, and `simulate` drops the staged change.
     fn set_nested(
         &mut self,
         parent: &ItemPlace,
         slot: usize,
         stack: ItemStack,
         one_by_one: bool,
+        simulate: bool,
     ) -> bool {
         let Some(handler) = self.item_capability(&ITEM_ITEMS, parent) else {
             return false;
@@ -401,12 +527,20 @@ impl dyn Host + '_ {
         let one = ItemStack { count: 1, ..before };
         STAGED.with_borrow_mut(|staged| staged.push((parent.clone(), one.clone())));
         let unstage = Unstage;
-        let done = Container::Item(handler, parent).set(self, slot, stack, one_by_one);
+        let place = ItemPlace::Nested {
+            parent: Box::new(parent.clone()),
+            slot,
+        };
+        let done =
+            Container::Item(handler, parent).set(self, &place, slot, stack, one_by_one, false);
         let after = STAGED.with_borrow(|staged| staged.last().map(|(_, held)| held.clone()));
         drop(unstage);
         match after {
             Some(after) if done => {
-                after == one || self.set_place_stack(parent, after, true).is_none()
+                after == one
+                    || self
+                        .set_place_stack(parent, after, true, simulate)
+                        .is_none()
             }
             _ => false,
         }

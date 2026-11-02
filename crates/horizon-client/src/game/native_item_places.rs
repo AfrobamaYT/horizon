@@ -2,8 +2,8 @@
 //! player's slots, hands and cursor, and item entities. Mods read and write them through
 //! `place_stack` and `set_place_stack`, which come here for these places; a block entity's slots,
 //! a stack inside an item and a mod's own places go through their handlers.
-use super::{Game, powder_snow::filled_result_split, shield::OFFHAND_SLOT};
-use horizon_client::{first_person::Hand, items::ItemStack, mod_api::ItemPlace};
+use super::{Game, powder_snow::HeldSlot, shield::OFFHAND_SLOT};
+use horizon_client::{cauldron, first_person::Hand, items::ItemStack, mod_api::ItemPlace};
 
 /// The player a place belongs to, if a player's.
 fn place_player(place: &ItemPlace) -> Option<u128> {
@@ -58,14 +58,16 @@ impl Game<'_> {
     /// removes an item entity); false, with nothing changed, where `native_game_stack` reads
     /// nothing for want of the place. With `one_by_one`, `stack` stands for one item of what is
     /// there: from a player's hand it goes as `ItemUtils.createFilledResult` puts a filled
-    /// bucket (in creative the hand is kept); from a player's other places the same, without
-    /// creative's rule; from an item entity of more than one, it's dropped by it. The player's
-    /// screen follows with the tick's sync.
+    /// bucket (in creative the hand is kept); from a player's other places it goes into their
+    /// inventory, else is dropped as `Player.drop(stack, false)`; from an item entity of more
+    /// than one, it's dropped by it. These never refuse, so `simulate` only asks whether the
+    /// place is there. The player's screen follows with the tick's sync.
     pub(super) fn native_set_game_stack(
         &mut self,
         place: &ItemPlace,
         stack: ItemStack,
         one_by_one: bool,
+        simulate: bool,
     ) -> bool {
         if !self.places_simulated() {
             return false;
@@ -74,6 +76,9 @@ impl Game<'_> {
             let Some(e) = self.dropped.iter().find(|e| e.id == *id) else {
                 return false;
             };
+            if simulate {
+                return true;
+            }
             let dimension = self.dim.id();
             if !one_by_one || e.stack.count <= 1 {
                 return self.native_set_item_entity(dimension, *id, stack);
@@ -97,29 +102,41 @@ impl Game<'_> {
         };
         let mut written = false;
         self.native_as_player(player, |g| {
+            written = g.player_place(place).is_some();
+            if !written || simulate {
+                return;
+            }
             if one_by_one && let ItemPlace::PlayerHand { hand, .. } = place {
                 let slot = match hand {
                     Hand::Main => g.selected,
                     Hand::Off => OFFHAND_SLOT,
                 };
-                g.filled_result_in(slot, stack);
-                written = true;
+                cauldron::create_filled_result(&mut HeldSlot { game: g, slot }, stack, true);
                 return;
             }
             let Some(slot) = g.player_place(place) else {
                 return;
             };
-            written = true;
-            if !one_by_one {
+            let split = one_by_one && slot.as_ref().is_some_and(|held| held.count > 1);
+            if !split {
                 *slot = (stack.count > 0).then_some(stack);
                 return;
             }
-            let (kept, out) = filled_result_split(slot.take(), stack, false, false);
-            *slot = kept;
-            if let Some(rest) = out.and_then(|out| g.give(out)) {
+            if let Some(held) = slot.as_mut() {
+                held.count -= 1;
+            }
+            if let Some(rest) = (stack.count > 0).then(|| g.give(stack)).flatten() {
                 g.drop_plain(rest);
             }
         });
         written
+    }
+    /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up
+    /// what it can't put back.
+    pub(super) fn native_drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
+        if self.places_simulated() && stack.count > 0 {
+            // `Block.popResource`'s default pickup delay.
+            self.spawn_item(stack, pos.map(|p| f64::from(p) + 0.5), [0.0; 3], 10);
+        }
     }
 }
