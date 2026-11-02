@@ -1067,7 +1067,14 @@ impl GameLevel<'_> {
         feature: &mut Option<String>,
         cancel: &mut bool,
     ) {
-        let _ = (dimension, pos, feature, cancel);
+        mod_api::dispatch_block_grow_feature(
+            self,
+            mod_api::mods(),
+            dimension,
+            pos,
+            feature,
+            cancel,
+        );
     }
 
     /// A block at `pos` is about to fade from `from` to `to` because of

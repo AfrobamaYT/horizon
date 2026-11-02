@@ -4508,6 +4508,21 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
+    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
+    /// block; set `feature` to another key to grow that one. Server-side.
+    /// @API:block_grow_feature@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_grow_feature(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut BlockGrowFeatureEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13793,5 +13808,35 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     let mut event = LivingJumpEvent { entity, kind };
     for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
+    }
+}
+/// What [`Hooks::block_grow_feature`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockGrowFeatureEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub feature: &'a mut Option<String>,
+}
+pub fn dispatch_block_grow_feature(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    feature: &mut Option<String>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockGrowFeatureEvent {
+        dimension,
+        pos,
+        feature,
+    };
+    for mod_hook in super::entered(mods, "block_grow_feature") {
+        if matches!(mod_hook.block_grow_feature(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
     }
 }
