@@ -5293,6 +5293,21 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
+    /// A tool is about to transform a block. Cancel or replace the final state;
+    /// `None` suppresses the transformation.
+    #[inline(never)]
+    pub(super) fn native_block_tool_modification(
+        &self,
+        stack: &ItemStack,
+        pos: [i32; 3],
+        face: [i32; 3],
+        simulated: bool,
+        final_state: &mut Option<BlockStateId>,
+        cancel: &mut bool,
+    ) {
+        let _ = (stack, pos, face, simulated, final_state, cancel);
+    }
+
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
     /// `BucketItem.use`, where it asks `Level.mayInteract`. Set `canceled`
     /// and the bucket does nothing. Server-side, for every player of the

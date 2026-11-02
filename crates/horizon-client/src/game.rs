@@ -12624,6 +12624,12 @@ impl Game<'_> {
         else {
             return Ok(false);
         };
+        let mut final_state = Some(new);
+        let mut cancel = false;
+        self.native_block_tool_modification(stack, pos, face, false, &mut final_state, &mut cancel);
+        let Some(new) = final_state.filter(|_| !cancel) else {
+            return Ok(false);
+        };
         // BlockTransformer.transformBlock: ITEM_USED_ON_BLOCK before the swap.
         self.trigger_block("minecraft:item_used_on_block", pos, stack);
         self.level_set(pos, new)?;

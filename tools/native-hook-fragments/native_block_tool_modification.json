@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "block_tool_modification",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_tool_modification",
+      "neoforge": "BlockEvent.BlockToolModificationEvent",
+      "side": "both",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a tool transforming a block (`native_block_tool_modification`).",
+  "doc_summary": "`native_block_tool_modification(stack, pos, face, simulated, final_state, cancel)` hears a tool transform a block. Set `cancel` or set `final_state` to `None` to prevent it, or replace the state ID. Bundles need \"hooks\": @API:block_tool_modification@."
+}
