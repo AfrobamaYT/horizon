@@ -102,6 +102,14 @@ impl View {
             _ => (0..self.len()).collect(),
         }
     }
+    /// `Container.getMaxStackSize`: what one slot holds of any item, 1 for a chiseled
+    /// bookshelf's books and a jukebox's disc, else vanilla's default.
+    fn slot_limit(&self) -> u32 {
+        match self.kind {
+            Kind::Bookshelf | Kind::Jukebox => 1,
+            _ => 99,
+        }
+    }
     /// The slots `HopperBlockEntity.addItem` tries through `face`.
     fn slots_to_add(&self, face: Option<Direction>) -> Vec<usize> {
         if matches!(self.kind, Kind::Furnace | Kind::Brewing | Kind::Mod) && face.is_some() {
@@ -366,20 +374,14 @@ impl Containers<'_> {
             _ => true,
         }
     }
-    /// How many of `stack` slot `slot` takes: `canPlaceItem`, then up to the slot's limit, into
-    /// an empty slot or onto the same item and components (`HopperBlockEntity.canMergeItems`).
+    /// How many of `stack` slot `slot` takes: `canPlaceItem`, then up to the slot's limit
+    /// (`Container.getMaxStackSize(stack)`: the container's and the item's, the lower).
     fn fits(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         if !self.can_place(view, slot, stack) {
             return 0;
         }
-        let max = self.max_stack(stack);
-        match self.get(view, slot) {
-            None => stack.count.min(max),
-            Some(current) if current.same_item_same_components(stack) => {
-                stack.count.min(max.saturating_sub(current.count))
-            }
-            Some(_) => 0,
-        }
+        let limit = view.slot_limit().min(self.max_stack(stack));
+        room(limit, self.get(view, slot), stack)
     }
     /// `canTakeItemThroughFace` (furnaces and brewing stands restrict it).
     fn can_take(&self, view: &View, slot: usize, stack: &ItemStack, face: Direction) -> bool {
@@ -424,6 +426,18 @@ impl Containers<'_> {
         // Mth.lerpDiscrete(total, 0, 15). A mod can write a stack over its own
         // limit, so the ratio itself is clamped, as vanilla's invariant does.
         (total.min(1.0) * 14.0).floor() as i32 + i32::from(total > 0.0)
+    }
+}
+
+/// How many of `stack` go into a slot holding `current`, up to `limit`: into an empty slot, or
+/// onto the same item and components (`HopperBlockEntity.canMergeItems`).
+fn room(limit: u32, current: Option<&ItemStack>, stack: &ItemStack) -> u32 {
+    match current {
+        None => stack.count.min(limit),
+        Some(current) if current.same_item_same_components(stack) => {
+            stack.count.min(limit.saturating_sub(current.count))
+        }
+        Some(_) => 0,
     }
 }
 
@@ -1738,7 +1752,8 @@ mod item_column_tests {
 
 #[cfg(test)]
 mod mod_container_tests {
-    use super::{Kind, ModContainer, View};
+    use super::{Kind, ModContainer, View, room};
+    use horizon_client::items::ItemStack;
     use horizon_core::geometry::Direction;
     use std::sync::Arc;
 
@@ -1766,5 +1781,29 @@ mod mod_container_tests {
         assert_eq!(view.slots_for_face(Some(Direction::North)), [1]);
         assert!(view.slots_for_face(Some(Direction::East)).is_empty());
         assert_eq!(view.slots_for_face(None), [0, 1, 2]);
+    }
+
+    /// A slot takes no more than its container's limit and the item's: one book into a chiseled
+    /// bookshelf slot of 64 offered, a chest slot 64 and then the rest of 64.
+    #[test]
+    fn a_slot_takes_up_to_its_containers_limit() {
+        let books = |count| ItemStack {
+            item: "minecraft:book".into(),
+            count,
+            damage: 0,
+            extra: None,
+        };
+        let limit = |kind| {
+            let view = View {
+                parts: vec![((0, 0, 0), 6)],
+                kind,
+                container: None,
+            };
+            view.slot_limit().min(64)
+        };
+        assert_eq!(room(limit(Kind::Bookshelf), None, &books(64)), 1);
+        assert_eq!(room(limit(Kind::Jukebox), None, &books(64)), 1);
+        assert_eq!(room(limit(Kind::Generic), None, &books(64)), 64);
+        assert_eq!(room(limit(Kind::Generic), Some(&books(60)), &books(64)), 4);
     }
 }
