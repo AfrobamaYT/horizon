@@ -7416,6 +7416,15 @@ impl Game<'_> {
     ) {
         let _ = (original_message, message, cancel);
     }
+    /// NeoForge's `ClientChatReceivedEvent`: change or suppress a received line.
+    /// @API:client_chat_received@.
+    pub(super) fn native_client_chat_received(
+        &mut self,
+        message: &mut Text,
+        cancel: &mut bool,
+    ) {
+        let _ = (message, cancel);
+    }
     /// A line in chat from the client.
     pub(super) fn native_chat(&mut self, text: &str) {
         let focused = self.screen == Screen::Chat;

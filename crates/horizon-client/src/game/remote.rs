@@ -4545,7 +4545,16 @@ impl Game<'_> {
                     }
                     return Ok(());
                 }
-                self.handle_player_chat(line, signature, trust, narration);
+                let mut line = line;
+                let mut cancel = false;
+                self.native_client_chat_received(&mut line, &mut cancel);
+                if cancel {
+                    if let Some(signature) = &signature {
+                        self.mark_message_processed(signature, false);
+                    }
+                } else {
+                    self.handle_player_chat(line, signature, trust, narration);
+                }
             }
             C::DisguisedChat(p) => {
                 let content = horizon_client::scoreboard::tag_to_json(&p.message);

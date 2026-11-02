@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "client_chat_received",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_chat_received",
+      "neoforge": "ClientChatReceivedEvent",
+      "side": "client",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A client receives a chat message (`native_client_chat_received`).",
+  "doc_summary": "A client can change or suppress a received chat line with `native_client_chat_received(message, cancel)`. Bundles need \"hooks\": @API:client_chat_received@."
+}
