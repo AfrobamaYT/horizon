@@ -537,6 +537,14 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        self.native_level_entities_in(level, min, max)
+    }
     fn level_block_shape(
         &self,
         level: LevelRef,
