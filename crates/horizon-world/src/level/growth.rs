@@ -310,7 +310,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BlockGrowFeatureEvent`: the feature `pos` grows into once mods may
     /// cancel or replace `feature`, if it is installed.
     pub(crate) fn grow_feature_event<'a>(
-        &self,
+        &mut self,
         pos: BlockPos,
         feature: &'a str,
     ) -> Option<std::borrow::Cow<'a, str>> {

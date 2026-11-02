@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "A block is about to grow into a feature (`native_block_grow_feature`).",
-  "doc_summary": "A block is about to grow into a feature: `native_block_grow_feature(dimension, pos, feature, cancel)` can cancel or replace the nullable feature key. Bundles need \"hooks\": @API:block_grow_feature@."
+  "doc_summary": "A block is about to grow into a feature: `native_block_grow_feature(dimension, pos, feature, cancel)` can cancel or replace the nullable feature key; `level.random()` exposes the growth RNG. Bundles need \"hooks\": @API:block_grow_feature@."
 }
