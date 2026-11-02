@@ -44,12 +44,17 @@ class SyncTests(unittest.TestCase):
         git(seed, "push", str(self.upstream), "main")
         self.upstream_sha = git(seed, "rev-parse", "HEAD")
         self.calls, self.open_issues = [], []
+        self.issue_thread = {"body": "", "comments": []}
         original = sync.command
 
         def command(*args):
             self.calls.append(args)
             if args[0] == "gh":
-                return json.dumps(self.open_issues) if args[1:3] == ("issue", "list") else ""
+                if args[1:3] == ("issue", "list"):
+                    return json.dumps(self.open_issues)
+                if args[1:3] == ("issue", "view"):
+                    return json.dumps(self.issue_thread)
+                return ""
             if args[:2] == ("git", "fetch"):
                 args = tuple(str(self.upstream) if arg == "https://github.com/horizon-rust/horizon.git" else arg
                              for arg in args)
@@ -109,7 +114,7 @@ class SyncTests(unittest.TestCase):
         self.assertFalse(any(call[1:3] == ("issue", "create") for call in self.calls))
         print("CONFLICT: shared.txt reported with upstream SHA; merge aborted; neither main nor staging pushed; issue commented")
 
-    def test_workflow_changes_require_agent_without_any_push(self):
+    def add_workflow_change(self):
         seed = self.work.parent / "seed"
         workflow = seed / ".github/workflows/checks.yml"
         workflow.parent.mkdir(parents=True)
@@ -118,6 +123,9 @@ class SyncTests(unittest.TestCase):
         git(seed, "commit", "-m", "change workflow")
         git(seed, "push", str(self.upstream), "main")
         self.upstream_sha = git(seed, "rev-parse", "HEAD")
+
+    def test_workflow_changes_require_agent_without_any_push(self):
+        self.add_workflow_change()
         with patch.object(sync, "verify") as check:
             self.assertEqual(sync.sync(), 1)
             check.assert_not_called()
@@ -129,6 +137,29 @@ class SyncTests(unittest.TestCase):
         self.assertIn(".github/workflows/checks.yml", issue)
         self.assertIn(self.upstream_sha, issue)
         print("WORKFLOWS: token limit detected before any push; paths/SHA reported for agent intervention")
+
+    def test_workflow_handoff_comments_only_for_unreported_upstream(self):
+        self.add_workflow_change()
+        self.open_issues = [{"number": 9, "title": sync.TITLE}]
+        for thread, expected_comments in [
+            ({"body": f"Waiting for upstream `{self.upstream_sha}`", "comments": []}, 0),
+            ({"body": "An earlier sync", "comments": [{"body": f"Upstream `{self.upstream_sha}` needs a push"}]}, 0),
+            ({"body": f"Waiting for upstream `{'0' * 40}`", "comments": []}, 1),
+        ]:
+            with self.subTest(thread=thread), patch.object(sync, "verify") as check:
+                git(self.work, "reset", "--hard", self.before)
+                self.calls.clear()
+                self.issue_thread = thread
+                self.assertEqual(sync.sync(), 1)
+                check.assert_not_called()
+                comments = [call for call in self.calls if call[1:3] == ("issue", "comment")]
+                self.assertEqual(len(comments), expected_comments)
+                if comments:
+                    self.assertIn(self.upstream_sha, comments[0][-1])
+                self.assertFalse(any(call[1:3] == ("issue", "create") for call in self.calls))
+                self.assertEqual(git(self.origin, "rev-parse", "main"), self.before)
+                self.assertEqual(git(self.origin, "for-each-ref", sync.STAGING), "")
+        print("DEDUP: same SHA in body/comment stays quiet; new SHA comments once; no pushes in either case")
 
     def test_concurrent_main_advance_is_not_overwritten(self):
         competitor = self.work.parent / "competitor"
