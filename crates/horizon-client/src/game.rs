@@ -837,6 +837,9 @@ impl Screen {
         }
     }
 }
+/// The vanilla `state` a `transformer` table entry offers to `ability`: hoe and
+/// shovel tables have one action each; the axe's strip, scrape and wax-off lists
+/// are one untagged list in `BlockTransformers.bootstrap`, so its particle names it.
 fn vanilla_tool_state(
     transformer: &str,
     particle: &str,
@@ -852,7 +855,7 @@ fn vanilla_tool_state(
         },
         "minecraft:shovel" => ShovelFlatten,
         "minecraft:hoe" => HoeTill,
-        _ => unreachable!(),
+        _ => return None,
     };
     (action == ability).then_some(state)
 }
