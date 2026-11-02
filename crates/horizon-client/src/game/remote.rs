@@ -10841,6 +10841,8 @@ mod tests {
         let names = Names::default();
         let env = Env {
             player: None,
+            player_entity_id: None,
+            side: horizon_client::menu::LogicalSide::Client,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

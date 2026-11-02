@@ -261,6 +261,88 @@ impl View<'_> {
     }
 }
 
+struct HostedSlotView<'a, 'v> {
+    view: &'a mut View<'v>,
+    slot: usize,
+    rules: &'a dyn Rules,
+}
+
+impl crate::menu::SlotView for HostedSlotView<'_, '_> {
+    fn item(&self) -> Option<ItemStack> {
+        self.view.get(self.slot)
+    }
+    fn may_place(&self, stack: &ItemStack) -> bool {
+        self.view.may_place(self.slot, stack, self.rules)
+    }
+    fn may_pickup(&self) -> bool {
+        self.view.container.is_some()
+            || !(5..=8).contains(&self.slot)
+            || self.view.guest.creative()
+            || self
+                .view
+                .get(self.slot)
+                .is_none_or(|s| s.enchantment_level("minecraft:binding_curse") == 0)
+    }
+    fn allow_modification(&self) -> bool {
+        let item = self
+            .item()
+            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+        self.may_pickup() && self.may_place(&item)
+    }
+    fn safe_insert(&mut self, mut stack: Option<ItemStack>, count: u32) -> Option<ItemStack> {
+        let Some(input) = stack.as_mut() else {
+            return stack;
+        };
+        if !self.may_place(input) {
+            return stack;
+        }
+        let current = self.item();
+        let have = current.as_ref().map_or(0, |s| s.count);
+        let moved = count.min(input.count).min(
+            self.view
+                .slot_max(self.slot, input, self.rules)
+                .saturating_sub(have),
+        );
+        if moved == 0 {
+            return stack;
+        }
+        match current {
+            None => {
+                let mut part = input.clone();
+                part.count = moved;
+                input.count -= moved;
+                self.view.set(self.slot, Some(part));
+            }
+            Some(mut current) if current.same_item_same_components(input) => {
+                current.count += moved;
+                input.count -= moved;
+                self.view.set(self.slot, Some(current));
+            }
+            Some(_) => {}
+        }
+        if input.count == 0 { None } else { stack }
+    }
+    fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack> {
+        if !self.may_pickup() {
+            return None;
+        }
+        let mut current = self.item()?;
+        if !self.allow_modification() && max < current.count {
+            return None;
+        }
+        let moved = count.min(max).min(current.count);
+        if moved == 0 {
+            return None;
+        }
+        let mut taken = current.clone();
+        taken.count = moved;
+        current.count -= moved;
+        self.view
+            .set(self.slot, (current.count > 0).then_some(current));
+        Some(taken)
+    }
+}
+
 /// Inventory index of the n-th player slot of a container menu (27 main, then hotbar).
 fn player_slot(n: usize) -> usize {
     if n < 27 { 9 + n } else { n - 27 }
@@ -494,20 +576,29 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
                 },
             ),
         };
-        let mut clicked = view.get(i);
+        let player = view.guest.uuid;
+        let player_entity_id = view.guest.entity_id;
+        let mut carried = view.guest.carried.take();
+        let mut slot_view = HostedSlotView {
+            view,
+            slot: i,
+            rules,
+        };
         let mut event = crate::menu::StackedOnOther {
-            player: Some(view.guest.uuid),
+            player: Some(player),
+            player_entity_id: Some(player_entity_id),
             slot: i,
             container,
             container_slot,
             primary: !right,
-            carried: &mut view.guest.carried,
-            clicked: &mut clicked,
+            side: crate::menu::LogicalSide::Server,
+            carried: crate::menu::CarriedAccess(&mut carried),
+            clicked: &mut slot_view,
             cancellation_result: false,
         };
         crate::menu::native_item_stacked_on_other(&mut event, &mut canceled);
         handled = event.cancellation_result;
-        view.set(i, clicked);
+        view.guest.carried = carried;
     }
     let handled = if canceled {
         handled
@@ -866,6 +957,32 @@ mod tests {
                 .map(|s| (s.item.to_string(), s.count))
                 .collect()
         })
+    }
+
+    #[test]
+    fn hosted_slot_view_respects_limits_and_transfers() {
+        use crate::menu::SlotView;
+        let Some(rules) = rules() else { return };
+        let mut guest = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 60))];
+        let mut view = View {
+            guest: &mut guest,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        let mut slot = HostedSlotView {
+            view: &mut view,
+            slot: 0,
+            rules: &rules,
+        };
+        let rest = slot
+            .safe_insert(Some(ItemStack::new("minecraft:stone", 10)), 10)
+            .unwrap();
+        assert_eq!(rest.count, 6);
+        assert_eq!(slot.item().unwrap().count, 64);
+        assert_eq!(slot.safe_take(8, 3).unwrap().count, 3);
+        assert_eq!(slot.item().unwrap().count, 61);
     }
 
     #[test]

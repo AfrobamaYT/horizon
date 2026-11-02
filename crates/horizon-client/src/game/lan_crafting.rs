@@ -90,6 +90,12 @@ impl Game<'_> {
             player: self
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
+            player_entity_id: Some(self.own_entity_id()),
+            side: if self.serving.is_some() {
+                horizon_client::menu::LogicalSide::Server
+            } else {
+                horizon_client::menu::LogicalSide::Client
+            },
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -122,6 +128,8 @@ impl Game<'_> {
         });
         let env = Env {
             player: Some(host.hub.guests[gi].uuid),
+            player_entity_id: Some(host.hub.guests[gi].entity_id),
+            side: horizon_client::menu::LogicalSide::Server,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             ..self.menu_env()
         };
