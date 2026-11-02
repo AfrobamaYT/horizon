@@ -8126,6 +8126,9 @@ impl Game<'_> {
     /// the main hand's item, then the off hand's turn (its block, its item).
     /// The server does each packet's part with that packet's hand only.
     fn remote_use_hands(&mut self) {
+        if !self.entity_targeted() && self.pick().is_none() && self.held().is_none() {
+            self.native_right_click_empty(Hand::Main);
+        }
         // A successful Item.use always drops the hand (LocalPlayer.itemUsed).
         if self.remote_use_item(Hand::Main) {
             self.heights.item_used(Hand::Main);
@@ -8145,6 +8148,9 @@ impl Game<'_> {
         };
         if off_target {
             return;
+        }
+        if !self.entity_targeted() && self.pick().is_none() && self.offhand.is_none() {
+            self.native_right_click_empty(Hand::Off);
         }
         if self.remote_use_item(Hand::Off) {
             self.heights.item_used(Hand::Off);
