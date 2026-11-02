@@ -3582,7 +3582,16 @@ impl Game<'_> {
         problem: Option<SleepProblem>,
         may_continue: &mut Option<bool>,
     ) {
-        let _ = (entity, name, kind, pos, problem, may_continue);
+        mod_api::dispatch_can_continue_sleeping(
+            self,
+            mod_api::mods(),
+            entity,
+            name,
+            kind,
+            pos,
+            problem,
+            may_continue,
+        );
     }
     /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
     /// spawn near a non-spectator server player, before its difficulty and rest rolls.
@@ -3598,7 +3607,15 @@ impl Game<'_> {
         result: &mut Option<PhantomSpawnResult>,
         phantoms: &mut Option<i32>,
     ) {
-        let _ = (player, name, pos, result, phantoms);
+        mod_api::dispatch_player_spawn_phantoms(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            pos,
+            phantoms,
+            result,
+        );
     }
     /// A server player's book edit or signing packet is about to be applied.
     /// `pages` is its page count; `signing` means the packet has a title. Set

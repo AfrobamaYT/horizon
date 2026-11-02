@@ -2634,6 +2634,26 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// `CanContinueSleepingEvent`: a sleeping living entity's check that it may go on
+    /// sleeping, run each tick for a server player the dead and health checks would not
+    /// already wake, and for a sleeping villager or wandering trader. `entity` is its UUID,
+    /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
+    /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
+    /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
+    /// none when nothing is wrong. `may_continue` starts empty, meaning `problem.is_none()` (`mayContinueSleeping`);
+    /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
+    /// on a guest tick. @API:can_continue_sleeping@.
+    ///
+    /// Return `Some` to set `may_continue`; the first mod returning `Some` wins.
+    fn can_continue_sleeping(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CanContinueSleepingEvent<'_>,
+    ) -> Option<bool> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// On an authoritative server, a cauldron at `pos` is about to change
     /// fill level from `from_level` to `to_level` for `reason`. Set `cancel`
     /// to leave it unchanged. @API:cauldron_level_changed@.
@@ -3970,6 +3990,23 @@ pub trait Hooks: Send + Sync {
     fn player_shield_disable(&self, host: &mut dyn Host, event: &mut PlayerShieldDisableEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
+    /// spawn near a non-spectator server player, before its difficulty and rest rolls.
+    /// `result` starts empty, meaning `Default` (skylight and sea level check); `Allow` skips
+    /// that check and `Deny` stops the attempt. `phantoms` starts empty, meaning vanilla's group size,
+    /// which is drawn later to keep its random order; set it to override the count.
+    /// @API:player_spawn_phantoms@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn player_spawn_phantoms(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerSpawnPhantomsEvent<'_>,
+    ) -> Option<PhantomSpawnResult> {
+        let _ = host;
+        let _ = event;
+        None
     }
     /// A server player's respawn point is about to change. `cause` is `bed`,
     /// `respawn_anchor`, `command` or `death_reset`; `pos` is its block
@@ -9122,6 +9159,42 @@ pub fn dispatch_campfire_start(
         mod_hook.campfire_start(host, &mut event);
     }
 }
+/// What [`Hooks::can_continue_sleeping`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CanContinueSleepingEvent<'a> {
+    pub entity: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub problem: Option<SleepProblem>,
+}
+pub fn dispatch_can_continue_sleeping(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u128,
+    name: &str,
+    kind: &str,
+    pos: [i32; 3],
+    problem: Option<SleepProblem>,
+    may_continue: &mut Option<bool>,
+) {
+    if may_continue.is_some() {
+        return;
+    }
+    let mut event = CanContinueSleepingEvent {
+        entity,
+        name,
+        kind,
+        pos,
+        problem,
+    };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.can_continue_sleeping(host, &mut event) {
+            *may_continue = Some(replacement);
+            break;
+        }
+    }
+}
 /// What [`Hooks::cauldron_level_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct CauldronLevelChangedEvent<'a> {
@@ -12103,6 +12176,39 @@ pub fn dispatch_player_shield_disable(
     };
     for mod_hook in mods {
         mod_hook.player_shield_disable(host, &mut event);
+    }
+}
+/// What [`Hooks::player_spawn_phantoms`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSpawnPhantomsEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub phantoms: &'a mut Option<i32>,
+}
+pub fn dispatch_player_spawn_phantoms(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    phantoms: &mut Option<i32>,
+    result: &mut Option<PhantomSpawnResult>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PlayerSpawnPhantomsEvent {
+        player,
+        name,
+        pos,
+        phantoms,
+    };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.player_spawn_phantoms(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
     }
 }
 /// What [`Hooks::player_spawn_point_set`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
