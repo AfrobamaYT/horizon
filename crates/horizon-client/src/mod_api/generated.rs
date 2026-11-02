@@ -424,7 +424,9 @@ pub trait Hooks: Send + Sync {
     /// `ItemStack.useOn` starts. Set `claimed` to take the use: the hand
     /// swings and neither the item's `useOn` nor its `use` runs.
     /// Server-side, for every player of the world (the helpers read the
-    /// acting one); an item on cooldown is never used. API 13.
+    /// acting one); an item on cooldown is never used. API 13. `hand`, `hit`
+    /// (`UseOnContext.getClickLocation`, `getClickedFace`, `isInside`) and
+    /// `player`, the acting player's UUID, since API @API:block_use_context@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `claimed`, and later mods are skipped.
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
@@ -471,7 +473,9 @@ pub trait Hooks: Send + Sync {
     /// `native_use_item_on`. Set `canceled` to stop the click: neither the
     /// block nor the item acts, the hand doesn't swing, and a guest sees the
     /// block as it is. Server-side, for every player of the world
-    /// (`native_acting_player` says who), once per hand. API 21.
+    /// (`native_acting_player` says who), once per hand. API 21. `hand`,
+    /// `hit` (the packet's `BlockHitResult`) and `player`, the acting
+    /// player's UUID, since API @API:block_use_context@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn right_click_block(&self, host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
@@ -5150,7 +5154,9 @@ pub trait ItemPart: Send + Sync + 'static {
     /// `ItemStack.useOn` starts. Set `claimed` to take the use: the hand
     /// swings and neither the item's `useOn` nor its `use` runs.
     /// Server-side, for every player of the world (the helpers read the
-    /// acting one); an item on cooldown is never used. API 13.
+    /// acting one); an item on cooldown is never used. API 13. `hand`, `hit`
+    /// (`UseOnContext.getClickLocation`, `getClickedFace`, `isInside`) and
+    /// `player`, the acting player's UUID, since API @API:block_use_context@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `claimed`, and later mods are skipped.
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
@@ -6225,6 +6231,9 @@ pub struct UseItemOnEvent<'a> {
     pub stack: &'a ItemStack,
     pub pos: [i32; 3],
     pub face: [i32; 3],
+    pub hand: Hand,
+    pub hit: BlockHit,
+    pub player: u128,
 }
 pub fn dispatch_use_item_on(
     host: &mut dyn Host,
@@ -6232,6 +6241,9 @@ pub fn dispatch_use_item_on(
     stack: &ItemStack,
     pos: [i32; 3],
     face: [i32; 3],
+    hand: Hand,
+    hit: BlockHit,
+    player: u128,
     claimed: &mut bool,
 ) {
     if *claimed {
@@ -6239,7 +6251,14 @@ pub fn dispatch_use_item_on(
     }
     let part_table = super::parts("use_item_on");
     let parts = part_table.item(|| Some(&*stack.item));
-    let mut event = UseItemOnEvent { stack, pos, face };
+    let mut event = UseItemOnEvent {
+        stack,
+        pos,
+        face,
+        hand,
+        hit,
+        player,
+    };
     'hook: {
         for mod_hook in super::entered(mods, "use_item_on") {
             if matches!(mod_hook.use_item_on(host, &mut event), Flow::Cancel) {
@@ -6335,18 +6354,30 @@ pub fn dispatch_place_block(
 pub struct RightClickBlockEvent {
     pub pos: [i32; 3],
     pub face: [i32; 3],
+    pub hand: Hand,
+    pub hit: BlockHit,
+    pub player: u128,
 }
 pub fn dispatch_right_click_block(
     host: &mut dyn Host,
     mods: &[Box<dyn Hooks>],
     pos: [i32; 3],
     face: [i32; 3],
+    hand: Hand,
+    hit: BlockHit,
+    player: u128,
     canceled: &mut bool,
 ) {
     if *canceled {
         return;
     }
-    let mut event = RightClickBlockEvent { pos, face };
+    let mut event = RightClickBlockEvent {
+        pos,
+        face,
+        hand,
+        hit,
+        player,
+    };
     for mod_hook in super::entered(mods, "right_click_block") {
         if matches!(mod_hook.right_click_block(host, &mut event), Flow::Cancel) {
             *canceled = true;

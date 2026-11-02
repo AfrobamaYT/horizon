@@ -1,0 +1,5 @@
+{
+  "hooks": [],
+  "rust_summary": "the hand, the hit and the acting player's UUID to `native_use_item_on` and\n`native_right_click_block` (`hand`, `hit`, `player`).",
+  "doc_summary": "the hand, the hit and the acting player to the two block-use hooks: `native_use_item_on(stack, pos, face, hand, hit, player, claimed)` and `native_right_click_block(pos, face, hand, hit, player, canceled)`, so trait mods read `event.hand`, `event.hit` and `event.player`. `hit` is a `BlockHit` (`BlockHitResult`): the point clicked in world coordinates, the face and whether the ray started inside the block. `player` is the acting player's UUID, the key `native_server_players` and `native_tell` use. The old parameters keep their names and order, with the new ones after `face`. Bundles need \"hooks\": @API:block_use_context@."
+}

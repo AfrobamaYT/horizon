@@ -650,6 +650,29 @@ pub enum Flow {
     Cancel,
 }
 
+/// Where a block use clicked, as vanilla's `BlockHitResult` says it. Fields
+/// may be added: build one with [`BlockHit::new`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct BlockHit {
+    /// The point clicked, in world coordinates (`getLocation`).
+    pub point: [f64; 3],
+    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`), the same
+    /// as the event's `face`.
+    pub face: [i32; 3],
+    /// The ray started inside the block's shape (`isInside`).
+    pub inside: bool,
+}
+impl BlockHit {
+    pub const fn new(point: [f64; 3], face: [i32; 3], inside: bool) -> Self {
+        Self {
+            point,
+            face,
+            inside,
+        }
+    }
+}
+
 mod generated_host;
 pub use generated_host::Host;
 
@@ -863,7 +886,19 @@ mod tests {
                 lines: Vec::new(),
             };
             let mut claimed = false;
-            dispatch_use_item_on(&mut host, &mods, &stack, [1, 2, 3], [0, 1, 0], &mut claimed);
+            let (pos, face) = ([1, 2, 3], [0, 1, 0]);
+            let hit = top_hit();
+            dispatch_use_item_on(
+                &mut host,
+                &mods,
+                &stack,
+                pos,
+                face,
+                Hand::Main,
+                hit,
+                7,
+                &mut claimed,
+            );
             assert_eq!(claimed, expected, "{block}");
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
@@ -881,6 +916,64 @@ mod tests {
             lines: Vec::new(),
         };
         let mut claimed = false;
-        dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+        let (pos, face) = ([0; 3], [0, 1, 0]);
+        dispatch_use_item_on(
+            &mut host,
+            &mods,
+            &stick(),
+            pos,
+            face,
+            Hand::Main,
+            top_hit(),
+            7,
+            &mut claimed,
+        );
+    }
+
+    /// The top of the block at the origin, clicked in its middle.
+    fn top_hit() -> BlockHit {
+        BlockHit::new([0.5, 1.0, 0.5], [0, 1, 0], false)
+    }
+
+    /// Takes a click with the off hand on a block's top half.
+    struct OffHandTop;
+
+    impl Hooks for OffHandTop {
+        fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+            let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
+            if event.hand == Hand::Off && top_half && event.player == 7 && !event.hit.inside {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    #[test]
+    fn a_block_use_hears_the_hand_the_hit_and_the_player() {
+        let mods = [Box::new(OffHandTop) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
+        for (hand, hit, expected) in [
+            (Hand::Off, top_hit(), true),
+            (Hand::Main, top_hit(), false),
+            (Hand::Off, low, false),
+        ] {
+            let mut canceled = false;
+            dispatch_right_click_block(
+                &mut host,
+                &mods,
+                [0; 3],
+                hit.face,
+                hand,
+                hit,
+                7,
+                &mut canceled,
+            );
+            assert_eq!(canceled, expected, "{hand:?} {hit:?}");
+        }
     }
 }
