@@ -42,7 +42,7 @@ use horizon_protocol::{
     text::{Language, plain},
 };
 use horizon_world::{
-    level::InteractionResult,
+    level::{InteractionResult, LevelAccess},
     nbt::Tag,
     registry::BlockStateId,
     stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
