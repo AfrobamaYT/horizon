@@ -109,6 +109,26 @@ class SyncTests(unittest.TestCase):
         self.assertFalse(any(call[1:3] == ("issue", "create") for call in self.calls))
         print("CONFLICT: shared.txt reported with upstream SHA; merge aborted; neither main nor staging pushed; issue commented")
 
+    def test_workflow_changes_require_agent_without_any_push(self):
+        seed = self.work.parent / "seed"
+        workflow = seed / ".github/workflows/checks.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("name: checks\n")
+        git(seed, "add", ".")
+        git(seed, "commit", "-m", "change workflow")
+        git(seed, "push", str(self.upstream), "main")
+        self.upstream_sha = git(seed, "rev-parse", "HEAD")
+        with patch.object(sync, "verify") as check:
+            self.assertEqual(sync.sync(), 1)
+            check.assert_not_called()
+        self.assertEqual(git(self.origin, "rev-parse", "main"), self.before)
+        self.assertEqual(git(self.origin, "for-each-ref", sync.STAGING), "")
+        issue = next(call[-1] for call in self.calls if call[1:3] == ("issue", "create"))
+        self.assertIn("Upstream changed workflow files; an agent must push this one", issue)
+        self.assertIn(".github/workflows/checks.yml", issue)
+        self.assertIn(self.upstream_sha, issue)
+        print("WORKFLOWS: token limit detected before any push; paths/SHA reported for agent intervention")
+
     def test_concurrent_main_advance_is_not_overwritten(self):
         competitor = self.work.parent / "competitor"
         subprocess.run(["git", "clone", "--branch", "main", str(self.origin), str(competitor)],

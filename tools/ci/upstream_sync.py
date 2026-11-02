@@ -68,6 +68,7 @@ def sync():
     upstream = "unavailable (fetch did not complete)"
     promoted = False
     try:
+        base = command("git", "rev-parse", "HEAD")
         command("git", "fetch", "--no-tags", "https://github.com/horizon-rust/horizon.git",
                 "+refs/heads/main:refs/remotes/upstream/main")
         upstream = command("git", "rev-parse", "upstream/main")
@@ -81,6 +82,11 @@ def sync():
         if result.returncode == 3 and issue is None:
             return 0
         head = command("git", "rev-parse", "HEAD")
+        workflows = command("git", "diff", "--name-only", base, head, "--", ".github/workflows")
+        if workflows:
+            raise RuntimeError("Upstream changed workflow files; an agent must push this one. "
+                               "GITHUB_TOKEN cannot update .github/workflows/ without workflows permission."
+                               f"\n\n```text\n{workflows}\n```")
         previous = command("git", "ls-remote", "--heads", "origin", STAGING).split()
         lease = previous[0] if previous else ""
         # Only the automation-owned side branch can be replaced. Main is never forced;
