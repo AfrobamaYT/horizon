@@ -2842,6 +2842,19 @@ impl Mob {
         if amount < 0.0 {
             amount = 0.0;
         }
+        // LivingEntity.applyItemBlocking: no mob raises a blocking item, but a native
+        // mod may block for it.
+        let blocked = if amount > 0.0 {
+            crate::health::shield_block(
+                crate::health::Hurting::Mob(self, &source),
+                amount,
+                crate::health::no_block(amount),
+            )
+            .map_or(0.0, |b| b.blocked_damage)
+        } else {
+            0.0
+        };
+        amount -= blocked;
         // #damages_helmet: falling anvils, blocks and stalactites.
         if matches!(
             source.kind,
@@ -2985,9 +2998,10 @@ impl Mob {
                 self.ai.last_hurt_by_player = 100;
             }
         }
-        // dealDefaultKnockback, unless the damage type is tagged no_knockback;
-        // a source without a position knocks in a random direction.
-        if knock && !source.no_knockback() {
+        // dealDefaultKnockback, unless the damage type is tagged no_knockback or
+        // the hit was blocked whole; a source without a position knocks in a
+        // random direction.
+        if knock && !source.no_knockback() && !(blocked > 0.0 && amount <= 0.0) {
             // dealDefaultKnockback: a projectile knocks the way it travelled
             // (`calculateHorizontalHurtKnockbackDirection`), else from the source's position.
             let (dx, dz) = match self.projectile_motion {
@@ -3052,7 +3066,8 @@ impl Mob {
         if self.species() == Species::GlowSquid {
             aquatic::hurt_server(self);
         }
-        true
+        // A hit blocked whole is not a success.
+        blocked <= 0.0 || amount > 0.0
     }
     /// A splash or cloud's harming effect on this mob: the potion's
     /// `indirect_magic` is in `#witch_resistant_to`, so a witch takes 15%.

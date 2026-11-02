@@ -6187,20 +6187,22 @@ impl Game<'_> {
             canceled,
         );
     }
-    /// NeoForge's `LivingShieldBlockEvent`: player `entity` is hit for `damage` of
-    /// `damage_type` (`minecraft:mob_attack`) by `causing` (`DamageSource.getEntity`, 0
-    /// for none or not known), and `LivingEntity.applyItemBlocking` is about to resolve
-    /// what a raised `blocks_attacks` item stops. Every hit with damage asks, raised item
-    /// or not: `original_blocked` is whether vanilla blocks. Change `block`: `blocked`
-    /// makes the player block or not (a block forced on a hit vanilla lets through stops
-    /// all of it), `blocked_damage` what is stopped (kept within 0 and `damage`) and
-    /// `shield_damage` the durability the raised item loses. Set `canceled` and nothing
-    /// is blocked. Mobs are not asked. No `self`, as `native_living_incoming_damage`: the
-    /// game is in the middle of the hit. @API:living_shield_block@.
+    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
+    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
+    /// type and entities, as `native_living_incoming_damage` names them), and
+    /// `LivingEntity.applyItemBlocking` is
+    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
+    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
+    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
+    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
+    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
+    /// item loses. Set `canceled` and nothing is blocked. No `self`, as
+    /// `native_living_incoming_damage`: the game is in the middle of the hit.
+    /// @API:living_shield_block@.
     pub(super) fn native_living_shield_block(
         entity: i32,
-        damage_type: &str,
-        causing: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
         damage: f32,
         original_blocked: bool,
         block: &mut ShieldBlock,
@@ -6209,8 +6211,8 @@ impl Game<'_> {
         mod_api::dispatch_living_shield_block(
             mod_api::mods(),
             entity,
-            damage_type,
-            causing,
+            kind,
+            source,
             damage,
             original_blocked,
             block,
@@ -6376,19 +6378,20 @@ impl Game<'_> {
 }
 
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
-/// canceled the block. Its one caller.
+/// canceled the block. Its one caller. The hurt entity and the source are named as the
+/// damage hook names them.
 pub(super) fn shield_block(
-    entity: i32,
-    source: HurtSource<'_>,
+    hurting: Hurting<'_>,
     damage: f32,
     original_blocked: bool,
     block: &mut ShieldBlock,
 ) -> bool {
+    let (entity, kind, source) = hurt_server_args(hurting);
     let mut canceled = false;
     Game::native_living_shield_block(
         entity,
-        source.damage_type,
-        source.causing,
+        kind,
+        &source,
         damage,
         original_blocked,
         block,

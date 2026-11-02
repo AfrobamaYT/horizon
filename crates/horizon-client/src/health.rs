@@ -80,11 +80,41 @@ pub struct ShieldBlock {
     pub shield_damage: i32,
 }
 /// The game's native shield hook (`native_living_shield_block`), set once by the game:
-/// `LivingEntity.applyItemBlocking` before it resolves a player's block, for the player's
-/// entity id, the hit's source and damage, and whether vanilla blocks. It may change the
-/// [`ShieldBlock`]; true cancels the block.
-pub static SHIELD_BLOCK: OnceLock<fn(i32, HurtSource<'_>, f32, bool, &mut ShieldBlock) -> bool> =
+/// `LivingEntity.applyItemBlocking` of a hit with damage, for what it hurts, the damage
+/// and whether vanilla blocks. It may change the [`ShieldBlock`]; true cancels the block.
+pub static SHIELD_BLOCK: OnceLock<fn(Hurting<'_>, f32, bool, &mut ShieldBlock) -> bool> =
     OnceLock::new();
+/// What `applyItemBlocking` stops of `damage` (above 0) once [`SHIELD_BLOCK`] had its say
+/// on `vanilla`, the block vanilla resolved: none when the hook cancels or unblocks it.
+pub fn shield_block(
+    hurting: Hurting<'_>,
+    damage: f32,
+    vanilla: ShieldBlock,
+) -> Option<ShieldBlock> {
+    let mut block = vanilla;
+    let canceled = SHIELD_BLOCK
+        .get()
+        .is_some_and(|hook| hook(hurting, damage, vanilla.blocked, &mut block));
+    if canceled || !block.blocked {
+        return None;
+    }
+    // A value a mod leaves that is not a number stops nothing.
+    block.blocked_damage = if block.blocked_damage.is_nan() {
+        0.0
+    } else {
+        block.blocked_damage.clamp(0.0, damage)
+    };
+    Some(block)
+}
+/// The block an entity with no raised item is asked about: none, and one a mod forces
+/// stops the whole hit.
+pub fn no_block(damage: f32) -> ShieldBlock {
+    ShieldBlock {
+        blocked: false,
+        blocked_damage: damage,
+        shield_damage: 0,
+    }
+}
 /// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
 /// value it leaves that is not a finite number is put back as it was.
 pub fn knockback_canceled(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
@@ -833,32 +863,31 @@ impl HurtWorld for Environment<'_> {
             }
             _ => 0.0,
         };
-        let mut block = ShieldBlock {
-            blocked: vanilla > 0.0,
-            // A block forced on a hit vanilla lets through stops it whole.
-            blocked_damage: if vanilla > 0.0 { vanilla } else { damage },
-            shield_damage: self
-                .blocking
-                .as_ref()
-                .map_or(0, |b| b.rules.item_damage.apply(vanilla)),
+        let shield_damage = self
+            .blocking
+            .as_ref()
+            .map_or(0, |b| b.rules.item_damage.apply(vanilla));
+        let block = if vanilla > 0.0 {
+            ShieldBlock {
+                blocked: true,
+                blocked_damage: vanilla,
+                shield_damage,
+            }
+        } else {
+            ShieldBlock {
+                shield_damage,
+                ..no_block(damage)
+            }
         };
         let source = HurtSource {
             damage_type: &self.source.definition().name,
             causing: self.causing,
             direct: 0,
         };
-        let canceled = SHIELD_BLOCK
-            .get()
-            .is_some_and(|hook| hook(self.entity, source, damage, vanilla > 0.0, &mut block));
-        if canceled || !block.blocked {
+        let Some(block) = shield_block(Hurting::Player(self.entity, source), damage, block) else {
             return Ok(0.0);
-        }
-        // A value a mod leaves that is not a number stops nothing.
-        self.blocked = if block.blocked_damage.is_nan() {
-            0.0
-        } else {
-            block.blocked_damage.clamp(0.0, damage)
         };
+        self.blocked = block.blocked_damage;
         self.shield_damage = block.shield_damage;
         self.fully_blocked = self.blocked >= damage;
         Ok(self.blocked)

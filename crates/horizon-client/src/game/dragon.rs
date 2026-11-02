@@ -568,6 +568,14 @@ impl Dragon {
         if damage < 0.0 {
             damage = 0.0;
         }
+        // LivingEntity.applyItemBlocking: the dragon raises nothing, but a native
+        // mod may block for it.
+        if damage > 0.0 {
+            let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
+            let block = horizon_client::health::no_block(damage);
+            damage -= horizon_client::health::shield_block(hurting, damage, block)
+                .map_or(0.0, |b| b.blocked_damage);
+        }
         if !damage.is_finite() {
             damage = f32::MAX;
         }

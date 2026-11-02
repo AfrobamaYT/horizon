@@ -3084,16 +3084,18 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
-    /// NeoForge's `LivingShieldBlockEvent`: player `entity` is hit for `damage` of
-    /// `damage_type` (`minecraft:mob_attack`) by `causing` (`DamageSource.getEntity`, 0
-    /// for none or not known), and `LivingEntity.applyItemBlocking` is about to resolve
-    /// what a raised `blocks_attacks` item stops. Every hit with damage asks, raised item
-    /// or not: `original_blocked` is whether vanilla blocks. Change `block`: `blocked`
-    /// makes the player block or not (a block forced on a hit vanilla lets through stops
-    /// all of it), `blocked_damage` what is stopped (kept within 0 and `damage`) and
-    /// `shield_damage` the durability the raised item loses. Set `canceled` and nothing
-    /// is blocked. Mobs are not asked. No `self`, as `native_living_incoming_damage`: the
-    /// game is in the middle of the hit. @API:living_shield_block@.
+    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
+    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
+    /// type and entities, as `native_living_incoming_damage` names them), and
+    /// `LivingEntity.applyItemBlocking` is
+    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
+    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
+    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
+    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
+    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
+    /// item loses. Set `canceled` and nothing is blocked. No `self`, as
+    /// `native_living_incoming_damage`: the game is in the middle of the hit.
+    /// @API:living_shield_block@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn living_shield_block(&self, event: &mut LivingShieldBlockEvent<'_>) -> Flow {
@@ -10339,8 +10341,8 @@ pub fn dispatch_lightning_strike(
 #[non_exhaustive]
 pub struct LivingShieldBlockEvent<'a> {
     pub entity: i32,
-    pub damage_type: &'a str,
-    pub causing: i32,
+    pub kind: &'a str,
+    pub source: &'a HurtSource<'a>,
     pub damage: f32,
     pub original_blocked: bool,
     pub block: &'a mut ShieldBlock,
@@ -10348,8 +10350,8 @@ pub struct LivingShieldBlockEvent<'a> {
 pub fn dispatch_living_shield_block(
     mods: &[Box<dyn Hooks>],
     entity: i32,
-    damage_type: &str,
-    causing: i32,
+    kind: &str,
+    source: &HurtSource<'_>,
     damage: f32,
     original_blocked: bool,
     block: &mut ShieldBlock,
@@ -10360,8 +10362,8 @@ pub fn dispatch_living_shield_block(
     }
     let mut event = LivingShieldBlockEvent {
         entity,
-        damage_type,
-        causing,
+        kind,
+        source,
         damage,
         original_blocked,
         block,
