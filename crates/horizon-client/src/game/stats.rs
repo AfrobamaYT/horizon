@@ -459,13 +459,9 @@ impl Game<'_> {
         {
             return;
         }
-        // `1 + nextInt(difficulty id + 1)`, drawn even when a mod set the count, so the
-        // level's random stays in vanilla's order.
-        let drawn = 1 + self
-            .world
-            .random
-            .next_int_bound(i32::from(difficulty.id) + 1)
-            .unwrap_or(0);
+        // Drawn even when a mod set the count, so the level's random stays in
+        // vanilla's order.
+        let drawn = 1 + self.world.random.next_int_bound(3).unwrap_or(0);
         let group = phantoms.unwrap_or(drawn);
         for _ in 0..group {
             let _ = self.spawn_mob(
