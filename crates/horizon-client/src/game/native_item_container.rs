@@ -104,6 +104,42 @@ fn insert_one(
     Some((moved, with_contents(stack, &slots)))
 }
 
+/// As much of `item` as slot `slot` of one item of `stack` takes, the slot topped up when it
+/// holds the same item and components, filled when empty, never past `limit`; none into a slot
+/// past the item's slots, or holding another item. The count that went in, and the item it
+/// becomes.
+fn insert_into(
+    stack: &ItemStack,
+    size: Option<u32>,
+    slot: usize,
+    item: &ItemStack,
+    limit: u32,
+) -> Option<(u32, ItemStack)> {
+    let size = size?;
+    if stack.count == 0 {
+        return None;
+    }
+    let mut slots = contents(stack, size);
+    let room = match slots.get(slot) {
+        _ if !horizon_client::menu::fits_inside_container_items(item) => 0,
+        Some(None) => limit,
+        Some(Some(held)) if held.same_item_same_components(item) => {
+            limit.saturating_sub(held.count)
+        }
+        _ => 0,
+    };
+    let put = room.min(item.count);
+    if put == 0 {
+        return Some((0, one_of(stack)));
+    }
+    let held = slots[slot].get_or_insert_with(|| ItemStack {
+        count: 0,
+        ..item.clone()
+    });
+    held.count += put;
+    Some((put, with_contents(stack, &slots)))
+}
+
 /// Up to `max` out of `slot` of one item of `stack`: what came out (none
 /// when nothing did), and the item it becomes.
 fn extract_one(
@@ -186,6 +222,19 @@ impl Game<'_> {
         let size = self.item_container_size(&stack.item);
         insert_one(stack, size, item, self.item_container_limit(item))
     }
+    /// `ResourceHandler.insert(index, …)`: as `native_item_container_insert`,
+    /// into slot `slot` alone: topped up when it holds the same item and
+    /// components, filled when empty. Nothing goes into a slot past the
+    /// item's slots or holding another item.
+    pub(in crate::game) fn native_item_container_insert_slot(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        let size = self.item_container_size(&stack.item);
+        insert_into(stack, size, slot, item, self.item_container_limit(item))
+    }
     /// `ResourceHandler.extract`: up to `max` out of slot `slot` of one item
     /// of `stack`. What came out (none when the slot is empty or past the
     /// item's slots), and the single item it becomes. The stack given is not
@@ -238,6 +287,32 @@ mod tests {
                 (0, "minecraft:stone".into(), 64),
                 (1, "minecraft:dirt".into(), 5),
                 (2, "minecraft:stone".into(), 6),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_insert_into_a_slot_goes_there_alone() {
+        let (moved, one) =
+            insert_into(&bag(1), Some(2), 1, &of("minecraft:stone", 70), 64).unwrap();
+        // Slot 1, not the first empty one, and only up to its limit.
+        assert_eq!(moved, 64);
+        assert_eq!(held(&one, 2), [(1, "minecraft:stone".into(), 64)]);
+        let (moved, one) = insert_into(&one, Some(2), 1, &of("minecraft:stone", 10), 64).unwrap();
+        assert_eq!((moved, held(&one, 2).len()), (0, 1));
+        // Another item, or a slot past the item's, takes nothing.
+        for slot in [1, 2] {
+            let (moved, _) =
+                insert_into(&one, Some(2), slot, &of("minecraft:dirt", 1), 64).unwrap();
+            assert_eq!(moved, 0);
+        }
+        let (moved, one) = insert_into(&one, Some(2), 0, &of("minecraft:dirt", 1), 64).unwrap();
+        assert_eq!(moved, 1);
+        assert_eq!(
+            held(&one, 2),
+            [
+                (0, "minecraft:dirt".into(), 1),
+                (1, "minecraft:stone".into(), 64)
             ]
         );
     }

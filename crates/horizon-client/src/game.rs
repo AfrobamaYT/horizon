@@ -3973,6 +3973,15 @@ impl Game<'_> {
         self.native_item_dropped(player, &thrown.item, thrown.count);
         self.throw_from_eyes(thrown, eye, true);
     }
+    /// `Player.drop(stack, false)`: what no longer fits in the inventory, thrown from the eyes
+    /// with the main hand's swing, and no thrower, statistic or drop hook.
+    pub(super) fn drop_plain(&mut self, stack: ItemStack) {
+        let Some(eye) = self.eye_position() else {
+            return;
+        };
+        self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
+        self.throw_from_eyes(stack, eye, false);
+    }
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
     /// along the view direction. `thrown_from_hand` (`drop(stack, true)`, the
     /// drop key) names the player as the thrower; `drop(stack, false)`, for

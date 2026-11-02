@@ -4,8 +4,12 @@
 //! of a place goes through [`place_stack`](dyn Host::place_stack) and
 //! [`set_place_stack`](dyn Host::set_place_stack), so the inventory holding the stack is the one
 //! changed. Handlers hold no borrow of the game, as block entity capabilities don't (#71).
-use super::{Direction, Hand, Host, ITEMS, ItemStack};
+//!
+//! A write is all or nothing: it changes the place and puts every item it moves somewhere, or
+//! it changes nothing and hands the stack back. No item is made or lost on the way.
+use super::{Direction, Hand, Host, ITEMS, ItemHandler, ItemStack};
 use std::{
+    cell::RefCell,
     marker::PhantomData,
     sync::{Arc, LazyLock},
 };
@@ -45,12 +49,12 @@ pub enum ItemPlace {
 pub trait PlaceProvider: Send + Sync + 'static {
     /// The stack at `key`, if any.
     fn stack(&self, host: &mut dyn Host, key: u64) -> Option<ItemStack>;
-    /// Puts `stack` in place of what is at `key` (a count of 0 empties it); false where `key`
-    /// is no longer a place.
-    fn set_stack(&self, host: &mut dyn Host, key: u64, stack: ItemStack) -> bool;
-    /// Where an item split off the stack at `key` goes, as vanilla's bucket gives a filled one
-    /// to the player, else drops it: what went nowhere.
-    fn rest(&self, host: &mut dyn Host, key: u64, rest: ItemStack) -> Option<ItemStack>;
+    /// Puts `stack` in place of what is at `key` (a count of 0 empties it). With `one_by_one`,
+    /// `stack` stands for one item of what is there: from a stack of more than one, `key` keeps
+    /// the others and `stack` goes where the mod puts a split-off item, such as the player's
+    /// inventory, else the ground (`host.set_game_stack` does both for a player's place). All
+    /// or nothing: false when nothing changed, as where `key` is no longer a place.
+    fn set_stack(&self, host: &mut dyn Host, key: u64, stack: ItemStack, one_by_one: bool) -> bool;
 }
 
 /// An item capability: its name, the handler trait `T` it answers with, and the game's own
@@ -86,7 +90,8 @@ pub const ITEM_ITEMS: ItemCapabilityKey<dyn StackItemHandler> = ItemCapabilityKe
 
 /// The slots of the item at `at`, numbered from 0. A change rewrites the item at `at` through
 /// [`set_place_stack`](dyn Host::set_place_stack) with `one_by_one`: from a stack of more than
-/// one, the changed item is split off. `simulate` changes nothing.
+/// one, the changed item is split off. When that hands the item back, nothing changed, and the
+/// handler reports nothing moved. `simulate` changes nothing.
 pub trait StackItemHandler: Send + Sync + 'static {
     fn slots(&self, host: &mut dyn Host, at: &ItemPlace) -> usize;
     fn stack(&self, host: &mut dyn Host, at: &ItemPlace, slot: usize) -> Option<ItemStack>;
@@ -110,8 +115,7 @@ pub trait StackItemHandler: Send + Sync + 'static {
     ) -> Option<ItemStack>;
 }
 
-/// The game's own [`ITEM_ITEMS`], over the `item_container` helpers. An insert goes where
-/// `SimpleContainer.addItem` puts it (equal stacks first, then empty slots), whatever `slot`.
+/// The game's own [`ITEM_ITEMS`], over the `item_container` helpers.
 struct GameItemItems;
 impl StackItemHandler for GameItemItems {
     fn slots(&self, host: &mut dyn Host, at: &ItemPlace) -> usize {
@@ -127,13 +131,13 @@ impl StackItemHandler for GameItemItems {
         &self,
         host: &mut dyn Host,
         at: &ItemPlace,
-        _: usize,
+        slot: usize,
         stack: ItemStack,
         simulate: bool,
     ) -> Option<ItemStack> {
         let Some((went, changed)) = host
             .place_stack(at)
-            .and_then(|held| host.item_container_insert(&held, &stack))
+            .and_then(|held| host.item_container_insert_slot(&held, slot, &stack))
         else {
             return Some(stack);
         };
@@ -163,6 +167,134 @@ impl StackItemHandler for GameItemItems {
     }
 }
 
+thread_local! {
+    /// One item of the stack at a place, held here while a write into one of its slots
+    /// (`set_nested`) changes it: reads and writes of that place come here, so nothing real
+    /// changes until the whole write is known to go through.
+    static STAGED: RefCell<Vec<(ItemPlace, ItemStack)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Drops the newest staged item, also when a handler panics.
+struct Unstage;
+impl Drop for Unstage {
+    fn drop(&mut self) {
+        STAGED.with_borrow_mut(Vec::pop);
+    }
+}
+
+/// The slots a place sits in: a block entity's, through [`ITEMS`], or an item's, through
+/// [`ITEM_ITEMS`].
+enum Container<'p> {
+    Block(Arc<dyn ItemHandler>, [i32; 3], Option<Direction>),
+    Item(Arc<dyn StackItemHandler>, &'p ItemPlace),
+}
+
+impl Container<'_> {
+    fn slots(&self, host: &mut dyn Host) -> usize {
+        match self {
+            Self::Block(h, pos, side) => h.slots(host, *pos, *side),
+            Self::Item(h, at) => h.slots(host, at),
+        }
+    }
+    fn stack(&self, host: &mut dyn Host, slot: usize) -> Option<ItemStack> {
+        match self {
+            Self::Block(h, pos, side) => h.stack(host, *pos, *side, slot),
+            Self::Item(h, at) => h.stack(host, at, slot),
+        }
+    }
+    fn insert(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) -> Option<ItemStack> {
+        match self {
+            Self::Block(h, pos, side) => h.insert(host, *pos, *side, slot, stack, false),
+            Self::Item(h, at) => h.insert(host, at, slot, stack, false),
+        }
+    }
+    fn extract(&self, host: &mut dyn Host, slot: usize, max: u32) -> Option<ItemStack> {
+        match self {
+            Self::Block(h, pos, side) => h.extract(host, *pos, *side, slot, max, false),
+            Self::Item(h, at) => h.extract(host, at, slot, max, false),
+        }
+    }
+    /// Takes exactly `count` out of `slot`; when less comes out, puts it back and is false.
+    fn take(&self, host: &mut dyn Host, slot: usize, count: u32) -> bool {
+        match self.extract(host, slot, count) {
+            Some(out) if out.count == count => true,
+            Some(out) => {
+                self.put_back(host, slot, out);
+                false
+            }
+            None => false,
+        }
+    }
+    /// Puts what just came out of `slot` back in. A handler that won't take back what it just
+    /// gave breaks its contract, and is named.
+    fn put_back(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) {
+        if let Some(rest) = self.insert(host, slot, stack) {
+            log::error!("Horizon: an item handler refused {rest:?} back into slot {slot}");
+        }
+    }
+    /// Puts all of `stack` into the slots, in order; false, with nothing put in, when it
+    /// doesn't all fit.
+    fn insert_anywhere(&self, host: &mut dyn Host, stack: &ItemStack) -> bool {
+        let mut went = Vec::new();
+        let mut left = stack.clone();
+        for slot in 0..self.slots(host) {
+            let count = left.count;
+            match self.insert(host, slot, left.clone()) {
+                None => return true,
+                Some(rest) => {
+                    went.extend((rest.count < count).then_some((slot, count - rest.count)));
+                    left = rest;
+                }
+            }
+        }
+        for (slot, count) in went {
+            if !self.take(host, slot, count) {
+                log::error!("Horizon: an item handler kept {count} of {stack:?} in slot {slot}");
+            }
+        }
+        false
+    }
+    /// Puts `stack` in `slot` in place of what is there. With `one_by_one`, from a stack of
+    /// more than one, one item comes out and `stack` goes into whichever slots take it
+    /// (`ItemAccess.forHandlerIndex`). All or nothing.
+    fn set(&self, host: &mut dyn Host, slot: usize, stack: ItemStack, one_by_one: bool) -> bool {
+        let old = self.stack(host, slot);
+        if one_by_one && let Some(old) = old.as_ref().filter(|old| old.count > 1) {
+            if !self.take(host, slot, 1) {
+                return false;
+            }
+            if stack.count == 0 || self.insert_anywhere(host, &stack) {
+                return true;
+            }
+            let one = ItemStack {
+                count: 1,
+                ..old.clone()
+            };
+            self.put_back(host, slot, one);
+            return false;
+        }
+        if let Some(old) = &old
+            && !self.take(host, slot, old.count)
+        {
+            return false;
+        }
+        let Some(rest) = (stack.count > 0)
+            .then(|| self.insert(host, slot, stack.clone()))
+            .flatten()
+        else {
+            return true;
+        };
+        let went = stack.count - rest.count.min(stack.count);
+        if went > 0 && !self.take(host, slot, went) {
+            log::error!("Horizon: an item handler kept {went} of {stack:?} in slot {slot}");
+        }
+        if let Some(old) = old {
+            self.put_back(host, slot, old);
+        }
+        false
+    }
+}
+
 impl dyn Host + '_ {
     /// `key`'s handler for the item at `place`: the part a mod registered for its item, else
     /// the game's own answer, if the game has one.
@@ -178,124 +310,105 @@ impl dyn Host + '_ {
 
     /// The stack at `place`, if any: the one place every item handler reads.
     pub fn place_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
-        match place {
-            ItemPlace::BlockEntity { pos, side, slot } => self
+        let staged = STAGED.with_borrow(|staged| {
+            staged
+                .iter()
+                .rev()
+                .find(|(at, _)| at == place)
+                .map(|(_, stack)| stack.clone())
+        });
+        match (staged, place) {
+            (Some(stack), _) => Some(stack),
+            (None, ItemPlace::BlockEntity { pos, side, slot }) => self
                 .capability(&ITEMS, *pos)?
                 .stack(self, *pos, *side, *slot),
-            ItemPlace::Nested { parent, slot } => self
+            (None, ItemPlace::Nested { parent, slot }) => self
                 .item_capability(&ITEM_ITEMS, parent)?
                 .stack(self, parent, *slot),
-            ItemPlace::Mod { provider, key } => super::place_provider(provider)?.stack(self, *key),
-            _ => self.game_stack(place),
+            (None, ItemPlace::Mod { provider, key }) => {
+                super::place_provider(provider)?.stack(self, *key)
+            }
+            (None, _) => self.game_stack(place),
         }
         .filter(|stack| stack.count > 0)
     }
 
     /// Puts `stack` at `place` (a count of 0 empties it): the one place every item handler
-    /// writes. With `one_by_one`, `stack` stands for one item of what is there: from a stack of
-    /// more than one, that one is taken off and `stack` goes where vanilla's
-    /// `ItemUtils.createFilledResult` puts a filled bucket, the player's inventory, else dropped
-    /// (by the block or item entity, or by the mod's [`PlaceProvider::rest`]).
+    /// writes. With `one_by_one`, `stack` stands for one item of what is there, as
+    /// `ItemAccess.oneByOne`: from a stack of more than one, the place keeps the others and
+    /// `stack` goes elsewhere. From a player's hand it goes as vanilla's
+    /// `ItemUtils.createFilledResult` puts a filled bucket: into their inventory, else dropped,
+    /// and in creative the hand is kept. From a player's other places the same, without
+    /// creative's rule. From an item entity, it's dropped there. From a block entity's slot or
+    /// an item's, into that container's other slots. From a mod's place, where its
+    /// [`PlaceProvider`] puts it. A stack of items holding the place splits the same way: one
+    /// of them is rewritten holding the change, and the others stay as they were.
     ///
-    /// None when it's done. Otherwise the stack that went nowhere is the caller's: all of
-    /// `stack` when `place` couldn't be written and nothing changed.
+    /// All or nothing: None when it's done, Some(`stack`) when it couldn't be and nothing
+    /// changed.
     pub fn set_place_stack(
         &mut self,
         place: &ItemPlace,
         stack: ItemStack,
         one_by_one: bool,
     ) -> Option<ItemStack> {
-        if one_by_one
-            && let Some(held) = self.place_stack(place)
-            && held.count > 1
-        {
-            let kept = ItemStack {
-                count: held.count - 1,
-                ..held
+        let staged = STAGED.with_borrow_mut(|staged| {
+            let at = staged.iter_mut().rev().find(|(at, _)| at == place);
+            at.map(|(_, held)| *held = stack.clone()).is_some()
+        });
+        let done = staged
+            || match place {
+                ItemPlace::BlockEntity { pos, side, slot } => {
+                    self.capability(&ITEMS, *pos).is_some_and(|handler| {
+                        Container::Block(handler, *pos, *side).set(
+                            self,
+                            *slot,
+                            stack.clone(),
+                            one_by_one,
+                        )
+                    })
+                }
+                ItemPlace::Nested { parent, slot } => {
+                    self.set_nested(parent, *slot, stack.clone(), one_by_one)
+                }
+                ItemPlace::Mod { provider, key } => {
+                    super::place_provider(provider).is_some_and(|provider| {
+                        provider.set_stack(self, *key, stack.clone(), one_by_one)
+                    })
+                }
+                _ => self.set_game_stack(place, stack.clone(), one_by_one),
             };
-            if !self.write_place(place, kept) {
-                return Some(stack);
-            }
-            return self.place_rest(place, stack);
-        }
-        (!self.write_place(place, stack.clone())).then_some(stack)
+        (!done).then_some(stack)
     }
 
-    /// Replaces the stack at `place`. Through a handler, the old stack is taken out and the new
-    /// one put in; what the slot won't take goes to `place_rest`.
-    fn write_place(&mut self, place: &ItemPlace, stack: ItemStack) -> bool {
-        match place {
-            ItemPlace::BlockEntity { pos, side, slot } => {
-                let Some(handler) = self.capability(&ITEMS, *pos) else {
-                    return false;
-                };
-                if let Some(old) = handler.stack(self, *pos, *side, *slot)
-                    && handler
-                        .extract(self, *pos, *side, *slot, old.count, false)
-                        .is_none()
-                {
-                    return false;
-                }
-                if stack.count > 0
-                    && let Some(rest) = handler.insert(self, *pos, *side, *slot, stack, false)
-                {
-                    self.place_rest(place, rest);
-                }
-                true
+    /// Writes slot `slot` of the item at `parent` on one item of it, staged, then writes that
+    /// one item back to `parent` with `one_by_one`: from a stack of them, it splits off holding
+    /// the change. Nothing real changes before that last write, so a refusal anywhere changes
+    /// nothing.
+    fn set_nested(
+        &mut self,
+        parent: &ItemPlace,
+        slot: usize,
+        stack: ItemStack,
+        one_by_one: bool,
+    ) -> bool {
+        let Some(handler) = self.item_capability(&ITEM_ITEMS, parent) else {
+            return false;
+        };
+        let Some(before) = self.place_stack(parent) else {
+            return false;
+        };
+        let one = ItemStack { count: 1, ..before };
+        STAGED.with_borrow_mut(|staged| staged.push((parent.clone(), one.clone())));
+        let unstage = Unstage;
+        let done = Container::Item(handler, parent).set(self, slot, stack, one_by_one);
+        let after = STAGED.with_borrow(|staged| staged.last().map(|(_, held)| held.clone()));
+        drop(unstage);
+        match after {
+            Some(after) if done => {
+                after == one || self.set_place_stack(parent, after, true).is_none()
             }
-            ItemPlace::Nested { parent, slot } => {
-                let Some(handler) = self.item_capability(&ITEM_ITEMS, parent) else {
-                    return false;
-                };
-                if let Some(old) = handler.stack(self, parent, *slot)
-                    && handler
-                        .extract(self, parent, *slot, old.count, false)
-                        .is_none()
-                {
-                    return false;
-                }
-                if stack.count > 0
-                    && let Some(rest) = handler.insert(self, parent, *slot, stack, false)
-                {
-                    self.place_rest(place, rest);
-                }
-                true
-            }
-            ItemPlace::Mod { provider, key } => super::place_provider(provider)
-                .is_some_and(|provider| provider.set_stack(self, *key, stack)),
-            _ => self.set_game_stack(place, stack),
-        }
-    }
-
-    /// Where an item that leaves `place` goes: into the container holding it, else as the game
-    /// or the mod puts it. What went nowhere.
-    fn place_rest(&mut self, place: &ItemPlace, rest: ItemStack) -> Option<ItemStack> {
-        match place {
-            ItemPlace::BlockEntity { pos, side, .. } => {
-                let mut rest = Some(rest);
-                if let Some(handler) = self.capability(&ITEMS, *pos) {
-                    for slot in 0..handler.slots(self, *pos, *side) {
-                        let Some(stack) = rest.take() else { break };
-                        rest = handler.insert(self, *pos, *side, slot, stack, false);
-                    }
-                }
-                rest.and_then(|rest| self.game_rest(place, rest))
-            }
-            ItemPlace::Nested { parent, .. } => {
-                let mut rest = Some(rest);
-                if let Some(handler) = self.item_capability(&ITEM_ITEMS, parent) {
-                    for slot in 0..handler.slots(self, parent) {
-                        let Some(stack) = rest.take() else { break };
-                        rest = handler.insert(self, parent, slot, stack, false);
-                    }
-                }
-                rest.and_then(|rest| self.place_rest(parent, rest))
-            }
-            ItemPlace::Mod { provider, key } => match super::place_provider(provider) {
-                Some(provider) => provider.rest(self, *key, rest),
-                None => Some(rest),
-            },
-            _ => self.game_rest(place, rest),
+            _ => false,
         }
     }
 }

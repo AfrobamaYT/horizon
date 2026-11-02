@@ -1374,21 +1374,32 @@ pub trait Host {
         unimplemented!("Host::game_stack")
     }
     /// Puts `stack` at a player's or an item entity's place (a count of 0 empties it, and
-    /// removes an item entity); false where `native_game_stack` reads nothing for want of the
-    /// place. The player's screen follows with the tick's sync.
-    fn set_game_stack(&mut self, place: &ItemPlace, stack: ItemStack) -> bool {
+    /// removes an item entity); false, with nothing changed, where `native_game_stack` reads
+    /// nothing for want of the place. With `one_by_one`, `stack` stands for one item of what is
+    /// there: from a player's hand it goes as `ItemUtils.createFilledResult` puts a filled
+    /// bucket (in creative the hand is kept); from a player's other places the same, without
+    /// creative's rule; from an item entity of more than one, it's dropped by it. The player's
+    /// screen follows with the tick's sync.
+    fn set_game_stack(&mut self, place: &ItemPlace, stack: ItemStack, one_by_one: bool) -> bool {
         let _ = place;
         let _ = stack;
+        let _ = one_by_one;
         unimplemented!("Host::set_game_stack")
     }
-    /// Where an item that leaves a place goes when nothing holds it: a player's into their
-    /// inventory, else thrown from their eyes (`ItemUtils.createFilledResult`); dropped where an
-    /// item entity is, or at the middle of a block entity's block. What went nowhere: all of it
-    /// for a player who isn't here, a gone item entity, and on a client.
-    fn game_rest(&mut self, place: &ItemPlace, rest: ItemStack) -> Option<ItemStack> {
-        let _ = place;
-        let _ = rest;
-        unimplemented!("Host::game_rest")
+    /// `ResourceHandler.insert(index, …)`: as `native_item_container_insert`,
+    /// into slot `slot` alone: topped up when it holds the same item and
+    /// components, filled when empty. Nothing goes into a slot past the
+    /// item's slots or holding another item.
+    fn item_container_insert_slot(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        let _ = stack;
+        let _ = slot;
+        let _ = item;
+        unimplemented!("Host::item_container_insert_slot")
     }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.

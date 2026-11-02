@@ -78,29 +78,86 @@ impl Game<'_> {
     }
     /// `ItemUtils.createFilledResult(held, player, filled)` for the held stack.
     pub(super) fn filled_result(&mut self, filled: ItemStack) {
-        if self.creative {
-            // Kept, and the filled one added unless the inventory has it.
-            let has = self
+        self.filled_result_in(self.held_slot(), filled);
+    }
+    /// `createFilledResult` for the stack in `slot` (`stack_in_mut`'s numbers). What the
+    /// inventory doesn't take is dropped as `Player.drop(stack, false)`: no thrower, statistic
+    /// or drop hook.
+    pub(super) fn filled_result_in(&mut self, slot: usize, filled: ItemStack) {
+        let has = self.creative
+            && self
                 .inventory
                 .iter()
                 .flatten()
                 .any(|s| s.same_item_same_components(&filled));
-            if !has {
-                let _ = self.give(filled);
-            }
-            return;
+        let held = self.stack_in_mut(slot);
+        let (kept, out) = filled_result_split(held.take(), filled, self.creative, has);
+        *self.stack_in_mut(slot) = kept;
+        if let Some(rest) = out.and_then(|out| self.give(out)) {
+            self.drop_plain(rest);
         }
-        let held = self.held_mut();
-        let last = held.as_ref().is_none_or(|s| s.count <= 1);
-        if last {
-            *held = Some(filled);
-            return;
+    }
+}
+
+/// `createFilledResult` on `held`: what the slot keeps, and the item to give the player. In
+/// creative (`hasInfiniteMaterials`) `held` is kept and `filled` given unless the inventory
+/// `has` it; otherwise one item of `held` becomes `filled`, in place when it was the last.
+pub(super) fn filled_result_split(
+    held: Option<ItemStack>,
+    filled: ItemStack,
+    creative: bool,
+    has: bool,
+) -> (Option<ItemStack>, Option<ItemStack>) {
+    let filled = (filled.count > 0).then_some(filled);
+    if creative {
+        return (held, filled.filter(|_| !has));
+    }
+    match held {
+        Some(held) if held.count > 1 => (
+            Some(ItemStack {
+                count: held.count - 1,
+                ..held
+            }),
+            filled,
+        ),
+        _ => (filled, None),
+    }
+}
+
+#[cfg(test)]
+mod filled_result_tests {
+    use super::filled_result_split;
+    use horizon_client::items::ItemStack;
+
+    fn stack(item: &str, count: u32) -> ItemStack {
+        ItemStack {
+            item: item.into(),
+            count,
+            damage: 0,
+            extra: None,
         }
-        if let Some(s) = held.as_mut() {
-            s.count -= 1;
-        }
-        if let Some(rest) = self.give(filled) {
-            self.player_drop(rest);
-        }
+    }
+
+    #[test]
+    fn creative_keeps_the_held_stack_and_gives_the_filled_one_once() {
+        let bucket = || Some(stack("minecraft:bucket", 1));
+        let filled = || stack("minecraft:powder_snow_bucket", 1);
+        assert_eq!(
+            filled_result_split(bucket(), filled(), true, false),
+            (bucket(), Some(filled()))
+        );
+        assert_eq!(
+            filled_result_split(bucket(), filled(), true, true),
+            (bucket(), None)
+        );
+        // Survival: the last item becomes the filled one; from more, one splits off.
+        assert_eq!(
+            filled_result_split(bucket(), filled(), false, false),
+            (Some(filled()), None)
+        );
+        assert_eq!(
+            filled_result_split(Some(stack("minecraft:bucket", 3)), filled(), false, false),
+            (Some(stack("minecraft:bucket", 2)), Some(filled()))
+        );
     }
 }
