@@ -505,9 +505,9 @@ impl Game<'_> {
     }
     /// `LivingEntity.checkBedExists`' `CanContinueSleepingEvent` for each sleeping villager
     /// and wandering trader, asked just before their tick, which acts on the answer, for those in
-    /// entity-ticking chunks.
+    /// entity-ticking chunks. Nothing to ask without native mods.
     pub(super) fn sync_sleeping_mobs(&mut self) {
-        if self.remote.is_some() {
+        if self.remote.is_some() || horizon_client::mod_api::mods().is_empty() {
             return;
         }
         let ticking = self.entity_ticking_area();

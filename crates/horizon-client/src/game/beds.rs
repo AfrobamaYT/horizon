@@ -5,8 +5,8 @@
 //! down (`try_sleep`) and freed in the level's tick once nobody sleeps in it
 //! any more, whichever way they got up: waking, the Leave Bed button, death,
 //! a broken bed, or leaving the game.
-use super::{Dim, Game};
 use super::native_hooks::SleepProblem;
+use super::{Dim, Game};
 use horizon_client::Result;
 
 impl Game<'_> {
@@ -114,7 +114,7 @@ impl Game<'_> {
         let back = self.dim;
         for (dim, head) in std::mem::take(&mut self.player_beds) {
             self.enter_level(None, dim)?;
-            // The in-frame game has only the level it is in.
+            // A client holds no other levels (`enter_level`).
             if self.dim == dim {
                 self.set_bed_occupied(head, false);
             }
