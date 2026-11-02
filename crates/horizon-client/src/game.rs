@@ -11869,6 +11869,7 @@ impl Game<'_> {
         self.score = Default::default();
         self.fns = Default::default();
         self.world_tables = self.build_world_tables();
+        self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
         // The registries a preload or an earlier world read are not this
@@ -18287,6 +18288,8 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
+        // A scoped hook on this thread asks this game's parts.
+        horizon_client::mod_api::mark_game_thread();
         let root = options.resources.clone();
         let registry = pack.assets.registry;
         // Until a world is opened the streamer is idle.
@@ -19192,6 +19195,21 @@ impl Game<'_> {
             data_maps,
         })
     }
+    /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
+    /// that attach parts to a block or item it doesn't have are an error.
+    pub(super) fn resolve_parts(&self) -> Result<()> {
+        let items = self.items();
+        let registry = self.pack.assets.registry;
+        horizon_client::mod_api::resolve_parts(
+            &items.block_tags,
+            &items.item_tags,
+            horizon_client::mod_api::KnownIds {
+                block: &|id| registry.default_state(id).is_some(),
+                item: &|id| items.items.contains_key(id),
+            },
+        )
+        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
+    }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
     pub(super) fn reload_world_tables(&mut self) {
@@ -19199,6 +19217,9 @@ impl Game<'_> {
             return;
         }
         self.world_tables = self.build_world_tables();
+        if let Err(e) = self.resolve_parts() {
+            log::warn!("Horizon: {e}");
+        }
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.
