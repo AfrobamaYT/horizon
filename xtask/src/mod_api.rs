@@ -303,7 +303,11 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 2] = [("entity", "EntityRef"), ("level", "LevelRef")];
+const HANDLES: [(&str, &str); 3] = [
+    ("entity", "EntityRef"),
+    ("level", "LevelRef"),
+    ("player", "PlayerRef"),
+];
 
 /// A helper's method on its handle (`receiver`): `entity_position(entity)` on
 /// `Host` is also `EntityRef::position(self, host)`, which calls it. The
@@ -1100,9 +1104,15 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
-        let native = format!("native_{name}");
         let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let method = one_function(game.iter().map(|(_, method)| method), &native)?;
+        let native = target
+            .rsplit("::")
+            .next()
+            .ok_or("helper target missing method")?;
+        if !native.starts_with("native_") {
+            return Err(format!("invalid helper target {target}"));
+        }
+        let method = one_function(game.iter().map(|(_, method)| method), native)?;
         let (module, _) = game
             .iter()
             .find(|(_, other)| std::ptr::eq(other, method))
@@ -2078,6 +2088,39 @@ mod tests {
 
     #[test]
     fn dispatch_contracts() {
+        struct Weapon;
+        impl Hooks for Weapon {
+            fn living_knockback(&self, event: &mut LivingKnockbackEvent<'_>) -> Flow {
+                assert_eq!(
+                    (event.entity, event.kind, event.attacker),
+                    (12, "minecraft:armor_stand", 7)
+                );
+                assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+                assert_eq!(event.strength, 0.4);
+                event.strength *= 2.0;
+                event.x = -event.x;
+                Flow::Cancel
+            }
+        }
+        let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
+        let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
+        dispatch_living_knockback(
+            &weapon_mods,
+            12,
+            "minecraft:armor_stand",
+            "minecraft:player_attack",
+            0,
+            0,
+            7,
+            None,
+            None,
+            &mut strength,
+            &mut x,
+            &mut z,
+            &mut canceled,
+        );
+        assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
+        assert!(canceled);
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = (1..=2)
             .map(|id| {
