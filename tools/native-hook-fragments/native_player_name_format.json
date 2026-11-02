@@ -2,7 +2,7 @@
   "hooks": [
     {
       "name": "player_name_format",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_name_format",
+      "target": "horizon_client_lib::lan::hub::native_player_name_format",
       "side": "both",
       "cancellable": false,
       "neoforge": "PlayerEvent.NameFormat",

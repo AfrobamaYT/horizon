@@ -299,6 +299,26 @@ fn string(s: &str) -> Tag {
     Tag::String(JavaString::from(s))
 }
 
+/// A player's display name was formatted. Replace `displayname` to change it.
+/// Both sides. @API:player_name_format@.
+#[inline(never)]
+pub fn native_player_name_format(username: &crate::text::Text, displayname: &mut crate::text::Text) {
+    crate::native_client_hooks::player_name_format(username, displayname);
+}
+
+fn formatted_player_name(name: &str, component: Tag) -> Tag {
+    let username = crate::text::Text::literal(name);
+    let original = crate::scoreboard::tag_to_json(&component);
+    let mut displayname = username.clone().with_component(original.clone());
+    native_player_name_format(&username, &mut displayname);
+    let result = displayname.component();
+    if result == original {
+        component
+    } else {
+        crate::scoreboard::component_tag(&result)
+    }
+}
+
 /// Player.getDisplayName for a player in no team: the name, suggesting
 /// `/tell NAME `, showing the player on hover and inserting the name.
 pub fn display_name(uuid: u128, name: &str) -> Tag {
@@ -308,7 +328,7 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
         (uuid >> 32) as i32,
         uuid as i32,
     ];
-    Tag::compound([
+    let component = Tag::compound([
         ("text", string(name)),
         (
             "click_event",
@@ -327,7 +347,8 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
             ]),
         ),
         ("insertion", string(name)),
-    ])
+    ]);
+    formatted_player_name(name, component)
 }
 
 /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
@@ -402,7 +423,7 @@ impl Hub {
         c["hover_event"] = serde_json::json!({"action": "show_entity", "id": "minecraft:player",
             "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name});
         c["insertion"] = name.into();
-        crate::scoreboard::component_tag(&c)
+        formatted_player_name(name, crate::scoreboard::component_tag(&c))
     }
 }
 

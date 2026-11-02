@@ -3650,11 +3650,6 @@ impl Game<'_> {
             cancel,
         );
     }
-    /// A player's display name was formatted. Replace `displayname` to change it.
-    /// Both sides. @API:player_name_format@.
-    pub(super) fn native_player_name_format(&self, username: &Text, displayname: &mut Text) {
-        let _ = (username, displayname);
-    }
     /// A server player's experience points are about to increase from an orb pickup,
     /// after mending has taken its share. Change `amount` to change the points
     /// added. The player's state is not swapped in, so helpers that look them up
