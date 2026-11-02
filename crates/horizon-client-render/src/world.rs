@@ -32,6 +32,17 @@ impl DirtySections {
     pub fn take_column(&mut self, x: i32, z: i32) -> SectionMask {
         self.columns.remove(&(x, z)).unwrap_or_default()
     }
+    /// Section indexes `sections` of column (x, z), no longer dirty.
+    pub fn take(&mut self, x: i32, z: i32, sections: SectionMask) {
+        if let Some(mask) = self.columns.get_mut(&(x, z)) {
+            for sy in sections.iter() {
+                mask.remove(sy);
+            }
+            if mask.is_empty() {
+                self.columns.remove(&(x, z));
+            }
+        }
+    }
     /// Keep the columns `keep` accepts.
     pub fn retain_columns(&mut self, mut keep: impl FnMut(i32, i32) -> bool) {
         self.columns.retain(|&(x, z), _| keep(x, z));

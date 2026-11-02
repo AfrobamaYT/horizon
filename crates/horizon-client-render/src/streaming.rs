@@ -267,6 +267,17 @@ impl CameraView {
         };
         self.frustum.intersects(rel(min), rel(max))
     }
+    /// Whether the block box `min..max` is entirely in view.
+    fn holds(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+        let rel = |p: [i32; 3]| {
+            glam::Vec3::new(
+                (f64::from(p[0]) - self.eye[0]) as f32,
+                (f64::from(p[1]) - self.eye[1]) as f32,
+                (f64::from(p[2]) - self.eye[2]) as f32,
+            )
+        };
+        self.frustum.contains(rel(min), rel(max))
+    }
 }
 struct Queued {
     priority: i64,
@@ -1108,6 +1119,32 @@ impl Streaming {
     /// Queue a job for the column `at`, nearest first: its distance (`distance`)
     /// times four plus `bias`, which orders a column's jobs. A job without a
     /// column (a save, meshes to free) goes ahead of every other.
+    /// `submit` for several jobs, under one lock.
+    fn submit_all(&mut self, jobs: Vec<(Option<(i32, i32)>, i64, Job)>) {
+        if jobs.is_empty() {
+            return;
+        }
+        let queued: Vec<Queued> = jobs
+            .into_iter()
+            .map(|(at, bias, job)| {
+                self.order += 1;
+                Queued {
+                    priority: at.map_or(i64::MIN, |(x, z)| self.distance(x, z) * 4 + bias),
+                    at,
+                    bias,
+                    order: self.order,
+                    job,
+                }
+            })
+            .collect();
+        let many = queued.len() > 1;
+        self.shared.queue.lock().unwrap().extend(queued);
+        if many {
+            self.jobs.notify_all();
+        } else {
+            self.jobs.notify();
+        }
+    }
     fn submit(&mut self, at: Option<(i32, i32)>, bias: i64, job: Job) {
         self.order += 1;
         let priority = at.map_or(i64::MIN, |(x, z)| self.distance(x, z) * 4 + bias);
@@ -1270,15 +1307,40 @@ impl Streaming {
     fn distance(&self, x: i32, z: i32) -> i64 {
         self.ranges().priority(x, z, self.loading)
     }
-    /// Whether the camera sees any of column (x, z) (true without a view).
-    fn column_seen(&self, world: &World, x: i32, z: i32) -> bool {
+    /// `sections` of column (x, z) split into those the camera sees and the
+    /// rest (all seen without a view). The column is looked at whole first:
+    /// most are either out of view or entirely in it.
+    fn split_seen(
+        &self,
+        world: &World,
+        x: i32,
+        z: i32,
+        sections: SectionMask,
+    ) -> (SectionMask, SectionMask) {
+        let Some(view) = &self.view else {
+            return (sections, SectionMask::default());
+        };
         let layout = world.layout();
-        self.view.is_none_or(|view| {
-            view.sees(
-                [x * 16, layout.min_y(), z * 16],
-                [x * 16 + 16, layout.max_y() + 1, z * 16 + 16],
-            )
-        })
+        let (min, max) = (
+            [x * 16, layout.min_y(), z * 16],
+            [x * 16 + 16, layout.max_y() + 1, z * 16 + 16],
+        );
+        if !view.sees(min, max) {
+            return (SectionMask::default(), sections);
+        }
+        if view.holds(min, max) {
+            return (sections, SectionMask::default());
+        }
+        let (mut seen, mut unseen) = (SectionMask::default(), SectionMask::default());
+        for sy in sections.iter() {
+            let y = layout.section_y(sy);
+            if view.sees([x * 16, y, z * 16], [x * 16 + 16, y + 16, z * 16 + 16]) {
+                seen.insert(sy);
+            } else {
+                unseen.insert(sy);
+            }
+        }
+        (seen, unseen)
     }
     /// Whether the camera sees any of section (x, sy, z) (true without a view).
     fn section_seen(&self, world: &World, x: i32, sy: i32, z: i32) -> bool {
@@ -1885,12 +1947,17 @@ impl Streaming {
             if !ready {
                 continue;
             }
-            let seen = self.column_seen(world, x, z);
-            if seen {
-                view_pending += sections.iter().count();
+            // The sections the camera sees go first, as vanilla compiles only
+            // those; the rest of the column waits for them (dirty until then).
+            let (seen, unseen) = self.split_seen(world, x, z, sections);
+            let rank = self.distance(x, z) * 4;
+            view_pending += seen.len();
+            if !seen.is_empty() {
+                candidates.push((rank, x, z, seen));
             }
-            let rank = self.distance(x, z) * 4 + if seen { 0 } else { OUT_OF_VIEW };
-            candidates.push((rank, x, z, sections));
+            if !unseen.is_empty() {
+                candidates.push((rank + OUT_OF_VIEW, x, z, unseen));
+            }
         }
         // What the camera sees first, then nearest first, and only as many
         // sections as the workers can chew.
@@ -1902,23 +1969,26 @@ impl Streaming {
         // capacity frees; `requeue` then has a small queue to keep close.
         let room = (self.workers * 32).saturating_sub(self.meshing.len());
         nearest_first(&mut candidates, room);
+        // Queued together, so a worker takes them in priority order rather
+        // than in the order they were made.
+        let mut jobs = Vec::new();
         for (rank, x, z, sections) in candidates {
             let Some(region) = Self::region(world, x, z) else {
                 continue;
             };
-            world.dirty_sections.take_column(x, z);
-            if rank < OUT_OF_VIEW {
+            world.dirty_sections.take(x, z, sections);
+            let behind = rank >= OUT_OF_VIEW;
+            if !behind {
                 // Counted above as ready; counted below as meshing.
-                view_pending -= sections.iter().count();
+                view_pending -= sections.len();
             }
             for sy in sections.iter().map(|sy| sy as i32) {
                 let first = self.meshed.insert((x, z));
                 self.sequence += 1;
                 self.meshing.insert((x, sy, z), self.sequence);
-                let seen = self.section_seen(world, x, sy, z);
-                self.submit(
+                jobs.push((
                     Some((x, z)),
-                    if first { 2 } else { 0 } + if seen { 0 } else { OUT_OF_VIEW },
+                    if first { 2 } else { 0 } + if behind { OUT_OF_VIEW } else { 0 },
                     Job::Mesh(
                         x,
                         sy,
@@ -1936,14 +2006,18 @@ impl Streaming {
                             leaf_culling: self.leaf_culling,
                         },
                     ),
-                );
+                ));
             }
         }
-        view_pending += self
-            .meshing
-            .keys()
-            .filter(|&&(x, sy, z)| self.section_seen(world, x, sy, z))
-            .count();
+        self.submit_all(jobs);
+        view_pending += match self.view {
+            Some(_) => self
+                .meshing
+                .keys()
+                .filter(|&&(x, sy, z)| self.section_seen(world, x, sy, z))
+                .count(),
+            None => self.meshing.len(),
+        };
         self.view_pending = view_pending;
         (uploads, removed)
     }
@@ -2724,8 +2798,8 @@ mod tests {
     use super::*;
 
     /// A remote client's columns all arrive at once around a camera looking
-    /// east: every section it sees meshes before any column it doesn't see,
-    /// and the count of sections in view still to mesh falls to 0 with them.
+    /// east: every section it sees meshes before any it doesn't see, and the
+    /// count of sections in view still to mesh falls to 0 with them.
     #[test]
     fn sections_in_the_camera_view_mesh_before_those_behind_it() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2807,17 +2881,18 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert_eq!(order.len(), all);
-        // No section the camera sees waits for a column it doesn't see. (A seen
-        // column's sections above or below the view go with it, after its others.)
+        // No section the camera sees waits for one it doesn't see, in its own
+        // column (above or below the view) or another.
         let behind = order
             .iter()
-            .position(|k| !column_seen(k))
-            .expect("columns behind");
-        assert!(order[..behind].iter().any(section_seen), "sections in view");
+            .position(|k| !section_seen(k))
+            .expect("sections behind");
+        assert!(behind > 0, "sections in view");
         assert!(
             !order[behind..].iter().any(section_seen),
-            "a section in view meshed after a column behind the camera: {order:?}"
+            "a section in view meshed after one out of view: {order:?}"
         );
+        assert!(order.iter().any(|k| !column_seen(k)), "columns behind");
         // Once the sections in view are done the count is 0 while others still mesh.
         assert!(
             pending_in_view
