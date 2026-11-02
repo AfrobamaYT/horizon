@@ -6590,6 +6590,7 @@ impl Game<'_> {
                     false,
                     &mut next_float,
                     border,
+                    &self.res.motion().fluids,
                 );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
@@ -9590,6 +9591,12 @@ impl Game<'_> {
         Some(r.glowing.contains(&(id as i32)))
     }
     /// The profile name of another player the server sent, by entity id.
+    /// The UUID of another player's entity in the level.
+    pub(super) fn remote_player_uuid(&self, id: u32) -> Option<u128> {
+        let r = self.remote.as_ref()?;
+        let uuid = *r.level_players.get(&(id as i32))?;
+        (uuid != r.profile).then_some(uuid)
+    }
     pub(super) fn remote_player_name(&self, id: u32) -> Option<&str> {
         let r = self.remote.as_ref()?;
         let uuid = r.level_players.get(&(id as i32))?;
