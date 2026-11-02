@@ -489,6 +489,18 @@ impl Host for super::Game<'_> {
     fn instance_dir(&self) -> PathBuf {
         self.native_instance_dir()
     }
+    fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
+        self.native_block_state_id(name)
+    }
+    fn block_state_string(&self, state: BlockStateId) -> Option<String> {
+        self.native_block_state_string(state)
+    }
+    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+        self.native_block_state_default(block)
+    }
+    fn item_stack_in_tag(&self, stack: &ItemStack, tag: &str) -> Option<bool> {
+        self.native_item_stack_in_tag(stack, tag)
+    }
     fn camera(&self) -> Option<NativeCamera> {
         self.native_camera()
     }
