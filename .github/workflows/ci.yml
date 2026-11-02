@@ -1,4 +1,5 @@
 name: checks
+run-name: ${{ inputs.upstream_sync && format('Upstream sync {0}', inputs.upstream_sync) || github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
 # verify: every pull request and every push to main, on GitHub's runners (the repository is public). It is the
 # check main requires, so it never has a condition: a skipped job counts as passed, and every run of this workflow
 # must report a real verify (a pull request that changes no Rust finishes it in seconds instead).
@@ -15,6 +16,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      upstream_sync:
+        description: 'Upstream sync short SHA and request ID (automation only; skips manual vanilla/JFR probes)'
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -237,7 +243,7 @@ jobs:
   # game directory in HORIZON_MINECRAFT_DIR and the pinned server jar in
   # HORIZON_SERVER_JAR. Start them by hand: gh workflow run checks --ref <branch>.
   vanilla-parity:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4
@@ -585,7 +591,7 @@ jobs:
           RUSTUP_TOOLCHAIN: stable
         run: python tools/test_float_log_parity.py
   jfr-analysis:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4

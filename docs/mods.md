@@ -40,7 +40,10 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the template. It makes content mods only: any other `--template` is refused.
+- `new <path> [--name "Name"]` writes the template. `--template native [--horizon <commit>]` writes a native trait
+  mod's bundle instead: `horizon-mixin.toml` (pinned to that Horizon commit, else unpinned) and an `[api]` crate with
+  one hook, built with `horizon-launcher native-build <path> --trust-native-code`
+  ([native-mods.md](native-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs `horizon-mod.toml`, `assets/` and `data/` into `target/horizon-mod/<id>.hmod`, with the same checks
   the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code is native now) and a
   manifest without capability `registries`.
@@ -151,6 +154,38 @@ signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign
 `minecraft:standing_signs`, `minecraft:wall_signs`, `minecraft:ceiling_hanging_signs` and
 `minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
 wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
+
+A block can override its targeting outline with `shapes` and independently override movement
+collision with `collision_shapes`. Both take the same table format. Boxes are
+`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.
+Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+
+```json
+{
+  "template": "minecraft:stone",
+  "state_properties": {
+    "facing": { "type": "enum", "values": ["north", "south"] },
+    "count": { "type": "enum", "values": ["1", "2"] }
+  },
+  "shapes": {
+    "properties": ["facing", "count"],
+    "values": { "north,2": [[0,0,0,1,0.5,1]] },
+    "default": [[0,0,0,1,1,1]]
+  },
+  "collision_shapes": { "default": [] }
+}
+```
+
+`properties` names an ordered tuple of template and/or declared state properties; each `values` key
+lists their values in that order, separated by commas without spaces. A nonmatching tuple uses
+`default`. Without `default`, every tuple must be covered. A default-only table gives every state the
+same shape. The existing `{"property":"axis","values":{"x":[...],"y":[...],"z":[...]}}`
+format still works; use either `property` or `properties`, not both. Unknown properties, unreachable
+value tuples, malformed boxes and duplicate property names reject the mod with a load error rather
+than silently ignoring a typo. Omitted `shapes` preserves the template outline (or the connecting
+block's `thickness` outline). Omitted `collision_shapes` preserves the existing behavior: a declared
+outline also becomes collision, otherwise the template collision is retained. An explicit collision
+table can be used without an outline override, and overrides `thickness` collision too.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
@@ -341,13 +376,15 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
-A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) generate in
+A mod's own configured and placed features (`data/<ns>/worldgen/feature/`, `placed_feature/`) generate in
 biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
 (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one
 generation `step` of every biome in `biomes`; `remove_features` takes them out of its `steps` (every step when it lists
 none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
 NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
-feature already in the step is not added twice.
+feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
+(registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
+Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
