@@ -6526,8 +6526,7 @@ impl Game<'_> {
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
         if !crate::mod_api::mods().is_empty()
-            && let Some(placement) =
-                self.with_level(|b, level, ticks| b.multi_placement(level, ticks, &ctx))
+            && let Some(placement) = self.preview_multi_place_context(&ctx)
         {
             let mut cancel = false;
             self.native_entity_multi_place(placement.state, &placement.snapshots, &mut cancel);
