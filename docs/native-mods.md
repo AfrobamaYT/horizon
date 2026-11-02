@@ -11,6 +11,11 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+`native_client_chat(original_message, message, cancel)` fires on the client before sending a chat line or
+command. The original is read-only; a mod may change the outgoing `message` or set `cancel` to prevent
+sending. It runs after Horizon's chat restrictions, but before command routing and signing. Client-owned
+commands and unattended commands do not pass through it. Bundles need "hooks": @API:client_chat@.
+
 ## Villager farming
 
 Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
