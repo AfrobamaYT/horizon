@@ -1172,6 +1172,19 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn block_grow_feature<'a>(
+        &mut self,
+        pos: BlockPos,
+        feature: &'a str,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+            return Some(std::borrow::Cow::Borrowed(feature));
+        }
+        let mut feature = Some(feature.to_owned());
+        let mut cancel = false;
+        self.native_block_grow_feature(self.dimension, pos, &mut feature, &mut cancel);
+        feature.filter(|_| !cancel).map(std::borrow::Cow::Owned)
+    }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
@@ -11413,6 +11426,7 @@ impl Game<'_> {
     /// `Player.attack` on a mob: the damage, knockback, sweep, particles and
     /// sounds.
     pub(super) fn attack_mob(&mut self, index: usize) {
+        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
         let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
