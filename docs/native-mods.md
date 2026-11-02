@@ -353,6 +353,18 @@ a version. Helpers (`native_text`, `native_player`…) have no hook entry; the c
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
+### Damage with the attacker, weapon and geometry
+
+`living_incoming_damage` (API 50) is one hook for every hit: it gets the attacker's network id,
+the weapon (a player's selected stack, a mob's main hand; `weapon.enchantments()` exposes the
+enchantment ids and levels), the hit's source position, and a mob victim's position and look
+vector, so an enchantment can tell a blow from behind and change `amount`. The weapon and the
+attacker come from the attack scope the game opens around an attack and are recorded only while
+a native mod is loaded; the positions are none for a player or the dragon as victim. It has no
+`Host`: the game is in the middle of the hit, so read the world from a tick hook. These arguments
+were added after the hook first shipped, so a mixin injection that names
+`native_living_incoming_damage` as a raw target must take them too.
+
 ### The build's warnings
 
 Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that
