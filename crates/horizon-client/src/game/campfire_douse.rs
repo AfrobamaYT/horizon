@@ -71,7 +71,7 @@ impl Game<'_> {
             return Some(unlit);
         }
         let tool = crate::mod_api::ToolUse {
-            player: self.player.as_ref().map(|p| p.entity_id as u32),
+            player: self.player.is_some().then(|| self.own_entity_id() as u32),
             hand: self.hand,
             pos: hit.pos,
             face: hit.face,
