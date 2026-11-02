@@ -7417,14 +7417,17 @@ impl Game<'_> {
         let _ = (original_message, message, cancel);
     }
     /// NeoForge's `ClientChatReceivedEvent`: change or suppress a received line;
-    /// `overlay` for the action bar. @API:client_chat_received@.
+    /// `overlay` for the action bar; system messages have a nil sender and no
+    /// chat type. @API:client_chat_received@.
     pub(super) fn native_client_chat_received(
         &mut self,
         message: &mut Text,
         overlay: bool,
+        sender: u128,
+        chat_type: Option<&horizon_protocol::packets::play::ChatTypeBound>,
         cancel: &mut bool,
     ) {
-        let _ = (message, overlay, cancel);
+        let _ = (message, overlay, sender, chat_type, cancel);
     }
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     /// @API:client_pause_change@.

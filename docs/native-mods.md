@@ -16,9 +16,10 @@ command. The original is read-only; a mod may change the outgoing `message` or s
 sending. It runs after Horizon's chat restrictions, but before command routing and signing. Client-owned
 commands and unattended commands do not pass through it. Bundles need "hooks": @API:client_chat@.
 
-`native_client_chat_received(message, overlay, cancel)` fires on the client for received player,
-disguised and system chat, and for action-bar overlays (`overlay`). A mod may change the displayed `Text`
-or set `cancel` to suppress it. Bundles need "hooks": @API:client_chat_received@.
+`native_client_chat_received(message, overlay, sender, chat_type, cancel)` fires on the client for received
+player, disguised and system chat, and for action-bar overlays (`overlay`). System messages have a nil
+sender and no chat type. A mod may change the displayed `Text` or set `cancel` to suppress it. Bundles
+need "hooks": @API:client_chat_received@.
 
 `native_client_player_change_game_type(info, current_game_type, new_game_type)` observes a client
 player-info game-type update before it is applied. The game types are protocol IDs and `info` is the

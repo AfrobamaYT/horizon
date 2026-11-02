@@ -4431,7 +4431,7 @@ impl Game<'_> {
                 // language. ChatListener.handleOverlay for the action bar.
                 let mut text = remote_text(&p.content);
                 let mut cancel = false;
-                self.native_client_chat_received(&mut text, p.overlay, &mut cancel);
+                self.native_client_chat_received(&mut text, p.overlay, 0, None, &mut cancel);
                 if cancel {
                     return Ok(());
                 }
@@ -4552,7 +4552,13 @@ impl Game<'_> {
                 }
                 let mut line = line;
                 let mut cancel = false;
-                self.native_client_chat_received(&mut line, false, &mut cancel);
+                self.native_client_chat_received(
+                    &mut line,
+                    false,
+                    p.sender,
+                    Some(&p.chat_type),
+                    &mut cancel,
+                );
                 if cancel {
                     if let Some(signature) = &signature {
                         self.mark_message_processed(signature, false);
@@ -4568,7 +4574,13 @@ impl Game<'_> {
                     .plain();
                 let mut line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
                 let mut cancel = false;
-                self.native_client_chat_received(&mut line, false, &mut cancel);
+                self.native_client_chat_received(
+                    &mut line,
+                    false,
+                    0,
+                    Some(&p.chat_type),
+                    &mut cancel,
+                );
                 if !cancel {
                     self.handle_player_chat(line, None, ChatTrust::Secure, narration);
                 }
