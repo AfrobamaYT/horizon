@@ -12,5 +12,5 @@
     }
   ],
   "rust_summary": "client registry tags being updated (`native_client_tags_updated`).",
-  "doc_summary": "client registry tags being updated: `native_client_tags_updated(registries, cause, should_update_static_data)` hears server configuration tags after the registry view is installed. Horizon retains only dialog tags. Bundles that use it need `\"hooks\": @API:client_tags_updated@`."
+  "doc_summary": "client registry tags being updated: `native_client_tags_updated(registries, cause, should_update_static_data)` hears configuration and play-phase server tag updates after the registry view is installed. Horizon retains only dialog tags. Bundles that use it need `\"hooks\": @API:client_tags_updated@`."
 }

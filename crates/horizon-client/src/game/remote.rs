@@ -2995,6 +2995,20 @@ impl Game<'_> {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
             // thread, after all preceding packets (especially teleports).
             C::Ping(p) => self.send(S::Pong(p)),
+            C::UpdateTags(packet) => {
+                let should_update_static_data = self.integrated.is_none();
+                if let Some(remote) = self.remote.as_mut() {
+                    if should_update_static_data {
+                        Arc::make_mut(&mut remote.registries).add_tags(&packet);
+                    }
+                    let registries = remote.registries.clone();
+                    self.native_client_tags_updated(
+                        &registries,
+                        "client_packet_received",
+                        should_update_static_data,
+                    );
+                }
+            }
             // A native mod's server half to its client half.
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
