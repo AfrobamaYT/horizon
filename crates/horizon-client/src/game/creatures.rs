@@ -852,6 +852,7 @@ impl Game<'_> {
             self.tick_village_siege();
         }
         self.tick_raids();
+        self.sync_sleeping_mobs();
         let ticked =
             horizon_client::spans::time("tick_creature_entities", || self.tick_creature_entities());
         self.dismount_underwater_mob_riders();

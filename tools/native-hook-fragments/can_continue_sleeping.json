@@ -12,6 +12,6 @@
       }
     }
   ],
-  "rust_summary": "a sleeping player's bed check, whose answer a mod can replace (`native_can_continue_sleeping`).",
-  "doc_summary": "a sleeping server player's bed check, each tick: `native_can_continue_sleeping(player, name, pos, may_continue)` runs with `pos` the bed head and `may_continue` empty, meaning whether the bed still exists. Set it true to keep the player asleep without a bed, or false to wake them beside a valid one. It replaces only the bed check, not the dead or health conditions. The player's state is not swapped in. Bundles need \"hooks\": @API:can_continue_sleeping@."
+  "rust_summary": "a sleeping entity's check that it may continue sleeping, whose answer a mod can replace (`native_can_continue_sleeping`).",
+  "doc_summary": "a sleeping living entity's check that it may continue sleeping, each tick: `native_can_continue_sleeping(entity, name, kind, pos, problem, may_continue)` runs for a sleeping server player and for a sleeping villager or wandering trader, with `pos` the bed head, `entity` its UUID and `name` a player's name (empty for a mob). `problem` is what vanilla found: `SleepProblem::NotPossibleHere` when the bed is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime), none otherwise. `may_continue` starts as `problem.is_none()`; set it true to keep the entity asleep, or false to wake it. It replaces only these checks, not a player's dead or health wake-up. A player's state is not swapped in. Bundles need \"hooks\": @API:can_continue_sleeping@."
 }

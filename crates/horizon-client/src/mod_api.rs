@@ -19,7 +19,7 @@ pub use crate::game::{
     NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
     NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
     NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
-    NativeShake, PhantomSpawnResult,
+    NativeShake, PhantomSpawnResult, SleepProblem,
 };
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,

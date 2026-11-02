@@ -3876,13 +3876,20 @@ impl Game<'_> {
         if let Some(head) = g.bed {
             let block = self.world.block(head[0], head[1], head[2]);
             let gone = g.dead || g.health <= 0.0;
-            let mut replaced = None;
+            let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
+            let problem = self.sleep_problem(bed_exists, true);
+            let mut may_continue = problem.is_none();
             if !gone {
-                self.native_can_continue_sleeping(g.uuid, &g.name, head, &mut replaced);
+                self.native_can_continue_sleeping(
+                    g.uuid,
+                    &g.name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
             }
-            let bed = replaced
-                .unwrap_or_else(|| self.res.facts().get(block).name.ends_with("_bed"));
-            if gone || !bed {
+            if gone || !may_continue {
                 self.wake_guest(host, gi);
             } else {
                 // LivingEntity.tick: a sleeper's xRot is 0.

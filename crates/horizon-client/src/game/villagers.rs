@@ -503,6 +503,32 @@ impl Game<'_> {
         self.wake_villager(id);
         true
     }
+    /// `LivingEntity.checkBedExists`' `CanContinueSleepingEvent` for each sleeping villager
+    /// and wandering trader, asked just before their tick, which acts on the answer.
+    pub(super) fn sync_sleeping_mobs(&mut self) {
+        if self.remote.is_some() {
+            return;
+        }
+        let sleepers: Vec<_> = self
+            .mobs
+            .iter()
+            .filter_map(|m| {
+                let pos = villager::sleeping_pos(m)?;
+                let uuid = horizon_client::lan::playerdata::ints_uuid(m.uuid);
+                Some((m.id, uuid, m.kind.id.clone(), pos))
+            })
+            .collect();
+        for (id, uuid, kind, pos) in sleepers {
+            let bed = self.world.block(pos[0], pos[1], pos[2]);
+            let bed_exists = self.res.facts().get(bed).name.ends_with("_bed");
+            let problem = self.sleep_problem(bed_exists, false);
+            let mut may_continue = problem.is_none();
+            self.native_can_continue_sleeping(uuid, "", &kind, pos, problem, &mut may_continue);
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                villager::ext_mut(m).may_continue_sleeping = Some(may_continue);
+            }
+        }
+    }
     /// `LivingEntity.stopSleeping` for the villager `id`, outside its own
     /// tick: it stands up and its bed is no longer occupied.
     pub(super) fn wake_villager(&mut self, id: u32) {

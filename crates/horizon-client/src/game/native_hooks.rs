@@ -1304,6 +1304,15 @@ pub enum PhantomSpawnResult {
     Deny,
 }
 
+/// `Player.BedSleepingProblem` as `CanContinueSleepingEvent.getProblem` reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SleepProblem {
+    /// The sleeper's bed is gone.
+    NotPossibleHere,
+    /// The bed rule no longer lets a player sleep: it is daytime.
+    NotPossibleNow,
+}
+
 /// The player as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
@@ -3387,18 +3396,25 @@ impl Game<'_> {
     pub(super) fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         mod_api::dispatch_player_bed_leave(self, mod_api::mods(), player, name, pos);
     }
-    /// `CanContinueSleepingEvent`: a sleeping server player's bed check, run each tick
-    /// only for a sleeper the dead and health checks would not already wake. `may_continue` starts empty, meaning
-    /// whether the bed still exists; set it true to keep them asleep without a bed, or false
-    /// to wake them beside a valid one. The player's state is not swapped in on a guest tick. @API:can_continue_sleeping@.
+    /// `CanContinueSleepingEvent`: a sleeping living entity's check that it may go on
+    /// sleeping, run each tick for a server player the dead and health checks would not
+    /// already wake, and for a sleeping villager or wandering trader. `entity` is its UUID,
+    /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
+    /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
+    /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
+    /// none when nothing is wrong. `may_continue` starts as `problem.is_none()` (`mayContinueSleeping`);
+    /// set it true to keep them asleep, false to wake them. The player's state is not swapped in
+    /// on a guest tick. @API:can_continue_sleeping@.
     pub(super) fn native_can_continue_sleeping(
         &mut self,
-        player: u128,
+        entity: u128,
         name: &str,
+        kind: &str,
         pos: [i32; 3],
-        may_continue: &mut Option<bool>,
+        problem: Option<SleepProblem>,
+        may_continue: &mut bool,
     ) {
-        let _ = (player, name, pos, may_continue);
+        let _ = (entity, name, kind, pos, problem, may_continue);
     }
     /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
     /// spawn near a non-spectator server player, before its difficulty and rest rolls.

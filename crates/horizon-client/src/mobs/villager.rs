@@ -198,7 +198,8 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if let Some(p) = bed {
             m.extra.ints[1] = bed_facing_code(w.prop(p[0], p[1], p[2], "facing"));
         }
-        if m.hurt_time > 0 || bed.is_none() {
+        let may_continue = ext_mut(m).may_continue_sleeping.take().unwrap_or(bed.is_some());
+        if m.hurt_time > 0 || !may_continue {
             stop_sleeping(m, w, events);
             super::villager_brain::woken(m, w.game_time);
         }
@@ -281,6 +282,9 @@ pub struct Ext {
     pub hurt_seen: i32,
     /// A zombie villager's cure under way.
     pub cure: Option<super::zombie_villager::Cure>,
+    /// `CanContinueSleepingEvent.mayContinueSleeping`, set by the game before the tick
+    /// when a native mod may overwrite the bed check; empty means vanilla's.
+    pub may_continue_sleeping: Option<bool>,
     /// The villager's brain, built at its first tick.
     pub brain: Option<Box<super::villager_brain::Brain>>,
 }

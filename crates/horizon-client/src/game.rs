@@ -392,7 +392,7 @@ pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult};
+pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
 pub use native_world_columns::NativeColumnBlocks;
@@ -14546,7 +14546,7 @@ impl Game<'_> {
                 };
             }
         }
-        if !(self.dim == Dim::Overworld && self.sky_darken() >= 4) {
+        if !self.bed_can_sleep_now() {
             self.tell_sleeper(
                 "block.minecraft.bed.no_sleep",
                 "You can sleep only at night or during thunderstorms",
@@ -14652,28 +14652,36 @@ impl Game<'_> {
     fn tick_sleep(&mut self) {
         self.sleep_timer = tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
         if let Some(head) = self.sleeping {
-            // LivingEntity.tick's checkBedExists: a sleeper whose bed is
-            // gone gets up.
+            // LivingEntity.tick's checkBedExists and Player.tick's bed rule: a
+            // sleeper whose bed is gone, or who may no longer sleep in it, gets up.
             let bed = self.world.block(head[0], head[1], head[2]);
             let dead = self
                 .player
                 .as_ref()
                 .is_none_or(|p| p.health.dead_or_dying());
-            let mut replaced = None;
+            let bed_exists = self.res.facts().get(bed).name.ends_with("_bed");
+            let problem = self.sleep_problem(bed_exists, true);
+            let mut may_continue = problem.is_none();
             if !dead
                 && let Some((player, name)) = self
                     .lan
                     .as_ref()
                     .map(|host| (host.host_uuid, host.host_name.clone()))
             {
-                self.native_can_continue_sleeping(player, &name, head, &mut replaced);
+                self.native_can_continue_sleeping(
+                    player,
+                    &name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
             }
-            let bed_gone = !replaced
-                .unwrap_or_else(|| self.res.facts().get(bed).name.ends_with("_bed"));
+            let wakes = !may_continue;
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
             if (self.screen != Screen::Chat && self.keys.contains(&KeyCode::ShiftLeft))
-                || bed_gone
+                || wakes
                 || dead
             {
                 self.wake_up();
