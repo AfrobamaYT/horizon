@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_tab_list_name_format",
+      "target": "horizon_client::lan::hub::native_player_tab_list_name_format",
+      "side": "server",
+      "cancellable": false,
+      "neoforge": "PlayerEvent.TabListNameFormat",
+      "mod_api": {
+        "contract": "replace",
+        "out": "display_name"
+      }
+    }
+  ],
+  "rust_summary": "Server player tab-list name formatting (`native_player_tab_list_name_format`).",
+  "doc_summary": "A server player's tab-list name is formatted: `native_player_tab_list_name_format(player, name, display_name)` can replace the nullable display name. Bundles need \"hooks\": @API:player_tab_list_name_format@."
+}

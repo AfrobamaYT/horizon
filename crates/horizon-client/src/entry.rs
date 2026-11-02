@@ -119,6 +119,14 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
+        player_tab_list_name_format: |player, name, display_name| {
+            crate::mod_api::dispatch_player_tab_list_name_format(
+                crate::mod_api::mods(),
+                player,
+                name,
+                display_name,
+            );
+        },
         ingredient: |kind, data, items| {
             crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
         },

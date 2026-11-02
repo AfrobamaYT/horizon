@@ -3541,6 +3541,7 @@ pub(crate) mod tests {
                     }
                 },
                 living_breathe: |_, _, _, _, _| {},
+                player_tab_list_name_format: |_, _, _| {},
                 ingredient: |_, _, _| {},
             });
         assert!(installed.is_ok());
