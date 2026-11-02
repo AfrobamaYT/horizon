@@ -382,7 +382,7 @@ pub fn click(
     } else {
         *drag = None;
         match mode {
-            input::PICKUP | input::QUICK_MOVE if slot == -999 => {
+            input::PICKUP | input::QUICK_MOVE if slot == -999 && (0..=1).contains(&button) => {
                 if mode == input::PICKUP
                     && let Some(mut carried) = view.guest.carried.take()
                 {
@@ -397,8 +397,8 @@ pub fn click(
                     }
                 }
             }
-            input::PICKUP => pickup(view, slot, button, rules),
-            input::QUICK_MOVE => {
+            input::PICKUP if (0..=1).contains(&button) => pickup(view, slot, button, rules),
+            input::QUICK_MOVE if (0..=1).contains(&button) => {
                 if let Ok(i) = usize::try_from(slot)
                     && i < view.len()
                 {
@@ -739,8 +739,9 @@ fn quick_craft(
             }
             if slots.len() == 1 {
                 // A single slot behaves like a plain click.
-                let button = if kind == 1 { 1 } else { 0 };
-                pickup(view, slots[0] as i32, button, rules);
+                if kind <= 1 {
+                    pickup(view, slots[0] as i32, i32::from(kind), rules);
+                }
                 return;
             }
             let each = match kind {
@@ -843,6 +844,39 @@ mod tests {
                 .map(|s| (s.item.to_string(), s.count))
                 .collect()
         })
+    }
+
+    #[test]
+    fn invalid_pickup_button_leaves_chest_and_carried_unchanged() {
+        let Some(rules) = rules() else { return };
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 10))];
+        g.carried = Some(ItemStack::new("minecraft:bundle", 1));
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        let mut drag = None;
+        let (drops, changed) = click(&mut view, &mut drag, 0, 2, input::PICKUP, &rules);
+        assert!(drops.is_empty() && changed.is_empty());
+        assert_eq!(view.get(0).unwrap().count, 10);
+        assert_eq!(
+            view.guest.carried.as_ref().unwrap().item.as_ref(),
+            "minecraft:bundle"
+        );
+        let mut creative_drag = Some((2, vec![0]));
+        let (drops, changed) = click(
+            &mut view,
+            &mut creative_drag,
+            0,
+            10,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        assert!(drops.is_empty() && changed.is_empty());
+        assert_eq!(view.get(0).unwrap().count, 10);
     }
 
     /// A guest's chest clicks run `BundleItem`'s overrides: a carried
