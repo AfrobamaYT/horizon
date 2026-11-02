@@ -790,6 +790,7 @@ impl Game<'_> {
             return Ok(());
         }
         self.join_world_rest()?;
+        self.client_logging_out();
         if let Err(error) = self.join_server(address, name, None, cookies, lan) {
             log::warn!("Horizon: could not join server: {error}");
             if self.title.is_none() {
@@ -3004,9 +3005,8 @@ impl Game<'_> {
             C::UpdateTags(packet) => {
                 let should_update_static_data = self.integrated.is_none();
                 if let Some(remote) = self.remote.as_mut() {
-                    if should_update_static_data {
-                        Arc::make_mut(&mut remote.registries).add_tags(&packet);
-                    }
+                    // Unlike vanilla's memory connection, this client keeps its own registry view.
+                    Arc::make_mut(&mut remote.registries).add_tags(&packet);
                     let registries = remote.registries.clone();
                     self.native_client_tags_updated(
                         &registries,
@@ -3076,7 +3076,11 @@ impl Game<'_> {
             }
             C::Respawn(p) => {
                 let player_id = self.remote.as_ref().map(|r| r.entity_id);
-                let old_dimension = self.dim.id().to_owned();
+                let old_dimension = self
+                    .remote
+                    .as_ref()
+                    .and_then(|r| r.heard_level.clone())
+                    .unwrap_or_else(|| self.dim.id().to_owned());
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
