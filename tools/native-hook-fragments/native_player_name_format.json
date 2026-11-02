@@ -7,8 +7,7 @@
       "cancellable": false,
       "neoforge": "PlayerEvent.NameFormat",
       "mod_api": {
-        "contract": "replace",
-        "out": "displayname"
+        "contract": "listen"
       }
     }
   ],

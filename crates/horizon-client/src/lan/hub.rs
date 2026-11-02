@@ -37,16 +37,6 @@ use horizon_world::{
 };
 use std::sync::{Arc, Mutex, atomic::Ordering};
 
-/// Format a server player's nullable tab-list display name.
-#[inline(never)]
-pub fn native_player_tab_list_name_format(
-    player: u128,
-    name: &str,
-    display_name: &mut Option<crate::text::Text>,
-) {
-    crate::native_client_hooks::player_tab_list_name_format(player, name, display_name);
-}
-
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod chat;
 pub mod chat_filter;
@@ -338,6 +328,18 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
         ),
         ("insertion", string(name)),
     ])
+}
+
+/// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
+/// `player`, None to let the client choose it. Replace `display_name` to
+/// change it.
+#[inline(never)]
+pub fn native_player_tab_list_name_format(
+    player: u128,
+    name: &str,
+    display_name: &mut Option<crate::text::Text>,
+) {
+    crate::native_client_hooks::player_tab_list_name_format(player, name, display_name);
 }
 
 /// `LivingEntity.DATA_ARROW_COUNT_ID` (12) and `DATA_STINGER_COUNT_ID` (13):
@@ -917,8 +919,6 @@ impl Hub {
 
     fn player_info(&self, uuid: u128, name: &str, mode: i32, latency: i32) -> play::PlayerInfo {
         let guest = self.guests.iter().find(|g| g.uuid == uuid);
-        let mut display_name = self.nicknames.get(&uuid).map(crate::text::Text::literal);
-        native_player_tab_list_name_format(uuid, name, &mut display_name);
         play::PlayerInfo {
             uuid,
             name: Some(name.to_owned()),
@@ -935,12 +935,17 @@ impl Hub {
             game_mode: Some(mode),
             listed: Some(true),
             latency: Some(latency),
-            display_name: Some(
-                display_name.map(|text| super::data::component_nbt(&text.component())),
-            ),
+            display_name: Some(self.tab_list_name(uuid, name)),
             list_order: Some(0),
             show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
+    }
+    /// ServerPlayer.getTabListDisplayName: the nickname, if any, as mods
+    /// format it.
+    fn tab_list_name(&self, uuid: u128, name: &str) -> Option<Tag> {
+        let mut display_name = self.nicknames.get(&uuid).map(crate::text::Text::literal);
+        native_player_tab_list_name_format(uuid, name, &mut display_name);
+        display_name.map(|text| crate::scoreboard::component_tag(&text.component()))
     }
     /// ClientboundPlayerInfoUpdatePacket.createPlayerInitializing: every action.
     const INFO_ACTIONS: u8 = 0xFF;
@@ -3597,17 +3602,15 @@ impl Hub {
             Some(n) => self.nicknames.insert(uuid, n),
             None => self.nicknames.remove(&uuid),
         };
-        let mut display_name = self.nicknames.get(&uuid).map(crate::text::Text::literal);
-        if let Some(guest) = self.guests.iter().find(|g| g.uuid == uuid) {
-            native_player_tab_list_name_format(uuid, &guest.name, &mut display_name);
-        }
+        let Some(guest) = self.guests.iter().find(|g| g.uuid == uuid) else {
+            return;
+        };
+        let display_name = self.tab_list_name(uuid, &guest.name);
         self.broadcast(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
             actions: 0x20,
             entries: vec![play::PlayerInfo {
                 uuid,
-                display_name: Some(
-                    display_name.map(|text| super::data::component_nbt(&text.component())),
-                ),
+                display_name: Some(display_name),
                 ..Default::default()
             }],
         }));

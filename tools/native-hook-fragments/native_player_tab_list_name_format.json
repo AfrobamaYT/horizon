@@ -7,8 +7,7 @@
       "cancellable": false,
       "neoforge": "PlayerEvent.TabListNameFormat",
       "mod_api": {
-        "contract": "replace",
-        "out": "display_name"
+        "contract": "listen"
       }
     }
   ],

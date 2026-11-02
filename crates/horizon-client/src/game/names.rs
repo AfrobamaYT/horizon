@@ -210,7 +210,8 @@ impl Game<'_> {
                 Some(t) => t.formatted_name(member),
                 None => member,
             };
-            if player {
+            // Every frame: build the username only for a mod to read.
+            if player && !horizon_client::mod_api::mods().is_empty() {
                 self.native_player_name_format(&Text::literal(&name), &mut shown);
             }
             let shown = shown.resolve_legacy();
