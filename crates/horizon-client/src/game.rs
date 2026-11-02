@@ -6505,6 +6505,16 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
+        if let Some(placement) = self.with_level(|b, level, ticks| {
+            b.multi_placement(level, ticks, &ctx)
+        }) {
+            let mut cancel = false;
+            self.native_entity_multi_place(placement.state, &placement.snapshots, &mut cancel);
+            if cancel {
+                self.use_failed = true;
+                return Ok(true);
+            }
+        }
         let outcome = self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx));
         let PlaceOutcome::Placed { pos, state } = outcome else {
             self.process_level_events()?;

@@ -47,6 +47,19 @@ pub enum PlaceOutcome {
     Failed,
 }
 
+/// A block replaced by a multi-block placement.
+#[derive(Clone, Debug)]
+pub struct ReplacedBlockSnapshot {
+    pub pos: BlockPos,
+    pub state: BlockStateId,
+}
+
+/// The primary state and replaced blocks of a multi-block placement.
+pub struct MultiPlacement {
+    pub state: BlockStateId,
+    pub snapshots: Vec<ReplacedBlockSnapshot>,
+}
+
 /// `BlockPlaceContext` after resolving the replaced position: what
 /// `Block.getStateForPlacement` reads, and what a mod block is handed when it
 /// chooses the state it is placed in
@@ -1748,6 +1761,44 @@ impl Behaviours {
         ctx: &PlaceContext,
     ) -> PlaceOutcome {
         self.sim(level, ticks).place(ctx)
+    }
+    /// Preview the blocks replaced by the companion placements handled by
+    /// `set_placed_by`. No blocks are changed.
+    pub fn multi_placement<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        input: &PlaceContext,
+    ) -> Option<MultiPlacement> {
+        let mut sim = self.sim(level, ticks);
+        let (ctx, _, state) = sim.placement(input)?;
+        if !sim.is_in_valid_bounds(ctx.pos) {
+            return None;
+        }
+        let data = sim.b.data(state);
+        let other = if data.is(Class::AbstractBed) {
+            rel(ctx.pos, sim.b.facing(state))
+        } else if data.is(Class::Door)
+            || data.is(Class::SmallDripleaf)
+            || data.is(Class::DoublePlant)
+        {
+            above(ctx.pos)
+        } else {
+            return None;
+        };
+        Some(MultiPlacement {
+            state,
+            snapshots: vec![
+                ReplacedBlockSnapshot {
+                    pos: ctx.pos,
+                    state: sim.state(ctx.pos),
+                },
+                ReplacedBlockSnapshot {
+                    pos: other,
+                    state: sim.state(other),
+                },
+            ],
+        })
     }
     /// `DirectionalPlaceContext.canPlace`: whether the block at the clicked
     /// position can be replaced by the item (a dispenser places only there).

@@ -5293,6 +5293,19 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
+    /// A player is about to place a block with a companion. `snapshots`
+    /// contains the previous states at the primary and companion positions.
+    /// Set `cancel` to prevent the placement. @API:entity_multi_place@.
+    #[inline(never)]
+    pub(super) fn native_entity_multi_place(
+        &self,
+        state: BlockStateId,
+        snapshots: &[horizon_world::level::ReplacedBlockSnapshot],
+        cancel: &mut bool,
+    ) {
+        let _ = (state, snapshots, cancel);
+    }
+
     /// A tool is about to transform a block. Cancel or replace the final state;
     /// `None` suppresses the transformation.
     #[inline(never)]

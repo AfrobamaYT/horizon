@@ -141,7 +141,9 @@ pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, Sta
 pub use falling::Landing;
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
-pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
+pub use place::{
+    MultiPlacement, PlaceContext, PlaceOutcome, PlacementContext, ReplacedBlockSnapshot,
+};
 pub use states::{BlockId, PropKey, StateTable};
 pub use tick::{Precipitation, PrecipitationKind, RandomTickMask};
 pub use ticks::Ticks;
