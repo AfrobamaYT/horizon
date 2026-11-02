@@ -2795,12 +2795,13 @@ mod tests {
             pending_in_view.push((stages["meshing_in_view"], stages["meshing"]));
             order.extend(uploads.iter().map(|(key, _)| *key));
             streaming.free(uploads);
-            if !streaming.busy() && world.dirty_sections.columns().next().is_none() {
+            // The edge columns stay dirty: their neighbours never come (`ready`).
+            if order.len() >= 169 && !streaming.busy() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        // The columns with all their neighbours: 13 x 13.
+        // The columns with all their neighbours, 13 x 13, each meshed once.
         assert_eq!(order.len(), 169);
         let first_behind = order.iter().position(|k| !seen(k)).expect("some behind");
         assert!(first_behind > 0, "some in view");
