@@ -1,4 +1,5 @@
 name: checks
+run-name: ${{ inputs.upstream_sync && format('Upstream sync {0}', inputs.upstream_sync) || github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
 # verify: every pull request and every push to main, on GitHub's runners (the repository is public). It is the
 # check main requires, so it never has a condition: a skipped job counts as passed, and every run of this workflow
 # must report a real verify (a pull request that changes no Rust finishes it in seconds instead).
@@ -15,6 +16,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      upstream_sync:
+        description: 'Upstream sync short SHA and request ID (automation only; skips manual vanilla/JFR probes)'
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -69,7 +75,7 @@ jobs:
   # Python and the Rust cache steps are GitHub's only.
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +156,7 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -237,7 +243,7 @@ jobs:
   # game directory in HORIZON_MINECRAFT_DIR and the pinned server jar in
   # HORIZON_SERVER_JAR. Start them by hand: gh workflow run checks --ref <branch>.
   vanilla-parity:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4
@@ -585,7 +591,7 @@ jobs:
           RUSTUP_TOOLCHAIN: stable
         run: python tools/test_float_log_parity.py
   jfr-analysis:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4
