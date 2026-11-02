@@ -240,6 +240,7 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let env = Env {
+            player: Some(host.hub.guests[gi].uuid),
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,

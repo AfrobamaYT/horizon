@@ -87,6 +87,9 @@ fn place_back(menu: &mut Menu, env: &Env, stacks: Vec<ItemStack>) {
 impl Game<'_> {
     pub(super) fn menu_env(&self) -> Env<'_> {
         Env {
+            player: self
+                .lan_acting_uuid
+                .or_else(|| self.remote.as_ref().map(|r| r.profile())),
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -118,6 +121,7 @@ impl Game<'_> {
             self.level_maps(&held)
         });
         let env = Env {
+            player: Some(host.hub.guests[gi].uuid),
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             ..self.menu_env()
         };

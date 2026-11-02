@@ -125,14 +125,8 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
-        player_flyable_fall: |player, distance, multiplier, replacement| {
-            crate::mod_api::dispatch_player_flyable_fall(
-                crate::mod_api::mods(),
-                player,
-                distance,
-                multiplier,
-                replacement,
-            );
+        player_flyable_fall: |player, fall| {
+            crate::mod_api::dispatch_player_flyable_fall(crate::mod_api::mods(), player, fall);
         },
         living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
             crate::mod_api::dispatch_living_drown(

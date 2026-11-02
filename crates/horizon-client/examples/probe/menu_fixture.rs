@@ -94,6 +94,7 @@ pub fn main() -> horizon_client::Result<()> {
     let names = horizon_client::creative::Names::load(root);
     let case_maps = CaseMaps::default();
     let env = Env {
+        player: None,
         items: &items,
         recipes: &recipes,
         brewing: &brewing,

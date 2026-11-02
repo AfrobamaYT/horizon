@@ -4534,9 +4534,24 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
+    /// @API:item_stacked_on_other@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn item_stacked_on_other(&self, event_: &mut ItemStackedOnOtherEvent<'_, '_>) -> Flow {
+        let _ = event_;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
+        let _ = event;
+    }
+    /// Called when a player with mayfly reaches `Player.causeFallDamage`.
+    /// @API:player_flyable_fall@.
+    ///
+    /// Every mod gets `event.fall` in order and may add, change or remove fall.
+    fn player_flyable_fall(&self, event: &mut PlayerFlyableFallEvent<'_>) {
         let _ = event;
     }
     /// Additional first-person hand and item pose, including empty arms and maps.
@@ -13912,6 +13927,27 @@ pub fn dispatch_item_container(
         }
     }
 }
+/// What [`Hooks::item_stacked_on_other`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemStackedOnOtherEvent<'a, 'b> {
+    pub event: &'a mut StackedOnOther<'b>,
+}
+pub fn dispatch_item_stacked_on_other(
+    mods: &[Box<dyn Hooks>],
+    event: &mut StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event_ = ItemStackedOnOtherEvent { event };
+    for mod_hook in super::entered(mods, "item_stacked_on_other") {
+        if matches!(mod_hook.item_stacked_on_other(&mut event_), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -13941,6 +13977,22 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::player_flyable_fall`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerFlyableFallEvent<'a> {
+    pub player: i32,
+    pub fall: &'a mut PlayerFlyableFall,
+}
+pub fn dispatch_player_flyable_fall(
+    mods: &[Box<dyn Hooks>],
+    player: i32,
+    fall: &mut PlayerFlyableFall,
+) {
+    let mut event = PlayerFlyableFallEvent { player, fall };
+    for mod_hook in super::entered(mods, "player_flyable_fall") {
+        mod_hook.player_flyable_fall(&mut event);
+    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

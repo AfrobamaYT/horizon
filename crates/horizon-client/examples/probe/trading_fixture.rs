@@ -378,6 +378,7 @@ pub fn main() -> horizon_client::Result<()> {
                     maps: None,
                 };
                 let env = Env {
+                    player: None,
                     items: &items,
                     recipes: &recipes,
                     brewing: &brewing,

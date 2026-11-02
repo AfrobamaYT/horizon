@@ -289,6 +289,7 @@ impl Game<'_> {
                 Kind::Inventory
             });
             let env = Env {
+                player: None,
                 items: self.items(),
                 recipes: self.recipes(),
                 brewing: &self.stations().brewing,

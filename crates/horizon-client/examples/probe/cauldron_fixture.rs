@@ -87,6 +87,7 @@ pub fn main() -> horizon_client::Result<()> {
     let enchantments = horizon_client::enchant::Enchantments::default();
     let names = horizon_client::creative::Names::default();
     let env = Env {
+        player: None,
         items: &items,
         recipes: &recipes,
         brewing: &brewing,

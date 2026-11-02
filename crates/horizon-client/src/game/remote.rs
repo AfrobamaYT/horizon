@@ -10805,6 +10805,7 @@ mod tests {
         let enchantments = Enchantments::default();
         let names = Names::default();
         let env = Env {
+            player: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

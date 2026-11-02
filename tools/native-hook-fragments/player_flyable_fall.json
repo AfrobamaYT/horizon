@@ -1,0 +1,18 @@
+{
+  "hooks": [
+    {
+      "name": "player_flyable_fall",
+      "target": "horizon_client_lib::landing::native_player_flyable_fall",
+      "neoforge": "PlayerFlyableFallEvent",
+      "side": "both",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "collect",
+        "out": "fall"
+      }
+    }
+  ],
+  "comments": ["crates/horizon-client/src/landing.rs"],
+  "rust_summary": "a flyable player's fall (`native_player_flyable_fall`).",
+  "doc_summary": "a flyable player's fall: `native_player_flyable_fall(player, fall)` is heard on both sides when a player with mayfly lands, also as a passenger of a falling mount, at `Player.causeFallDamage`'s early return. Mods may change the fall distance and multiplier in turn, but as in NeoForge they change nothing: the player still takes no fall damage. Bundles that use it need `\"hooks\": @API:player_flyable_fall@`."
+}

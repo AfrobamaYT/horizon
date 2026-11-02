@@ -21,6 +21,8 @@ pub mod place;
 
 /// What a menu needs to know about items and recipes.
 pub struct Env<'a> {
+    /// UUID of the player operating this menu, when a player is available.
+    pub player: Option<u128>,
     pub items: &'a Items,
     pub recipes: &'a Recipes,
     pub brewing: &'a Brewing,
@@ -237,7 +239,10 @@ struct Slot {
 
 /// A pickup click's slot and cursor, including empty stacks.
 pub struct StackedOnOther<'a> {
+    pub player: Option<u128>,
     pub slot: usize,
+    pub container: usize,
+    pub container_slot: usize,
     pub primary: bool,
     pub carried: &'a mut Option<ItemStack>,
     pub clicked: &'a mut Option<ItemStack>,
@@ -245,6 +250,7 @@ pub struct StackedOnOther<'a> {
 }
 
 /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
+/// @API:item_stacked_on_other@.
 #[inline(never)]
 pub fn native_item_stacked_on_other(event: &mut StackedOnOther<'_>, canceled: &mut bool) {
     crate::native_client_hooks::item_stacked_on_other(event, canceled);
@@ -2830,7 +2836,10 @@ impl Menu {
     fn pickup(&mut self, env: &Env, s: usize, primary: bool) {
         let slot = self.slots[s];
         let mut event = StackedOnOther {
+            player: env.player,
             slot: s,
+            container: slot.container,
+            container_slot: slot.index,
             primary,
             carried: &mut self.carried,
             clicked: &mut self.containers[slot.container][slot.index],
@@ -3314,6 +3323,7 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            player: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -3571,7 +3581,7 @@ pub(crate) mod tests {
                     }
                 },
                 item_stacked_on_other: |_, _| {},
-                player_flyable_fall: |_, _, _, _| {},
+                player_flyable_fall: |_, _| {},
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
                 living_drown: |_, _, _, _, _, _| {},
@@ -3606,6 +3616,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            player: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -3681,6 +3692,7 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            player: None,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

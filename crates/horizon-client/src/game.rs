@@ -9535,6 +9535,9 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let env = Env {
+            player: self
+                .lan_acting_uuid
+                .or_else(|| self.remote.as_ref().map(|r| r.profile())),
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
