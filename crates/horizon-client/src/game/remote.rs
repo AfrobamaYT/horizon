@@ -7396,7 +7396,7 @@ impl Game<'_> {
                 if result.should_swing() {
                     self.with_hand(hand, Game::swing_arm);
                 }
-            } else if self.predict_campfire_douse(&hit, held.as_ref(), seq) {
+            } else if self.with_hand(hand, |g| g.predict_campfire_douse(&hit, held.as_ref(), seq)) {
                 // CampfireBlock.useItemOn succeeded: this hand swings and the
                 // click ends, so a shield in the other hand is not raised.
                 self.with_hand(hand, Game::swing_arm);
@@ -7440,7 +7440,7 @@ impl Game<'_> {
                 }
                 return true;
             } else if let Some(stack) = held.as_ref()
-                && (self.predict_item_on_block(stack, &hit, hand)
+                && (self.with_hand(hand, |g| g.predict_item_on_block(stack, &hit, hand))
                     || self.predict_map_on_banner(stack, &hit))
             {
                 // Item.useOn succeeded here (InteractionResult.SUCCESS):
