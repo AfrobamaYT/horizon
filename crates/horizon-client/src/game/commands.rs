@@ -159,6 +159,17 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     i32::try_from(id).ok()
 }
 impl Game<'_> {
+    /// `native_player_level_change` for a level that was `from` before an experience change.
+    pub(super) fn native_player_level_changed(&mut self, from: i32) {
+        let to = self.experience.level;
+        if from != to
+            && !horizon_client::mod_api::mods().is_empty()
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_level_change(player, &name, from, to);
+        }
+    }
+
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
         if self.client_mod_command(command) {
@@ -2905,7 +2916,10 @@ impl Game<'_> {
             } else {
                 self.give_experience_points(amount);
             }
-        } else if levels {
+            return true;
+        }
+        let old_level = self.experience.level;
+        if levels {
             self.experience.level = amount;
         } else {
             let needed = horizon_client::entities::Experience::needed(self.experience.level);
@@ -2914,6 +2928,7 @@ impl Game<'_> {
             }
             self.experience.progress = amount as f32 / needed as f32;
         }
+        self.native_player_level_changed(old_level);
         true
     }
     /// `GameRules.set` as the `/gamerule` command and the management protocol call it: the rule changes, the

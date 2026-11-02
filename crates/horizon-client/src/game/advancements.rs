@@ -614,6 +614,11 @@ impl Game<'_> {
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
                 self.advancement_progress(&a.id, criterion, true);
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_advancement_criterion_grant(player, &name, &a.id, criterion);
+                }
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {

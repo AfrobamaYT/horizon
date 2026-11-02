@@ -2011,7 +2011,10 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let atlas = startup::time("ui.atlas", || HudAtlas::build_over(root, defaults));
+            let mod_image = !horizon_client::mod_api::mods().is_empty();
+            let atlas = startup::time("ui.atlas", || {
+                HudAtlas::build_over_with_image(root, defaults, mod_image)
+            });
             let panorama = panorama
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
@@ -4102,6 +4105,13 @@ impl Game<'_> {
                 if extra_life > 0 {
                     item.age = 6000 - extra_life.min(32766);
                     alive = true;
+                } else if self.serving.is_some() || self.options.dedicated.is_some() {
+                    self.native_item_despawn(
+                        item.id,
+                        &item.stack.item,
+                        item.stack.count as i32,
+                        [item.position.x, item.position.y, item.position.z],
+                    );
                 }
             }
             if !alive || removed[i] {
@@ -13357,15 +13367,16 @@ impl Game<'_> {
             self.spawn_orbs(at, xp);
         }
     }
-    /// `Player.giveExperiencePoints`: `give_levels` runs once for each level
-    /// gained or lost.
+    /// `Player.giveExperiencePoints`: `add_experience_levels` runs once for each
+    /// level gained or lost, and the mods hear of the level change once.
     pub(super) fn give_experience_points(&mut self, points: i32) {
+        let old_level = self.experience.level;
         self.experience.add_points(points);
         while self.experience.progress < 0.0 {
             let xp = &self.experience;
             let lost = xp.progress * horizon_client::entities::Experience::needed(xp.level) as f32;
             let had_level = xp.level > 0;
-            self.give_levels(-1);
+            self.add_experience_levels(-1);
             let xp = &mut self.experience;
             xp.progress = if had_level {
                 1.0 + lost / horizon_client::entities::Experience::needed(xp.level) as f32
@@ -13377,10 +13388,11 @@ impl Game<'_> {
             let xp = &mut self.experience;
             xp.progress =
                 (xp.progress - 1.0) * horizon_client::entities::Experience::needed(xp.level) as f32;
-            self.give_levels(1);
+            self.add_experience_levels(1);
             let xp = &mut self.experience;
             xp.progress /= horizon_client::entities::Experience::needed(xp.level) as f32;
         }
+        self.native_player_level_changed(old_level);
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
     fn release_bow(&mut self, stack: &ItemStack, ticks: u32) {

@@ -977,10 +977,16 @@ impl Game<'_> {
             self.throw_from_eyes(rest, eye, false);
         }
     }
-    /// `Player.giveExperienceLevels`: the mods of a server player may change or
-    /// cancel the levels, and every fifth level gained plays the level-up sound
+    /// `Player.giveExperienceLevels`, and the level change reported to the mods.
+    pub(super) fn give_levels(&mut self, levels: i32) {
+        let old_level = self.experience.level;
+        self.add_experience_levels(levels);
+        self.native_player_level_changed(old_level);
+    }
+    /// `ServerPlayer.giveExperienceLevels`: the mods of a server player may change
+    /// or cancel the levels, and every fifth level gained plays the level-up sound
     /// (at most every 100 ticks).
-    pub(super) fn give_levels(&mut self, mut levels: i32) {
+    pub(super) fn add_experience_levels(&mut self, mut levels: i32) {
         // ServerPlayer.giveExperienceLevels
         if levels == 0 {
             return;
