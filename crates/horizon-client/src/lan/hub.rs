@@ -428,7 +428,7 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
 
 /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
 /// `player`, None to let the client choose it. Replace `display_name` to
-/// change it.
+/// change it. @API:player_tab_list_name_format@.
 #[inline(never)]
 pub fn native_player_tab_list_name_format(
     player: u128,

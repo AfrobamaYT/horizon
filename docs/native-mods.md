@@ -1809,13 +1809,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   keep the old slot; the client is sent that slot again.
 - **`native_furnace_burn(pos, fuel)`**: a furnace consumed `fuel` and started burning at `pos`.
 - **`native_furnace_smelt(pos, item, result)`**: a furnace finished smelting `item` into `result` at `pos`.
-- **`native_player_name_format(username, displayname)`**: a player's display name is formatted. `username` is the
-  original name component; replace `displayname` to change the result. The command/chat player paths, hub messages,
-  other players' command names and client name tags are wired. The starting display name includes team formatting and,
-  where available, click, hover and insertion decoration; replacing it discards those unless the mod retains them.
-- **`native_player_tab_list_name_format(player, name, display_name)`**: a server player's tab-list name is
-  formatted for a player-info entry. Replace `display_name` (`Option<Text>`); `None` lets the client choose the
-  name. The initial value is the server nickname, if any.
 - **`native_player_exp_change(player, name, amount)`**: a server player's experience points from an orb pickup are
   about to be added, after mending has taken its share. Change `amount` to change the points added; negative values
   become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing

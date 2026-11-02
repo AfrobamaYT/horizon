@@ -4532,7 +4532,7 @@ pub trait Hooks: Send + Sync {
     }
     /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
     /// `player`, None to let the client choose it. Replace `display_name` to
-    /// change it.
+    /// change it. @API:player_tab_list_name_format@.
     ///
     /// Every mod gets `event.display_name` in order and may add, change or remove display_name.
     fn player_tab_list_name_format(&self, event: &mut PlayerTabListNameFormatEvent<'_>) {
