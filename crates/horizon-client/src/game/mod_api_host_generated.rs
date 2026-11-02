@@ -545,4 +545,7 @@ impl Host for super::Game<'_> {
     ) -> Option<Vec<[f64; 6]>> {
         self.native_level_block_shape(level, pos, kind)
     }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
+    }
 }
