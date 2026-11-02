@@ -99,6 +99,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         log::warn!("Native data-load hooks already installed; keeping the first callbacks");
     }
     if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+        has_mods: || !crate::mod_api::mods().is_empty(),
         menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
             crate::mod_api::dispatch_menu_slot_rules(
                 crate::mod_api::mods(),

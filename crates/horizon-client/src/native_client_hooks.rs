@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
+    pub has_mods: fn() -> bool,
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub player_flyable_fall: fn(i32, &mut crate::landing::PlayerFlyableFall),
@@ -21,6 +22,10 @@ static HOOKS: OnceLock<NativeClientHooks> = OnceLock::new();
 /// Install the process-wide callbacks once; a second installation keeps the first.
 pub fn install(hooks: NativeClientHooks) -> Result<(), NativeClientHooks> {
     HOOKS.set(hooks)
+}
+
+pub(crate) fn has_mods() -> bool {
+    HOOKS.get().is_some_and(|hooks| (hooks.has_mods)())
 }
 
 pub(crate) fn menu_slot_rules(

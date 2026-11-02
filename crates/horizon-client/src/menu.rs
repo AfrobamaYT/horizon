@@ -283,8 +283,8 @@ pub fn fits_inside_container_items(stack: &ItemStack) -> bool {
 }
 
 /// The containers a menu spans.
-const PLAYER: usize = 0;
-const MAIN: usize = 1;
+pub(crate) const PLAYER: usize = 0;
+pub(crate) const MAIN: usize = 1;
 const GRID: usize = 2;
 const RESULT: usize = 3;
 /// `Container.getMaxStackSize`.
@@ -3574,6 +3574,7 @@ pub(crate) mod tests {
     fn installed_slot_rules_change_mod_menu_placement() {
         let installed =
             crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+                has_mods: || false,
                 menu_slot_rules: |menu, slot, _, may_place, max_stack| {
                     if menu == "test:rules" && slot == 0 {
                         *may_place = false;

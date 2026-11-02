@@ -455,7 +455,44 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
         return;
     }
     let right = button == 1;
-    if bundle_click(view, i, right, rules) {
+    let mut canceled = false;
+    let mut handled = false;
+    if crate::native_client_hooks::has_mods() {
+        let (container, container_slot) = match &view.container {
+            Some(c) if i < c.len() => (crate::menu::MAIN, i),
+            Some(c) => (crate::menu::PLAYER, player_slot(i - c.len())),
+            None => (
+                crate::menu::PLAYER,
+                match i {
+                    5..=8 => 44 - i,
+                    9..=35 => i,
+                    36..=44 => i - 36,
+                    45 => 40,
+                    _ => i,
+                },
+            ),
+        };
+        let mut clicked = view.get(i);
+        let mut event = crate::menu::StackedOnOther {
+            player: Some(view.guest.uuid),
+            slot: i,
+            container,
+            container_slot,
+            primary: !right,
+            carried: &mut view.guest.carried,
+            clicked: &mut clicked,
+            cancellation_result: false,
+        };
+        crate::menu::native_item_stacked_on_other(&mut event, &mut canceled);
+        handled = event.cancellation_result;
+        view.set(i, clicked);
+    }
+    let handled = if canceled {
+        handled
+    } else {
+        bundle_click(view, i, right, rules)
+    };
+    if handled {
         return;
     }
     let (slot_item, carried) = (view.get(i), view.guest.carried.clone());
