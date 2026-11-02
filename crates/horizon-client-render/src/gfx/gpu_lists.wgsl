@@ -2,9 +2,11 @@
 // listed, the runs of its quads that face the eye, found as
 // `mesher::Sides::visible_from` finds them on the CPU, written into the call
 // each of its parts draws in (one per pass group and arena page) after taking
-// room there: their indices, in the flat draws' index list, as `flatten_seen`
-// does for occlusion culling's phase 2. Solid draws write depth and are tested
-// against it, so their order within a call does not change the picture.
+// room there: their indices (`flatten_sides`, for the flat draws' index list,
+// as `flatten_seen` does for occlusion culling's phase 2), or one indirect draw
+// per run (`sides_draws`, for `multi_draw_indexed_indirect_count`). Solid draws
+// write depth and are tested against it, so their order within a call does not
+// change the picture.
 struct View {
     // The eye relative to the camera, and 1.0 when there is one (`sides_on`);
     // without, every bucket is drawn (`Sides::every`).
@@ -12,8 +14,8 @@ struct View {
     has_eye: f32,
 }
 // Per section listed: its row's id; for each of its parts (up to two) the call
-// it draws in, with the part (`PART_*`) in the top bits; its number of parts.
-// Then its origin relative to the camera.
+// it draws in, with the part (`PART_*`) in the top bits; its number of parts
+// plus 4 times its instance. Then its origin relative to the camera.
 struct Record {
     words: vec4<u32>,
     origin: vec4<f32>,
@@ -23,10 +25,11 @@ struct Record {
 // (14 ends, 7 planes' bits, flags).
 @group(0) @binding(1) var<storage, read> rows: array<u32>;
 @group(0) @binding(2) var<uniform> view: View;
-// Per call `DrawIndexedIndirectArgs`: its index count starts at 0, its first
-// index is where its room starts.
+// Per call five words: its count (indices, or draws), which starts at 0, then
+// for `flatten_sides` the rest of its `DrawIndexedIndirectArgs`; word 2 is
+// where its room starts.
 @group(0) @binding(3) var<storage, read_write> calls: array<atomic<u32>>;
-// The flat draws' index list.
+// Indices (`flatten_sides`) or `DrawIndexedIndirectArgs` (`sides_draws`).
 @group(0) @binding(4) var<storage, read_write> out: array<u32>;
 
 const ROW: u32 = 24u;
@@ -146,7 +149,7 @@ fn flatten_sides(@builtin(workgroup_id) group: vec3<u32>,
     }
     let record = records[r];
     let row = record.words.x * ROW;
-    let parts = record.words.w;
+    let parts = record.words.w & 3u;
     if lane == 0u {
         let eye = eye_of(record);
         for (var p = 0u; p < parts; p++) {
@@ -173,6 +176,41 @@ fn flatten_sides(@builtin(workgroup_id) group: vec3<u32>,
                 out[to + i] = first + quad(i);
             }
             to += count;
+        }
+    }
+}
+
+// One record per invocation: a draw per run, as the CPU lists them
+// (`[quads * 6, 1, 0, first vertex, instance]` over the quad index pattern).
+@compute @workgroup_size(64)
+fn sides_draws(@builtin(workgroup_id) group: vec3<u32>,
+    @builtin(local_invocation_index) lane: u32) {
+    let r = record_index(group) * LANES + lane;
+    if r >= arrayLength(&records) {
+        return;
+    }
+    let record = records[r];
+    let row = record.words.x * ROW;
+    let parts = record.words.w & 3u;
+    let instance = record.words.w >> 2u;
+    let eye = eye_of(record);
+    let base = rows[row];
+    for (var p = 0u; p < parts; p++) {
+        let word = part_word(record, p);
+        let runs = part_runs(row, word >> 28u, eye);
+        if runs.n == 0u {
+            continue;
+        }
+        let call = (word & CALL_MASK) * 5u;
+        var to = (atomicLoad(&calls[call + 2u]) + atomicAdd(&calls[call], runs.n)) * 5u;
+        for (var k = 0u; k < runs.n; k++) {
+            let run = runs.runs[k];
+            out[to] = run.y * 6u;
+            out[to + 1u] = 1u;
+            out[to + 2u] = 0u;
+            out[to + 3u] = base + run.x * 4u;
+            out[to + 4u] = instance;
+            to += 5u;
         }
     }
 }

@@ -664,7 +664,7 @@ impl Flat {
             );
         }
         if let Some(lists) = &mut lists {
-            lists.prepare(device, encoder, uploads, &self.indices, eye);
+            lists.prepare(device, encoder, uploads, Some(&self.indices), eye);
         }
         let ranges_at = |first: u64, count: u64| {
             wgpu::BindingResource::Buffer(wgpu::BufferBinding {

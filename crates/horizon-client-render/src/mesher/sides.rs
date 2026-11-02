@@ -169,6 +169,31 @@ impl Sides {
         self.runs(|_| true, part, draw);
     }
 
+    /// Whether `part` draws the cutout (or opaque) quads of a bucket.
+    fn wants(&self, part: Part, cutout: bool) -> bool {
+        match part {
+            Part::All => true,
+            _ if !self.split => true,
+            Part::Opaque => !cutout,
+            Part::Cutout => cutout,
+        }
+    }
+
+    /// The most runs `visible_from` finds for `part`, whatever the eye: one per
+    /// part of a bucket it draws that holds quads, and at most 7, as runs are
+    /// apart (gpu_lists.wgsl's room for its draws).
+    pub fn part_runs(&self, part: Part) -> u32 {
+        let mut start = 0;
+        let mut runs = 0;
+        for (n, &end) in self.ends.iter().enumerate() {
+            if end != start && self.wants(part, slot(self.grouped, n).1) {
+                runs += 1;
+            }
+            start = end;
+        }
+        runs.min(7)
+    }
+
     /// Calls `draw` for each run of `part`'s quads in the buckets `seen` keeps.
     fn runs(&self, seen: impl Fn(usize) -> bool, part: Part, mut draw: impl FnMut(u32, u32)) {
         let mut start = 0;
@@ -178,13 +203,7 @@ impl Sides {
                 continue;
             }
             let (bucket, cutout) = slot(self.grouped, n);
-            let wanted = match part {
-                Part::All => true,
-                _ if !self.split => true,
-                Part::Opaque => !cutout,
-                Part::Cutout => cutout,
-            };
-            match (wanted && seen(bucket), run) {
+            match (self.wants(part, cutout) && seen(bucket), run) {
                 (true, None) => run = Some(start),
                 (false, Some(first)) => {
                     draw(first, start - first);

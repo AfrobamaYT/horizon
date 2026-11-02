@@ -792,7 +792,8 @@ pub struct Renderer {
     flat: Option<flat::Flat>,
     /// `flat` draws this frame's sections (off: the per-section draws).
     flat_on: bool,
-    /// Phase 1's solid lists made on the GPU, in flat frames (with `flat`).
+    /// Phase 1's solid lists made on the GPU: in flat frames (indices), or as
+    /// draws counted on the GPU (`MULTI_DRAW_INDIRECT_COUNT`: Vulkan, DX12).
     gpu_lists: Option<gpu_lists::GpuLists>,
     /// Occlusion culling of solid section draws, where the GPU's instance
     /// counts reach a multi-draw's entries (Vulkan, Metal).
@@ -1689,6 +1690,7 @@ async fn open_backend(
         | oit::features(&adapter)
         | (adapter.features()
             & (wgpu::Features::INDIRECT_FIRST_INSTANCE
+                | wgpu::Features::MULTI_DRAW_INDIRECT_COUNT
                 | wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
                 | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
@@ -3514,7 +3516,18 @@ impl Renderer {
                 .get_downlevel_capabilities()
                 .flags
                 .contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION);
-        let gpu_lists = flat.as_ref().map(|_| gpu_lists::GpuLists::new(&device));
+        let gpu_lists = if flat.is_some() {
+            Some(gpu_lists::Out::Indices)
+        } else if multi_draw
+            && device
+                .features()
+                .contains(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT)
+        {
+            Some(gpu_lists::Out::Draws)
+        } else {
+            None
+        }
+        .map(|out| gpu_lists::GpuLists::new(&device, out));
         let batchable = translucent_batchable(
             &adapter.get_info(),
             multi_draw,
@@ -6040,15 +6053,18 @@ impl Renderer {
             }
         };
         // Phase 1's sections can leave finding their facing quads to the GPU
-        // (`gpu_lists`) in frames drawn flat with nothing but the camera's
-        // terrain: no mirror, shader pack terrain or shadow, nor tiles.
+        // (`gpu_lists`) in frames with nothing but the camera's terrain (no
+        // mirror, shader pack terrain or shadow, nor tiles): drawn flat, or
+        // where multi-draws take their count from the GPU.
         let use_lists = gpu_lists_on()
             && !pack_terrain
             && shadow_view.is_none()
             && mirror.is_none()
             && visible_lods.is_empty()
-            && self.flat_on
-            && (self.flat.as_ref()).is_some_and(|f| self.drawn_sections >= f.min_sections);
+            && match &self.flat {
+                Some(flat) => self.flat_on && self.drawn_sections >= flat.min_sections,
+                None => self.multi_draw,
+            };
         if let Some(lists) = &mut self.gpu_lists {
             lists.clear(&self.device);
         }
@@ -6066,6 +6082,7 @@ impl Renderer {
                     &s.sides,
                     parts(fade_code(s, &v.key) != 0),
                     v.origin,
+                    i as u32,
                 )
             {
                 if let Some(c) = &mut cull {
@@ -6750,6 +6767,27 @@ impl Renderer {
                 bytemuck::cast_slice(&self.draws),
             );
         }
+        // Without flat draws, the GPU writes the lists' draws and counts them.
+        if let Some(lists) = self
+            .gpu_lists
+            .as_mut()
+            .filter(|l| l.out() == gpu_lists::Out::Draws && l.listed() > 0)
+        {
+            lists.rooms();
+            lists.prepare(
+                &self.device,
+                &mut encoder,
+                &mut self.uploads,
+                None,
+                eye.map(|e| e.to_array()),
+            );
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Section lists"),
+                timestamp_writes: None,
+            });
+            lists.dispatch(&mut pass);
+            self.section_draw_calls += lists.calls().len();
+        }
         let view_target = target_texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(self.config.format.remove_srgb_suffix()),
             ..Default::default()
@@ -7397,13 +7435,31 @@ impl Renderer {
                     // Without a native material, on Metal, the opaque pass, then the
                     // cutout one (terrain.wgsl's `opaque_quad`), each over phase 1's
                     // lists with quads for it, and over all of phase 2's.
+                    // Each pass's GPU-made draws by group, too (`gpu_lists`).
                     let (opaque, cutout) = (opaque_end as u32, cutout_start as u32);
-                    let passes: &[(&wgpu::RenderPipeline, std::ops::Range<u32>)] = match material {
+                    type Passes<'p> =
+                        &'p [(&'p wgpu::RenderPipeline, std::ops::Range<u32>, &'p [u8])];
+                    let passes: Passes = match material {
                         None if split_solid => &[
-                            (&self.solid_opaque, 0..opaque),
-                            (&self.solid_cutout, cutout..phase1_draws),
+                            (&self.solid_opaque, 0..opaque, &[0]),
+                            (&self.solid_cutout, cutout..phase1_draws, &[1]),
                         ],
-                        _ => &[(solid_pipeline, 0..phase1_draws)],
+                        _ => &[(solid_pipeline, 0..phase1_draws, &[0, 1])],
+                    };
+                    let lists = self
+                        .gpu_lists
+                        .as_ref()
+                        .filter(|l| l.out() == gpu_lists::Out::Draws && l.prepared());
+                    let draw_lists = |pass: &mut wgpu::RenderPass<'_>, groups: &[u8]| {
+                        let Some(lists) = lists else {
+                            return;
+                        };
+                        for (k, call) in lists.calls().iter().enumerate() {
+                            if groups.contains(&call.group) {
+                                pass.set_vertex_buffer(0, self.arena.buffer(call.page).slice(..));
+                                lists.multi_draw(pass, k);
+                            }
+                        }
                     };
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.set_vertex_buffer(1, self.instances.slice(..));
@@ -7413,8 +7469,9 @@ impl Renderer {
                             // its pass, or one of their own on Metal), then
                             // what they found in sight, in a pass that loads
                             // both targets (it reads the test's results).
-                            for (pipeline, draws) in passes {
+                            for (pipeline, draws, groups) in passes {
                                 pass.set_pipeline(pipeline);
+                                draw_lists(&mut pass, groups);
                                 self.draw_sections(
                                     &mut pass,
                                     &self.indirect,
@@ -7448,7 +7505,7 @@ impl Renderer {
                                 wgpu::IndexFormat::Uint32,
                             );
                             pass.set_vertex_buffer(1, self.instances.slice(..));
-                            for (pipeline, _) in passes {
+                            for (pipeline, ..) in passes {
                                 pass.set_pipeline(pipeline);
                                 self.draw_sections(
                                     &mut pass,
@@ -7461,8 +7518,9 @@ impl Renderer {
                         }
                         // Without culling, phase 1 is all the solid draws.
                         None => {
-                            for (pipeline, draws) in passes {
+                            for (pipeline, draws, groups) in passes {
                                 pass.set_pipeline(pipeline);
+                                draw_lists(&mut pass, groups);
                                 self.draw_sections(
                                     &mut pass,
                                     &self.indirect,

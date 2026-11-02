@@ -5,10 +5,11 @@
 //! and pushed one draw per run. Here it pushes one record per section instead:
 //! its row (where its quads start and how `Sides` sorted them, uploaded with its
 //! mesh), the call each of its parts draws in and its camera-relative origin. The
-//! GPU finds the same runs and writes their indices, per call (one per pass
-//! group and arena page), into the flat draws' index list, drawn with
-//! `draw_indexed_indirect`. Calls take room for all the quads of their sections'
-//! parts; the GPU counts the indices it wrote.
+//! GPU finds the same runs and writes, per call (one per pass group and arena
+//! page), either the runs' indices into the flat draws' index list
+//! (`Out::Indices`, drawn with `draw_indexed_indirect`), or one indirect draw per
+//! run (`Out::Draws`, drawn with `multi_draw_indexed_indirect_count`). Calls take
+//! room for the most their sections may write; the GPU counts what they wrote.
 //!
 //! Solid draws write depth and are tested against it, so their order within a
 //! call does not change the picture.
@@ -16,8 +17,20 @@ use crate::mesher::{Part, Sides};
 
 /// Words per row: first vertex, `Sides::gpu_row`, padding.
 const ROW: usize = 24;
+/// Records each workgroup of `sides_draws` takes.
+const GROUP: u32 = 64;
 /// Most workgroups along one dimension of a dispatch.
 const GROUP_LIMIT: u32 = 65535;
+
+/// What the GPU writes for a frame's calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Out {
+    /// Indices into the flat draws' list (`flat::Flat`), one indirect draw per call.
+    Indices,
+    /// `DrawIndexedIndirectArgs` per run, over the quad index pattern, with the
+    /// section's instance; per call a count for `multi_draw_indexed_indirect_count`.
+    Draws,
+}
 
 /// A part of a section in a record: `Part` as gpu_lists.wgsl names it.
 fn part_code(part: Part) -> u32 {
@@ -29,7 +42,7 @@ fn part_code(part: Part) -> u32 {
 }
 
 /// One of the frame's calls: what pass `group` draws of arena `page`, from
-/// index `first` with room for `count`.
+/// `first` (an index, or a draw) with room for `count`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ListCall {
     pub group: u8,
@@ -39,6 +52,7 @@ pub(super) struct ListCall {
 }
 
 pub(super) struct GpuLists {
+    out: Out,
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     /// Per id: its first vertex and `Sides::gpu_row` (`ROW` words).
@@ -47,7 +61,7 @@ pub(super) struct GpuLists {
     free_ids: Vec<u32>,
     next_id: u32,
     /// The frame's sections: id, the call and part of each of its parts, its
-    /// number of parts; then its origin.
+    /// number of parts plus its instance times 4; then its origin.
     records: Vec<[u32; 8]>,
     record_buffer: wgpu::Buffer,
     record_capacity: u64,
@@ -57,12 +71,16 @@ pub(super) struct GpuLists {
     call_of: Vec<u32>,
     band: u32,
     call_data: Vec<[u32; 5]>,
-    /// Per call `DrawIndexedIndirectArgs`; the GPU adds what it writes to the count.
+    /// Per call `DrawIndexedIndirectArgs` (`Out::Indices`), or its count of
+    /// draws first (`Out::Draws`); the GPU adds what it writes to the first word.
     call_buffer: wgpu::Buffer,
     call_capacity: u64,
     view: wgpu::Buffer,
+    /// `Out::Draws`' draws.
+    draws: wgpu::Buffer,
+    draw_capacity: u64,
     group: Option<(wgpu::BindGroup, u32)>,
-    /// The indices the frame's calls take, and the most they may.
+    /// The room the frame's calls take (indices, or draws), and the most they may.
     room: u64,
     cap: u64,
 }
@@ -76,7 +94,7 @@ fn buffer(
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size,
-        // COPY_SRC: rows move to a larger buffer; tests read calls back.
+        // COPY_SRC: rows move to a larger buffer; tests read calls and draws back.
         usage: usage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     })
@@ -96,7 +114,7 @@ fn entry(binding: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntr
 }
 
 impl GpuLists {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, out: Out) -> Self {
         let read = wgpu::BufferBindingType::Storage { read_only: true };
         let write = wgpu::BufferBindingType::Storage { read_only: false };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -123,13 +141,17 @@ impl GpuLists {
                 }),
             ),
             module: &module,
-            entry_point: Some("flatten_sides"),
+            entry_point: Some(match out {
+                Out::Indices => "flatten_sides",
+                Out::Draws => "sides_draws",
+            }),
             compilation_options: Default::default(),
             cache: None,
         });
         let storage = wgpu::BufferUsages::STORAGE;
         let indirect = wgpu::BufferUsages::INDIRECT | storage;
         Self {
+            out,
             pipeline,
             layout,
             rows: buffer(device, "Section rows", ROW as u64 * 4, storage),
@@ -151,6 +173,8 @@ impl GpuLists {
                 16,
                 wgpu::BufferUsages::UNIFORM,
             ),
+            draws: buffer(device, "Section list draws", 20, indirect),
+            draw_capacity: 1,
             group: None,
             room: 0,
             cap: 0,
@@ -228,14 +252,19 @@ impl GpuLists {
         self.band = 0;
         self.room = 0;
         self.group = None;
-        // A quarter of the binding they share with the CPU's draws.
-        self.cap = device.limits().max_storage_buffer_binding_size / 16;
+        // A quarter of a binding: indices share theirs with the CPU's draws.
+        let binding = device.limits().max_storage_buffer_binding_size;
+        self.cap = match self.out {
+            Out::Indices => binding / 16,
+            Out::Draws => binding / 20 / 4,
+        };
     }
 
     /// Section `id`, in `page`, at `origin` from the camera and `distance`
-    /// (squared, as bits) from it: each of `parts` (pass group, part) draws the
-    /// quads of the part that face the eye. False, listing nothing, when the
-    /// frame's lists hold all the room they may: the caller draws it.
+    /// (squared, as bits) from it, instance `instance` of the frame's list:
+    /// each of `parts` (pass group, part) draws the quads of the part that face
+    /// the eye. False, listing nothing, when the frame's lists hold all the room
+    /// they may: the caller draws it.
     ///
     /// Sections come nearest first. Each band of distance gets calls of its own,
     /// drawn in that order, as the CPU's lists keep them (`page_runs`): within
@@ -249,14 +278,18 @@ impl GpuLists {
         sides: &Sides,
         parts: &[(u8, Part)],
         origin: [f32; 3],
+        instance: u32,
     ) -> bool {
         let parts = &parts[..parts.len().min(2)];
         let mut counts = [0; 2];
         for (count, &(_, part)) in counts.iter_mut().zip(parts) {
-            *count = sides.part_quads(part) * 6;
+            *count = match self.out {
+                Out::Indices => sides.part_quads(part) * 6,
+                Out::Draws => sides.part_runs(part),
+            };
         }
         let room = u64::from(counts[0]) + u64::from(counts[1]);
-        if self.room + room > self.cap {
+        if self.room + room > self.cap || instance >= 1 << 30 {
             return false;
         }
         self.room += room;
@@ -265,7 +298,7 @@ impl GpuLists {
             self.band = band;
             self.call_of.fill(u32::MAX);
         }
-        let mut record = [id, 0, 0, parts.len() as u32, 0, 0, 0, 0];
+        let mut record = [id, 0, 0, parts.len() as u32 | instance << 2, 0, 0, 0, 0];
         for (k, &(group, part)) in parts.iter().enumerate() {
             let key = page as usize * 2 + usize::from(group.min(1));
             if self.call_of.len() <= key {
@@ -301,8 +334,8 @@ impl GpuLists {
         &self.calls
     }
 
-    /// Lays the calls' rooms out one after the other from the start of the
-    /// index list: the indices they take.
+    /// Lays the calls' rooms out one after the other from the start: the
+    /// room they take (indices, or draws).
     pub fn rooms(&mut self) -> u64 {
         let mut room = 0u64;
         for call in &mut self.calls {
@@ -313,14 +346,14 @@ impl GpuLists {
     }
 
     /// Stages the frame's sections, calls and eye (camera-relative; none: every
-    /// quad faces it), and binds them for `dispatch` writing into `indices`.
-    /// After `rooms`.
+    /// quad faces it), and binds them for `dispatch` writing into `indices`
+    /// (`Out::Indices`) or into the lists' own draws. After `rooms`.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         uploads: &mut super::upload::Uploads,
-        indices: &wgpu::Buffer,
+        indices: Option<&wgpu::Buffer>,
         eye: Option<[f32; 3]>,
     ) {
         self.group = None;
@@ -363,9 +396,26 @@ impl GpuLists {
             0,
             bytemuck::cast_slice(&self.call_data),
         );
+        let room = self
+            .calls
+            .last()
+            .map_or(0, |c| u64::from(c.first + c.count));
+        if self.out == Out::Draws && room > self.draw_capacity {
+            self.draw_capacity = room.next_power_of_two();
+            self.draws = buffer(
+                device,
+                "Section list draws",
+                self.draw_capacity * 20,
+                indirect,
+            );
+        }
         let [x, y, z] = eye.unwrap_or_default();
         let view = [x, y, z, if eye.is_some() { 1.0 } else { 0.0 }];
         uploads.buffer(encoder, &self.view, 0, bytemuck::cast_slice(&view));
+        let out = match self.out {
+            Out::Indices => indices.expect("flat draws' index list"),
+            Out::Draws => &self.draws,
+        };
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Section lists"),
             layout: &self.layout,
@@ -392,7 +442,7 @@ impl GpuLists {
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: indices.as_entire_binding(),
+                    resource: out.as_entire_binding(),
                 },
             ],
         });
@@ -404,10 +454,17 @@ impl GpuLists {
         let Some((group, records)) = &self.group else {
             return;
         };
-        let groups = *records;
+        let groups = match self.out {
+            Out::Indices => *records,
+            Out::Draws => records.div_ceil(GROUP),
+        };
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, group, &[]);
         pass.dispatch_workgroups(groups.min(GROUP_LIMIT), groups.div_ceil(GROUP_LIMIT), 1);
+    }
+
+    pub fn out(&self) -> Out {
+        self.out
     }
 
     /// Whether `dispatch` writes this frame's lists.
@@ -415,9 +472,23 @@ impl GpuLists {
         self.group.is_some()
     }
 
-    /// Draws call `k` with a pipeline, its page's vertices and the index list bound.
+    /// Draws call `k` (`Out::Indices`) with a pipeline, its page's vertices and
+    /// the index list bound.
     pub fn draw_indexed(&self, pass: &mut wgpu::RenderPass<'_>, k: usize) {
         pass.draw_indexed_indirect(&self.call_buffer, k as u64 * 20);
+    }
+
+    /// Draws call `k` (`Out::Draws`) with a pipeline, its page's vertices, the
+    /// quad indices and the frame's instances bound.
+    pub fn multi_draw(&self, pass: &mut wgpu::RenderPass<'_>, k: usize) {
+        let call = self.calls[k];
+        pass.multi_draw_indexed_indirect_count(
+            &self.draws,
+            u64::from(call.first) * 20,
+            &self.call_buffer,
+            k as u64 * 20,
+            call.count,
+        );
     }
 }
 
@@ -485,9 +556,12 @@ mod tests {
         runs
     }
 
-    /// Lists `sections` from each of a few eyes; per eye, the lists, the
-    /// calls' words and the indices written.
-    fn run(sections: &[Section]) -> Option<Vec<(Option<[f32; 3]>, GpuLists, Vec<u32>, Vec<u32>)>> {
+    /// Lists `sections` for `out` from each of a few eyes; per eye, the
+    /// lists, the calls' words and the written words.
+    fn run(
+        out: Out,
+        sections: &[Section],
+    ) -> Option<Vec<(Option<[f32; 3]>, GpuLists, Vec<u32>, Vec<u32>)>> {
         let (device, queue) = device()?;
         let mut results = Vec::new();
         for eye in [
@@ -495,7 +569,7 @@ mod tests {
             Some([-40.0, -3.0, 50.5]),
             None,
         ] {
-            let mut lists = GpuLists::new(&device);
+            let mut lists = GpuLists::new(&device, out);
             lists.clear(&device);
             let mut rows = vec![0u32; sections.len() * ROW];
             for (id, s) in sections.iter().enumerate() {
@@ -503,7 +577,10 @@ mod tests {
                 rows[id * ROW + 1..id * ROW + 23].copy_from_slice(&s.sides.gpu_row());
                 // Nearest first, over several bands.
                 let distance = (id as f64 * 2.0).powi(2).to_bits();
-                assert!(lists.list(id as u32, s.page, distance, &s.sides, s.parts, s.origin));
+                let instance = id as u32 + 7;
+                assert!(lists.list(
+                    id as u32, s.page, distance, &s.sides, s.parts, s.origin, instance
+                ));
             }
             let room = lists.rooms();
             let init = |contents: &[u8], usage| {
@@ -515,16 +592,24 @@ mod tests {
             };
             let storage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
             lists.rows = init(bytemuck::cast_slice(&rows), storage);
-            let indices = init(&vec![0xffu8; room as usize * 4], storage);
+            let words = match out {
+                Out::Indices => room,
+                Out::Draws => room * 5,
+            };
+            let indices = init(&vec![0xffu8; words as usize * 4], storage);
             let mut encoder = device.create_command_encoder(&Default::default());
             let mut uploads = super::super::upload::Uploads::new(&device);
-            lists.prepare(&device, &mut encoder, &mut uploads, &indices, eye);
+            lists.prepare(&device, &mut encoder, &mut uploads, Some(&indices), eye);
             uploads.finish(&encoder);
             {
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 lists.dispatch(&mut pass);
             }
             queue.submit([encoder.finish()]);
+            let written = match out {
+                Out::Indices => &indices,
+                Out::Draws => &lists.draws,
+            };
             let read_back = |buffer: &wgpu::Buffer, words: u64| -> Vec<u32> {
                 let read = device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
@@ -540,7 +625,7 @@ mod tests {
                 bytemuck::cast_slice(&read.slice(..).get_mapped_range().unwrap()).to_vec()
             };
             let calls = read_back(&lists.call_buffer, lists.calls.len() as u64 * 5);
-            let words = read_back(&indices, room);
+            let words = read_back(written, words);
             results.push((eye, lists, calls, words));
         }
         Some(results)
@@ -571,13 +656,13 @@ mod tests {
         let Some((device, _)) = device() else {
             return;
         };
-        let mut lists = GpuLists::new(&device);
+        let mut lists = GpuLists::new(&device, Out::Indices);
         lists.clear(&device);
         let sides = Sides::unsorted(4);
         let parts = &[(0, Part::Opaque), (1, Part::Cutout)];
         for (page, blocks) in [(1, 10.0), (0, 20.0), (1, 30.0), (1, 100.0), (0, 130.0)] {
             let distance = f64::powi(blocks, 2).to_bits();
-            assert!(lists.list(0, page, distance, &sides, parts, [0.0; 3]));
+            assert!(lists.list(0, page, distance, &sides, parts, [0.0; 3], 0));
         }
         let calls: Vec<_> = lists
             .calls()
@@ -605,7 +690,7 @@ mod tests {
     #[test]
     fn flatten_sides_writes_the_runs_the_cpu_finds() {
         let sections = sections(200);
-        let Some(results) = run(&sections) else {
+        let Some(results) = run(Out::Indices, &sections) else {
             return;
         };
         for (eye, lists, calls, out) in results {
@@ -633,6 +718,46 @@ mod tests {
                 got.sort_unstable();
                 expected[k].sort_unstable();
                 assert_eq!(got, expected[k], "call {k}'s indices, eye {eye:?}");
+            }
+        }
+    }
+
+    /// `sides_draws` writes, in each call's room, one draw per run the CPU finds
+    /// (as the CPU lists them: the run's indices over the quad pattern, from its
+    /// first vertex, with the section's instance), and counts them; the room
+    /// holds them all.
+    #[test]
+    fn sides_draws_writes_a_draw_per_run_the_cpu_finds() {
+        let sections = sections(200);
+        let Some(results) = run(Out::Draws, &sections) else {
+            return;
+        };
+        for (eye, lists, calls, out) in results {
+            let mut expected = vec![Vec::new(); lists.calls.len()];
+            for (i, s) in sections.iter().enumerate() {
+                for (k, &(_, part)) in s.parts.iter().enumerate() {
+                    let call = call_of(&lists, i, k);
+                    for (first, quads) in cpu_runs(s, part, eye) {
+                        expected[call].push([quads * 6, 1, 0, s.start + first * 4, i as u32 + 7]);
+                    }
+                }
+            }
+            for (k, call) in lists.calls.iter().enumerate() {
+                let count = calls[k * 5] as usize;
+                assert_eq!(
+                    count,
+                    expected[k].len(),
+                    "call {k}'s draw count, eye {eye:?}"
+                );
+                assert!(count as u32 <= call.count, "call {k} wrote past its room");
+                let first = call.first as usize * 5;
+                let mut got: Vec<[u32; 5]> = out[first..first + count * 5]
+                    .chunks(5)
+                    .map(|d| d.try_into().unwrap())
+                    .collect();
+                got.sort_unstable();
+                expected[k].sort_unstable();
+                assert_eq!(got, expected[k], "call {k}'s draws, eye {eye:?}");
             }
         }
     }
