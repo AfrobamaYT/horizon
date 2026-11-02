@@ -7609,13 +7609,12 @@ impl Game<'_> {
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
         if active && grabbed {
-            let mut turn = native_hooks::NativePlayerTurn {
-                mouse_sensitivity: look.sensitivity,
-                cinematic_camera_enabled: look.smooth_camera,
-            };
-            self.native_calculate_player_turn(&mut turn);
-            look.sensitivity = turn.mouse_sensitivity;
-            look.smooth_camera = turn.cinematic_camera_enabled;
+            let mut turn = None;
+            self.native_calculate_player_turn(look.sensitivity, look.smooth_camera, &mut turn);
+            if let Some(turn) = turn {
+                look.sensitivity = turn.mouse_sensitivity;
+                look.smooth_camera = turn.cinematic_camera_enabled;
+            }
         }
         if let Some((xo, yo)) = self
             .mouse

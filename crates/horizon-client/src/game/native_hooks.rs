@@ -529,9 +529,13 @@ pub(super) use horizon_world::level::flags;
 #[allow(dead_code)]
 pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
-/// Settings used to calculate a player's mouse turn on the client.
+/// The options `MouseHandler.turnPlayer` reads, as a client mod replaces
+/// them (`native_calculate_player_turn`).
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativePlayerTurn {
+    /// The raw mouse sensitivity option, `0.0..=1.0` in the options screen.
     pub mouse_sensitivity: f64,
+    /// Cinematic camera (smooth turning).
     pub cinematic_camera_enabled: bool,
 }
 
@@ -4949,11 +4953,18 @@ impl Game<'_> {
     pub(super) fn native_item_bar(&self, stack: &ItemStack, bar: &mut Option<(i32, u32)>) {
         mod_api::dispatch_item_bar(self, mod_api::mods(), stack, bar);
     }
-    /// Replace the raw mouse sensitivity and cinematic camera setting before turning.
-    pub(super) fn native_calculate_player_turn(&self, turn: &mut NativePlayerTurn) {
-        let _ = (turn,);
+    /// The mouse sensitivity and cinematic camera option a grabbed player's
+    /// mouse turn reads this frame (`MouseHandler.turnPlayer`). Put both in
+    /// `turn` to replace them for this turn only; the options are unchanged.
+    /// Once each frame while turning, client-side. @API:calculate_player_turn@.
+    pub(super) fn native_calculate_player_turn(
+        &self,
+        mouse_sensitivity: f64,
+        cinematic_camera_enabled: bool,
+        turn: &mut Option<NativePlayerTurn>,
+    ) {
+        let _ = (mouse_sensitivity, cinematic_camera_enabled, turn);
     }
-
     /// Append an item's custom decorations after its default bar, cooldown and count.
     /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
     /// no item translation is active.
