@@ -483,7 +483,90 @@ impl Host for super::Game<'_> {
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
         self.native_item_stack(batch, stack, at, size)
     }
+    fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        self.native_mod_image(width, height, rgba)
+    }
     fn instance_dir(&self) -> PathBuf {
         self.native_instance_dir()
+    }
+    fn camera(&self) -> Option<NativeCamera> {
+        self.native_camera()
+    }
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.native_block_collision(pos)
+    }
+    fn entity(&self, id: u32) -> Option<EntityRef> {
+        self.native_entity(id)
+    }
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        self.native_level(dimension)
+    }
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        self.native_entity_position(entity)
+    }
+    fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
+        self.native_entity_block_position(entity)
+    }
+    fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
+        self.native_entity_rotation(entity)
+    }
+    fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+        self.native_entity_kind(entity)
+    }
+    fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        self.native_entity_uuid(entity)
+    }
+    fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+        self.native_entity_level(entity)
+    }
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        self.native_item_container_slots(stack)
+    }
+    fn item_container_insert(
+        &self,
+        stack: &ItemStack,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        self.native_item_container_insert(stack, item)
+    }
+    fn item_container_extract(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        max: u32,
+    ) -> Option<(Option<ItemStack>, ItemStack)> {
+        self.native_item_container_extract(stack, slot, max)
+    }
+    fn level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        self.native_level_entities_in(level, min, max)
+    }
+    fn player(&self, uuid: u128) -> Option<PlayerRef> {
+        self.native_player_ref(uuid)
+    }
+    fn player_game_mode(&self, player: PlayerRef) -> Option<i32> {
+        self.native_player_game_mode(player)
+    }
+    fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
+        self.native_player_is_creative(player)
+    }
+    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
+        self.native_player_is_spectator(player)
+    }
+    fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
+        self.native_player_may_build(player)
+    }
+    fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+        self.native_player_food(player)
+    }
+    fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+        self.native_player_abilities(player)
+    }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
     }
 }
