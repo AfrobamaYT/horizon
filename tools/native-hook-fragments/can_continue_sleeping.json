@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "can_continue_sleeping",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_can_continue_sleeping",
+      "side": "server",
+      "neoforge": "CanContinueSleepingEvent",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "replace",
+        "out": "may_continue"
+      }
+    }
+  ],
+  "rust_summary": "a sleeping player's bed check, whose answer a mod can replace (`native_can_continue_sleeping`).",
+  "doc_summary": "a sleeping server player's bed check, each tick: `native_can_continue_sleeping(player, name, pos, may_continue)` runs with `pos` the bed head and `may_continue` set to whether the bed still exists. Set it true to keep the player asleep without a bed, or false to wake them beside a valid one. It replaces only the bed check, not the dead or health conditions. The player's state is not swapped in. Bundles need \"hooks\": @API:can_continue_sleeping@."
+}

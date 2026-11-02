@@ -1479,6 +1479,18 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 }
 
 /// The hook points. Each does nothing in Horizon.
+/// `PlayerSpawnPhantomsEvent.Result`: whether the phantom spawner tries a spawn near a player.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PhantomSpawnResult {
+    /// Always try, skipping the skylight and sea level check.
+    Allow,
+    /// Try only above sea level with the sky in view.
+    #[default]
+    Default,
+    /// Never try.
+    Deny,
+}
+
 impl Game<'_> {
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
@@ -3375,6 +3387,35 @@ impl Game<'_> {
     /// while a guest packet is handled. @API:player_bed_leave@.
     pub(super) fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         mod_api::dispatch_player_bed_leave(self, mod_api::mods(), player, name, pos);
+    }
+    /// `CanContinueSleepingEvent`: a sleeping server player's bed check, run each tick
+    /// before the dead and health checks. `may_continue` starts as whether the bed still
+    /// exists; set it true to keep them asleep without a bed, or false to wake them beside
+    /// a valid one. The player's state is not swapped in on a guest tick. @API:can_continue_sleeping@.
+    pub(crate) fn native_can_continue_sleeping(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        may_continue: &mut bool,
+    ) {
+        let _ = (player, name, pos, may_continue);
+    }
+    /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
+    /// spawn near a non-spectator server player, before its difficulty and rest rolls.
+    /// `result` starts as `Default` (skylight and sea level check); `Allow` skips that check
+    /// and `Deny` stops the attempt. `phantoms` starts empty, meaning vanilla's group size,
+    /// which is drawn later to keep its random order; set it to override the count.
+    /// @API:player_spawn_phantoms@.
+    pub(crate) fn native_player_spawn_phantoms(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        result: &mut PhantomSpawnResult,
+        phantoms: &mut Option<i32>,
+    ) {
+        let _ = (player, name, pos, result, phantoms);
     }
     /// A server player's book edit or signing packet is about to be applied.
     /// `pages` is its page count; `signing` means the packet has a title. Set

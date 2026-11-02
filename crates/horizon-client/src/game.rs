@@ -14655,7 +14655,12 @@ impl Game<'_> {
             // LivingEntity.tick's checkBedExists: a sleeper whose bed is
             // gone gets up.
             let bed = self.world.block(head[0], head[1], head[2]);
-            let bed_gone = !self.res.facts().get(bed).name.ends_with("_bed");
+            let mut bed_exists = self.res.facts().get(bed).name.ends_with("_bed");
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_can_continue_sleeping(player, &name, head, &mut bed_exists);
+            }
+            let bed_gone = !bed_exists;
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
             if (self.screen != Screen::Chat && self.keys.contains(&KeyCode::ShiftLeft))
