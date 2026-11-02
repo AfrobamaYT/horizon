@@ -286,6 +286,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      # Harness subprocess timeouts can be shorter than a cold release build. Match their build commands and target dir.
+      - name: Build parity probes
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          cargo build --release --bin horizon-parity
+          cargo build --release --bin horizon-tick-parity
+          cargo build --release --bin horizon-geometry-parity
+          cargo build --release --bin horizon-noise-parity
+          cargo build --release --bin horizon-density-parity
+          cargo build --release --bin horizon-worldgen-parity
+          cargo build --release --bin horizon-float-log-parity
+          cargo build --release -p horizon-core --example generation_tick_fixture
+          cargo build --release -p horizon-core --example biome_zoom_fixture
+          cargo build --release -p horizon-world --bin horizon-world --example world_probe
+          cargo build --release -p horizon-world --example world_probe
       - name: Compare Rust foundations with pinned vanilla client and server bytecode
         env:
           RUSTUP_TOOLCHAIN: stable
