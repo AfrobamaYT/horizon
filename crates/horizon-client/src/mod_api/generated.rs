@@ -1855,6 +1855,11 @@ pub trait Hooks: Send + Sync {
     /// click, drag and shift-click that puts an item in a slot, several times for
     /// one shift-click: answer from `stack` alone, and fast. API
     /// 130.
+    /// A pickup click before item stack overrides run.
+    fn item_stacked_on_other(&self, event: &mut ItemStackedOnOtherEvent<'_, '_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
     fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
         let _ = event;
     }
@@ -7664,6 +7669,24 @@ pub fn dispatch_experience_orb_merge(
             mod_hook.experience_orb_merge(host, &mut event),
             Flow::Cancel
         ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_stacked_on_other`] is told.
+#[non_exhaustive]
+pub struct ItemStackedOnOtherEvent<'a, 'b> {
+    pub event: &'a mut StackedOnOther<'b>,
+}
+pub fn dispatch_item_stacked_on_other(
+    mods: &[Box<dyn Hooks>],
+    event: &mut StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
+    let mut event = ItemStackedOnOtherEvent { event };
+    for mod_hook in mods {
+        if matches!(mod_hook.item_stacked_on_other(&mut event), Flow::Cancel) {
             *canceled = true;
             break;
         }

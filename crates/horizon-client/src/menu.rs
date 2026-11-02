@@ -235,6 +235,21 @@ struct Slot {
     role: Role,
 }
 
+/// A pickup click's slot and cursor, including empty stacks.
+pub struct StackedOnOther<'a> {
+    pub slot: usize,
+    pub primary: bool,
+    pub carried: &'a mut Option<ItemStack>,
+    pub clicked: &'a mut Option<ItemStack>,
+    pub cancellation_result: bool,
+}
+
+/// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
+#[inline(never)]
+pub fn native_item_stacked_on_other(event: &mut StackedOnOther<'_>, canceled: &mut bool) {
+    crate::native_client_hooks::item_stacked_on_other(event, canceled);
+}
+
 /// `BeaconBlockEntity.BEACON_EFFECTS`: the powers of each pyramid level.
 pub const BEACON_EFFECTS: [&[&str]; 4] = [
     &["minecraft:speed", "minecraft:haste"],
@@ -2813,7 +2828,22 @@ impl Menu {
     /// The PICKUP branch of `doClick`: a bundle's override, else the
     /// plain click, ending with `slot.setChanged()`.
     fn pickup(&mut self, env: &Env, s: usize, primary: bool) {
-        if !self.bundle_click(env, s, primary) {
+        let slot = self.slots[s];
+        let mut canceled = false;
+        let mut event = StackedOnOther {
+            slot: s,
+            primary,
+            carried: &mut self.carried,
+            clicked: &mut self.containers[slot.container][slot.index],
+            cancellation_result: false,
+        };
+        native_item_stacked_on_other(&mut event, &mut canceled);
+        let handled = event.cancellation_result;
+        if !(if canceled {
+            handled
+        } else {
+            self.bundle_click(env, s, primary)
+        }) {
             self.pickup_inner(env, s, primary);
         }
         self.slot_changed(env, s);
@@ -3540,6 +3570,7 @@ pub(crate) mod tests {
                         *max_stack = 7;
                     }
                 },
+                item_stacked_on_other: |_, _| {},
                 living_breathe: |_, _, _, _, _| {},
                 ingredient: |_, _, _| {},
             });
