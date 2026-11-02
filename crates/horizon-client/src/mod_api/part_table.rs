@@ -18,6 +18,9 @@ use std::{
 pub struct Attached<P: ?Sized> {
     /// The mod's place in dispatch order.
     pub(super) mod_index: usize,
+    /// Its place in its mod's registrations: a mod's parts on one thing keep this order, key or
+    /// tag (#41 §3).
+    order: usize,
     /// The part's kind: one per thing.
     kind: TypeId,
     pub(super) type_name: &'static str,
@@ -28,6 +31,7 @@ impl<P: ?Sized> Clone for Attached<P> {
     fn clone(&self) -> Self {
         Self {
             mod_index: self.mod_index,
+            order: self.order,
             kind: self.kind,
             type_name: self.type_name,
             part: self.part.clone(),
@@ -180,7 +184,8 @@ fn unknown_keys<'a, P: ?Sized>(
         })
 }
 
-/// Attach each tag part to its tag's members, after the parts already there in dispatch order.
+/// Attach each tag part to its tag's members, in dispatch order: by mod, then by registration
+/// within a mod.
 fn add_tagged<P: ?Sized>(
     table: &mut HashMap<Box<str>, Vec<Attached<P>>>,
     tagged: &[(Box<str>, Attached<P>)],
@@ -213,7 +218,7 @@ fn add_tagged<P: ?Sized>(
                 }
                 None => list.push(part.clone()),
             }
-            list.sort_by_key(|a| a.mod_index);
+            list.sort_by_key(|a| (a.mod_index, a.order));
         }
     }
 }
@@ -268,6 +273,8 @@ fn attached<'a, 'k, P: ?Sized>(
 #[derive(Default)]
 pub struct Registrar {
     mod_index: usize,
+    /// Parts registered so far, by every mod: the next part's `order`.
+    registered: usize,
     parts: Parts,
     tags: TagParts,
     refused: Vec<String>,
@@ -333,10 +340,12 @@ impl Registrar {
             ));
             return None;
         }
+        self.registered += 1;
         Some((
             tag.into(),
             Attached {
                 mod_index: self.mod_index,
+                order: self.registered,
                 kind: TypeId::of::<K>(),
                 type_name: name,
                 part,
@@ -368,8 +377,10 @@ impl Registrar {
             ));
             return false;
         }
+        self.registered += 1;
         list.push(Attached {
             mod_index: self.mod_index,
+            order: self.registered,
             kind: TypeId::of::<K>(),
             type_name: name,
             part,
@@ -408,7 +419,7 @@ pub(crate) fn install_parts(mods: &[Box<dyn Hooks>]) -> Result<(), Vec<String>> 
 mod tests {
     use super::super::*;
     use super::{Attached, KnownIds, mark_game_thread, resolve_parts};
-    use std::any::TypeId;
+    use std::any::{TypeId, type_name};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
@@ -527,15 +538,19 @@ mod tests {
     #[test]
     fn each_game_answers_from_its_own_tags_and_reload_drops_what_left() {
         let mods = game_thread();
+        // Both games resolve before either reads, so one shared table would fail one of them.
+        let resolved = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
+                resolved.wait();
                 (read(&mods, 1), read(&mods, 2))
             });
             let server = scope.spawn(|| {
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
+                resolved.wait();
                 let before = (read(&mods, 1), read(&mods, 2));
                 // `/reload` with the tag emptied.
                 resolve(&[]).unwrap();
@@ -567,6 +582,7 @@ mod tests {
     fn a_tag_giving_a_part_twice_keeps_the_earlier_mod() {
         let part = |mod_index| Attached::<dyn BlockPart> {
             mod_index,
+            order: 0,
             kind: TypeId::of::<Gauge>(),
             type_name: "Gauge",
             part: Arc::new(Gauge),
@@ -584,6 +600,23 @@ mod tests {
         );
         let kept: Vec<usize> = table["test:gauge"].iter().map(|a| a.mod_index).collect();
         assert_eq!(kept, [0]);
+    }
+
+    #[test]
+    fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
+        let mut r = Registrar::default();
+        r.block_part_tag("test:gauged", TagGauge);
+        r.block_part("test:gauge", Gauge);
+        let tags = HashMap::from([(
+            "test:gauged".to_owned(),
+            HashSet::from(["test:gauge".to_owned()]),
+        )]);
+        super::add_tagged(&mut r.parts.blocks, &r.tags.blocks, &tags, "block");
+        let order: Vec<&str> = r.parts.blocks["test:gauge"]
+            .iter()
+            .map(|a| a.type_name)
+            .collect();
+        assert_eq!(order, [type_name::<TagGauge>(), type_name::<Gauge>()]);
     }
 
     #[test]
