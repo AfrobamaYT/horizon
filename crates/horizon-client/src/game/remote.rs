@@ -9598,6 +9598,14 @@ impl Game<'_> {
         }
         r.level_player_name(id as i32, uuid)
     }
+    pub(super) fn remote_player_uuid(&self, id: u32) -> Option<u128> {
+        let remote = self.remote.as_ref()?;
+        if self.player_model.as_ref().is_some_and(|m| m.id == id) {
+            Some(remote.profile)
+        } else {
+            remote.level_players.get(&(id as i32)).copied()
+        }
+    }
     /// Status for `horizon-ctl status`.
     /// The other players' entities in the level and their names (their
     /// profiles', which outlive the player list's entries).
