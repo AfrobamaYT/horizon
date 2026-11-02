@@ -403,7 +403,8 @@ impl Game<'_> {
                 players.push(PhantomTarget {
                     position: Vec3::new(g.position[0], g.position[1], g.position[2]),
                     since_rest: since,
-                    identity: Some((g.uuid, g.name.clone())),
+                    identity: (!horizon_client::mod_api::mods().is_empty())
+                        .then(|| (g.uuid, g.name.clone())),
                 });
             }
         }
@@ -423,10 +424,10 @@ impl Game<'_> {
             position.y.floor() as i32,
             position.z.floor() as i32,
         ];
-        // `PlayerSpawnPhantomsEvent`: the group size stays `None` until vanilla draws it below.
         let mut result = None;
         let mut phantoms = None;
         if let Some((player, name)) = identity {
+            phantoms = Some(1 + self.world.random.next_int_bound(3).unwrap_or(0));
             self.native_player_spawn_phantoms(player, &name, pos, &mut result, &mut phantoms);
         }
         let attempt = match result.unwrap_or(PhantomSpawnResult::Default) {
@@ -459,10 +460,9 @@ impl Game<'_> {
         {
             return;
         }
-        // Drawn even when a mod set the count, so the level's random stays in
-        // vanilla's order.
-        let drawn = 1 + self.world.random.next_int_bound(3).unwrap_or(0);
-        let group = phantoms.unwrap_or(drawn);
+        // Without mods, draw at the original point in the random sequence.
+        let group =
+            phantoms.unwrap_or_else(|| 1 + self.world.random.next_int_bound(3).unwrap_or(0));
         for _ in 0..group {
             let _ = self.spawn_mob(
                 "minecraft:phantom",

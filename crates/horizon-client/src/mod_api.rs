@@ -619,6 +619,41 @@ mod tests {
         }
     }
 
+    struct MorePhantoms;
+
+    impl Hooks for MorePhantoms {
+        fn player_spawn_phantoms(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerSpawnPhantomsEvent<'_>,
+        ) -> Option<PhantomSpawnResult> {
+            *event.phantoms = event.phantoms.map(|count| count + 2);
+            None
+        }
+    }
+
+    #[test]
+    fn phantom_listener_can_increase_the_default_count() {
+        let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut count = Some(3);
+        let mut result = None;
+        dispatch_player_spawn_phantoms(
+            &mut host,
+            &mods,
+            7,
+            "Probe",
+            [0; 3],
+            &mut count,
+            &mut result,
+        );
+        assert_eq!(count, Some(5));
+        assert!(result.is_none());
+    }
+
     /// Asks the host to tell a player without anyone having implemented it.
     struct Chatty;
 
