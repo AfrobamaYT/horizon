@@ -571,6 +571,15 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
+        self.native_game_stack(place)
+    }
+    fn set_game_stack(&mut self, place: &ItemPlace, stack: ItemStack) -> bool {
+        self.native_set_game_stack(place, stack)
+    }
+    fn game_rest(&mut self, place: &ItemPlace, rest: ItemStack) -> Option<ItemStack> {
+        self.native_game_rest(place, rest)
+    }
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
         self.native_recipe_book_category(kind)
     }

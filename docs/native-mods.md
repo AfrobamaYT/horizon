@@ -2953,6 +2953,15 @@ neighbour's capability, and it keeps its state in the block entity's slots, comp
 `insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
 mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
+An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
+block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
+(`ItemPlace::Mod`, read and written by the `PlaceProvider` it registers with `r.place_provider`).
+`r.item_capability(&ITEM_ITEMS, "mymod:backpack", Arc::new(Backpack))` answers `ITEM_ITEMS` for an item with a
+`StackItemHandler`; `host.item_capability(&ITEM_ITEMS, &place)` finds it, else the game's own over
+`item_container`. A handler keeps its contents in the stack, and reads and writes it only with
+`host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one)`: with `one_by_one`, a changed item
+is split off a bigger stack and goes to the player's inventory, else is dropped, as vanilla's filled bucket.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements

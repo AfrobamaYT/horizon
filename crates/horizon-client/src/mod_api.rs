@@ -646,9 +646,14 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
 pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+mod item_place;
+pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
-pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
+pub(crate) use part_table::{
+    KnownIds, install_parts, item_capability, mark_game_thread, parts, place_provider,
+    resolve_parts,
+};
 
 mod generated;
 pub use generated::Hooks;

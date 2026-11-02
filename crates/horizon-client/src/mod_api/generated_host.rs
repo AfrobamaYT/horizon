@@ -1366,6 +1366,30 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::item_container_extract")
     }
+    /// The stack at a player's or an item entity's place; none for an empty one, a player who
+    /// isn't here or is dead, an item entity not in the level in place, any other place
+    /// (`place_stack` reads those), and on a client.
+    fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
+        let _ = place;
+        unimplemented!("Host::game_stack")
+    }
+    /// Puts `stack` at a player's or an item entity's place (a count of 0 empties it, and
+    /// removes an item entity); false where `native_game_stack` reads nothing for want of the
+    /// place. The player's screen follows with the tick's sync.
+    fn set_game_stack(&mut self, place: &ItemPlace, stack: ItemStack) -> bool {
+        let _ = place;
+        let _ = stack;
+        unimplemented!("Host::set_game_stack")
+    }
+    /// Where an item that leaves a place goes when nothing holds it: a player's into their
+    /// inventory, else thrown from their eyes (`ItemUtils.createFilledResult`); dropped where an
+    /// item entity is, or at the middle of a block entity's block. What went nowhere: all of it
+    /// for a player who isn't here, a gone item entity, and on a client.
+    fn game_rest(&mut self, place: &ItemPlace, rest: ItemStack) -> Option<ItemStack> {
+        let _ = place;
+        let _ = rest;
+        unimplemented!("Host::game_rest")
+    }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.

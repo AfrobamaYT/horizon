@@ -1,0 +1,10 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "game_stack", "target": "horizon_client::game::native_item_places::Game<'_>::native_game_stack", "mod_api": {}},
+    {"name": "set_game_stack", "target": "horizon_client::game::native_item_places::Game<'_>::native_set_game_stack", "mod_api": {}},
+    {"name": "game_rest", "target": "horizon_client::game::native_item_places::Game<'_>::native_game_rest", "mod_api": {}}
+  ],
+  "rust_summary": "items as holders: `ItemPlace` (a player's slot, hand or cursor, a block entity's slot, an item entity, a stack inside an item, a mod's own place), `ITEM_ITEMS` and `StackItemHandler`, `Registrar::item_capability` and `place_provider`, `host.item_capability`, `place_stack` and `set_place_stack`, over the game's places in `native_item_places.rs`: `native_game_stack`, `native_set_game_stack`, `native_game_rest`.",
+  "doc_summary": "items as holders (`Capabilities.Item.ITEM` through an `ItemAccess`): an `ItemPlace` names where a stack lives, and `host.item_capability(&ITEM_ITEMS, &place)` answers for the item there, the mod's `StackItemHandler` (`r.item_capability(&ITEM_ITEMS, \"mymod:backpack\", Arc::new(Backpack))`) or the game's over `item_container`. Every handler reads and writes the place with `place_stack` and `set_place_stack(place, stack, one_by_one)`, which splits one item off a bigger stack and gives it to the player, else drops it. `ItemPlace::Nested` reaches a stack inside an item, and `ItemPlace::Mod` a mod's own place, through the `PlaceProvider` it registers (`r.place_provider`). `native_game_stack`, `native_set_game_stack` and `native_game_rest` are the game's side for players and item entities. Bundles need \"hooks\": @API:item_places@."
+}
