@@ -341,13 +341,15 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
-A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) generate in
+A mod's own configured and placed features (`data/<ns>/worldgen/feature/`, `placed_feature/`) generate in
 biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
 (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one
 generation `step` of every biome in `biomes`; `remove_features` takes them out of its `steps` (every step when it lists
 none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
 NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
-feature already in the step is not added twice.
+feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
+(registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
+Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
