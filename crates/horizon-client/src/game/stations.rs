@@ -991,7 +991,9 @@ impl Game<'_> {
         if levels == 0 {
             return;
         }
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+        if !horizon_client::mod_api::mods().is_empty()
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
             let mut cancel = false;
             self.native_player_xp_level_change(player, &name, &mut levels, &mut cancel);
             if cancel {
@@ -1007,6 +1009,13 @@ impl Game<'_> {
             self.audio
                 .play("minecraft:entity.player.levelup", at, volume * 0.75, 1.0);
         }
+    }
+    /// `Player.onEnchantmentPerformed`: the cost leaves the level directly, not
+    /// through `giveExperienceLevels`, and the mods hear of the level change.
+    pub(super) fn enchantment_performed(&mut self, cost: i32) {
+        let old_level = self.experience.level;
+        self.experience.add_levels(-cost);
+        self.native_player_level_changed(old_level);
     }
     /// Whether the result slot may be taken (`mayPickup`).
     fn may_take_result(&self) -> bool {
@@ -1057,8 +1066,7 @@ impl Game<'_> {
         };
         let pos = s.pos;
         let enchanted_item = enchanted.clone();
-        // Player.onEnchantmentPerformed
-        self.experience.add_levels(-(lapis_needed as i32));
+        self.enchantment_performed(lapis_needed as i32);
         self.level.xp_seed = self.world.random.next_int();
         if let Some(s) = self.station.as_mut() {
             s.inputs[0] = Some(enchanted);
