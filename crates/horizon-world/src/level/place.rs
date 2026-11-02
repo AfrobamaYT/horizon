@@ -1763,28 +1763,34 @@ impl Behaviours {
         self.sim(level, ticks).place(ctx)
     }
     /// Preview the blocks replaced by the companion placements handled by
-    /// `set_placed_by`. No blocks are changed.
+    /// `set_placed_by`. No blocks are changed. Only the item's block class is
+    /// read before `placement`, whose state choice for other blocks may draw
+    /// randoms or schedule ticks (corals, growing plants).
     pub fn multi_placement<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
         ticks: &mut Ticks,
         input: &PlaceContext,
     ) -> Option<MultiPlacement> {
+        let data = self.block_data(self.item_binding(&input.item)?.block);
+        let companions = [
+            Class::AbstractBed,
+            Class::Door,
+            Class::SmallDripleaf,
+            Class::DoublePlant,
+        ];
+        if !companions.into_iter().any(|class| data.is(class)) {
+            return None;
+        }
         let mut sim = self.sim(level, ticks);
         let (ctx, _, state) = sim.placement(input)?;
         if !sim.is_in_valid_bounds(ctx.pos) {
             return None;
         }
-        let data = sim.b.data(state);
         let other = if data.is(Class::AbstractBed) {
             rel(ctx.pos, sim.b.facing(state))
-        } else if data.is(Class::Door)
-            || data.is(Class::SmallDripleaf)
-            || data.is(Class::DoublePlant)
-        {
-            above(ctx.pos)
         } else {
-            return None;
+            above(ctx.pos)
         };
         Some(MultiPlacement {
             state,

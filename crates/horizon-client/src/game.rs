@@ -1159,14 +1159,15 @@ impl LevelAccess for GameLevel<'_> {
         let mut cancel = false;
         if self.native_authoritative {
             self.native_fluid_place_block(
-                self.dimension, pos, liquid_pos, state, &mut new_state, &mut cancel,
+                self.dimension,
+                pos,
+                liquid_pos,
+                state,
+                &mut new_state,
+                &mut cancel,
             );
         }
-        if cancel {
-            None
-        } else {
-            Some(new_state)
-        }
+        (!cancel).then_some(new_state)
     }
     fn allow_fluid_level_change(
         &self,
@@ -6524,9 +6525,10 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        if let Some(placement) = self.with_level(|b, level, ticks| {
-            b.multi_placement(level, ticks, &ctx)
-        }) {
+        if !crate::mod_api::mods().is_empty()
+            && let Some(placement) =
+                self.with_level(|b, level, ticks| b.multi_placement(level, ticks, &ctx))
+        {
             let mut cancel = false;
             self.native_entity_multi_place(placement.state, &placement.snapshots, &mut cancel);
             if cancel {

@@ -43,7 +43,7 @@ pub use horizon_world::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
     },
     fluid::FluidState,
-    level::{BlockId, Dimension as LevelDimension, PlacementContext},
+    level::{BlockId, Dimension as LevelDimension, PlacementContext, ReplacedBlockSnapshot},
     loot::{LootStack, NativeLootContext},
     nbt::{Compound, Tag},
     registry::BlockStateId,

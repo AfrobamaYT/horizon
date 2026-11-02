@@ -537,10 +537,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         target: FluidState,
     ) {
         let b = self.b;
-        if !self
-            .level
-            .allow_spread(Spread::Fluid, rel(pos, direction.opposite()), pos)
-        {
+        let from = rel(pos, direction.opposite());
+        if !self.level.allow_spread(Spread::Fluid, from, pos) {
             return;
         }
         if !is_water(kind)
@@ -548,10 +546,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && b.is_water_fluid(self.fluid_at(pos).kind())
         {
             if b.instance_of(state, Class::Liquid) {
-                let liquid_pos = rel(pos, direction.opposite());
                 if let Some(state) =
                     self.level
-                        .fluid_place_block(pos, liquid_pos, b.default_of(b.named.stone))
+                        .fluid_place_block(pos, from, b.default_of(b.named.stone))
                 {
                     self.set_block_and_update(pos, state);
                 }

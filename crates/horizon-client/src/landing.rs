@@ -26,6 +26,7 @@ use horizon_world::{
 use std::{collections::BTreeMap, fs, path::Path};
 
 /// Called on the server before a landing converts farmland to its base block.
+/// @API:farmland_trample@.
 #[inline(never)]
 pub fn native_farmland_trample(
     entity: u32,

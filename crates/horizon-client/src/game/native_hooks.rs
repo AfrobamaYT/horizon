@@ -504,7 +504,7 @@ use horizon_core::{
 use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
-    level::{BlockId, LevelAccess, PlacementContext, Ticks},
+    level::{BlockId, LevelAccess, PlacementContext, ReplacedBlockSnapshot, Ticks},
     nbt::Compound,
     registry::{BlockRegistry, BlockStateId},
 };
@@ -5316,14 +5316,14 @@ impl Game<'_> {
     pub(super) fn native_entity_multi_place(
         &self,
         state: BlockStateId,
-        snapshots: &[horizon_world::level::ReplacedBlockSnapshot],
+        snapshots: &[ReplacedBlockSnapshot],
         cancel: &mut bool,
     ) {
         let _ = (state, snapshots, cancel);
     }
 
     /// A tool is about to transform a block. Cancel or replace the final state;
-    /// `None` suppresses the transformation.
+    /// `None` suppresses the transformation. @API:block_tool_modification@.
     #[inline(never)]
     pub(super) fn native_block_tool_modification(
         &self,
