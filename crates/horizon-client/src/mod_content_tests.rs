@@ -3223,7 +3223,7 @@ fn zinc_mod(dir: &Path, modifiers: &[(&str, &str)]) -> ContentMod {
     let mut files = vec![
         ("horizon-mod.toml".to_owned(), manifest("zinc", "")),
         (
-            "data/zinc/worldgen/configured_feature/ore_zinc.json".to_owned(),
+            "data/zinc/worldgen/feature/ore_zinc.json".to_owned(),
             r#"{"type":"minecraft:ore","config":{}}"#.to_owned(),
         ),
         (
@@ -3355,6 +3355,46 @@ fn biome_modifiers_place_mod_features_in_vanilla_biomes() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+/// 26.3's feature directory feeds the configured-feature bundle and command
+/// registry, including nested paths; the old documented path warns instead.
+#[test]
+fn configured_features_load_from_the_26_3_path() {
+    let base = biome_base("feature-paths");
+    let scratch = base.parent().unwrap();
+    fs::write(
+        base.join("command-registries.json"),
+        r#"{"blocks":{},"items":[],"by_registry":{"minecraft:worldgen/feature":{"ids":[]}}}"#,
+    )
+    .unwrap();
+    let feature = r#"{"type":"minecraft:simple_block","config":{}}"#;
+    let m = folder_mod(
+        &scratch.join("zinc"),
+        &[
+            ("horizon-mod.toml", &manifest("zinc", "")),
+            ("data/zinc/worldgen/feature/nested/new.json", feature),
+            ("data/zinc/worldgen/configured_feature/old.json", feature),
+        ],
+    );
+    let root = scratch.join("out");
+    build(&base, &[m], &root).unwrap();
+    let bundle: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(root.join("worldgen/features.json")).unwrap()).unwrap();
+    assert_eq!(
+        bundle,
+        BTreeMap::from([("zinc:nested/new".into(), feature.into())])
+    );
+    let commands: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("command-registries.json")).unwrap()).unwrap();
+    let ids = commands["by_registry"]["minecraft:worldgen/feature"]["ids"]
+        .as_array()
+        .unwrap();
+    assert_eq!(ids, &[serde_json::json!("zinc:nested/new")]);
+    let warnings = fs::read_to_string(root.join(WARNINGS)).unwrap();
+    assert!(warnings.contains("data/zinc/worldgen/configured_feature/old.json"));
+    assert!(warnings.contains("use worldgen/feature/ in 26.3"));
+    fs::remove_dir_all(scratch).unwrap();
+}
+
 /// A mod with features but no modifier leaves vanilla's biome bundle alone.
 #[test]
 fn biome_modifiers_none_keep_the_vanilla_biomes() {
@@ -3451,7 +3491,7 @@ fn content_root_generates_a_biome_modifier_ore() {
                 r#"{"template": "minecraft:iron_ore"}"#.to_owned(),
             ),
             (
-                "data/zinc/worldgen/configured_feature/ore_zinc.json",
+                "data/zinc/worldgen/feature/ore_zinc.json",
                 r##"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
                     "targets": [{"target": {"predicate_type": "minecraft:tag_match",
                         "tag": "minecraft:stone_ore_replaceables"},
@@ -3819,7 +3859,7 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
                 r#"{"template": "minecraft:oak_sign"}"#,
             ),
             (
-                "data/post/worldgen/configured_feature/notice.json",
+                "data/post/worldgen/feature/notice.json",
                 r#"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
                     "targets": [{"target": {"predicate_type": "minecraft:tag_match",
                         "tag": "minecraft:stone_ore_replaceables"},

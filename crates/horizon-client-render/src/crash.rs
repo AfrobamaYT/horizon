@@ -32,6 +32,8 @@ pub struct NativeModCall {
     /// Its place in dispatch order, which names it then.
     pub index: usize,
     pub hook: &'static str,
+    /// The part's type (`std::any::type_name`), when the call is to one of the mod's parts.
+    pub part: Option<&'static str>,
 }
 
 /// Marks this thread as inside `call` until the guard drops, which also happens while a panic
@@ -56,17 +58,17 @@ impl Drop for NativeModGuard {
 
 /// `message`, with the native mod hook this thread is inside, if any.
 fn attributed(message: String) -> String {
-    match IN_NATIVE_MOD.with(Cell::get) {
-        Some(NativeModCall {
-            id: Some(id), hook, ..
-        }) => format!("{message}\nin native mod {id}, hook {hook}"),
-        Some(NativeModCall {
-            id: None,
-            index,
-            hook,
-        }) => format!("{message}\nin native mod #{index}, hook {hook}"),
-        None => message,
-    }
+    let Some(call) = IN_NATIVE_MOD.with(Cell::get) else {
+        return message;
+    };
+    let name = call
+        .id
+        .map_or_else(|| format!("#{}", call.index), str::to_owned);
+    let part = call
+        .part
+        .map(|part| format!(", part {part}"))
+        .unwrap_or_default();
+    format!("{message}\nin native mod {name}, hook {}{part}", call.hook)
 }
 
 /// Runs `f`, and returns a panic in it as an error with the panic's message instead of letting
@@ -730,17 +732,30 @@ mod tests {
             id: None,
             index: 1,
             hook: "render",
+            part: None,
         });
         let inner = enter_native_mod(NativeModCall {
             id: Some("b"),
             index: 0,
             hook: "tick",
+            part: None,
         });
         assert!(attributed("boom".into()).ends_with("\nin native mod b, hook tick"));
         drop(inner);
         assert!(attributed("boom".into()).ends_with("\nin native mod #1, hook render"));
         drop(outer);
         assert_eq!(attributed("boom".into()), "boom");
+        let part = enter_native_mod(NativeModCall {
+            id: Some("c"),
+            index: 2,
+            hook: "analog_output",
+            part: Some("c::Gauge"),
+        });
+        assert!(
+            attributed("boom".into())
+                .ends_with("\nin native mod c, hook analog_output, part c::Gauge")
+        );
+        drop(part);
     }
 
     fn report() -> Report {
@@ -869,6 +884,7 @@ mod tests {
                 id: Some("a"),
                 index: 0,
                 hook: "tick",
+                part: None,
             });
             panic!("the test crash")
         });
