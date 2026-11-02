@@ -34,6 +34,17 @@ env:
   HORIZON_TELEMETRY_URL: "off"
 
 jobs:
+  # Dyna runners accept dispatches, not scheduled events.
+  nightly-dispatch:
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
+
   # Dyna's image enforces the event and repository check again in job-started.sh.
   # GitHub's external-contributor approval is the third lock.
   changes:
@@ -243,7 +254,7 @@ jobs:
       full: ${{ contains(github.event.pull_request.labels.*.name, 'full-parity') }}
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   vanilla-parity:
-    if: github.repository == 'arismoko/horizon' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.upstream_sync))
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: dyna-large
     permissions:
       contents: read
