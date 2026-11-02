@@ -4857,7 +4857,7 @@ impl Game<'_> {
                 };
                 let mut amount = rest.min(i32::MAX as u32) as i32;
                 game.native_player_exp_change(player, &name, &mut amount);
-                game.give_orb_points(amount.max(0) as u32);
+                game.give_experience_points(amount.max(0));
             }
         });
     }

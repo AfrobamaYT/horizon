@@ -3439,6 +3439,22 @@ impl Game<'_> {
     pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
         mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
     }
+    /// A server player's level is about to change through
+    /// `Player.giveExperienceLevels`: once per level gained or lost by points,
+    /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
+    /// Change `levels`, or set `cancel` to leave the level unchanged. The
+    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// and the item helpers reach them. Server-side.
+    /// @API:player_xp_level_change@.
+    pub(super) fn native_player_xp_level_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        levels: &mut i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, levels, cancel);
+    }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
     /// so helpers that look them up through `self.lan` may find nothing while a

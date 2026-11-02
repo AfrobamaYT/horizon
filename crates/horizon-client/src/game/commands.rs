@@ -2814,28 +2814,6 @@ impl Game<'_> {
         self.feedback(Text::tr("commands.clone.success", &[&count]));
         Ok(count)
     }
-    /// Player.giveExperiencePoints including negative amounts.
-    fn give_points(&mut self, amount: i32) {
-        let e = &mut self.experience;
-        e.progress += amount as f32 / horizon_client::entities::Experience::needed(e.level) as f32;
-        e.total = e.total.saturating_add(amount).clamp(0, i32::MAX);
-        while e.progress < 0.0 {
-            let f = e.progress * horizon_client::entities::Experience::needed(e.level) as f32;
-            if e.level > 0 {
-                e.level -= 1;
-                e.progress = 1.0 + f / horizon_client::entities::Experience::needed(e.level) as f32;
-            } else {
-                e.level = 0;
-                e.progress = 0.0;
-            }
-        }
-        while e.progress >= 1.0 {
-            e.progress =
-                (e.progress - 1.0) * horizon_client::entities::Experience::needed(e.level) as f32;
-            e.level += 1;
-            e.progress /= horizon_client::entities::Experience::needed(e.level) as f32;
-        }
-    }
     /// AdvancementCommands.perform / performCriterion.
     fn cmd_advancement(&mut self, ctx: &Context) -> R<i32> {
         let targets = self.entities(ctx, "targets", true)?;
@@ -3002,12 +2980,9 @@ impl Game<'_> {
     fn change_experience(&mut self, add: bool, levels: bool, amount: i32) -> bool {
         if add {
             if levels {
-                self.experience.level = (self.experience.level + amount).max(0);
-                if self.experience.level == 0 && amount < 0 {
-                    self.experience.progress = 0.0;
-                }
+                self.give_levels(amount);
             } else {
-                self.give_points(amount);
+                self.give_experience_points(amount);
             }
         } else if levels {
             self.experience.level = amount;

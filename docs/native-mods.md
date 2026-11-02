@@ -1323,6 +1323,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   about to be added, after mending has taken its share. Change `amount` to change the points added; negative values
   become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing
   while a guest packet is being handled. Command experience changes use another path and are not heard.
+- **`native_player_xp_level_change(player, name, levels, cancel)`**: a server player's level is about to change
+  through `Player.giveExperienceLevels` (NeoForge's `PlayerXpEvent.LevelChange`): once per level gained or lost by
+  experience points, for an anvil's cost, `/experience add ... levels` and `native_give_levels`. Change `levels` or
+  set `cancel` to leave the level as it is. Enchanting's cost and `/experience set` do not call it. The player's state
+  is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
 - **`native_player_item_cooldown(player, name, item, ticks, cancel)`**: an item cooldown is about to start for a
   server player, including a used item's cooldown and a shield disabled by a hit. `item` is the item id and `ticks`
   its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound.
