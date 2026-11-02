@@ -4524,7 +4524,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// A player's destroy speed for the block at `pos` may be changed or canceled.
-    /// @API:native_player_break_speed@.
+    /// @API:player_break_speed@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn player_break_speed(&self, host: &mut dyn Host, event: &mut PlayerBreakSpeedEvent) -> Flow {
@@ -4533,7 +4533,7 @@ pub trait Hooks: Send + Sync {
         Flow::Continue
     }
     /// A player's ability to harvest the block at `pos` may be changed.
-    /// @API:native_player_harvest_check@.
+    /// @API:player_harvest_check@.
     ///
     /// Every mod gets `event.can_harvest` in order and may add, change or remove can_harvest.
     fn player_harvest_check(&self, host: &mut dyn Host, event: &mut PlayerHarvestCheckEvent) {
