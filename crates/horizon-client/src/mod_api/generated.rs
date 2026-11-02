@@ -4524,7 +4524,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// A player's display name was formatted. Replace `displayname` to change it.
-    /// Both sides. @API:native_player_name_format@.
+    /// Both sides. @API:player_name_format@.
     ///
     /// Every mod gets `event.displayname` in order and may add, change or remove displayname.
     fn player_name_format(&self, event: &mut PlayerNameFormatEvent<'_>) {
@@ -13922,13 +13922,13 @@ pub fn dispatch_movement_input(
 /// What [`Hooks::player_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerNameFormatEvent<'a> {
-    pub username: &'a crate::text::Text,
-    pub displayname: &'a mut crate::text::Text,
+    pub username: &'a Text,
+    pub displayname: &'a mut Text,
 }
 pub fn dispatch_player_name_format(
     mods: &[Box<dyn Hooks>],
-    username: &crate::text::Text,
-    displayname: &mut crate::text::Text,
+    username: &Text,
+    displayname: &mut Text,
 ) {
     let mut event = PlayerNameFormatEvent {
         username,
@@ -13943,13 +13943,13 @@ pub fn dispatch_player_name_format(
 pub struct PlayerTabListNameFormatEvent<'a> {
     pub player: u128,
     pub name: &'a str,
-    pub display_name: &'a mut Option<crate::text::Text>,
+    pub display_name: &'a mut Option<Text>,
 }
 pub fn dispatch_player_tab_list_name_format(
     mods: &[Box<dyn Hooks>],
     player: u128,
     name: &str,
-    display_name: &mut Option<crate::text::Text>,
+    display_name: &mut Option<Text>,
 ) {
     let mut event = PlayerTabListNameFormatEvent {
         player,

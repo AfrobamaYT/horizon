@@ -16,6 +16,7 @@ use crate::{
     collisions::SceneCollisions,
     effects::{EffectInstance, PlayerEffects},
     items::ItemStack,
+    text::Text,
     world::World,
 };
 use horizon_core::{
@@ -371,12 +372,9 @@ fn string(s: &str) -> Tag {
 }
 
 /// A player's display name was formatted. Replace `displayname` to change it.
-/// Both sides. @API:native_player_name_format@.
+/// Both sides. @API:player_name_format@.
 #[inline(never)]
-pub fn native_player_name_format(
-    username: &crate::text::Text,
-    displayname: &mut crate::text::Text,
-) {
+pub fn native_player_name_format(username: &Text, displayname: &mut Text) {
     crate::native_client_hooks::player_name_format(username, displayname);
 }
 
@@ -435,7 +433,7 @@ pub fn display_name(uuid: u128, name: &str) -> Tag {
 pub fn native_player_tab_list_name_format(
     player: u128,
     name: &str,
-    display_name: &mut Option<crate::text::Text>,
+    display_name: &mut Option<Text>,
 ) {
     crate::native_client_hooks::player_tab_list_name_format(player, name, display_name);
 }

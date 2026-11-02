@@ -458,11 +458,6 @@ fn extract(tar: &[u8], out: &Path) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod text {
-    pub struct Text;
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
