@@ -1161,6 +1161,8 @@ pub struct Mob {
     pub previous_limb_speed: f32,
     pub swell: i32,
     pub previous_swell: i32,
+    /// Creeper.maxSwell (`Fuse`): local NBT state, not synced entity data.
+    pub max_swell: i32,
     pub ambient_timer: i32,
     pub fall_distance: f64,
     /// `Entity.stuckSpeedMultiplier`: the next move is scaled by it.
@@ -1630,6 +1632,7 @@ pub enum MobEvent {
         params: conversion::Params,
     },
     DropItem {
+        mob: u32,
         item: Arc<str>,
         count: u32,
         at: [f64; 3],
@@ -2602,6 +2605,7 @@ impl Mob {
             previous_limb_speed: 0.0,
             swell: 0,
             previous_swell: 0,
+            max_swell: 30,
             // Mob.ambientSoundTime starts at 0.
             ambient_timer: 0,
             fall_distance: 0.0,
@@ -3340,6 +3344,14 @@ impl Mob {
         });
         true
     }
+    /// `LivingEntity.heal`, with the native heal hook.
+    pub fn heal(&mut self, mut amount: f32) {
+        let mut cancel = false;
+        crate::hunger::native_living_heal(self.id, &mut amount, &mut cancel);
+        if !cancel && self.health > 0.0 {
+            self.health = (self.health + amount).clamp(0.0, self.attrs.max_health);
+        }
+    }
     /// `HealOrHarmMobEffect.applyInstantenousEffect`: a harming effect hurts a
     /// living mob (6 << amplifier, magic) and heals an undead one, a healing effect
     /// the reverse (4 << amplifier), both scaled by `scale`.
@@ -3352,7 +3364,7 @@ impl Mob {
             );
         } else {
             let heal = (scale * f64::from(4i32 << amp)) as i32 as f32;
-            self.health = (self.health + heal).min(self.attrs.max_health);
+            self.heal(heal);
         }
     }
     pub fn add_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
