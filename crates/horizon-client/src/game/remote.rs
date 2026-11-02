@@ -3036,6 +3036,10 @@ impl Game<'_> {
                 self.debug_charts.ping.log(delay);
             }
             C::Login(p) => {
+                // A client's parts, from the tags it plays with.
+                if let Err(e) = self.resolve_parts() {
+                    log::warn!("Horizon: {e}");
+                }
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
                 self.level.hardcore = p.hardcore;
