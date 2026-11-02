@@ -125,6 +125,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(git(self.origin, "for-each-ref", sync.STAGING), "")
         issue = next(call[-1] for call in self.calls if call[1:3] == ("issue", "create"))
         self.assertIn("Upstream changed workflow files; an agent must push this one", issue)
+        self.assertIn("upstream-sync prepares the merge branch, and root pushes main from hermeslab", issue)
         self.assertIn(".github/workflows/checks.yml", issue)
         self.assertIn(self.upstream_sha, issue)
         print("WORKFLOWS: token limit detected before any push; paths/SHA reported for agent intervention")
@@ -163,7 +164,7 @@ class SyncTests(unittest.TestCase):
 
 class VerifyTests(unittest.TestCase):
     def run_checks(self, *, sha="candidate", conclusion="success", verify="success"):
-        run = {"id": 7, "display_title": "Upstream sync 123-1", "html_url": "https://github.com/checks/7",
+        run = {"id": 7, "display_title": "Upstream sync candida (123-1)", "html_url": "https://github.com/checks/7",
                "head_sha": sha, "status": "completed", "conclusion": conclusion}
         job = {"name": "verify", "head_sha": sha, "conclusion": verify, "check_run_url": "https://api.github.com/checks/7"}
         with patch.object(sync, "command"), patch.object(sync, "api", side_effect=[
@@ -174,7 +175,7 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(self.run_checks(), "https://github.com/checks/7")
 
     def test_waits_for_own_dispatch_to_appear_and_complete(self):
-        run = {"id": 7, "display_title": "Upstream sync 123-1", "html_url": "https://github.com/checks/7",
+        run = {"id": 7, "display_title": "Upstream sync candida (123-1)", "html_url": "https://github.com/checks/7",
                "head_sha": "candidate", "status": "queued", "conclusion": None}
         job = {"name": "verify", "head_sha": "candidate", "conclusion": "success", "check_run_url": "check/7"}
         answers = [{"workflow_runs": []}, {"workflow_runs": [run]}, dict(run, status="in_progress"),
@@ -183,11 +184,11 @@ class VerifyTests(unittest.TestCase):
                 patch.object(sync.time, "monotonic", return_value=0), patch.object(sync.time, "sleep") as sleep:
             self.assertEqual(sync.verify("arismoko/horizon", "candidate", "123-1"), run["html_url"])
             command.assert_called_once_with("gh", "workflow", "run", "ci.yml", "--repo", "arismoko/horizon",
-                                            "--ref", "sync/upstream", "--field", "upstream_sync=123-1")
+                                            "--ref", "sync/upstream", "--field", "upstream_sync=candida (123-1)")
             self.assertEqual([call.args[0] for call in sleep.call_args_list], [15, 30, 30])
 
     def test_stalled_checks_are_cancelled_and_fail_closed(self):
-        run = {"id": 7, "display_title": "Upstream sync 123-1", "html_url": "https://github.com/checks/7",
+        run = {"id": 7, "display_title": "Upstream sync candida (123-1)", "html_url": "https://github.com/checks/7",
                "head_sha": "candidate", "status": "queued"}
         with patch.object(sync, "api", return_value={"workflow_runs": [run]}), \
                 patch.object(sync, "command") as command, \

@@ -20,9 +20,10 @@ def api(path):
 
 
 def verify(repo, head, request):
-    title = f"Upstream sync {request}"
+    label = f"{head[:7]} ({request})"
+    title = f"Upstream sync {label}"
     command("gh", "workflow", "run", "ci.yml", "--repo", repo, "--ref", "sync/upstream",
-            "--field", f"upstream_sync={request}")
+            "--field", f"upstream_sync={label}")
     # The dispatch endpoint returns no run ID. A unique run-name distinguishes this
     # request from manual dispatches and reruns, even when they share the same SHA.
     deadline = time.monotonic() + 300
@@ -85,6 +86,7 @@ def sync():
         workflows = command("git", "diff", "--name-only", base, head, "--", ".github/workflows")
         if workflows:
             raise RuntimeError("Upstream changed workflow files; an agent must push this one. "
+                               "upstream-sync prepares the merge branch, and root pushes main from hermeslab. "
                                "GITHUB_TOKEN cannot update .github/workflows/ without workflows permission."
                                f"\n\n```text\n{workflows}\n```")
         previous = command("git", "ls-remote", "--heads", "origin", STAGING).split()
