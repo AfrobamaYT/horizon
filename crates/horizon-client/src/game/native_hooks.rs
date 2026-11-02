@@ -5409,9 +5409,10 @@ impl Game<'_> {
     pub(super) fn native_create_spawn_position(
         &mut self,
         position: &mut [i32; 3],
+        rotation: &mut [f32; 2],
         cancel: &mut bool,
     ) {
-        let _ = (position, cancel);
+        let _ = (position, rotation, cancel);
     }
     /// A server player's respawn destination before placement (NeoForge's
     /// `PlayerRespawnPositionEvent`). `flags` holds copy-saved-position,

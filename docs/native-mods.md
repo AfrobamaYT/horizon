@@ -856,7 +856,7 @@ API 114 adds `native_mouse_button_pre(button, pressed, modifiers, canceled)` see
 
 API 115 adds a player respawning: `native_player_respawned(player, name)` is heard once at the end of `PlayerList.respawn`, with the player placed and their health, food and experience reset (NeoForge's `PlayerRespawnEvent`), on a server, with their state swapped in so the helpers reach them. Bundles that use it need `"hooks": 115`.
 
-`native_create_spawn_position(position, cancel)` fires on the server before a new world's spawn is selected (NeoForge's `LevelEvent.CreateSpawnPosition`). Set `position` and `cancel` to replace the initial spawn and skip vanilla selection, including the bonus chest. Bundles need `"hooks": @API:create_spawn_position@`.
+`native_create_spawn_position(position, rotation, cancel)` fires on the server before a new world's spawn is selected (NeoForge's `LevelEvent.CreateSpawnPosition`). Set `position`, optionally `rotation`, and `cancel` to replace the initial spawn and skip vanilla selection, including the bonus chest. Bundles need `"hooks": @API:create_spawn_position@`.
 
 `native_player_respawn_position(player, dimension, position, rotation, flags, saved)` exposes the default world-spawn decision before placement (NeoForge's `PlayerRespawnPositionEvent`). The mutable flags are copy saved point, missing block, and End return. This initial implementation does not yet cover block-based or End-return respawns, and its default position precedes the world-spawn column search. Custom dimensions are not yet supported. Bundles need `"hooks": @API:player_respawn_position@`.
 

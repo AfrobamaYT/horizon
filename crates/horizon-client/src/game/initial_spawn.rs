@@ -105,11 +105,13 @@ impl Game<'_> {
     pub(super) fn find_world_spawn(&mut self) -> Result<Option<[i32; 3]>> {
         if !self.spawn_hook_fired {
             self.spawn_hook_fired = true;
-            let mut position = [0, 0, 0];
+            let mut position = self.level.world_spawn.unwrap_or([0, 0, 0]);
+            let mut rotation = self.level.world_spawn_angle;
             let mut cancel = false;
-            self.native_create_spawn_position(&mut position, &mut cancel);
+            self.native_create_spawn_position(&mut position, &mut rotation, &mut cancel);
             if cancel {
                 self.spawn_hook_cancelled = true;
+                self.level.world_spawn_angle = rotation;
                 return Ok(Some(position));
             }
         }
