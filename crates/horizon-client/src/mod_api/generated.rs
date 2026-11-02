@@ -4533,6 +4533,20 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
+    /// `cancel` to prevent placement or change `new_state` to replace it.
+    /// Server-side. @API:fluid_place_block@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn fluid_place_block(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut FluidPlaceBlockEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -13891,6 +13905,42 @@ pub fn dispatch_farmland_trample(
     };
     for mod_hook in super::entered(mods, "farmland_trample") {
         if matches!(mod_hook.farmland_trample(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::fluid_place_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FluidPlaceBlockEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub liquid_pos: BlockPos,
+    pub state: BlockStateId,
+    pub new_state: &'a mut BlockStateId,
+}
+pub fn dispatch_fluid_place_block(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    liquid_pos: BlockPos,
+    state: BlockStateId,
+    new_state: &mut BlockStateId,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = FluidPlaceBlockEvent {
+        dimension,
+        pos,
+        liquid_pos,
+        state,
+        new_state,
+    };
+    for mod_hook in super::entered(mods, "fluid_place_block") {
+        if matches!(mod_hook.fluid_place_block(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
