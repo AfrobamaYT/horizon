@@ -593,7 +593,7 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar};
-pub(crate) use part_table::{install_parts, parts};
+pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
 
 mod generated;
 pub use generated::Hooks;
@@ -712,6 +712,8 @@ mod tests {
 
     #[test]
     fn a_test_host_implements_only_what_its_hook_calls() {
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
         let mods = [Box::new(Probe) as Box<dyn Hooks>];
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
@@ -730,6 +732,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "Host::tell")]
     fn an_unexpected_host_call_names_the_method() {
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
         let mods = [Box::new(Chatty) as Box<dyn Hooks>];
         let mut host = Reader {
             block: "minecraft:stone",
