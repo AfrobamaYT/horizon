@@ -1303,6 +1303,30 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::item_container_extract")
     }
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    fn level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        let _ = level;
+        let _ = min;
+        let _ = max;
+        unimplemented!("Host::level_entities_in")
+    }
     /// Resolve an online UUID on this server. During a player swap only the
     /// acting player is available; other players return None because swaps can
     /// nest and their records may hold displaced state. API @API:player_read@.
@@ -1382,6 +1406,29 @@ impl EntityRef {
     /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
     pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
         host.entity_level(self)
+    }
+}
+impl LevelRef {
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    pub fn entities_in(
+        self,
+        host: &dyn Host,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        host.level_entities_in(self, min, max)
     }
 }
 impl PlayerRef {
