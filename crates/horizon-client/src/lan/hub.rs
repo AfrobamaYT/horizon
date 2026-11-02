@@ -935,7 +935,9 @@ impl Hub {
             game_mode: Some(mode),
             listed: Some(true),
             latency: Some(latency),
-            display_name: Some(display_name.map(|text| super::data::component_nbt(&text.component()))),
+            display_name: Some(
+                display_name.map(|text| super::data::component_nbt(&text.component())),
+            ),
             list_order: Some(0),
             show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
@@ -3595,11 +3597,17 @@ impl Hub {
             Some(n) => self.nicknames.insert(uuid, n),
             None => self.nicknames.remove(&uuid),
         };
+        let mut display_name = self.nicknames.get(&uuid).map(crate::text::Text::literal);
+        if let Some(guest) = self.guests.iter().find(|g| g.uuid == uuid) {
+            native_player_tab_list_name_format(uuid, &guest.name, &mut display_name);
+        }
         self.broadcast(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
             actions: 0x20,
             entries: vec![play::PlayerInfo {
                 uuid,
-                display_name: Some(self.nicknames.get(&uuid).map(|n| literal(n))),
+                display_name: Some(
+                    display_name.map(|text| super::data::component_nbt(&text.component())),
+                ),
                 ..Default::default()
             }],
         }));
