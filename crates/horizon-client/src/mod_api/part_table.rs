@@ -278,6 +278,19 @@ pub fn block_entity_capability<'k, T: ?Sized + 'static>(
     part.handler.downcast_ref::<Arc<T>>().cloned()
 }
 
+/// The mod that registered `handler` for a capability; none for the game's own.
+pub(crate) fn capability_mod<T: ?Sized + 'static>(handler: &Arc<T>) -> Option<usize> {
+    let parts = INSTALLED.get()?.keys.capabilities.values();
+    parts
+        .flat_map(HashMap::values)
+        .find(|part| {
+            part.handler
+                .downcast_ref::<Arc<T>>()
+                .is_some_and(|h| std::ptr::addr_eq(Arc::as_ptr(h), Arc::as_ptr(handler)))
+        })
+        .map(|part| part.mod_index)
+}
+
 fn attached<'a, 'k, P: ?Sized>(
     table: &'a HashMap<Box<str>, Vec<Attached<P>>>,
     id: impl FnOnce() -> Option<&'k str>,
@@ -518,6 +531,8 @@ mod tests {
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
+            r.block_entity_capability(&FLUIDS, "test:tank", Arc::new(Tank));
+            r.block_entity_capability(&FLUIDS, "test:liar", Arc::new(Liar));
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output *= 2;
@@ -791,6 +806,287 @@ mod tests {
         assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
         assert!(r.refused[0].contains("horizon:items is answered for test:pipe twice"));
         assert!(r.refused[1].contains("not a namespaced id"));
+    }
+
+    /// A mod's tank: the game's tank at its position, reached from every side but its top.
+    struct Tank;
+    impl FluidHandler for Tank {
+        fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            if side == Some(Direction::Up) {
+                return 0;
+            }
+            host.fluid_tank_count(at, None).unwrap_or(0)
+        }
+        fn fluid(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            _: Option<Direction>,
+            tank: usize,
+        ) -> Option<FluidStack> {
+            host.fluid_tank(at, None, tank)
+        }
+        fn capacity(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            _: Option<Direction>,
+            tank: usize,
+            fluid: &FluidStack,
+        ) -> u32 {
+            host.fluid_tank_capacity(at, None, tank, fluid)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            _: Option<Direction>,
+            tank: usize,
+            fluid: FluidStack,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            host.fluid_tank_insert(at, None, tank, fluid, simulate)
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            _: Option<Direction>,
+            tank: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            host.fluid_tank_extract(at, None, tank, max, simulate)
+        }
+    }
+
+    /// A tank whose simulation says it takes everything, and which takes nothing.
+    struct Liar;
+    impl FluidHandler for Liar {
+        fn tanks(&self, _: &dyn Host, _: [i32; 3], _: Option<Direction>) -> usize {
+            1
+        }
+        fn fluid(
+            &self,
+            _: &dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+        ) -> Option<FluidStack> {
+            None
+        }
+        fn capacity(
+            &self,
+            _: &dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: &FluidStack,
+        ) -> u32 {
+            1000
+        }
+        fn insert(
+            &self,
+            _: &mut dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            fluid: FluidStack,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            (!simulate).then_some(fluid)
+        }
+        fn extract(
+            &self,
+            _: &mut dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: u32,
+            _: bool,
+        ) -> Option<FluidStack> {
+            None
+        }
+    }
+
+    /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
+    /// drains.
+    struct GameTank {
+        held: Option<FluidStack>,
+        capacity: u32,
+        fills: bool,
+        drains: bool,
+    }
+    /// Game tanks by position, and the mod block entity types standing at some.
+    #[derive(Default)]
+    struct TankWorld {
+        tanks: HashMap<[i32; 3], GameTank>,
+        types: HashMap<[i32; 3], &'static str>,
+    }
+    const SOURCE: [i32; 3] = [0, 64, 0];
+    const TANK: [i32; 3] = [1, 64, 0];
+    impl TankWorld {
+        fn tank(&mut self, pos: [i32; 3], held: Option<FluidStack>, fills: bool) -> &mut Self {
+            let tank = GameTank {
+                held,
+                capacity: 1000,
+                fills,
+                drains: true,
+            };
+            self.tanks.insert(pos, tank);
+            self
+        }
+        fn held(&self, pos: [i32; 3]) -> Option<FluidStack> {
+            self.tanks[&pos].held.clone()
+        }
+    }
+    impl Host for TankWorld {
+        fn block_entity_type(&self, pos: [i32; 3]) -> Option<String> {
+            self.types.get(&pos).map(|kind| kind.to_string())
+        }
+        fn fluid_tank_count(&self, pos: [i32; 3], _: Option<Direction>) -> Option<usize> {
+            self.tanks.contains_key(&pos).then_some(1)
+        }
+        fn fluid_tank(&self, pos: [i32; 3], _: Option<Direction>, _: usize) -> Option<FluidStack> {
+            self.tanks.get(&pos)?.held.clone()
+        }
+        fn fluid_tank_capacity(
+            &self,
+            pos: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: &FluidStack,
+        ) -> u32 {
+            self.tanks
+                .get(&pos)
+                .filter(|tank| tank.fills)
+                .map_or(0, |tank| tank.capacity)
+        }
+        fn fluid_tank_insert(
+            &mut self,
+            pos: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            fluid: FluidStack,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            let Some(tank) = self.tanks.get_mut(&pos).filter(|tank| tank.fills) else {
+                return Some(fluid);
+            };
+            let held = tank.held.as_ref().map_or(0, |held| held.amount);
+            if tank
+                .held
+                .as_ref()
+                .is_some_and(|held| !held.same_fluid_same_components(&fluid))
+            {
+                return Some(fluid);
+            }
+            let add = fluid.amount.min(tank.capacity - held);
+            if !simulate && add > 0 {
+                tank.held = Some(fluid.with_amount(held + add));
+            }
+            (add < fluid.amount).then(|| fluid.with_amount(fluid.amount - add))
+        }
+        fn fluid_tank_extract(
+            &mut self,
+            pos: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            let tank = self.tanks.get_mut(&pos).filter(|tank| tank.drains)?;
+            let held = tank.held.clone()?;
+            let take = held.amount.min(max);
+            if !simulate {
+                tank.held = (take < held.amount).then(|| held.with_amount(held.amount - take));
+            }
+            Some(held.with_amount(take))
+        }
+    }
+
+    fn potion(amount: u32, potion: &str) -> FluidStack {
+        let components = crate::item_data::StackData {
+            potion: Some(Arc::from(potion)),
+            ..Default::default()
+        };
+        FluidStack {
+            components: Some(Box::new(components)),
+            ..FluidStack::new("test:potion", amount)
+        }
+    }
+
+    #[test]
+    fn a_fluid_move_plans_both_ends_and_fills_only_with_the_same_fluid_and_components() {
+        game_thread();
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(potion(1500, "minecraft:healing")), true);
+        world.tank(TANK, None, true).types.insert(TANK, "test:tank");
+        let host: &mut dyn Host = &mut world;
+        // The mod's tank takes nothing from above.
+        assert!(
+            host.transfer_fluids(SOURCE, None, TANK, Some(Direction::Up), 4000)
+                .is_none()
+        );
+        // The source is asked for no more than the tank takes.
+        let moved = host.transfer_fluids(SOURCE, None, TANK, Some(Direction::West), 4000);
+        assert_eq!(moved, Some(potion(1000, "minecraft:healing")));
+        let moved = host.transfer_fluids(TANK, Some(Direction::West), SOURCE, None, 400);
+        assert_eq!(moved, Some(potion(400, "minecraft:healing")));
+        assert_eq!(world.held(SOURCE), Some(potion(900, "minecraft:healing")));
+        assert_eq!(world.held(TANK), Some(potion(600, "minecraft:healing")));
+        // The same fluid with other components, or another fluid, doesn't go in.
+        for other in [
+            potion(500, "minecraft:poison"),
+            FluidStack::new("test:potion", 500),
+        ] {
+            world.tank(SOURCE, Some(other.clone()), true);
+            let host: &mut dyn Host = &mut world;
+            assert!(
+                host.transfer_fluids(SOURCE, None, TANK, None, 4000)
+                    .is_none()
+            );
+            assert_eq!(world.held(SOURCE), Some(other));
+            assert_eq!(world.held(TANK), Some(potion(600, "minecraft:healing")));
+        }
+        // A drain-only tank has no capacity, and nothing moves.
+        let water = FluidStack::new("minecraft:water", 1000);
+        world.tank(SOURCE, Some(water.clone()), true);
+        world.tank(TANK, None, false);
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(host.fluid_tank_capacity(TANK, None, 0, &water), 0);
+        assert!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 1000)
+                .is_none()
+        );
+        assert_eq!(world.held(SOURCE), Some(water));
+    }
+
+    #[test]
+    fn a_tank_whose_simulation_lies_gets_back_what_it_refused_or_loses_it_and_is_named() {
+        game_thread();
+        let water = FluidStack::new("minecraft:water", 1000);
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water.clone()), true);
+        world.types.insert(TANK, "test:liar");
+        let host: &mut dyn Host = &mut world;
+        // Its simulation took it all and its real call took none: it goes back into the source.
+        assert!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 1000)
+                .is_none()
+        );
+        assert_eq!(world.held(SOURCE), Some(water.clone()));
+        assert!(super::super::fluid_capability::warned_about(
+            "native mod #0"
+        ));
+        // A source that can't take it back: fluid has no item form to drop, so it is lost.
+        world.tanks.get_mut(&SOURCE).unwrap().fills = false;
+        let host: &mut dyn Host = &mut world;
+        assert!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 1000)
+                .is_none()
+        );
+        assert_eq!(world.held(SOURCE), None);
     }
 
     #[test]

@@ -1263,6 +1263,79 @@ pub trait Host {
         let _ = entity;
         unimplemented!("Host::entity_level")
     }
+    /// How many tanks of the block at `pos` in the level in place its side `side` reaches
+    /// (none: every tank), for the game's own fluid capability: a mod block's by its table, a
+    /// cauldron's one. None where no tanks are, as `native_fluid_tanks`.
+    fn fluid_tank_count(&self, pos: [i32; 3], side: Option<Direction>) -> Option<usize> {
+        let _ = pos;
+        let _ = side;
+        unimplemented!("Host::fluid_tank_count")
+    }
+    /// What tank `tank` of those `side` reaches at `pos` holds (`native_fluid_tank_count`).
+    fn fluid_tank(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+    ) -> Option<FluidStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        unimplemented!("Host::fluid_tank")
+    }
+    /// How much of `fluid` tank `tank` of those `side` reaches at `pos` holds when empty: a mod
+    /// block's fillable tank its capacity, a cauldron a bucket; none for another tank, a
+    /// drain-only one, or a fluid the game's tanks don't hold (`game_holds`).
+    fn fluid_tank_capacity(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        fluid: &FluidStack,
+    ) -> u32 {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        let _ = fluid;
+        unimplemented!("Host::fluid_tank_capacity")
+    }
+    /// Puts as much of `fluid` as tank `tank` of those `side` reaches at `pos` takes: a mod
+    /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
+    /// whole thirds, lava only whole into an empty one. What didn't fit. `simulate` changes
+    /// nothing and answers as the real call.
+    fn fluid_tank_insert(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        fluid: FluidStack,
+        simulate: bool,
+    ) -> Option<FluidStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        let _ = fluid;
+        let _ = simulate;
+        unimplemented!("Host::fluid_tank_insert")
+    }
+    /// Takes up to `max` out of tank `tank` of those `side` reaches at `pos`: a mod block's
+    /// drainable tank, a cauldron by whole thirds and lava only whole. What came out.
+    /// `simulate` changes nothing and answers as the real call.
+    fn fluid_tank_extract(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        max: u32,
+        simulate: bool,
+    ) -> Option<FluidStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        let _ = max;
+        let _ = simulate;
+        unimplemented!("Host::fluid_tank_extract")
+    }
     /// The type id of the mod block entity at `pos` (`mymod:press`), which its capability parts
     /// are registered by. None for a vanilla block entity, for none, and for the mod block entity
     /// ticking now.

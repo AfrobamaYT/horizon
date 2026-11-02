@@ -646,9 +646,13 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
 pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+mod fluid_capability;
+pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
-pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
+pub(crate) use part_table::{
+    KnownIds, capability_mod, install_parts, mark_game_thread, parts, resolve_parts,
+};
 
 mod generated;
 pub use generated::Hooks;
