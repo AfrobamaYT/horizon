@@ -836,6 +836,31 @@ def items_and_loot():
 
 def world_misc():
     return [
+        # BlockInput.place calculates neighbour shapes before setting the block,
+        # then reapplies only properties explicitly supplied by the command.
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        cmd('/setblock 4 219 4 minecraft:gold_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=bell]'),
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block strict'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        # Even an unchanged input state must be normalized before comparison.
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        # An unsupported shape falling back to air retains the requested block.
+        cmd('/setblock 6 220 4 minecraft:poppy'),
+        cmd('/execute if block 6 220 4 minecraft:poppy'),
         cmd('/setblock 1 210 1 minecraft:stone keep'),
         cmd('/setblock 1 210 1 minecraft:dirt keep'),
         cmd('/setblock 1 210 1 minecraft:dirt destroy'),
@@ -1686,6 +1711,59 @@ def summoned_potions():
     return ops
 
 
+def trial_spawner_passengers():
+    """Configured passengers must exist as entities with a vehicle (#7254)."""
+    ops = [*setup('/fill 1 219 1 13 219 8 stone',
+                  '/fill 1 220 1 13 224 8 air', '/gamerule spawn_mobs true')]
+    # Exercise namespace and position independently, plus the explicit control.
+    for i, (kind, pos) in enumerate([
+        ('chicken', ''), ('minecraft:chicken', ''),
+        ('chicken', ',Pos:[4.5d,220.0d,6.5d]'),
+        ('minecraft:chicken', ',Pos:[4.5d,220.0d,6.5d]'),
+    ]):
+        parent, rider = f'trial_parent_{i}', f'trial_rider_{i}'
+        ops += setup(
+            '/setblock 4 220 4 trial_spawner[trial_spawner_state=active]'
+            '{normal_config:{spawn_range:3,total_mobs:1.0f,simultaneous_mobs:1.0f,'
+            'total_mobs_added_per_player:0.0f,simultaneous_mobs_added_per_player:0.0f,'
+            'ticks_between_spawn:1000},spawn_data:{entity:{id:"zombie",'
+            f'Tags:["{parent}"],Pos:[4.5d,220.0d,6.5d],NoAI:1b,'
+            f'Passengers:[{{id:"{kind}",NoAI:1b,Tags:["{rider}"]{pos}}}]'
+            '}},next_mob_spawns_at:0L}',
+            '/data modify block 4 220 4 registered_players append from entity @s UUID')
+        ops += [
+            {'op': 'tick', 'n': 5},
+            cmd(f'/execute if entity @e[tag={parent}]'),
+            cmd(f'/execute if entity @e[tag={rider}]'),
+            cmd(f'/execute as @e[tag={rider}] on vehicle if entity @s[tag={parent}]'),
+            cmd(f'/data get entity @e[tag={parent},limit=1] Passengers[0].Tags'),
+            *setup(f'/kill @e[tag={parent}]', f'/kill @e[tag={rider}]',
+                   '/setblock 4 220 4 air'),
+        ]
+    return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
+
+
+def forceload_query_order():
+    """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
+    return [
+        *setup('/forceload remove all'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add 32 0'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add -16 0'),
+        cmd('/forceload add 0 -16'),
+        # Java 26.3: [0,-1], [2,0], [-1,0]. These replies say nothing
+        # about whether the force-loaded chunks have finished loading.
+        cmd('/forceload query'),
+        cmd('/forceload remove 32 0'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload remove all'),
+        cmd('/forceload query'),
+    ]
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1694,10 +1772,12 @@ def groups():
         ('game state', game_state()),
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
+        ('forceload query order', forceload_query_order()),
         ('entities', entities()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
+        ('trial spawner passengers', trial_spawner_passengers()),
         ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
         ('execute', execute()),
