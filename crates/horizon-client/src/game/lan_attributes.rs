@@ -6,7 +6,7 @@ use super::Game;
 use super::commands::Target;
 use horizon_client::{
     effects,
-    lan::attributes::{add_modifier, generic_snapshots, instance, operation_named},
+    lan::attributes::{add_modifier, generic_syncable, instance, operation_named},
     mobs::{
         Mob, Species,
         finalize::{self, Attr, Op},
@@ -57,13 +57,11 @@ impl Game<'_> {
 
     /// The registry id of a client-syncable attribute the entity type has
     /// (`AttributeMap.getInstance` is null for the others), by name.
-    fn selected_attribute(&self, entity: &str, name: &str, sync_only: bool) -> Option<i32> {
+    fn synced_attribute(&self, entity: &str, name: &str) -> Option<i32> {
         let catalog = &self.motion.attributes;
         let id = catalog.id(name)?;
-        if sync_only && !catalog.attribute(id).syncable {
-            return None;
-        }
-        catalog.default_base(entity, id).map(|_| id.registry_id())
+        (catalog.attribute(id).syncable && catalog.default_base(entity, id).is_some())
+            .then(|| id.registry_id())
     }
 
     /// The type's base value of an attribute, as the instance starts.
@@ -81,7 +79,6 @@ impl Game<'_> {
     fn equipment_attributes<'a>(
         &self,
         entity: &str,
-        sync_only: bool,
         base: impl Fn(&str) -> Option<f64>,
         slots: impl IntoIterator<Item = (&'static str, Option<&'a Arc<str>>)>,
         out: &mut Vec<AttributeSnapshot>,
@@ -94,7 +91,7 @@ impl Game<'_> {
                 if !slot_in_group(group, slot) {
                     continue;
                 }
-                let Some(a) = self.selected_attribute(entity, attribute, sync_only) else {
+                let Some(a) = self.synced_attribute(entity, attribute) else {
                     continue;
                 };
                 let start =
@@ -118,32 +115,23 @@ impl Game<'_> {
     /// modifier, its effects' modifiers, its equipment's, and what
     /// `/attribute` changed.
     pub(super) fn mob_attributes(&self, m: &Mob, out: &mut Vec<AttributeSnapshot>) {
-        self.mob_attributes_selected(m, out, true);
-    }
-
-    pub(super) fn mob_attributes_selected(
-        &self,
-        m: &Mob,
-        out: &mut Vec<AttributeSnapshot>,
-        sync_only: bool,
-    ) {
         let kind = m.kind.id.as_str();
         // Movement speed is synced for nearly every mob, and read up to three
         // times below: looked up once per mob and tick.
         let speed = self
-            .selected_attribute(kind, Attr::MovementSpeed.id(), sync_only)
+            .synced_attribute(kind, Attr::MovementSpeed.id())
             .map(|a| (a, finalize::base_value(m, Attr::MovementSpeed)));
         if let Some((a, base)) = speed {
             instance(out, a, base);
         }
         if let Some(s) = m.extra.attributes.as_deref() {
             for (attr, v) in &s.bases {
-                if let Some(a) = self.selected_attribute(kind, attr.id(), sync_only) {
+                if let Some(a) = self.synced_attribute(kind, attr.id()) {
                     instance(out, a, *v).base = *v;
                 }
             }
             for x in &s.modifiers {
-                if let Some(a) = self.selected_attribute(kind, x.attr.id(), sync_only) {
+                if let Some(a) = self.synced_attribute(kind, x.attr.id()) {
                     add_modifier(
                         out,
                         a,
@@ -176,7 +164,7 @@ impl Game<'_> {
         if rolled
             && !jump_base
             && m.extra.vector[0] > 0.0
-            && let Some(a) = self.selected_attribute(kind, Attr::JumpStrength.id(), sync_only)
+            && let Some(a) = self.synced_attribute(kind, Attr::JumpStrength.id())
         {
             instance(out, a, m.extra.vector[0]).base = m.extra.vector[0];
         }
@@ -220,7 +208,7 @@ impl Game<'_> {
             else {
                 continue;
             };
-            let Some(a) = self.selected_attribute(kind, attribute, sync_only) else {
+            let Some(a) = self.synced_attribute(kind, attribute) else {
                 continue;
             };
             let start = base(attribute).unwrap_or_else(|| self.attribute_default(kind, attribute));
@@ -238,7 +226,6 @@ impl Game<'_> {
         let e = &m.extra;
         self.equipment_attributes(
             kind,
-            sync_only,
             base,
             [
                 ("mainhand", e.main_hand.as_ref()),
@@ -250,7 +237,7 @@ impl Game<'_> {
             ],
             out,
         );
-        self.generic_attributes_of(Target::Mob(m.id), out, sync_only);
+        self.generic_attributes_of(Target::Mob(m.id), out);
     }
 
     /// An armor stand's synced instances: movement speed (its first
@@ -260,18 +247,9 @@ impl Game<'_> {
         id: u32,
         equipment: &[Option<horizon_client::items::ItemStack>; 6],
     ) -> Vec<AttributeSnapshot> {
-        self.stand_attributes_selected(id, equipment, true)
-    }
-
-    pub(super) fn stand_attributes_selected(
-        &self,
-        id: u32,
-        equipment: &[Option<horizon_client::items::ItemStack>; 6],
-        sync_only: bool,
-    ) -> Vec<AttributeSnapshot> {
         const KIND: &str = "minecraft:armor_stand";
         let mut out = Vec::new();
-        if let Some(a) = self.selected_attribute(KIND, "minecraft:movement_speed", sync_only) {
+        if let Some(a) = self.synced_attribute(KIND, "minecraft:movement_speed") {
             instance(
                 &mut out,
                 a,
@@ -281,8 +259,8 @@ impl Game<'_> {
         let slots = horizon_client::entities::ArmorStand::SLOTS
             .into_iter()
             .zip(equipment.iter().map(|s| s.as_ref().map(|s| &s.item)));
-        self.equipment_attributes(KIND, sync_only, |_| None, slots, &mut out);
-        self.generic_attributes_of(Target::Stand(id), &mut out, sync_only);
+        self.equipment_attributes(KIND, |_| None, slots, &mut out);
+        self.generic_attributes_of(Target::Stand(id), &mut out);
         out
     }
 
@@ -331,11 +309,11 @@ impl Game<'_> {
 
     /// The instances `/attribute` created in an entity's generic map
     /// replace the ones derived from its state.
-    fn generic_attributes_of(&self, t: Target, out: &mut Vec<AttributeSnapshot>, sync_only: bool) {
+    fn generic_attributes_of(&self, t: Target, out: &mut Vec<AttributeSnapshot>) {
         let Some(map) = self.cmds.attributes.get(&t) else {
             return;
         };
-        for s in generic_snapshots(map, sync_only) {
+        for s in generic_syncable(map) {
             let (attribute, base) = (s.attribute, s.base);
             *instance(out, attribute, base) = s;
         }

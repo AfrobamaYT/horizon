@@ -1336,13 +1336,16 @@ pub trait Host {
     }
     /// The effective value of an attribute on a living entity. None for an
     /// unknown or absent attribute, an unavailable entity, or on a client.
-    /// API @API:living_refs@.
+    /// Mobs, armor stands and the dragon return None until they have live
+    /// attribute maps. API @API:living_refs@.
     fn living_attribute_value(&mut self, living: LivingRef, id: &str) -> Option<f64> {
         let _ = living;
         let _ = id;
         unimplemented!("Host::living_attribute_value")
     }
-    /// The base value of an attribute, before modifiers. API @API:living_refs@.
+    /// The base value of an attribute, before modifiers. Mobs, armor stands
+    /// and the dragon return None until they have live attribute maps.
+    /// API @API:living_refs@.
     fn living_attribute_base(&mut self, living: LivingRef, id: &str) -> Option<f64> {
         let _ = living;
         let _ = id;
@@ -1486,11 +1489,14 @@ impl LevelRef {
 impl LivingRef {
     /// The effective value of an attribute on a living entity. None for an
     /// unknown or absent attribute, an unavailable entity, or on a client.
-    /// API @API:living_refs@.
+    /// Mobs, armor stands and the dragon return None until they have live
+    /// attribute maps. API @API:living_refs@.
     pub fn attribute_value(self, host: &mut dyn Host, id: &str) -> Option<f64> {
         host.living_attribute_value(self, id)
     }
-    /// The base value of an attribute, before modifiers. API @API:living_refs@.
+    /// The base value of an attribute, before modifiers. Mobs, armor stands
+    /// and the dragon return None until they have live attribute maps.
+    /// API @API:living_refs@.
     pub fn attribute_base(self, host: &mut dyn Host, id: &str) -> Option<f64> {
         host.living_attribute_base(self, id)
     }

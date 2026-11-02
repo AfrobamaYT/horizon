@@ -85,7 +85,8 @@ impl Game<'_> {
     }
     /// The effective value of an attribute on a living entity. None for an
     /// unknown or absent attribute, an unavailable entity, or on a client.
-    /// API @API:living_refs@.
+    /// Mobs, armor stands and the dragon return None until they have live
+    /// attribute maps. API @API:living_refs@.
     pub(super) fn native_living_attribute_value(
         &mut self,
         living: LivingRef,
@@ -98,7 +99,9 @@ impl Game<'_> {
         )
     }
 
-    /// The base value of an attribute, before modifiers. API @API:living_refs@.
+    /// The base value of an attribute, before modifiers. Mobs, armor stands
+    /// and the dragon return None until they have live attribute maps.
+    /// API @API:living_refs@.
     pub(super) fn native_living_attribute_base(
         &mut self,
         living: LivingRef,
@@ -113,65 +116,19 @@ impl Game<'_> {
         name: &str,
         kind: horizon_world::attribute_map::ValueKind,
     ) -> Option<f64> {
-        use horizon_world::attribute_map::ValueKind;
-        let target = self.native_living_target(living)?;
-        match target {
-            Target::Player | Target::Guest(_) => {
-                let player = match target {
-                    Target::Player => self.player.as_mut()?,
-                    Target::Guest(conn) => self
-                        .lan
-                        .as_mut()?
-                        .hub
-                        .guest_mut(conn)?
-                        .motion
-                        .as_deref_mut()?,
-                    _ => unreachable!(),
-                };
-                let key = player.attributes.key(name)?;
-                player.attributes.value(Some(key), kind).ok()
-            }
-            Target::Mob(id) | Target::Stand(id) => {
-                let (entity, snapshots) = match target {
-                    Target::Mob(_) => {
-                        let mob = self.mobs.iter().find(|m| m.id == id)?;
-                        let mut snapshots = Vec::new();
-                        self.mob_attributes_selected(mob, &mut snapshots, false);
-                        (mob.kind.id.as_str(), snapshots)
-                    }
-                    Target::Stand(_) => {
-                        let stand = self.armor_stands.iter().find(|s| s.id == id)?;
-                        (
-                            "minecraft:armor_stand",
-                            self.stand_attributes_selected(id, &stand.equipment, false),
-                        )
-                    }
-                    _ => unreachable!(),
-                };
-                let catalog = &self.motion.attributes;
-                let attribute = catalog.id(name)?;
-                let mut map = catalog.create(entity)?;
-                if !map.has(attribute) {
-                    return None;
-                }
-                if let Some(snapshot) = snapshots
-                    .iter()
-                    .find(|s| s.attribute == attribute.registry_id())
-                {
-                    map.edit(attribute, |instance, observer| {
-                        horizon_client::lan::attributes::apply_instance(
-                            instance, observer, snapshot,
-                        )
-                    })?
-                    .ok()?;
-                }
-                match kind {
-                    ValueKind::Base => map.base_value(attribute).ok(),
-                    ValueKind::Computed => map.value(attribute).ok(),
-                }
-            }
-            _ => None,
-        }
+        let player = match self.native_living_target(living)? {
+            Target::Player => self.player.as_mut()?,
+            Target::Guest(conn) => self
+                .lan
+                .as_mut()?
+                .hub
+                .guest_mut(conn)?
+                .motion
+                .as_deref_mut()?,
+            _ => return None,
+        };
+        let key = player.attributes.key(name)?;
+        player.attributes.value(Some(key), kind).ok()
     }
 
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):

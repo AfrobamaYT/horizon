@@ -5,7 +5,7 @@
 //! changed since (`getAttributesToSync`), to the trackers and the player itself.
 use horizon_protocol::packets::play::{AttributeModifier, AttributeSnapshot};
 use horizon_world::attributes::{
-    Instance, Modifier, Observer, Operation,
+    Instance, Modifier, Operation,
     entity::{AttributeId, EntityAttributes},
     live::LiveAttributes,
 };
@@ -87,28 +87,20 @@ pub fn apply<G: FnMut() -> i32>(map: &mut LiveAttributes<G>, values: &[Attribute
         let Ok(Some(handle)) = map.get_instance(Some(key)) else {
             continue;
         };
+        let modifiers: Vec<_> = s
+            .modifiers
+            .iter()
+            .filter_map(|m| Modifier::new(&m.id, m.amount, operation(m.operation)).ok())
+            .collect();
         let _ = map.edit(&handle, |instance, observer| {
-            apply_instance(instance, observer, s)
+            instance.set_base_value(s.base, observer)?;
+            instance.remove_all(observer)?;
+            for m in modifiers {
+                instance.add_transient(m, observer)?;
+            }
+            Ok(())
         });
     }
-}
-
-/// Apply the wire representation to an instance using the same path as the client.
-pub fn apply_instance<O: Observer>(
-    instance: &mut Instance,
-    observer: &mut O,
-    snapshot: &AttributeSnapshot,
-) -> Result<(), horizon_world::attributes::AttributeError<O::Error>> {
-    instance.set_base_value(snapshot.base, observer)?;
-    instance.remove_all(observer)?;
-    for modifier in &snapshot.modifiers {
-        if let Ok(modifier) =
-            Modifier::new(&modifier.id, modifier.amount, operation(modifier.operation))
-        {
-            instance.add_transient(modifier, observer)?;
-        }
-    }
-    Ok(())
 }
 
 /// `AttributeModifier.Operation.BY_ID`.
@@ -122,17 +114,10 @@ fn operation(id: i32) -> Operation {
 
 /// The client-syncable instances of a generic attribute map.
 pub fn generic_syncable(map: &EntityAttributes) -> impl Iterator<Item = AttributeSnapshot> + '_ {
-    generic_snapshots(map, true)
-}
-
-/// Existing generic instances, optionally limited to client-syncable attributes.
-pub fn generic_snapshots(
-    map: &EntityAttributes,
-    sync_only: bool,
-) -> impl Iterator<Item = AttributeSnapshot> + '_ {
-    map.catalog()
+    let catalog = map.catalog();
+    catalog
         .attributes()
-        .filter(move |(_, a)| !sync_only || a.syncable)
+        .filter(|(_, a)| a.syncable)
         .filter_map(move |(id, _)| map.instance(id).map(|i| snapshot(id, i)))
 }
 
@@ -173,54 +158,6 @@ pub fn instance(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn snapshot_uses_instance_operations_and_sanitizes() {
-        use horizon_world::attributes::entity::Catalog;
-        use std::sync::Arc;
-
-        let bits = |n: f64| format!("{:016x}", n.to_bits());
-        let catalog = Arc::new(Catalog::from_json(&serde_json::json!({
-            "data_version": horizon_world::DATA_VERSION,
-            "attributes": [{"id": "minecraft:attack_damage", "default": bits(2.0), "min": bits(0.0), "max": bits(2048.0), "syncable": false}],
-            "entities": {"minecraft:zombie": {"minecraft:attack_damage": bits(3.0)}}
-        })).unwrap());
-        let id = catalog.id("minecraft:attack_damage").unwrap();
-        assert!(!catalog.attribute(id).syncable);
-        let mut map = catalog.create("minecraft:zombie").unwrap();
-        let mut snapshots = Vec::new();
-        for (id, amount, operation) in [
-            ("minecraft:weapon", 2.0, 0),
-            ("minecraft:strength", 3.0, 0),
-            ("minecraft:bonus", 0.5, 1),
-        ] {
-            add_modifier(
-                &mut snapshots,
-                0,
-                4.0,
-                AttributeModifier {
-                    id: id.into(),
-                    amount,
-                    operation,
-                },
-            );
-        }
-        map.edit(id, |instance, observer| {
-            apply_instance(instance, observer, &snapshots[0]).unwrap()
-        });
-        assert_eq!(map.base_value(id).unwrap(), 4.0);
-        assert_eq!(map.value(id).unwrap(), 13.5); // (4 + 2 + 3) * 1.5
-        assert!(catalog.id("minecraft:absent").is_none());
-        snapshots[0].modifiers.push(AttributeModifier {
-            id: "test:large".into(),
-            amount: 3000.0,
-            operation: 0,
-        });
-        map.edit(id, |instance, observer| {
-            apply_instance(instance, observer, &snapshots[0]).unwrap();
-        });
-        assert_eq!(map.value(id).unwrap(), 2048.0);
-    }
 
     #[test]
     fn player_live_map_reports_base_and_modified_value() {

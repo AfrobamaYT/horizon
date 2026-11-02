@@ -255,10 +255,9 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn living_attributes_include_zombie_equipment_and_effects() {
-        use horizon_client::mobs::Mob;
+    fn living_attributes_are_unavailable_for_nonplayers() {
+        use horizon_client::{entities::ArmorStand, mobs::Mob};
         use horizon_core::geometry::Vec3;
-        use std::sync::Arc;
         with_game(|game| {
             let zombie = game
                 .res
@@ -266,26 +265,16 @@ mod tests {
                 .get("minecraft:zombie")
                 .unwrap()
                 .clone();
-            let mut mob = Mob::new(12, zombie, Vec3::ZERO, 0.0);
-            mob.extra.main_hand = Some(Arc::from("minecraft:iron_sword"));
-            mob.extra.head = Some(Arc::from("minecraft:iron_helmet"));
-            mob.extra.effects.push(("strength", 100, 0));
-            game.mobs.push(mob);
-            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
-            assert_eq!(
-                living.attribute_base(game, "minecraft:attack_damage"),
-                Some(3.0)
-            );
-            assert_eq!(
-                living.attribute_value(game, "minecraft:attack_damage"),
-                Some(11.0)
-            );
-            assert_eq!(living.attribute_base(game, "minecraft:armor"), Some(2.0));
-            assert_eq!(living.attribute_value(game, "minecraft:armor"), Some(4.0));
-            assert_eq!(
-                living.attribute_value(game, "minecraft:player.block_interaction_range"),
-                None
-            );
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 14;
+            game.dragon = Some(dragon);
+            for id in [12, 13, 14] {
+                let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
+                assert_eq!(living.attribute_base(game, "minecraft:max_health"), None);
+                assert_eq!(living.attribute_value(game, "minecraft:max_health"), None);
+            }
         });
     }
 

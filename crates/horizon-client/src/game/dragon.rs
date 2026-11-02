@@ -440,7 +440,7 @@ const ADJACENCY: [u32; 24] = [
     8257536,
 ];
 impl Dragon {
-    fn new(position: Vec3, yaw: f32, seed: i64) -> Self {
+    pub(super) fn new(position: Vec3, yaw: f32, seed: i64) -> Self {
         Self {
             id: 0,
             position,
