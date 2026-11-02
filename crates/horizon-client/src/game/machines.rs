@@ -12,6 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
+    mod_api::{self, ItemHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -363,6 +364,21 @@ impl Containers<'_> {
                 fuel || (&*stack.item == "minecraft:bucket" && !current_bucket)
             }
             _ => true,
+        }
+    }
+    /// How many of `stack` slot `slot` takes: `canPlaceItem`, then up to the slot's limit, into
+    /// an empty slot or onto the same item and components (`HopperBlockEntity.canMergeItems`).
+    fn fits(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
+        if !self.can_place(view, slot, stack) {
+            return 0;
+        }
+        let max = self.max_stack(stack);
+        match self.get(view, slot) {
+            None => stack.count.min(max),
+            Some(current) if current.same_item_same_components(stack) => {
+                stack.count.min(max.saturating_sub(current.count))
+            }
+            Some(_) => 0,
         }
     }
     /// `canTakeItemThroughFace` (furnaces and brewing stands restrict it).
@@ -856,8 +872,87 @@ impl Game<'_> {
         }
         taken
     }
+    /// The item capability part a mod registered for the type of the mod block entity at `pos`.
+    /// With no capability part registered, one empty-table check.
+    fn item_part_at(&self, pos: Pos) -> Option<Arc<dyn ItemHandler>> {
+        mod_api::block_entity_capability(&mod_api::ITEMS, || {
+            match self.world.block_entities.get(&pos) {
+                Some(BlockEntity::Mod(m)) => Some(m.id.as_str()),
+                _ => None,
+            }
+        })
+    }
+    /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
+    /// is a capability part: whether a mod canceled the move.
+    fn part_move_canceled(&self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
+        let mut cancel = false;
+        self.native_inventory_move_item(source, destination, item, &mut cancel);
+        cancel
+    }
+    /// `ejectItems` into a capability part through its side `face`: the first hopper item
+    /// one of its slots takes, one item, as a hopper moves.
+    fn eject_into_part(
+        &mut self,
+        hopper: &View,
+        part: &dyn ItemHandler,
+        at: [i32; 3],
+        face: Direction,
+    ) -> bool {
+        let from = self.container_world_pos(hopper);
+        let slots = part.slots(self, at, Some(face));
+        for slot in 0..hopper.len() {
+            let Some(stack) = self.containers().get(hopper, slot).cloned() else {
+                continue;
+            };
+            if self.part_move_canceled(from, at, &stack.item) {
+                continue;
+            }
+            let one = ItemStack { count: 1, ..stack };
+            let Some(into) = (0..slots).find(|&s| {
+                part.insert(self, at, Some(face), s, one.clone(), true)
+                    .is_none()
+            }) else {
+                continue;
+            };
+            let Some(one) = self.take_one(hopper, slot) else {
+                continue;
+            };
+            match part.insert(self, at, Some(face), into, one, false) {
+                None => return true,
+                Some(rest) => self.put_back(hopper, slot, rest),
+            }
+        }
+        false
+    }
+    /// `suckInItems` from a capability part through its bottom: one item from the first of its
+    /// slots that gives one the hopper has room for.
+    fn suck_from_part(&mut self, part: &dyn ItemHandler, at: [i32; 3], hopper: &View) -> bool {
+        let into = self.container_world_pos(hopper);
+        for slot in 0..part.slots(self, at, Some(Direction::Down)) {
+            let Some(one) = part.extract(self, at, Some(Direction::Down), slot, 1, true) else {
+                continue;
+            };
+            let c = self.containers();
+            if !(0..hopper.len()).any(|s| c.fits(hopper, s, &one) > 0)
+                || self.part_move_canceled(at, into, &one.item)
+            {
+                continue;
+            }
+            let Some(one) = part.extract(self, at, Some(Direction::Down), slot, 1, false) else {
+                continue;
+            };
+            match self.add_item(None, hopper, one, None) {
+                None => return true,
+                Some(rest) => {
+                    part.insert(self, at, Some(Direction::Down), slot, rest, false);
+                }
+            }
+        }
+        false
+    }
     /// `HopperBlockEntity.ejectItems`: into the block container in front, else
-    /// a container entity there (`getContainerAt`).
+    /// a container entity there (`getContainerAt`). A capability part in front takes the
+    /// container's place.
     fn hopper_eject(&mut self, pos: Pos, hopper: &View) -> bool {
         let state = self.world.block(pos.0, pos.1, pos.2);
         let c = self.containers();
@@ -866,6 +961,11 @@ impl Game<'_> {
         };
         let front = offset(pos, facing);
         let face = facing.opposite();
+        if let Some(part) = self.item_part_at(front) {
+            let at = [front.0, front.1, front.2];
+            self.native_hopper_inventory_search([pos.0, pos.1, pos.2], Some(at), None);
+            return self.eject_into_part(hopper, &*part, at, face);
+        }
         if let Some(target) = c.view(front, false) {
             self.native_hopper_inventory_search(
                 [pos.0, pos.1, pos.2],
@@ -994,8 +1094,15 @@ impl Game<'_> {
     /// The container half of `HopperBlockEntity.suckInItems`: one item from the
     /// container at `above`, through its bottom face; with no block container
     /// there, from a container entity whose box meets the one around `at`
-    /// (`getSourceContainerOrHandler`). `None` when there is no container.
+    /// (`getSourceContainerOrHandler`). `None` when there is no container. A capability part
+    /// above takes the container's place.
     fn suck_from_container(&mut self, above: Pos, at: [f64; 3], hopper: &View) -> Option<bool> {
+        if let Some(part) = self.item_part_at(above) {
+            let (x, y, z) = hopper.parts[0].0;
+            let above = [above.0, above.1, above.2];
+            self.native_hopper_inventory_search([x, y, z], Some(above), None);
+            return Some(self.suck_from_part(&*part, above, hopper));
+        }
         let c = self.containers();
         let Some(source) = c.view(above, false) else {
             let id = self.entity_container_at(at)?;

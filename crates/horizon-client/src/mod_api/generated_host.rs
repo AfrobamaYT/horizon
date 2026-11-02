@@ -1263,6 +1263,69 @@ pub trait Host {
         let _ = entity;
         unimplemented!("Host::entity_level")
     }
+    /// The type id of the mod block entity at `pos` (`mymod:press`), which its capability parts
+    /// are registered by. None for a vanilla block entity, for none, and for the mod block entity
+    /// ticking now.
+    fn block_entity_type(&self, pos: [i32; 3]) -> Option<String> {
+        let _ = pos;
+        unimplemented!("Host::block_entity_type")
+    }
+    /// How many slots of the block entity at `pos` its side `side` reaches (none: every slot),
+    /// by its `WorldlyContainer` rules: a furnace's top reaches its input only. None where no
+    /// block entity has slots, and on a client's copy of the world.
+    fn container_size(&self, pos: [i32; 3], side: Option<Direction>) -> Option<usize> {
+        let _ = pos;
+        let _ = side;
+        unimplemented!("Host::container_size")
+    }
+    /// The stack in slot `slot` of those `side` reaches at `pos` (`native_container_size`).
+    fn container_stack(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+    ) -> Option<ItemStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = slot;
+        unimplemented!("Host::container_stack")
+    }
+    /// Puts as much of `stack` as slot `slot` of those `side` reaches at `pos` takes, as a
+    /// hopper would (`canPlaceItem`, the slot's limit, the same item and components); what
+    /// didn't fit. `simulate` changes nothing.
+    fn container_insert(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: ItemStack,
+        simulate: bool,
+    ) -> Option<ItemStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = slot;
+        let _ = stack;
+        let _ = simulate;
+        unimplemented!("Host::container_insert")
+    }
+    /// Takes up to `max` out of slot `slot` of those `side` reaches at `pos`; through a side,
+    /// only what that side may take (`canTakeItemThroughFace`). What came out. `simulate`
+    /// changes nothing.
+    fn container_extract(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        max: u32,
+        simulate: bool,
+    ) -> Option<ItemStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = slot;
+        let _ = max;
+        let _ = simulate;
+        unimplemented!("Host::container_extract")
+    }
     /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
     /// empty ones included, kept in its `minecraft:container`. None for an
     /// item without slots, and for an empty stack.
