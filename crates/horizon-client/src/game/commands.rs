@@ -373,22 +373,13 @@ impl Game<'_> {
     /// Player.getDisplayName: the name (team-formatted), suggesting a
     /// `/tell`, showing the player on hover, inserting the name.
     pub(super) fn player_display_name(&self) -> Text {
-        let name = self.acting_player_name().to_owned();
-        let Some(uuid) = self.lan_acting_uuid else {
-            return self.target_name(Target::Player);
-        };
-        self.target_name(Target::Player).with_component_fields(vec![
-            (
-                "click_event".into(),
-                serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")}),
-            ),
-            (
-                "hover_event".into(),
-                serde_json::json!({"action": "show_entity", "id": "minecraft:player",
-                    "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
-            ),
-            ("insertion".into(), name.into()),
-        ])
+        let name = self.acting_player_name();
+        if let Some(uuid) = self.lan_acting_uuid {
+            return self.player_text(name, uuid);
+        }
+        let mut displayname = self.target_name(Target::Player);
+        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut displayname);
+        displayname
     }
     fn source_position(&self) -> [f64; 3] {
         if let Some(s) = &self.command_source {
@@ -2342,6 +2333,37 @@ impl Game<'_> {
             state,
         )
     }
+    /// `BlockInput.overwriteWithDefinedProperties`: restore explicit command
+    /// properties after normalizing the state against neighbouring blocks.
+    fn block_input_state(
+        &mut self,
+        pos: [i32; 3],
+        input: &BlockInput,
+        state: BlockStateId,
+        strict: bool,
+    ) -> R<BlockStateId> {
+        if strict {
+            return Ok(state);
+        }
+        let updated = self.with_level(|b, level, ticks| {
+            let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+            let updated = b.update_from_neighbour_shapes(level, ticks, at, state);
+            if b.is_air(updated) { state } else { updated }
+        });
+        let registry = self.pack.assets.registry;
+        let mut descriptor = registry
+            .state(updated)
+            .expect("registered block state")
+            .clone();
+        for (key, value) in &input.properties {
+            if descriptor.properties.contains_key(key) {
+                descriptor.properties.insert(key.clone(), value.clone());
+            }
+        }
+        registry
+            .resolve(&descriptor)
+            .map_err(|_| err("argument.block.id.invalid", &[&input.id]))
+    }
     /// Place a state like BlockInput.place: false when nothing changed.
     pub(super) fn place_state(
         &mut self,
@@ -2410,6 +2432,7 @@ impl Game<'_> {
         if ctx.has("destroy") && current != self.world.air {
             self.destroy_block_dropping(pos)?;
         }
+        let state = self.block_input_state(pos, &b, state, ctx.has("strict"))?;
         let placed = self.place_state(pos, state, ctx.has("strict"))?;
         let loaded = match &b.nbt {
             Some(nbt) => self.load_block_entity_nbt(pos, nbt),
@@ -2957,10 +2980,10 @@ impl Game<'_> {
         let old_level = self.experience.level;
         if add {
             if levels {
-                self.experience.level = (self.experience.level + amount).max(0);
-                if self.experience.level == 0 && amount < 0 {
-                    self.experience.progress = 0.0;
-                }
+                // Player.giveExperienceLevels handles the strict negative
+                // boundary and emits the level-change hook itself.
+                self.give_levels(amount);
+                return true;
             } else {
                 self.give_points(amount);
             }
