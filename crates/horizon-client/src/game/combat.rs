@@ -46,12 +46,21 @@ pub(super) enum PlayerCredit {
     Owner(u128),
 }
 impl PlayerCredit {
-    /// The credited player's UUID; `host` finds a player by entity id.
-    pub(super) fn uuid(self, host: Option<&super::lan::LanHost>) -> Option<u128> {
-        match self {
-            Self::Entity(id) => host?.player_uuid_of_entity(id),
-            Self::Owner(uuid) => Some(uuid),
-        }
+    /// `EntityReference.getPlayer`: the UUID of the credited player when they
+    /// are in the level `dimension`, none for a player who left or is elsewhere.
+    pub(super) fn uuid(self, host: &super::lan::LanHost, dimension: &str) -> Option<u128> {
+        host.hub
+            .guests
+            .iter()
+            .find(|g| {
+                g.placed
+                    && g.dimension == dimension
+                    && match self {
+                        Self::Entity(id) => g.entity_id as u32 == id,
+                        Self::Owner(uuid) => g.uuid == uuid,
+                    }
+            })
+            .map(|g| g.uuid)
     }
 }
 impl CombatTracker {
@@ -60,6 +69,10 @@ impl CombatTracker {
     pub(super) fn take_hurt_by_player(&mut self, now: i64) -> Option<PlayerCredit> {
         let (credit, at) = self.last_hurt_by_player.take()?;
         (now - at <= 100).then_some(credit)
+    }
+    /// `LivingEntity.setLastHurtByPlayer(player, 100)`.
+    pub(super) fn note_hurt_by_player(&mut self, credit: PlayerCredit, now: i64) {
+        self.last_hurt_by_player = Some((credit, now));
     }
 }
 impl Stuck {
@@ -329,15 +342,22 @@ impl Game<'_> {
             let now = self.world.game_time;
             if let Some(a) = &attacker {
                 self.combat.last_hurt_by = Some((a.clone(), now));
-                // A tamed animal's hit names its owner; other mobs name no one.
-                let credit = match self.mobs.iter().find(|m| m.id == a.0) {
-                    Some(m) => m.extra.owner.filter(|_| m.extra.tame).map(|o| {
-                        PlayerCredit::Owner(horizon_client::lan::playerdata::ints_uuid(o))
-                    }),
-                    None => Some(PlayerCredit::Entity(a.0)),
-                };
-                if let Some(credit) = credit {
-                    self.combat.last_hurt_by_player = Some((credit, now));
+                // LivingEntity.resolvePlayerResponsibleForDamage, which only a native
+                // mod reads: a player's hit names them, a tame wolf's its owner (no
+                // one without one), and other mobs leave it as it was.
+                if !horizon_client::mod_api::mods().is_empty() {
+                    match self.mobs.iter().find(|m| m.id == a.0) {
+                        None => self
+                            .combat
+                            .note_hurt_by_player(PlayerCredit::Entity(a.0), now),
+                        Some(m) if m.extra.tame && &*m.kind.id == "minecraft:wolf" => {
+                            self.combat.last_hurt_by_player = m.extra.owner.map(|o| {
+                                let owner = horizon_client::lan::playerdata::ints_uuid(o);
+                                (PlayerCredit::Owner(owner), now)
+                            });
+                        }
+                        Some(_) => {}
+                    }
                 }
                 if !self.combat.in_combat {
                     self.combat.in_combat = true;

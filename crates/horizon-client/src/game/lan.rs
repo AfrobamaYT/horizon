@@ -194,17 +194,6 @@ pub(super) struct LanHost {
     pub(super) states_next_entity: Option<u32>,
 }
 
-impl LanHost {
-    /// The UUID of the player with entity id `id`.
-    pub(super) fn player_uuid_of_entity(&self, id: u32) -> Option<u128> {
-        self.hub
-            .guests
-            .iter()
-            .find(|g| g.entity_id as u32 == id)
-            .map(|g| g.uuid)
-    }
-}
-
 impl Game<'_> {
     /// `PlayerList.remove`: `player.awardStat(Stats.LEAVE_GAME)` before the
     /// player is saved, heard by native mods first. Once per guest, however
