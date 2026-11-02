@@ -224,7 +224,7 @@ impl Hdr {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::gfx::pipeline_cache::get(device),
             })
         };
         let alpha_pass = |label, blend| {
@@ -251,7 +251,7 @@ impl Hdr {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: crate::gfx::pipeline_cache::get(device),
             })
         };
         let clear_alpha = alpha_pass("Horizon HDR UI mask", None);

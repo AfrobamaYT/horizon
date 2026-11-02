@@ -429,7 +429,7 @@ impl Translated {
             depth_stencil: None,
             multisample: Default::default(),
             multiview_mask: None,
-            cache: None,
+            cache: crate::gfx::pipeline_cache::get(device),
         });
         self.pipelines.insert(format, pipeline);
     }
@@ -773,7 +773,7 @@ impl PostEffects {
                     depth_stencil: None,
                     multisample: Default::default(),
                     multiview_mask: None,
-                    cache: None,
+                    cache: crate::gfx::pipeline_cache::get(device),
                 })
             })
     }

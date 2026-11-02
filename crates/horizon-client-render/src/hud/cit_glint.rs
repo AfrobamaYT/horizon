@@ -408,7 +408,7 @@ impl CitGlintPass {
                         })],
                     }),
                     multiview_mask: None,
-                    cache: None,
+                    cache: crate::gfx::pipeline_cache::get(device),
                 })
             })
             .collect();

@@ -308,7 +308,7 @@ impl Cull {
                 targets,
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::gfx::pipeline_cache::get(device),
         });
         Self {
             pipeline,

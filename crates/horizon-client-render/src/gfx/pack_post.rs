@@ -823,7 +823,7 @@ fn helper(
             targets,
         }),
         multiview_mask: None,
-        cache: None,
+        cache: crate::gfx::pipeline_cache::get(device),
     });
     (pipeline, layout)
 }
@@ -1499,7 +1499,7 @@ fn build_pass(
                 targets: &targets,
             }),
             multiview_mask: None,
-            cache: None,
+            cache: crate::gfx::pipeline_cache::get(device),
         });
         (layout, pipeline)
     });
@@ -1633,7 +1633,7 @@ fn build_compute(
             module: &module,
             entry_point: Some("main"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: crate::gfx::pipeline_cache::get(device),
         });
         (layout, pipeline)
     });
