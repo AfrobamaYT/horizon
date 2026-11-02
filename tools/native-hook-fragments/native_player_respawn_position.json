@@ -8,10 +8,10 @@
       "cancellable": false,
       "mod_api": {
         "contract": "replace",
-        "out": "dimension, position, rotation, flags, saved"
+        "out": "respawn"
       }
     }
   ],
-  "rust_summary": "a player's respawn destination (`native_player_respawn_position`).",
-  "doc_summary": "A server player's default respawn destination (`native_player_respawn_position`). Bundles need \"hooks\": @API:player_respawn_position@."
+  "rust_summary": "a server player's default respawn destination (`native_player_respawn_position`).",
+  "doc_summary": "a server player's respawn destination: `native_player_respawn_position(player, original, respawn)` is asked before a player with no respawn point is placed (NeoForge's `PlayerRespawnPositionEvent`). `original` is the world spawn with its level and angle; return another `NativeRespawn` to respawn there instead. Only the vanilla levels can be chosen; respawns at a bed, anchor or spawnpoint are not asked yet. Bundles need \"hooks\": @API:native_player_respawn_position@."
 }

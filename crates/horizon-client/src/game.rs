@@ -2510,6 +2510,7 @@ struct Game<'a> {
     loading_progress_at: Option<std::time::Instant>,
     /// The world spawn search's origin chunk and fallback height, once known.
     spawn_origin: Option<((i32, i32), i32)>,
+    /// `native_create_spawn_position` was asked, and a mod chose the spawn.
     spawn_hook_fired: bool,
     spawn_hook_cancelled: bool,
     spawn_spiral: horizon_client::world_spawn::ChunkSpiral,

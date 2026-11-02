@@ -3420,31 +3420,21 @@ impl Game<'_> {
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
-        // The default-world-spawn path has no respawn block to look up.
-        // Block-based destinations are resolved later by the trip machinery.
-        let default_spawn = own.is_none() && host.hub.guests[i].spawn.is_none();
-        let mut changed_destination = false;
-        let mut rotation = [host.hub.guests[i].yaw, host.hub.guests[i].pitch];
-        if default_spawn {
-            let mut dimension = level.id().to_owned();
-            let original_dimension = dimension.clone();
-            let original_spawn = spawn;
-            let original_rotation = rotation;
-            let mut flags = [true, false, false];
-            let mut saved = host.hub.guests[i].respawn_elsewhere.clone();
-            self.native_player_respawn_position(
-                uuid,
-                &mut dimension,
-                &mut spawn,
-                &mut rotation,
-                &mut flags,
-                &mut saved,
-            );
-            changed_destination = dimension != original_dimension
-                || spawn != original_spawn
-                || rotation != original_rotation;
-            level = super::Dim::from_id(&dimension);
-            host.hub.guests[i].respawn_elsewhere = if flags[0] { saved } else { None };
+        // PlayerRespawnPositionEvent, for TeleportTransition.createDefault
+        // only: a respawn point's block is looked up once its level has
+        // loaded (`respawn_trip`).
+        let mut replaced = None;
+        if own.is_none() && host.hub.guests[i].spawn.is_none() {
+            let original = horizon_client::mod_api::NativeRespawn {
+                dimension: level.id().to_owned(),
+                position: spawn,
+                rotation: self.level.world_spawn_angle,
+            };
+            self.native_player_respawn_position(uuid, &original, &mut replaced);
+        }
+        if let Some(r) = &replaced {
+            level = super::Dim::from_id(&r.dimension);
+            spawn = r.position;
         }
         let back = self.dim;
         let left = super::Dim::from_id(&host.hub.guests[i].dimension);
@@ -3500,9 +3490,8 @@ impl Game<'_> {
             streaming: Some(&self.streaming),
         };
         host.hub.respawn(i, spawn, &ctx);
-        if changed_destination {
-            host.hub.guests[i].yaw = rotation[0];
-            host.hub.guests[i].pitch = rotation[1];
+        if let Some(r) = &replaced {
+            [host.hub.guests[i].yaw, host.hub.guests[i].pitch] = r.rotation;
             host.hub.teleport(i, Some(spawn));
         }
         // ServerGamePacketListenerImpl.handleClientCommand: a hardcore world's
@@ -3523,9 +3512,7 @@ impl Game<'_> {
         }
         if let Some(config) = elsewhere {
             self.respawn_trip(conn, config);
-        } else if !changed_destination
-            && in_frame_bed.is_none()
-            && host.hub.guests[i].spawn.is_none()
+        } else if replaced.is_none() && in_frame_bed.is_none() && host.hub.guests[i].spawn.is_none()
         {
             // TeleportTransition.createDefault: no point of its own, so the
             // world spawn's free column once its chunks have loaded.
