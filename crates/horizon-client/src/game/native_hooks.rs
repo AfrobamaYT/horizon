@@ -2104,10 +2104,6 @@ impl Game<'_> {
     pub(super) fn native_client_level_unload(&mut self, dimension: &str) {
         mod_api::dispatch_client_level_unload(self, mod_api::mods(), dimension);
     }
-    /// Tags are ready after a server data load or client join. @API:tags_updated@.
-    pub(super) fn native_tags_updated(&mut self, server_data_load: bool) {
-        mod_api::dispatch_tags_updated(self, mod_api::mods(), server_data_load);
-    }
     /// The client accepted a play login and initialized its level and player
     /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
     /// is the server's entity ID. Client-side,

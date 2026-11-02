@@ -11872,7 +11872,6 @@ impl Game<'_> {
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
-        self.native_tags_updated(true);
         // The registries a preload or an earlier world read are not this
         // world's packs': a world with packs sends its own (their dialogs,
         // recipes and advancements). For a world without packs, `sync_data`
@@ -12181,9 +12180,7 @@ impl Game<'_> {
             return Ok(());
         }
         // exitWorldAndClose disconnects the client from its world.
-        if self.remote.is_some() {
-            self.client_logging_out();
-        }
+        self.client_logging_out();
         if let Some(server) = self.integrated.take() {
             // The server thread saves the world.
             server.stop()?;
@@ -19221,7 +19218,6 @@ impl Game<'_> {
         if let Err(e) = self.resolve_parts() {
             log::warn!("Horizon: {e}");
         }
-        self.native_tags_updated(true);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.

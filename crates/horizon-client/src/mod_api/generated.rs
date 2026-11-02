@@ -4700,11 +4700,6 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// Tags are ready after a server data load or client join. @API:tags_updated@.
-    fn tags_updated(&self, host: &mut dyn Host, event: &mut TagsUpdatedEvent) {
-        let _ = host;
-        let _ = event;
-    }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
     fn tooltip_color(&self, host: &dyn Host, event: &mut TooltipColorEvent<'_>) {
@@ -15438,17 +15433,6 @@ pub fn dispatch_screen_opening(
     let mut event = ScreenOpeningEvent { screen };
     for mod_hook in super::entered(mods, "screen_opening") {
         mod_hook.screen_opening(host, &mut event);
-    }
-}
-/// What [`Hooks::tags_updated`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct TagsUpdatedEvent {
-    pub server_data_load: bool,
-}
-pub fn dispatch_tags_updated(host: &mut dyn Host, mods: &[Box<dyn Hooks>], server_data_load: bool) {
-    let mut event = TagsUpdatedEvent { server_data_load };
-    for mod_hook in super::entered(mods, "tags_updated") {
-        mod_hook.tags_updated(host, &mut event);
     }
 }
 /// What [`Hooks::tooltip_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
