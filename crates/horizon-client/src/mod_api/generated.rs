@@ -3084,6 +3084,22 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// NeoForge's `LivingShieldBlockEvent`: player `entity` is hit for `damage` of
+    /// `damage_type` (`minecraft:mob_attack`) by `causing` (`DamageSource.getEntity`, 0
+    /// for none or not known), and `LivingEntity.applyItemBlocking` is about to resolve
+    /// what a raised `blocks_attacks` item stops. Every hit with damage asks, raised item
+    /// or not: `original_blocked` is whether vanilla blocks. Change `block`: `blocked`
+    /// makes the player block or not (a block forced on a hit vanilla lets through stops
+    /// all of it), `blocked_damage` what is stopped (kept within 0 and `damage`) and
+    /// `shield_damage` the durability the raised item loses. Set `canceled` and nothing
+    /// is blocked. Mobs are not asked. No `self`, as `native_living_incoming_damage`: the
+    /// game is in the middle of the hit. @API:living_shield_block@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_shield_block(&self, event: &mut LivingShieldBlockEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
     /// A player shift-clicked slot `slot` of the menu of the mod block
     /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
     /// Java menu overrides), on the server, before the game's own routing:
@@ -4197,6 +4213,20 @@ pub trait Hooks: Send + Sync {
     fn sponge_absorb(&self, level: &dyn LevelHost, event: &mut SpongeAbsorbEvent) {
         let _ = level;
         let _ = event;
+    }
+    /// NeoForge's `SweepAttackEvent`: a player's damaging melee hit on a
+    /// `target` (`minecraft:zombie`, `minecraft:oak_boat`) is about to sweep or
+    /// not, after `native_critical_hit`. `vanilla_sweep` is `Player.isSweepAttack`
+    /// (a charged, grounded, not critical sword hit below the speed limit);
+    /// `sweeping` starts as it and may force or stop the sweep, and `canceled`
+    /// stops it whatever `sweeping` says. A critical hit that sweeps has both
+    /// sounds. Fires on the Game that runs the attack. @API:sweep_attack@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn sweep_attack(&self, host: &mut dyn Host, event: &mut SweepAttackEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// A guest asked to complete `command`; `suggestions` may be added to or
     /// filtered. `range` is the replaced byte range. @API:tab_complete@.
@@ -10305,6 +10335,44 @@ pub fn dispatch_lightning_strike(
         }
     }
 }
+/// What [`Hooks::living_shield_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingShieldBlockEvent<'a> {
+    pub entity: i32,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub damage: f32,
+    pub original_blocked: bool,
+    pub block: &'a mut ShieldBlock,
+}
+pub fn dispatch_living_shield_block(
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    damage_type: &str,
+    causing: i32,
+    damage: f32,
+    original_blocked: bool,
+    block: &mut ShieldBlock,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingShieldBlockEvent {
+        entity,
+        damage_type,
+        causing,
+        damage,
+        original_blocked,
+        block,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_shield_block(&mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::menu_quick_move`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MenuQuickMoveEvent<'a> {
@@ -12673,6 +12741,37 @@ pub fn dispatch_sponge_absorb(
     for mod_hook in mods {
         mod_hook.sponge_absorb(level, &mut event);
     }
+}
+/// What [`Hooks::sweep_attack`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SweepAttackEvent<'a> {
+    pub target: &'a str,
+    pub vanilla_sweep: bool,
+    pub sweeping: bool,
+}
+pub fn dispatch_sweep_attack(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    target: &str,
+    vanilla_sweep: bool,
+    sweeping: &mut bool,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = SweepAttackEvent {
+        target,
+        vanilla_sweep,
+        sweeping: *sweeping,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.sweep_attack(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *sweeping = event.sweeping;
 }
 /// What [`Hooks::tab_complete`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

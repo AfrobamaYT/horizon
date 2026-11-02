@@ -664,6 +664,7 @@ impl Game<'_> {
         let hurt = self.hit_armor_stand(i, |g, area, id| {
             g.attack_effects(
                 area,
+                "minecraft:armor_stand",
                 Some(id as i32),
                 crit,
                 super::mace::Spared::Stand(id),

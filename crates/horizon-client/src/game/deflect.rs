@@ -147,7 +147,11 @@ impl Game<'_> {
             self.lan_level_particles(host, &options, at, [0.2, 0.2, 0.2], 0.0, 15, None);
         }
         let (_, _, _, magic) = self.melee_damage("minecraft:shulker_bullet", false);
-        self.vehicle_attack_sounds(p.aabb(), magic.then_some(p.id as i32));
+        self.vehicle_attack_sounds(
+            p.aabb(),
+            "minecraft:shulker_bullet",
+            magic.then_some(p.id as i32),
+        );
         self.reset_attack_strength();
         self.swing_arm();
     }

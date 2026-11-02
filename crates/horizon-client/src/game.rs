@@ -11159,8 +11159,14 @@ impl Game<'_> {
         let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
         ((self.attack_ticks as f32 + 0.5) / delay).clamp(0.0, 1.0)
     }
-    /// `Player.isSweepAttack`: a charged, grounded sword hit below the movement limit.
-    pub(super) fn sweep_attack_position(&mut self, scale: f32, crit: bool) -> Option<[f64; 3]> {
+    /// `Player.isSweepAttack`: a charged, grounded sword hit below the movement
+    /// limit, which `native_sweep_attack` may force or stop for the hit on `target`.
+    pub(super) fn sweep_attack_position(
+        &mut self,
+        scale: f32,
+        crit: bool,
+        target: &str,
+    ) -> Option<[f64; 3]> {
         // Player.getSpeed: the movement speed attribute as it is now (the
         // field is only refreshed by the local movement step, never for a
         // server's player).
@@ -11176,9 +11182,13 @@ impl Game<'_> {
                 .get("minecraft:swords")
                 .is_some_and(|tag| tag.contains(&*s.item))
         });
-        if !p.is_sweep_attack(scale, crit, sword) {
+        let vanilla = p.is_sweep_attack(scale, crit, sword);
+        let (mut sweeping, mut canceled) = (vanilla, false);
+        self.native_sweep_attack(target, vanilla, &mut sweeping, &mut canceled);
+        if canceled || !sweeping {
             return None;
         }
+        let p = self.player.as_ref()?;
         // Mth.sin / Mth.cos of yRot * (PI / 180), from its sine table.
         use horizon_core::geometry::trig;
         let yaw = f64::from(self.yaw * trig::DEG_TO_RAD);
@@ -11222,12 +11232,12 @@ impl Game<'_> {
             randomization: 0,
         });
     }
-    /// `Player.attack`'s sounds when a vehicle takes the hit (it always does,
-    /// and can't be hit critically): knockback when sprinting at full
+    /// `Player.attack`'s sounds when a vehicle of type `target` takes the hit (it
+    /// always does, and can't be hit critically): knockback when sprinting at full
     /// strength, then strong or weak, or the sweep around the vehicle's
     /// box `area`. Before the hit resets the charge (`Player.onAttack`).
-    pub(super) fn vehicle_attack_sounds(&mut self, area: Aabb, magic: Option<i32>) {
-        self.attack_effects(area, None, false, mace::Spared::Nothing, magic);
+    pub(super) fn vehicle_attack_sounds(&mut self, area: Aabb, target: &str, magic: Option<i32>) {
+        self.attack_effects(area, target, None, false, mace::Spared::Nothing, magic);
     }
     /// `Player.attack` after a target that is not a mob took the hit:
     /// the sprint knockback sound, a living target's critical hit (`living`:
@@ -11237,6 +11247,7 @@ impl Game<'_> {
     pub(super) fn attack_effects(
         &mut self,
         area: Aabb,
+        target: &str,
         living: Option<i32>,
         crit: bool,
         spared: mace::Spared,
@@ -11251,7 +11262,7 @@ impl Game<'_> {
                 .play("minecraft:entity.player.attack.knockback", from, 1.0, 1.0);
         }
         let crit = living.is_some() && crit;
-        let sweep = self.sweep_attack_position(scale, crit);
+        let sweep = self.sweep_attack_position(scale, crit, target);
         if let Some(at) = sweep {
             self.sweep_attack(at, from, Some((area, spared)), scale);
         }
@@ -11344,7 +11355,7 @@ impl Game<'_> {
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
         let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
-        let sweep = self.sweep_attack_position(scale, crit);
+        let sweep = self.sweep_attack_position(scale, crit, &target_kind);
         let (knockback, knockback_attack) = self.extra_knockback(&target_kind, scale);
         self.attack_ticks = 0;
         let player = self.player.as_ref();
@@ -11458,14 +11469,16 @@ impl Game<'_> {
             } else {
                 "minecraft:entity.player.attack.weak"
             };
-            // Player.playServerSideSound: at the player.
+            // Player.playServerSideSound: at the player. A critical hit a mod
+            // let sweep has both sounds (attackVisualEffects).
             if let Some(at) = sweep {
                 let target = (
                     self.mobs[index].bounds(),
                     mace::Spared::Mob(self.mobs[index].id),
                 );
                 self.sweep_attack(at, from, Some(target), scale);
-            } else {
+            }
+            if crit || sweep.is_none() {
                 self.audio.play(sound, from, 1.0, 1.0);
             }
             // The hurt or death sound the mob raised (getHurtSound / getDeathSound,
@@ -20749,6 +20762,7 @@ pub fn run_with() -> Result<()> {
     let _ = horizon_client::health::HURT_SERVER.set(native_hooks::hurt_server);
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
+    let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
     horizon_threads::put_helpers_behind();

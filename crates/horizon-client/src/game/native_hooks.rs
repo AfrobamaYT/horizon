@@ -484,7 +484,7 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{HurtSource, Hurting, Knock},
+    health::{HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
     items::ItemStack,
     keybinds,
@@ -5222,6 +5222,29 @@ impl Game<'_> {
             damage_multiplier,
         );
     }
+    /// NeoForge's `SweepAttackEvent`: a player's damaging melee hit on a
+    /// `target` (`minecraft:zombie`, `minecraft:oak_boat`) is about to sweep or
+    /// not, after `native_critical_hit`. `vanilla_sweep` is `Player.isSweepAttack`
+    /// (a charged, grounded, not critical sword hit below the speed limit);
+    /// `sweeping` starts as it and may force or stop the sweep, and `canceled`
+    /// stops it whatever `sweeping` says. A critical hit that sweeps has both
+    /// sounds. Fires on the Game that runs the attack. @API:sweep_attack@.
+    pub(super) fn native_sweep_attack(
+        &mut self,
+        target: &str,
+        vanilla_sweep: bool,
+        sweeping: &mut bool,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_sweep_attack(
+            self,
+            mod_api::mods(),
+            target,
+            vanilla_sweep,
+            sweeping,
+            canceled,
+        );
+    }
     /// `Item.releaseUsing` of `stack`: `entity` let it go with `time_left`
     /// ticks of its `native_use_duration` left, so it was held for
     /// `duration - time_left` (a bow-like item shoots by that charge). Set
@@ -6164,6 +6187,36 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// NeoForge's `LivingShieldBlockEvent`: player `entity` is hit for `damage` of
+    /// `damage_type` (`minecraft:mob_attack`) by `causing` (`DamageSource.getEntity`, 0
+    /// for none or not known), and `LivingEntity.applyItemBlocking` is about to resolve
+    /// what a raised `blocks_attacks` item stops. Every hit with damage asks, raised item
+    /// or not: `original_blocked` is whether vanilla blocks. Change `block`: `blocked`
+    /// makes the player block or not (a block forced on a hit vanilla lets through stops
+    /// all of it), `blocked_damage` what is stopped (kept within 0 and `damage`) and
+    /// `shield_damage` the durability the raised item loses. Set `canceled` and nothing
+    /// is blocked. Mobs are not asked. No `self`, as `native_living_incoming_damage`: the
+    /// game is in the middle of the hit. @API:living_shield_block@.
+    pub(super) fn native_living_shield_block(
+        entity: i32,
+        damage_type: &str,
+        causing: i32,
+        damage: f32,
+        original_blocked: bool,
+        block: &mut ShieldBlock,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_shield_block(
+            mod_api::mods(),
+            entity,
+            damage_type,
+            causing,
+            damage,
+            original_blocked,
+            block,
+            canceled,
+        );
+    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -6322,6 +6375,27 @@ impl Game<'_> {
     }
 }
 
+/// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
+/// canceled the block. Its one caller.
+pub(super) fn shield_block(
+    entity: i32,
+    source: HurtSource<'_>,
+    damage: f32,
+    original_blocked: bool,
+    block: &mut ShieldBlock,
+) -> bool {
+    let mut canceled = false;
+    Game::native_living_shield_block(
+        entity,
+        source.damage_type,
+        source.causing,
+        damage,
+        original_blocked,
+        block,
+        &mut canceled,
+    );
+    canceled
+}
 /// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.

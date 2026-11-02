@@ -1333,7 +1333,7 @@ impl Game<'_> {
         let (kind, id) = (self.boats[i].entity_type(), self.boats[i].id as i32);
         let (damage, _, _, magic) = self.melee_damage(&kind, false);
         self.hurt_boat(i, damage, self.creative);
-        self.vehicle_attack_sounds(area, magic.then_some(id));
+        self.vehicle_attack_sounds(area, &kind, magic.then_some(id));
         // Player.onAttack: the hit starts the attack strength again.
         self.attack_ticks = 0;
         self.swing_arm();

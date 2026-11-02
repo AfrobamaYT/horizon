@@ -144,13 +144,8 @@ impl Game<'_> {
         if outcome.blocked <= 0.0 {
             return;
         }
-        // ItemDamageFunction.apply, then hurtAndBreak.
-        let (threshold, base, factor) = component.item_damage;
-        let item_damage = if outcome.blocked < threshold {
-            0
-        } else {
-            (base + factor * outcome.blocked).floor() as i32
-        };
+        // ItemDamageFunction.apply (or what a native mod set), then hurtAndBreak.
+        let item_damage = outcome.shield_damage;
         if item_damage > 0 && !self.creative {
             let loss = self.wear(&stack, item_damage as u32);
             let max = self

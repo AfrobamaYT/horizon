@@ -1073,6 +1073,7 @@ mod tests {
         pub(super) struct Hand;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
+        pub(super) struct ShieldBlock;
         pub(super) struct Music;
         pub(super) struct MusicLayer;
         pub(super) struct NativeBlockRim;
