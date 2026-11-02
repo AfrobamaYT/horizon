@@ -5863,8 +5863,14 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
+            && !crate::mod_api::mods().is_empty()
         {
-            self.native_player_harvest_check(pos, state.0, &mut correct_tool);
+            self.native_player_harvest_check(
+                self.own_entity_id() as u32,
+                pos,
+                state.0,
+                &mut correct_tool,
+            );
         }
         let removed = self.with_level(|b, level, ticks| {
             b.player_destroy_block(
@@ -5882,7 +5888,14 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            self.native_player_harvest_check(pos, state.0, &mut harvest);
+            if !crate::mod_api::mods().is_empty() {
+                self.native_player_harvest_check(
+                    self.own_entity_id() as u32,
+                    pos,
+                    state.0,
+                    &mut harvest,
+                );
+            }
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);
             }

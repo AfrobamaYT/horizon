@@ -1794,30 +1794,43 @@ impl Game<'_> {
                     // attacks the block at once, so a tap released in the same tick
                     // still plays a note. The dig is marked begun for tick_mining.
                     let pos = a.pos;
-                    let destroyed = self.as_guest(host, conn, |g| {
+                    enum StartDig {
+                        Creative,
+                        Restricted,
+                        Air,
+                        Accepted,
+                    }
+                    let start = self.as_guest(host, conn, |g| {
                         if g.creative {
                             let _ = g.break_block(pos);
-                            return true;
+                            return StartDig::Creative;
                         }
-                        if !g.block_action_restricted(pos) {
-                            let _ = g.attack_block(pos);
-                            g.mining = Some(Mining {
-                                pos,
-                                progress: 0.0,
-                                ticks: 0,
-                            });
+                        if g.block_action_restricted(pos) {
+                            return StartDig::Restricted;
                         }
-                        false
+                        if g.res.facts().is_air(g.world.block(pos[0], pos[1], pos[2])) {
+                            return StartDig::Air;
+                        }
+                        let _ = g.attack_block(pos);
+                        g.mining = Some(Mining {
+                            pos,
+                            progress: 0.0,
+                            ticks: 0,
+                        });
+                        StartDig::Accepted
                     });
-                    if destroyed == Some(true)
+                    if !matches!(start, Some(StartDig::Accepted))
                         && let Some(play) = host.play.get_mut(&conn)
                     {
                         play.digging = None;
+                        if matches!(start, Some(StartDig::Air)) {
+                            play.destroy_pos = Some(pos);
+                        }
                     }
                     // ServerPlayerGameMode.handleBlockBreakAction writes `destroyPos`
                     // only for a dig that takes more than one hit: a creative START
                     // and an instant one leave no block behind for a later STOP.
-                    if destroyed != Some(true) {
+                    if matches!(start, Some(StartDig::Accepted)) {
                         let one_hit = self
                             .as_guest(host, conn, |g| g.destroy_progress(pos))
                             .is_some_and(|p| p >= 1.0);

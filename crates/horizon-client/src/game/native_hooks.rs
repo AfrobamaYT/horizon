@@ -4586,17 +4586,26 @@ impl Game<'_> {
     /// @API:player_harvest_check@.
     pub(super) fn native_player_harvest_check(
         &mut self,
+        player: u32,
         pos: [i32; 3],
         state: u32,
         can_harvest: &mut bool,
     ) {
-        mod_api::dispatch_player_harvest_check(self, mod_api::mods(), pos, state, can_harvest);
+        mod_api::dispatch_player_harvest_check(
+            self,
+            mod_api::mods(),
+            player,
+            pos,
+            state,
+            can_harvest,
+        );
     }
 
     /// A player's destroy speed for the block at `pos` may be changed or canceled.
     /// @API:player_break_speed@.
     pub(super) fn native_player_break_speed(
         &mut self,
+        player: u32,
         pos: [i32; 3],
         state: u32,
         original_speed: f32,
@@ -4606,6 +4615,7 @@ impl Game<'_> {
         mod_api::dispatch_player_break_speed(
             self,
             mod_api::mods(),
+            player,
             pos,
             state,
             original_speed,

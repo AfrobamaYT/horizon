@@ -13924,6 +13924,7 @@ pub fn dispatch_movement_input(
 /// What [`Hooks::player_break_speed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerBreakSpeedEvent {
+    pub player: u32,
     pub pos: [i32; 3],
     pub state: u32,
     pub original_speed: f32,
@@ -13932,6 +13933,7 @@ pub struct PlayerBreakSpeedEvent {
 pub fn dispatch_player_break_speed(
     host: &mut dyn Host,
     mods: &[Box<dyn Hooks>],
+    player: u32,
     pos: [i32; 3],
     state: u32,
     original_speed: f32,
@@ -13942,6 +13944,7 @@ pub fn dispatch_player_break_speed(
         return;
     }
     let mut event = PlayerBreakSpeedEvent {
+        player,
         pos,
         state,
         original_speed,
@@ -13958,6 +13961,7 @@ pub fn dispatch_player_break_speed(
 /// What [`Hooks::player_harvest_check`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerHarvestCheckEvent {
+    pub player: u32,
     pub pos: [i32; 3],
     pub state: u32,
     pub can_harvest: bool,
@@ -13965,11 +13969,13 @@ pub struct PlayerHarvestCheckEvent {
 pub fn dispatch_player_harvest_check(
     host: &mut dyn Host,
     mods: &[Box<dyn Hooks>],
+    player: u32,
     pos: [i32; 3],
     state: u32,
     can_harvest: &mut bool,
 ) {
     let mut event = PlayerHarvestCheckEvent {
+        player,
         pos,
         state,
         can_harvest: *can_harvest,

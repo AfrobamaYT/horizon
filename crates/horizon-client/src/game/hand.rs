@@ -383,7 +383,14 @@ impl Game<'_> {
         let mut harvest =
             !facts.requires_tool || self.items().correct_for_drops(self.held(), &facts.name);
         let hardness = facts.hardness;
-        self.native_player_harvest_check(pos, state.0, &mut harvest);
+        if !crate::mod_api::mods().is_empty() {
+            self.native_player_harvest_check(
+                self.own_entity_id() as u32,
+                pos,
+                state.0,
+                &mut harvest,
+            );
+        }
         let block_break_speed = self.block_break_speed();
         let facts = self.res.facts().get(state);
         let mut speed = self.items().mining_speed(self.held(), &facts.name);
@@ -407,7 +414,16 @@ impl Game<'_> {
             speed /= 5.0;
         }
         let mut canceled = false;
-        self.native_player_break_speed(pos, state.0, speed, &mut speed, &mut canceled);
+        if !crate::mod_api::mods().is_empty() {
+            self.native_player_break_speed(
+                self.own_entity_id() as u32,
+                pos,
+                state.0,
+                speed,
+                &mut speed,
+                &mut canceled,
+            );
+        }
         if canceled {
             return 0.0;
         }
