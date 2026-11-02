@@ -302,7 +302,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         *self.random() = random;
         placed
     }
-    fn feature_exists(&self, name: &str) -> bool {
+    pub(crate) fn feature_exists(&self, name: &str) -> bool {
         self.b
             .live_features()
             .is_some_and(|f| f.configured(name).is_some())
@@ -362,10 +362,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && self.feature_exists(mega)
             && let Some((dx, dz, around)) = self.two_by_two(state, pos)
         {
+            let mut feature = Some(mega.to_owned());
+            if !self.level.block_grow_feature(pos, &mut feature) {
+                return false;
+            }
+            let Some(feature) = feature.filter(|name| self.feature_exists(name)) else {
+                return false;
+            };
             for &(_, p) in &around {
                 self.remove_sapling(p);
             }
-            if self.place_configured_feature(mega, pos.offset(dx, 0, dz)) {
+            if self.place_configured_feature(&feature, pos.offset(dx, 0, dz)) {
                 return true;
             }
             for &(s, p) in &around {
@@ -459,6 +466,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !self.feature_exists(&feature) {
             return false;
         }
+        let mut feature = Some(feature);
+        if !self.level.block_grow_feature(pos, &mut feature) {
+            return false;
+        }
+        let Some(feature) = feature.filter(|name| self.feature_exists(name)) else {
+            return false;
+        };
         self.remove_block(pos, false);
         if self.place_configured_feature(&feature, pos) {
             return true;
