@@ -1184,11 +1184,23 @@ impl Game<'_> {
         // would drop, whoever killed the mob.
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
+        // LivingEntity.dropExperience's own conditions: the hook only hears of
+        // experience that would drop; the catalyst charges the rest unchanged.
+        let would_drop = by_player && self.ui.rules.bool("mob_drops");
         let consumed =
             self.catalyst_takes_experience([m.position.x, m.position.y, m.position.z], |game| {
                 catalyst_xp = if horizon_client::mobs::drops::drops_experience(&dying) {
                     let reward = horizon_client::mobs::drops::base_experience(&mut dying);
-                    game.living_experience_drop(&dying, player, reward) as u32
+                    if would_drop {
+                        game.living_experience_drop(
+                            dying.id,
+                            &super::native_hooks::mob_kind(&dying),
+                            player,
+                            reward,
+                        ) as u32
+                    } else {
+                        reward as u32
+                    }
                 } else {
                     0
                 };
@@ -1378,13 +1390,19 @@ impl Game<'_> {
             None => None,
         }
     }
-    /// `LivingEntity.dropExperience`: the experience a dying mob is worth once
+    /// `LivingEntity.dropExperience`: the experience a dying mob or player is worth once
     /// the mods have had their say; 0 when they cancel it.
-    fn living_experience_drop(&mut self, m: &Mob, attacker: Option<u128>, original: i32) -> i32 {
+    pub(super) fn living_experience_drop(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        attacker: Option<u128>,
+        original: i32,
+    ) -> i32 {
         let (mut amount, mut cancel) = (original, false);
         self.native_living_experience_drop(
-            m.id,
-            &super::native_hooks::mob_kind(m),
+            entity,
+            kind,
             attacker,
             original,
             &mut amount,
@@ -1540,7 +1558,12 @@ impl Game<'_> {
                     }
                 }
                 drops::Drop::Experience(reward) if !consumed => {
-                    let amount = self.living_experience_drop(m, player_uuid, reward);
+                    let amount = self.living_experience_drop(
+                        m.id,
+                        &super::native_hooks::mob_kind(m),
+                        player_uuid,
+                        reward,
+                    );
                     self.spawn_orbs(pos, amount as u32);
                 }
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}

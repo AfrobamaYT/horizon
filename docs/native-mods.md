@@ -1328,11 +1328,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   experience points, for an anvil's cost, `/experience add ... levels` and `native_give_levels`. Change `levels` or
   set `cancel` to leave the level as it is. Enchanting's cost and `/experience set` do not call it. The player's state
   is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- **`native_living_experience_drop(entity, kind, attacking_player, original, amount, cancel)`**: a dying mob is about
+- **`native_living_experience_drop(entity, kind, attacking_player, original, amount, cancel)`**: a dying mob or player is about
   to drop `original` experience points (NeoForge's `LivingExperienceDropEvent`), after the vanilla conditions
-  (`LivingEntity.dropExperience`): `entity` is its id, `kind` its type, `attacking_player` the player who last hurt it.
+  (`LivingEntity.dropExperience`): `entity` is its id, `kind` its type, `attacking_player` the player who last hurt a mob (none for a dying player).
   Change `amount` (0 or less drops nothing) or set `cancel` to drop none. A sculk catalyst that takes the mob's
-  experience charges the changed `amount`. Players' death experience and the Ender Dragon do not call it.
+  experience charges the changed `amount`. The Ender Dragon does not call it.
 - **`native_player_item_cooldown(player, name, item, ticks, cancel)`**: an item cooldown is about to start for a
   server player, including a used item's cooldown and a shield disabled by a hit. `item` is the item id and `ticks`
   its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound.

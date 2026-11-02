@@ -7697,7 +7697,11 @@ impl Game<'_> {
             let reward = self
                 .experience
                 .death_reward(self.ui.rules.bool("keep_inventory") || self.spectator());
-            self.spawn_orbs(feet, reward);
+            // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+            let host_entity = self.lan.as_ref().map_or(0, |h| h.host_entity) as u32;
+            let reward =
+                self.living_experience_drop(host_entity, "minecraft:player", None, reward as i32);
+            self.spawn_orbs(feet, reward as u32);
             if !self.spectator() {
                 self.drop_inventory(at);
             }

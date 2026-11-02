@@ -3795,7 +3795,14 @@ impl Game<'_> {
             if let Some(eyes) = drops {
                 self.as_guest(host, conn, |game| game.drop_inventory(eyes));
             }
-            self.spawn_orbs(at, reward);
+            // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+            let reward = self.living_experience_drop(
+                id as u32,
+                "minecraft:player",
+                None,
+                reward as i32,
+            );
+            self.spawn_orbs(at, reward as u32);
         }
     }
 
