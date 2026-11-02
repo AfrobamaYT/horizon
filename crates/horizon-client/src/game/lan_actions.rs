@@ -3941,7 +3941,9 @@ impl Game<'_> {
             let mut keep_sleeping = !gone;
             if !modded {
                 keep_sleeping &= self.sleep_problem(bed_exists, true).is_none();
-            } else if keep_sleeping && bed_exists {
+            } else if keep_sleeping {
+                // Player.tick's bed rule check, which comes before and doesn't
+                // look at the bed.
                 let problem = self.sleep_problem(true, true);
                 let mut may_continue = None;
                 self.native_can_continue_sleeping(
@@ -3954,6 +3956,7 @@ impl Game<'_> {
                 );
                 keep_sleeping = may_continue.unwrap_or(problem.is_none());
             }
+            // Then LivingEntity.tick's checkBedExists, for a sleeper still in bed.
             if modded && keep_sleeping {
                 let problem = self.sleep_problem(bed_exists, false);
                 let mut may_continue = None;
