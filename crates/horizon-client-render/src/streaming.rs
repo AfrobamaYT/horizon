@@ -2882,15 +2882,19 @@ mod tests {
         }
         assert_eq!(order.len(), all);
         // No section the camera sees waits for one it doesn't see, in its own
-        // column (above or below the view) or another.
+        // column (above or below the view) or another: once a worker took one
+        // out of view, the sections in view still to finish are those the
+        // pool's other workers held then (`order` is the order they finished).
         let behind = order
             .iter()
             .position(|k| !section_seen(k))
             .expect("sections behind");
         assert!(behind > 0, "sections in view");
+        let late: Vec<_> = order[behind..].iter().filter(|k| section_seen(k)).collect();
         assert!(
-            !order[behind..].iter().any(section_seen),
-            "a section in view meshed after one out of view: {order:?}"
+            late.len() < horizon_threads::jobs::pool().threads(),
+            "sections in view meshed after {:?} (#{behind}), out of view: {late:?}",
+            order[behind]
         );
         assert!(order.iter().any(|k| !column_seen(k)), "columns behind");
         // Once the sections in view are done the count is 0 while others still mesh.
