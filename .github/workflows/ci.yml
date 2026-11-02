@@ -60,6 +60,7 @@ jobs:
   # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
   # and every merge to main starting this workflow, three jobs a run left the pool's queue tens of minutes deep.
   #
+  # Dyna's slot shares a 40 GiB persistent cache between verify and launcher; the pool wipes it above that size.
   # Where: Dyna when its switch and lease allow it, otherwise GitHub's runners. With the repository variable
   # SELF_HOSTED_CI=all (for when that pool is full: their 4 CPUs
   # are about one GitHub runner, docs/ci-runners.md), main's pushes and this repository's own pull requests run on
@@ -112,9 +113,10 @@ jobs:
           if [ "$HOSTED" = true ]; then
             sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
           elif [ "$DYNA" = true ]; then
-            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
@@ -174,9 +176,10 @@ jobs:
             sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
               libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
           elif [ "$DYNA" = true ]; then
-            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2

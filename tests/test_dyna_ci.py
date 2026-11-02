@@ -1,7 +1,9 @@
 """Dyna's switch routes only supported, same-repository events to its pool."""
+import hashlib
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import time
 import unittest
 
@@ -25,6 +27,22 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertEqual(self.route("push", enabled="false"), "self_hosted=false")
         for lease in ("", "bad", "0"):
             self.assertEqual(self.route("push", lease=lease), "self_hosted=false")
+
+    def test_cached_dependencies_export_persistent_paths(self):
+        script = ROOT / "tools/ci/dyna_ci_deps.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            prefix = cache / "apt-prefix"
+            prefix.mkdir()
+            (prefix / ".dyna-hash").write_text(hashlib.sha256(script.read_bytes()).hexdigest() + "\n")
+            envfile, pathfile = cache / "env", cache / "path"
+            env = dict(os.environ, DYNA_CI_CACHE=directory, GITHUB_ENV=str(envfile), GITHUB_PATH=str(pathfile))
+            subprocess.run(["bash", script], env=env, check=True)
+            exports = envfile.read_text()
+            for key, value in (("CARGO_TARGET_DIR", "target"), ("CARGO_HOME", "cargo"), ("RUSTUP_HOME", "rustup")):
+                self.assertIn(f"{key}={cache / value}\n", exports)
+            self.assertNotIn("CARGO_INCREMENTAL", exports)
+            self.assertIn(str(cache / "cargo/bin"), pathfile.read_text())
 
     def test_workflow_wires_route_and_keeps_privileges_off_pool(self):
         from test_ci_runners import jobs
