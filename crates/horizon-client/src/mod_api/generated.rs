@@ -4527,6 +4527,22 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
+    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
+    /// block; set `feature` to another key to grow that one. Server-side.
+    /// Mods can use `level.random()` to access the growth random source.
+    /// @API:block_grow_feature@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_grow_feature(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        event: &mut BlockGrowFeatureEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -14851,6 +14867,36 @@ pub fn dispatch_arrow_nock(
     };
     for mod_hook in super::entered(mods, "arrow_nock") {
         if matches!(mod_hook.arrow_nock(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_grow_feature`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockGrowFeatureEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub feature: &'a mut Option<String>,
+}
+pub fn dispatch_block_grow_feature(
+    level: &mut dyn LevelRandomHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    feature: &mut Option<String>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockGrowFeatureEvent {
+        dimension,
+        pos,
+        feature,
+    };
+    for mod_hook in super::entered(mods, "block_grow_feature") {
+        if matches!(mod_hook.block_grow_feature(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }

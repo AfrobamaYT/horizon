@@ -1172,6 +1172,19 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn block_grow_feature<'a>(
+        &mut self,
+        pos: BlockPos,
+        feature: &'a str,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+            return Some(std::borrow::Cow::Borrowed(feature));
+        }
+        let mut feature = Some(feature.to_owned());
+        let mut cancel = false;
+        self.native_block_grow_feature(self.dimension, pos, &mut feature, &mut cancel);
+        feature.filter(|_| !cancel).map(std::borrow::Cow::Owned)
+    }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
