@@ -62,12 +62,12 @@ impl Game<'_> {
     }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
-    /// Returns None on a client, for a stale handle, or when this level is
-    /// parked: its entity handles cannot
-    /// resolve until the level is in place. The walk is in entity-list order
-    /// followed by players; each overlap requires a handle lookup, so cost grows
-    /// with the box's contents. Tridents cannot yet resolve; frames, paintings,
-    /// other special entities and the dragon are not on the entity-list walk.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
     /// During a player's action with the hub taken out, players including the
     /// acting player are not listed: their handles cannot resolve there yet.
     /// During `hears_projectile_impacts`, the projectile list is taken out of
