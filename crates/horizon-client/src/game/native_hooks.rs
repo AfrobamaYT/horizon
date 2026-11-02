@@ -3672,7 +3672,14 @@ impl Game<'_> {
         levels: &mut i32,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, levels, cancel);
+        mod_api::dispatch_player_xp_level_change(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            levels,
+            cancel,
+        );
     }
     /// A dying mob or player `entity` of `kind` is about to drop `original`
     /// points of experience; the vanilla conditions have been checked.
@@ -3689,7 +3696,16 @@ impl Game<'_> {
         amount: &mut i32,
         cancel: &mut bool,
     ) {
-        let _ = (entity, kind, attacking_player, original, amount, cancel);
+        mod_api::dispatch_living_experience_drop(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            attacking_player,
+            original,
+            amount,
+            cancel,
+        );
     }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,

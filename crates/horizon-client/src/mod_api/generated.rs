@@ -3084,6 +3084,23 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A dying mob or player `entity` of `kind` is about to drop `original`
+    /// points of experience; the vanilla conditions have been checked.
+    /// `attacking_player` is the player who last hurt it, if any. Change
+    /// `amount` (0 or less drops nothing), or set `cancel` to drop none. A
+    /// sculk catalyst that takes the experience does not call this.
+    /// Server-side. @API:living_experience_drop@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_experience_drop(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingExperienceDropEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A player shift-clicked slot `slot` of the menu of the mod block
     /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
     /// Java menu overrides), on the server, before the game's own routing:
@@ -4081,6 +4098,24 @@ pub trait Hooks: Send + Sync {
     fn player_velocity(&self, host: &mut dyn Host, event: &mut PlayerVelocityEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// A server player's level is about to change through
+    /// `Player.giveExperienceLevels`: once per level gained or lost by points,
+    /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
+    /// Change `levels`, or set `cancel` to leave the level unchanged. The
+    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// and the item helpers reach them. Server-side.
+    /// @API:player_xp_level_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_xp_level_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerXpLevelChangeEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// A Nether portal was built for a dimension travel, or an End platform
     /// was made for an arrival. `pos` is the lower corner of the Nether
@@ -10305,6 +10340,46 @@ pub fn dispatch_lightning_strike(
         }
     }
 }
+/// What [`Hooks::living_experience_drop`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingExperienceDropEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub attacking_player: Option<u128>,
+    pub original: i32,
+    pub amount: i32,
+}
+pub fn dispatch_living_experience_drop(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    attacking_player: Option<u128>,
+    original: i32,
+    amount: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingExperienceDropEvent {
+        entity,
+        kind,
+        attacking_player,
+        original,
+        amount: *amount,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.living_experience_drop(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
 /// What [`Hooks::menu_quick_move`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MenuQuickMoveEvent<'a> {
@@ -12372,6 +12447,40 @@ pub fn dispatch_player_velocity(
     for mod_hook in mods {
         mod_hook.player_velocity(host, &mut event);
     }
+}
+/// What [`Hooks::player_xp_level_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerXpLevelChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub levels: i32,
+}
+pub fn dispatch_player_xp_level_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    levels: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerXpLevelChangeEvent {
+        player,
+        name,
+        levels: *levels,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_xp_level_change(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *levels = event.levels;
 }
 /// What [`Hooks::portal_create`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
