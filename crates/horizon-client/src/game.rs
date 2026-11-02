@@ -392,7 +392,7 @@ pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativeShake};
+pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult};
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
 pub use native_world_columns::NativeColumnBlocks;
@@ -14655,12 +14655,16 @@ impl Game<'_> {
             // LivingEntity.tick's checkBedExists: a sleeper whose bed is
             // gone gets up.
             let bed = self.world.block(head[0], head[1], head[2]);
-            let mut bed_exists = self.res.facts().get(bed).name.ends_with("_bed");
-            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            let mut replaced = None;
+            if let Some((player, name)) = self
+                .lan
+                .as_ref()
+                .map(|host| (host.host_uuid, host.host_name.clone()))
             {
-                self.native_can_continue_sleeping(player, &name, head, &mut bed_exists);
+                self.native_can_continue_sleeping(player, &name, head, &mut replaced);
             }
-            let bed_gone = !bed_exists;
+            let bed_gone = !replaced
+                .unwrap_or_else(|| self.res.facts().get(bed).name.ends_with("_bed"));
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
             if (self.screen != Screen::Chat && self.keys.contains(&KeyCode::ShiftLeft))

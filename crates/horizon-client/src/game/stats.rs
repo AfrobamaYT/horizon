@@ -398,12 +398,12 @@ impl Game<'_> {
             position.z.floor() as i32,
         ];
         // `PlayerSpawnPhantomsEvent`: the group size stays `None` until vanilla draws it below.
-        let mut result = PhantomSpawnResult::Default;
+        let mut result = None;
         let mut phantoms = None;
         if let Some((player, name)) = identity {
             self.native_player_spawn_phantoms(player, &name, pos, &mut result, &mut phantoms);
         }
-        let attempt = match result {
+        let attempt = match result.unwrap_or(PhantomSpawnResult::Default) {
             PhantomSpawnResult::Allow => true,
             PhantomSpawnResult::Default => pos[1] >= 63 && self.can_see_sky(pos),
             PhantomSpawnResult::Deny => false,

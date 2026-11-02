@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "whether the phantom spawner tries a spawn near a player, and the group size (`native_player_spawn_phantoms`).",
-  "doc_summary": "the phantom spawner is about to decide whether to try a spawn near a non-spectator server player: `native_player_spawn_phantoms(player, name, pos, result, phantoms)` runs once per player, before the difficulty and rest rolls. `result` starts as `Default` (above sea level with the sky in view); `Allow` skips that check, `Deny` stops the attempt. Allow still passes the later rolls. `phantoms` starts empty, meaning vanilla's group size, drawn later to keep its random order; set it to override the count. Bundles need \"hooks\": @API:player_spawn_phantoms@."
+  "doc_summary": "the phantom spawner is about to decide whether to try a spawn near a non-spectator server player: `native_player_spawn_phantoms(player, name, pos, result, phantoms)` runs once per player, before the difficulty and rest rolls. `result` starts empty, meaning `Default` (above sea level with the sky in view); `Allow` skips that check, `Deny` stops the attempt. Allow still passes the later rolls. `phantoms` starts empty, meaning vanilla's group size, drawn later to keep its random order; set it to override the count. Bundles need \"hooks\": @API:player_spawn_phantoms@."
 }

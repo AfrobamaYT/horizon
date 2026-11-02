@@ -3875,9 +3875,11 @@ impl Game<'_> {
         let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
         if let Some(head) = g.bed {
             let block = self.world.block(head[0], head[1], head[2]);
-            let mut bed = self.res.facts().get(block).name.ends_with("_bed");
             let (player, name) = (g.uuid, g.name.clone());
-            self.native_can_continue_sleeping(player, &name, head, &mut bed);
+            let mut replaced = None;
+            self.native_can_continue_sleeping(player, &name, head, &mut replaced);
+            let bed = replaced
+                .unwrap_or_else(|| self.res.facts().get(block).name.ends_with("_bed"));
             let g = &mut host.hub.guests[gi];
             if g.dead || g.health <= 0.0 || !bed {
                 self.wake_guest(host, gi);
