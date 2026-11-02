@@ -7765,6 +7765,10 @@ impl Game<'_> {
         if changed
             && self.res.facts().get(previous).name != new
             && self.res.facts().get(landed).name == new
+            && !self
+                .world
+                .block_entities
+                .contains_key(&(pos[0], pos[1], pos[2]))
             && let Some(entity) = self.new_block_entity(&new)
         {
             self.world

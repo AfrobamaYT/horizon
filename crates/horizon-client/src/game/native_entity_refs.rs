@@ -274,6 +274,29 @@ mod tests {
                 .any(|item| item.stack.item.as_ref() == "minecraft:cobblestone")
         );
         assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        game.dropped.clear();
+        let copper = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:copper_chest")
+            .unwrap();
+        let exposed = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:exposed_copper_chest")
+            .unwrap();
+        assert!(game.native_level_set_block(level, [0, 64, 0], copper, flags));
+        fill_chest(&mut game);
+        assert!(game.native_level_set_block(level, [0, 64, 0], exposed, flags));
+        let Some(super::super::BlockEntity::Chest(items)) =
+            game.world.block_entities.get(&(0, 64, 0))
+        else {
+            panic!("copper chest entity missing")
+        };
+        assert_eq!(items[0].as_ref().unwrap().count, 3);
+        assert!(game.dropped.is_empty());
         assert!(
             game.enter_command_level(super::super::Dim::Nether)
                 .is_some()
