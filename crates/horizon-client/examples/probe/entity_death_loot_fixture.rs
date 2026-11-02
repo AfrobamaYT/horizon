@@ -310,7 +310,9 @@ pub fn main() -> horizon_client::Result<()> {
                         }
                         Ok(())
                     }
-                    drops::Drop::Orb(v) => writeln!(out, "orb {v}"),
+                    drops::Drop::Experience(amount) => {
+                        drops::orb_values(amount).try_for_each(|v| writeln!(out, "orb {v}"))
+                    }
                 };
             }
         }

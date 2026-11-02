@@ -27,8 +27,9 @@ pub enum Drop {
     /// `Enderman.dropCustomDeathLoot`: the carried block's own drops, rolled
     /// with `enderman::carried_block_tool` (`enderman::carried_block_drops`).
     CarriedBlock(BlockStateId),
-    /// An experience orb of this value.
-    Orb(i32),
+    /// The experience the mob is worth (`getExperienceReward`), before
+    /// `orb_values` splits it into orbs.
+    Experience(i32),
 }
 
 /// How the mob died.
@@ -422,8 +423,18 @@ pub fn loot_entity(m: &Mob, vehicle: Option<LootEntity>) -> LootEntity {
         .collect();
     e
 }
+/// `ExperienceOrb.award`: the values of the orbs `amount` points are split into.
+pub fn orb_values(mut amount: i32) -> impl Iterator<Item = i32> {
+    std::iter::from_fn(move || {
+        (amount > 0).then(|| {
+            let value = orb_value(amount);
+            amount -= value;
+            value
+        })
+    })
+}
 /// `ExperienceOrb.getExperienceValue`.
-pub fn orb_value(amount: i32) -> i32 {
+fn orb_value(amount: i32) -> i32 {
     for v in [2477, 1237, 617, 307, 149, 73, 37, 17, 7, 3] {
         if amount >= v {
             return v;
@@ -567,12 +578,7 @@ pub fn die(m: &mut Mob, d: &Death, sequences: &mut RandomSequences) -> (Vec<Drop
     }
     // dropExperience.
     if killed_by_player && drops_experience(m) && d.mob_drops {
-        let mut amount = base_experience(m);
-        while amount > 0 {
-            let value = orb_value(amount);
-            amount -= value;
-            out.push(Drop::Orb(value));
-        }
+        out.push(Drop::Experience(base_experience(m)));
     }
     (out, skulls)
 }

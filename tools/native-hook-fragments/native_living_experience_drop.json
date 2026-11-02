@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "living_experience_drop",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_experience_drop",
+      "neoforge": "LivingExperienceDropEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a dying mob's experience drop, changeable and cancellable (`native_living_experience_drop`).",
+  "doc_summary": "a dying mob's experience: `native_living_experience_drop(entity, kind, attacking_player, original, amount, cancel)` is called after the vanilla drop conditions (`LivingEntity.dropExperience`) and before the points are split into orbs. Change `amount` (0 or less drops nothing) or set `cancel` to drop none. A sculk catalyst that takes the experience charges the changed `amount`. Players and the Ender Dragon do not call it. Bundles need \"hooks\": @API:living_experience_drop@."
+}

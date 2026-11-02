@@ -3455,6 +3455,23 @@ impl Game<'_> {
     ) {
         let _ = (player, name, levels, cancel);
     }
+    /// A dying mob `entity` of `kind` is about to drop `original` points of
+    /// experience; the vanilla conditions have been checked. `attacking_player`
+    /// is the player who last hurt it, if any. Change `amount` (0 or less
+    /// drops nothing), or set `cancel` to drop none. A sculk catalyst that
+    /// takes the experience charges `amount` instead of dropping it.
+    /// Server-side. @API:living_experience_drop@.
+    pub(super) fn native_living_experience_drop(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        attacking_player: Option<u128>,
+        original: i32,
+        amount: &mut i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (entity, kind, attacking_player, original, amount, cancel);
+    }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
     /// so helpers that look them up through `self.lan` may find nothing while a

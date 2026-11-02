@@ -1172,6 +1172,12 @@ impl Game<'_> {
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
         let by_player = killer.is_some() || m.ai.last_hurt_by_player > 0;
+        // LAST_DAMAGE_PLAYER only while the player-hurt memory lasts
+        // (LivingEntity.dropFromLootTable's playerKilled): a mob that dies to
+        // the environment long after a player's hit names no player.
+        let player = killer
+            .filter(|_| m.ai.last_hurt_by_player > 0)
+            .and_then(|conn| self.killer_uuid(conn));
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
@@ -1179,9 +1185,10 @@ impl Game<'_> {
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
         let consumed =
-            self.catalyst_takes_experience([m.position.x, m.position.y, m.position.z], |_| {
+            self.catalyst_takes_experience([m.position.x, m.position.y, m.position.z], |game| {
                 catalyst_xp = if horizon_client::mobs::drops::drops_experience(&dying) {
-                    horizon_client::mobs::drops::base_experience(&mut dying).max(0) as u32
+                    let reward = horizon_client::mobs::drops::base_experience(&mut dying);
+                    game.living_experience_drop(&dying, player, reward) as u32
                 } else {
                     0
                 };
@@ -1235,12 +1242,6 @@ impl Game<'_> {
         self.villager_murdered(m, slain_by_player, killer.flatten());
         let pos = [m.position.x, m.position.y + 0.5, m.position.z];
         let killer_entity = self.killer_loot_entity(killer.flatten());
-        // LAST_DAMAGE_PLAYER only while the player-hurt memory lasts
-        // (LivingEntity.dropFromLootTable's playerKilled): a mob that dies to
-        // the environment long after a player's hit names no player.
-        let player = killer
-            .filter(|_| m.ai.last_hurt_by_player > 0)
-            .and_then(|conn| self.killer_uuid(conn));
         if let Some(player) = player.filter(|_| m.extra.leash.is_some()) {
             self.lead_killers.insert(m.id, (player, self.dim));
         }
@@ -1376,6 +1377,20 @@ impl Game<'_> {
             }
             None => None,
         }
+    }
+    /// `LivingEntity.dropExperience`: the experience a dying mob is worth once
+    /// the mods have had their say; 0 when they cancel it.
+    fn living_experience_drop(&mut self, m: &Mob, attacker: Option<u128>, original: i32) -> i32 {
+        let (mut amount, mut cancel) = (original, false);
+        self.native_living_experience_drop(
+            m.id,
+            &super::native_hooks::mob_kind(m),
+            attacker,
+            original,
+            &mut amount,
+            &mut cancel,
+        );
+        if cancel { 0 } else { amount.max(0) }
     }
     fn drop_death_loot(
         &mut self,
@@ -1524,8 +1539,13 @@ impl Game<'_> {
                         self.spawn_item(item, pos, dispenser::new_item_motion(), 10);
                     }
                 }
-                drops::Drop::Orb(value) if !consumed => self.spawn_orbs(pos, value as u32),
-                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Orb(_) => {}
+                drops::Drop::Experience(reward) if !consumed => {
+                    let amount = self.living_experience_drop(m, player_uuid, reward);
+                    for value in drops::orb_values(amount) {
+                        self.spawn_orbs(pos, value as u32);
+                    }
+                }
+                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
     }
