@@ -7,6 +7,8 @@ name: checks
 # request that changes a harness, oracle, probe or the runner: the rest are checked on main by parity-main. A fork's pull
 # request runs it only when a maintainer adds the run-parity label (.github/workflows/run-parity.yml), so labels
 # never start this workflow. See docs/release-flow.md.
+# Fork limit: with SELF_HOSTED_CI=off, parity-scope runs hosted, but a harness change or run-parity label
+# can queue parity indefinitely because the fork has no horizon-game runner.
 on:
   push:
     branches: [main]

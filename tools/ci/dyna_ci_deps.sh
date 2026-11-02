@@ -31,5 +31,7 @@ arch=x86_64-linux-gnu
   echo "LIBRARY_PATH=$prefix/usr/lib/$arch:$prefix/lib/$arch"
   echo "C_INCLUDE_PATH=$prefix/usr/include:$prefix/usr/include/$arch"
   echo "LD_LIBRARY_PATH=$prefix/usr/lib/$arch:$prefix/lib/$arch"
+  # Each Dyna runner starts cold; incremental artifacts only consume tmpfs.
+  echo "CARGO_INCREMENTAL=0"
 } >> "$GITHUB_ENV"
 rm -rf "$aptroot"
