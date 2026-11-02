@@ -81,7 +81,10 @@ impl Game<'_> {
         pos: [i32; 3],
         drop: bool,
     ) -> bool {
-        if !self.native_level_write_allowed(level, pos) {
+        if !self.native_level_write_allowed(level, pos)
+            || (self.serving.is_none() && self.options.dedicated.is_none())
+            || self.dim.id() != level.dimension()
+        {
             return false;
         }
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
@@ -91,9 +94,7 @@ impl Game<'_> {
     }
     fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.remote.is_none()
-            && (self.serving.is_some() || self.options.dedicated.is_some())
             && self.native_lifecycle.epoch() == Some(level.epoch())
-            && self.dim.id() == level.dimension()
             && self.world.loaded(pos[0], pos[2])
             && (self.world.layout().min_y()..self.world.layout().max_y()).contains(&pos[1])
     }
@@ -152,5 +153,132 @@ mod tests {
             super::uuid_from_words(words),
             0x0102_0304_ffff_ffff_0000_0000_7fff_ffff
         );
+    }
+    use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::{
+        chunk::Chunk,
+        mod_api::{NativeAuthority, NativeBlockUpdateFlags},
+    };
+    use std::{sync::Arc, time::Instant};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_block_writes_validate_and_change_world() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        options.dedicated = Some(Vec::new());
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.native_lifecycle
+            .begin_open(NativeAuthority::IntegratedServer);
+        let level = game.native_level("minecraft:overworld").unwrap();
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        let chest = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:chest")
+            .unwrap();
+        let air = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:air")
+            .unwrap();
+        let flags = NativeBlockUpdateFlags::NEIGHBORS;
+        assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
+        assert_eq!(game.world.block(0, 64, 0), stone);
+        assert!(!game.native_level_set_block(level, [16, 64, 0], stone, flags));
+        assert!(!game.native_level_set_block(level, [0, 10000, 0], stone, flags));
+        let stale = horizon_client::mod_api::LevelRef::new(
+            horizon_client::mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+            level.dimension(),
+        );
+        assert!(!game.native_level_set_block(stale, [0, 64, 0], stone, flags));
+        assert!(!game.native_level_destroy_block(stale, [0, 64, 0], true));
+        let fill_chest = |game: &mut Game<'_>| {
+            let Some(super::super::BlockEntity::Chest(items)) =
+                game.world.block_entities.get_mut(&(0, 64, 0))
+            else {
+                panic!("chest block entity missing")
+            };
+            items[0] = Some(horizon_client::items::ItemStack {
+                item: "minecraft:diamond".into(),
+                count: 3,
+                damage: 0,
+                extra: None,
+            });
+        };
+        assert!(game.native_level_set_block(level, [0, 64, 0], chest, flags));
+        fill_chest(&mut game);
+        assert!(game.native_level_set_block(level, [0, 64, 0], air, flags));
+        assert_eq!(
+            game.dropped
+                .iter()
+                .filter(|item| item.stack.item.as_ref() == "minecraft:diamond")
+                .map(|item| u32::from(item.stack.count))
+                .sum::<u32>(),
+            3
+        );
+        game.dropped.clear();
+        assert!(game.native_level_set_block(level, [0, 64, 0], chest, flags));
+        fill_chest(&mut game);
+        assert!(game.native_level_set_block(
+            level,
+            [0, 64, 0],
+            air,
+            NativeBlockUpdateFlags::SKIP_BLOCK_ENTITY_SIDE_EFFECTS
+        ));
+        assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
+        assert!(game.dropped.is_empty());
+        assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
+        assert!(game.native_level_destroy_block(level, [0, 64, 0], false));
+        assert!(game.dropped.is_empty());
+        assert_eq!(game.world.block(0, 64, 0), air);
+        assert!(game.native_level_set_block(level, [0, 64, 0], stone, flags));
+        assert!(game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.dropped
+                .iter()
+                .any(|item| item.stack.item.as_ref() == "minecraft:cobblestone")
+        );
+        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
+        assert!(
+            game.enter_command_level(super::super::Dim::Nether)
+                .is_some()
+        );
+        assert!(!game.native_level_set_block(level, [0, 64, 0], stone, flags));
+        assert!(!game.native_level_destroy_block(level, [0, 64, 0], true));
     }
 }

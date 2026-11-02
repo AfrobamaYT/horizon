@@ -199,8 +199,6 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
-#[cfg(test)]
-mod native_block_write_tests;
 mod native_claimed_items;
 mod native_components;
 mod native_criteria;
