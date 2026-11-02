@@ -386,6 +386,16 @@ use horizon_world::{
     },
     registry::BlockStateId,
 };
+pub use maps::{NativeMapDecoration, NativeMapInfo};
+pub use native_block_entity_draw::BlockEntityDraw;
+pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use native_data_maps::NativeDataMapType;
+pub use native_falling::NativeFalling;
+pub use native_hooks::{NativeClock, NativeShake};
+pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
+pub use native_server::NativeExperienceOrb;
+pub use native_world_columns::NativeColumnBlocks;
+pub use native_world_edit::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -2290,6 +2300,8 @@ struct Game<'a> {
     regrab_on_refocus: bool,
     /// Only the local player owning keyboard and mouse changes the native pointer.
     keyboard_mouse: bool,
+    /// Offscreen rendering into a visible splitscreen window still accepts native input.
+    split_window: bool,
     /// This view's corner in its shared window; cursor warps include the offset.
     view_at: [u32; 2],
     /// Splitscreen: what it draws over this player's view (its badge, questions, notices).
@@ -2584,6 +2596,9 @@ struct Game<'a> {
     server_trips: Vec<server_travel::Trip>,
     /// Players a command sends to another level, once it has run.
     level_teleports: Vec<server_travel::LevelTeleport>,
+    /// Teleports a command made inside a level, for `native_player_teleported`
+    /// once the player's move has reached their client (`leave_guest`).
+    teleport_notes: Vec<server_travel::TeleportNote>,
     /// A server's levels other than the one in place (game/levels.rs).
     levels: levels::Levels,
     /// Which pass of a server tick runs (`tick_server`): the first one reads
@@ -2649,6 +2664,8 @@ struct Game<'a> {
     /// Models drawn only once such an entity shows up (lead knots, wind charges...).
     entity_models: EntityModels,
     carts: Vec<minecarts::Minecart>,
+    /// The boats and minecarts `native_vehicle_moved` follows (lan_vehicles.rs).
+    watched_vehicles: Vec<lan_vehicles::WatchedVehicle>,
     /// Songs playing from jukeboxes (tracked sound handles).
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
@@ -2920,6 +2937,9 @@ struct Game<'a> {
     lan_acting_name: Option<String>,
     /// Their UUID (`Player.getUUID`).
     lan_acting_uuid: Option<u128>,
+    /// Where the mods refused to prime TNT: the sound and game event the level
+    /// queued right after the prime are dropped (`prime_tnt_event`).
+    tnt_refused: Option<BlockPos>,
     /// Their permission level: an op's above 0 (`PlayerList.isOp`).
     lan_acting_permission: Option<u8>,
     /// Their entity id, which the hub (often taken out of `lan` while they
@@ -5019,6 +5039,15 @@ impl Game<'_> {
                         _ => {}
                     }
                 }
+                // A prime the mods refused is silent: no fuse sound, no game event.
+                LevelEvent::Sound { pos, ref sound, .. }
+                    if self.tnt_refused == Some(pos)
+                        && &**sound == "minecraft:entity.tnt.primed" => {}
+                LevelEvent::GameEvent {
+                    pos,
+                    event: "minecraft:prime_fuse",
+                    ..
+                } if self.tnt_refused == Some(pos) => self.tnt_refused = None,
                 LevelEvent::Sound {
                     pos,
                     sound,
@@ -5108,7 +5137,7 @@ impl Game<'_> {
                     }
                     PlayerEffect::InteractLoot(_) => {}
                 },
-                LevelEvent::PrimeTnt { pos, rot } => self.add_primed_tnt(pos, rot, 80, None, None),
+                LevelEvent::PrimeTnt { pos, rot } => self.prime_tnt_event(pos, rot),
                 LevelEvent::BlockEvent {
                     pos,
                     state,
@@ -6424,6 +6453,22 @@ impl Game<'_> {
         }
         Ok(true)
     }
+    /// Asks the mods whether the acting guest may empty `stack` at `pos`
+    /// (`native_bucket_empty`): true when one cancelled it. A game's own
+    /// player is not asked.
+    fn bucket_empty_cancelled(&mut self, stack: &ItemStack, pos: [i32; 3]) -> bool {
+        let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) else {
+            return false;
+        };
+        let fluid = match &*stack.item {
+            "minecraft:lava_bucket" => "minecraft:lava",
+            "minecraft:powder_snow_bucket" => "minecraft:powder_snow",
+            _ => "minecraft:water",
+        };
+        let mut cancel = false;
+        self.native_bucket_empty(uuid, &name, pos, fluid, &mut cancel);
+        cancel
+    }
     /// The player as a block's `useItemOn` / `useWithoutItem` sees them.
     fn use_context(&self) -> PlayerContext {
         PlayerContext {
@@ -7549,6 +7594,7 @@ impl Game<'_> {
             horizon_client::spans::time("tick_cushions", || self.tick_cushions());
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
+            self.tick_vehicle_watch();
             horizon_client::spans::time("tick_thunder", || self.tick_thunder());
             horizon_client::spans::time("tick_lecterns", || self.tick_lecterns());
             horizon_client::spans::time("tick_maps", || self.tick_maps());
@@ -7971,9 +8017,9 @@ impl Game<'_> {
         };
         let scale = HudBatch::new(size).scale;
         let was_grabbed = self.captured;
-        if self.options.offscreen {
-            // `--offscreen` shows no window: the system pointer stays where the
-            // person at the computer has it, and the grab is the game's own (an
+        if self.options.offscreen && !self.split_window {
+            // A genuinely hidden `--offscreen` run leaves the system pointer where
+            // the person at the computer has it. Its grab is internal (an
             // agent turns the view with `mouse-move`).
             if capture {
                 self.mouse.set_ignore_first_move();
@@ -8034,7 +8080,7 @@ impl Game<'_> {
         ) {
             self.cursor = pos;
         }
-        if !self.options.offscreen {
+        if !self.options.offscreen || self.split_window {
             window.set_cursor_visible(!self.captured);
         }
     }
@@ -13071,7 +13117,7 @@ impl Game<'_> {
             let target = self.bucket_target(content, &hit);
             let mut canceled = false;
             self.native_fill_bucket(stack, target, &mut canceled);
-            if canceled {
+            if canceled || self.bucket_empty_cancelled(stack, target) {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);
@@ -16579,11 +16625,13 @@ impl ApplicationHandler for Game<'_> {
         }
     }
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
-        // The real mouse never steers an offscreen game: its pointer is not grabbed.
+        // A composited view renders offscreen but its keyboard/mouse owner still
+        // controls a visible native window. A headless offscreen run never does.
         if self.pending_save.is_none()
             && self.captured
             && self.focused
-            && !self.options.offscreen
+            && self.keyboard_mouse
+            && (!self.options.offscreen || self.split_window)
             && self.screen == Screen::Playing
             && let DeviceEvent::MouseMotion { delta: (x, y) } = event
         {
@@ -18262,6 +18310,7 @@ impl<'a> Game<'a> {
             captured: false,
             regrab_on_refocus: false,
             keyboard_mouse: true,
+            split_window: false,
             view_at: [0, 0],
             split_hud: Default::default(),
             focused: true,
@@ -18426,6 +18475,7 @@ impl<'a> Game<'a> {
             travelling: None,
             server_trips: Vec::new(),
             level_teleports: Vec::new(),
+            teleport_notes: Vec::new(),
             levels: Default::default(),
             level_pass: Default::default(),
             portals: Default::default(),
@@ -18466,6 +18516,7 @@ impl<'a> Game<'a> {
             cushion_model: prepared.cushion_model,
             entity_models: prepared.entity_models,
             carts: Vec::new(),
+            watched_vehicles: Vec::new(),
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
             maps: maps::Maps::default(),
@@ -18620,6 +18671,7 @@ impl<'a> Game<'a> {
             guest_player_sounds: Vec::new(),
             lan_acting_name: None,
             lan_acting_uuid: None,
+            tnt_refused: None,
             lan_acting_permission: None,
             lan_acting_entity: None,
             chat_capture: None,
