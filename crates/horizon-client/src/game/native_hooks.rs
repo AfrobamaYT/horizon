@@ -1534,6 +1534,13 @@ impl Game<'_> {
     pub(super) fn native_client_level_unload(&mut self, dimension: &str) {
         mod_api::dispatch_client_level_unload(self, mod_api::mods(), dimension);
     }
+    /// The client accepted a play login and initialized its level and player
+    /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
+    /// is the server's entity ID and `dimension` is the level key. Client-side,
+    /// once per connection, including single player. @API:client_player_logging_in@.
+    pub(super) fn native_client_player_logging_in(&mut self, player_id: i32, dimension: &str) {
+        let _ = (player_id, dimension);
+    }
     /// Once a tick, in every `Game`: the window's (in single player, on LAN
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).

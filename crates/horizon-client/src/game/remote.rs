@@ -3037,6 +3037,7 @@ impl Game<'_> {
                 }
                 self.send(S::ClientInformation(info));
                 self.remote_chat_login();
+                self.native_client_player_logging_in(p.player_id, &p.spawn.dimension);
             }
             C::Respawn(p) => {
                 // A new player, without effects (the server sends them
