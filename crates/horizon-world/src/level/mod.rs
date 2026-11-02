@@ -330,6 +330,15 @@ pub trait LevelAccess {
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
     }
+    /// Returns the state to place for a liquid conversion, or None to cancel.
+    fn fluid_place_block(
+        &self,
+        _pos: BlockPos,
+        _liquid_pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<BlockStateId> {
+        Some(state)
+    }
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,

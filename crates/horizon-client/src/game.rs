@@ -1149,6 +1149,21 @@ impl LevelAccess for GameLevel<'_> {
         }
         !canceled
     }
+    fn fluid_place_block(
+        &self,
+        pos: BlockPos,
+        liquid_pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<BlockStateId> {
+        let mut new_state = state;
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_fluid_place_block(
+                self.dimension, pos, liquid_pos, state, &mut new_state, &mut cancel,
+            );
+        }
+        if cancel { None } else { Some(new_state) }
+    }
     fn allow_fluid_level_change(
         &self,
         pos: BlockPos,

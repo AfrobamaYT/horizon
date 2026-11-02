@@ -577,6 +577,22 @@ impl GameLevel<'_> {
         mod_api::dispatch_block_changed(self, mod_api::mods(), dimension, pos, old, new);
     }
 
+    /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
+    /// `cancel` to prevent placement or change `new_state` to replace it.
+    /// Server-side. @API:fluid_place_block@.
+    #[inline(always)]
+    pub(super) fn native_fluid_place_block(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        liquid_pos: BlockPos,
+        state: BlockStateId,
+        new_state: &mut BlockStateId,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, liquid_pos, state, new_state, cancel);
+    }
+
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
     /// level. Server-side. @API:fluid_level_change@.

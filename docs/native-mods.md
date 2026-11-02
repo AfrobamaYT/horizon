@@ -1693,6 +1693,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `pos`. Set `cancel` to keep it.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
+- **`native_fluid_place_block(dimension, pos, liquid_pos, state, new_state, cancel)`** (on `GameLevel`):
+  liquid is about to place `state` at `pos`, originating at `liquid_pos`. Change `new_state` to replace the
+  proposed state, or set `cancel` to prevent placement. Server-side.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
 - **`native_leaves_decay(dimension, pos, cancel)`** (on `GameLevel`): a non-persistent leaf block at distance 7 is

@@ -690,12 +690,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 } else {
                     b.named.cobblestone
                 };
-                self.set_block_and_update(pos, b.default_of(block));
+                if let Some(state) = self.level.fluid_place_block(pos, pos, b.default_of(block)) {
+                    self.set_block_and_update(pos, state);
+                }
                 self.level_event(1501, pos, 0);
                 return false;
             }
             if over_soul_soil && b.is_block(self.state(neighbour), b.named.blue_ice) {
-                self.set_block_and_update(pos, b.default_of(b.named.basalt));
+                if let Some(state) = self.level.fluid_place_block(pos, pos, b.default_of(b.named.basalt)) {
+                    self.set_block_and_update(pos, state);
+                }
                 self.level_event(1501, pos, 0);
                 return false;
             }
