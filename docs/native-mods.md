@@ -2589,11 +2589,11 @@ clicks already.
 
 ### Player harvest check
 
-`native_player_harvest_check(pos, state, can_harvest)` runs on the client and server when a player's ability to harvest a block is checked. `state` is the block state ID and `can_harvest` starts with vanilla's result; replace it to change the result. On the server, `native_acting_player` identifies a guest whose state is swapped in. Bundles need "hooks": @API:player_harvest_check@.
+`native_player_harvest_check(pos, state, can_harvest)` runs on the client and server when a player's ability to harvest a block is checked. `state` is the block state ID and `can_harvest` starts with vanilla's result; replace it to change the result. On the server, `native_acting_player` identifies a guest whose state is swapped in. Bundles need "hooks": @API:native_player_harvest_check@.
 
 ### Player break speed
 
-`native_player_break_speed(pos, state, original_speed, new_speed, canceled)` runs on the client and server when a player's destroy progress is calculated. `state` is the block state ID, `original_speed` is the speed after vanilla's modifiers, and `new_speed` starts with that value. Change `new_speed` to replace it, or set `canceled` to prevent breaking. On the server, `native_acting_player` identifies a guest whose state is swapped in. Bundles need "hooks": @API:player_break_speed@.
+`native_player_break_speed(pos, state, original_speed, new_speed, canceled)` runs on the client and server when a player's destroy progress is calculated. `state` is the block state ID, `original_speed` is the speed after vanilla's modifiers, and `new_speed` starts with that value. Change `new_speed` to replace it, or set `canceled` to prevent breaking. On the server, `native_acting_player` identifies a guest whose state is swapped in. Bundles need "hooks": @API:native_player_break_speed@.
 
 ### Items' default components
 
