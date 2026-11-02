@@ -881,8 +881,9 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::mod_api::{
-    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
-    RecipeBookCategory, ServerTickPhase, WorldPhase,
+    self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    NativeLifecycleContext, NativePlayerFood, NativeServerPlayer, RecipeBookCategory,
+    ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -7098,13 +7099,21 @@ impl Game<'_> {
     /// `Entity.getId`, None for a player (`native_acting_player` says who).
     /// It runs inside the entity's tick: a mob's world borrows the game
     /// there, so the game is read-only, and it does not hold the ticking
-    /// mobs, nor the player's effects. Server-side. API 56.
+    /// mobs, nor the player's effects. `holder` identifies the holder; Host
+    /// reads of a mob holder are unavailable while it is ticking. Queued
+    /// changes apply after the hook; clearing `keep` ends the effect.
+    /// Server-side. API 56.
     pub(super) fn native_apply_effect_tick(
         &self,
         effect: &str,
         dimension: &str,
         entity: Option<i32>,
         amplifier: i32,
+        holder: LivingRef,
+        health: f32,
+        max_health: f32,
+        food: Option<NativePlayerFood>,
+        changes: &mut Vec<EffectTickChange>,
         keep: &mut bool,
     ) {
         mod_api::dispatch_apply_effect_tick(
@@ -7114,6 +7123,11 @@ impl Game<'_> {
             dimension,
             entity,
             amplifier,
+            holder,
+            health,
+            max_health,
+            food,
+            changes,
             keep,
         );
     }

@@ -815,7 +815,10 @@ pub trait Hooks: Send + Sync {
     /// `Entity.getId`, None for a player (`native_acting_player` says who).
     /// It runs inside the entity's tick: a mob's world borrows the game
     /// there, so the game is read-only, and it does not hold the ticking
-    /// mobs, nor the player's effects. Server-side. API 56.
+    /// mobs, nor the player's effects. `holder` identifies the holder; Host
+    /// reads of a mob holder are unavailable while it is ticking. Queued
+    /// changes apply after the hook; clearing `keep` ends the effect.
+    /// Server-side. API 56.
     fn apply_effect_tick(&self, host: &dyn Host, event: &mut ApplyEffectTickEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -7021,6 +7024,11 @@ pub struct ApplyEffectTickEvent<'a> {
     pub dimension: &'a str,
     pub entity: Option<i32>,
     pub amplifier: i32,
+    pub holder: LivingRef,
+    pub health: f32,
+    pub max_health: f32,
+    pub food: Option<NativePlayerFood>,
+    pub(super) changes: &'a mut Vec<EffectTickChange>,
     pub keep: bool,
 }
 pub fn dispatch_apply_effect_tick(
@@ -7030,6 +7038,11 @@ pub fn dispatch_apply_effect_tick(
     dimension: &str,
     entity: Option<i32>,
     amplifier: i32,
+    holder: LivingRef,
+    health: f32,
+    max_health: f32,
+    food: Option<NativePlayerFood>,
+    changes: &mut Vec<EffectTickChange>,
     keep: &mut bool,
 ) {
     let mut event = ApplyEffectTickEvent {
@@ -7037,6 +7050,11 @@ pub fn dispatch_apply_effect_tick(
         dimension,
         entity,
         amplifier,
+        holder,
+        health,
+        max_health,
+        food,
+        changes,
         keep: *keep,
     };
     for mod_hook in super::entered(mods, "apply_effect_tick") {

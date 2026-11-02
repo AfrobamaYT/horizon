@@ -18,7 +18,8 @@ use horizon_client::{
     hud_layout, hud_overlays, inventory_effects,
     items::ItemStack,
     mesher::Vertex,
-    mobs::{Damage, DamageKind, Who},
+    mobs::{Damage, DamageKind, Mob, Who},
+    mod_api::{EffectTickChange, EntityRef, LivingRef, NativePlayerFood},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
     text::Text,
@@ -796,6 +797,10 @@ impl Game<'_> {
             }
             action => action,
         };
+        if let EffectAction::Hurt(source, amount) = action {
+            self.apply_effect_damage(source, amount);
+            return;
+        }
         let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {
@@ -810,16 +815,7 @@ impl Game<'_> {
                     let _ = p.set_health((h + amount).min(max), false);
                 }
             }
-            EffectAction::Hurt(source, amount) => {
-                let mut canceled = false;
-                if !creative
-                    && let Some(id) = self.motion.health.damage.id(source)
-                    && let Ok(o) = p.hurt_blocking(&self.motion.health, rules, id, amount, None)
-                {
-                    canceled = o.canceled;
-                }
-                self.combat.forget_noted(canceled);
-            }
+            EffectAction::Hurt(_, _) => unreachable!(),
             EffectAction::Poison => {
                 if !creative
                     && p.health.health() > 1.0
@@ -839,6 +835,24 @@ impl Game<'_> {
             }
         }
     }
+    fn apply_effect_damage(&mut self, source: &str, amount: f32) {
+        let mut canceled = false;
+        if !self.creative
+            && let Some(id) = self.motion.health.damage.id(source)
+            && let Some(player) = self.player.as_mut()
+            && let Ok(outcome) = player.hurt_blocking(
+                &self.motion.health,
+                self.world.health_rules,
+                id,
+                amount,
+                None,
+            )
+        {
+            canceled = outcome.canceled;
+        }
+        self.combat.forget_noted(canceled);
+    }
+
     /// The local player's effects (`tick_mob_effects`), then the potions
     /// in flight, which a server without a local player still has. A frozen
     /// tick (`/tick freeze`) leaves the potions where they are
@@ -891,10 +905,54 @@ impl Game<'_> {
             &mut |e, t| {
                 if !brewing::is_mod_effect(e.id) {
                     self.omen_tick(e)
-                } else if self.mod_effect_tick(e.id, None, t, e.amplifier) {
-                    OmenTick::Continue
                 } else {
-                    OmenTick::Remove
+                    let Some(player) = self.player.as_mut() else {
+                        return OmenTick::Remove;
+                    };
+                    let Some(epoch) = self.native_lifecycle.epoch() else {
+                        return OmenTick::Continue;
+                    };
+                    let holder = LivingRef::new(EntityRef::new(epoch, player.entity_id as u32));
+                    let health = player.health.health();
+                    let max_health =
+                        player.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
+                    let food = &player.health.food;
+                    let food = Some(NativePlayerFood {
+                        level: food.food,
+                        saturation: food.saturation,
+                        exhaustion: food.exhaustion,
+                    });
+                    let (keep, changes) = self.mod_effect_tick(
+                        e.id,
+                        None,
+                        t,
+                        e.amplifier,
+                        holder,
+                        health,
+                        max_health,
+                        food,
+                    );
+                    for change in changes {
+                        match change {
+                            EffectTickChange::Heal(amount) => {
+                                self.apply_effect_action(EffectAction::Heal(amount))
+                            }
+                            EffectTickChange::Hurt(source, amount) => {
+                                self.apply_effect_damage(&source, amount)
+                            }
+                            EffectTickChange::AddExhaustion(amount) => {
+                                self.apply_effect_action(EffectAction::Exhaust(amount))
+                            }
+                            EffectTickChange::Eat(nutrition, saturation) => {
+                                self.apply_effect_action(EffectAction::Eat(nutrition, saturation))
+                            }
+                        }
+                    }
+                    if keep {
+                        OmenTick::Continue
+                    } else {
+                        OmenTick::Remove
+                    }
                 }
             },
             absorption_empty,
@@ -979,14 +1037,30 @@ impl Game<'_> {
         entity: Option<i32>,
         tick_count: i32,
         amplifier: i32,
-    ) -> bool {
+        holder: LivingRef,
+        health: f32,
+        max_health: f32,
+        food: Option<NativePlayerFood>,
+    ) -> (bool, Vec<EffectTickChange>) {
         let mut apply = false;
         self.native_should_apply_effect_tick_this_tick(effect, tick_count, amplifier, &mut apply);
         let mut keep = true;
+        let mut changes = Vec::new();
         if apply {
-            self.native_apply_effect_tick(effect, self.dim.id(), entity, amplifier, &mut keep);
+            self.native_apply_effect_tick(
+                effect,
+                self.dim.id(),
+                entity,
+                amplifier,
+                holder,
+                health,
+                max_health,
+                food,
+                &mut changes,
+                &mut keep,
+            );
         }
-        keep
+        (keep, changes)
     }
     /// The effects' attribute modifiers, armor protection and status flags
     /// on `self.player`.
@@ -1819,8 +1893,39 @@ impl Game<'_> {
 
 /// A mob's content mod effects tick in its own tick (`ai::tick_effects`).
 impl horizon_client::mobs::ModEffectTicks for Game<'_> {
-    fn tick_mod_effect(&self, effect: &str, mob: u32, tick_count: i32, amplifier: i32) -> bool {
-        self.mod_effect_tick(effect, Some(mob as i32), tick_count, amplifier)
+    fn tick_mod_effect(
+        &self,
+        effect: &str,
+        mob: &mut Mob,
+        tick_count: i32,
+        amplifier: i32,
+    ) -> bool {
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return true;
+        };
+        let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
+        let (keep, changes) = self.mod_effect_tick(
+            effect,
+            Some(mob.id as i32),
+            tick_count,
+            amplifier,
+            holder,
+            mob.health,
+            mob.attrs.max_health,
+            None,
+        );
+        for change in changes {
+            match change {
+                EffectTickChange::Heal(amount) => mob.heal(amount),
+                EffectTickChange::Hurt(source, amount)
+                    if self.motion.health.damage.id(&source).is_some() =>
+                {
+                    mob.damage(amount, Damage::of(Self::damage_kind(&source)));
+                }
+                _ => {}
+            }
+        }
+        keep
     }
 }
 
