@@ -4531,6 +4531,22 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
+    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
+    /// block; set `feature` to another key to grow that one. Server-side.
+    /// Mods can use `level.random()` to access the growth random source.
+    /// @API:block_grow_feature@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_grow_feature(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        event: &mut BlockGrowFeatureEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -4605,6 +4621,14 @@ pub trait Hooks: Send + Sync {
     ///
     /// Every mod gets `event.display_name` in order and may add, change or remove display_name.
     fn player_tab_list_name_format(&self, event: &mut PlayerTabListNameFormatEvent<'_>) {
+        let _ = event;
+    }
+    /// Declare categories for custom recipe types, with registered item icons.
+    /// Asked lazily once per recipe table by `native_recipe_book_category`.
+    /// Invalid declarations are logged and skipped; the first valid category
+    /// owns its id and type. This does not yet add tabs or book displays.
+    fn recipe_book_categories(&self, host: &dyn Host, event: &mut RecipeBookCategoriesEvent<'_>) {
+        let _ = host;
         let _ = event;
     }
     /// Additional first-person hand and item pose, including empty arms and maps.
@@ -14861,6 +14885,36 @@ pub fn dispatch_arrow_nock(
         }
     }
 }
+/// What [`Hooks::block_grow_feature`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockGrowFeatureEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub feature: &'a mut Option<String>,
+}
+pub fn dispatch_block_grow_feature(
+    level: &mut dyn LevelRandomHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    feature: &mut Option<String>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockGrowFeatureEvent {
+        dimension,
+        pos,
+        feature,
+    };
+    for mod_hook in super::entered(mods, "block_grow_feature") {
+        if matches!(mod_hook.block_grow_feature(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -15063,6 +15117,21 @@ pub fn dispatch_player_tab_list_name_format(
     };
     for mod_hook in super::entered(mods, "player_tab_list_name_format") {
         mod_hook.player_tab_list_name_format(&mut event);
+    }
+}
+/// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RecipeBookCategoriesEvent<'a> {
+    pub categories: &'a mut Vec<RecipeBookCategory>,
+}
+pub fn dispatch_recipe_book_categories(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    categories: &mut Vec<RecipeBookCategory>,
+) {
+    let mut event = RecipeBookCategoriesEvent { categories };
+    for mod_hook in super::entered(mods, "recipe_book_categories") {
+        mod_hook.recipe_book_categories(host, &mut event);
     }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

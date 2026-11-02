@@ -537,4 +537,28 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn player(&self, uuid: u128) -> Option<PlayerRef> {
+        self.native_player_ref(uuid)
+    }
+    fn player_game_mode(&self, player: PlayerRef) -> Option<i32> {
+        self.native_player_game_mode(player)
+    }
+    fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
+        self.native_player_is_creative(player)
+    }
+    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
+        self.native_player_is_spectator(player)
+    }
+    fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
+        self.native_player_may_build(player)
+    }
+    fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+        self.native_player_food(player)
+    }
+    fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+        self.native_player_abilities(player)
+    }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
+    }
 }
