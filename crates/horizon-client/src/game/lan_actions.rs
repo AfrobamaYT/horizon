@@ -3862,12 +3862,10 @@ impl Game<'_> {
                 let attacker = if horizon_client::mod_api::mods().is_empty() {
                     None
                 } else {
-                    let dimension = host.hub.guest(conn).map(|g| g.dimension.clone());
                     self.guest_combat
                         .get_mut(&conn)
                         .and_then(|c| c.take_hurt_by_player(now))
-                        .zip(dimension)
-                        .and_then(|(c, dimension)| c.uuid(host, &dimension))
+                        .and_then(|c| c.uuid(host))
                 };
                 let reward = self.living_experience_drop(
                     id as u32,

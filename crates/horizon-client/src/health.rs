@@ -174,6 +174,8 @@ pub enum HealthEvent {
         source: DamageTypeId,
     },
     Criterion {
+        /// The hit's damage type, for the responsible player of an accepted hit.
+        source: DamageTypeId,
         original: f32,
         amount: f32,
         blocked: bool,
@@ -897,6 +899,7 @@ impl HurtWorld for Environment<'_> {
         blocked: bool,
     ) -> io::Result<()> {
         self.event(HealthEvent::Criterion {
+            source: self.source.type_id(),
             original,
             amount,
             blocked,
