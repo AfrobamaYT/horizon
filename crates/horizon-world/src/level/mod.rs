@@ -344,8 +344,12 @@ pub trait LevelAccess {
         true
     }
     /// Select or cancel the feature a block is about to grow into.
-    fn block_grow_feature(&self, _pos: BlockPos, _feature: &mut Option<String>) -> bool {
-        true
+    fn block_grow_feature<'a>(
+        &self,
+        _pos: BlockPos,
+        feature: &'a str,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        Some(std::borrow::Cow::Borrowed(feature))
     }
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true

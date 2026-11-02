@@ -309,12 +309,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `BlockGrowFeatureEvent`: the feature `pos` grows into once mods may
     /// cancel or replace `feature`, if it is installed.
-    pub(crate) fn grow_feature_event(&self, pos: BlockPos, feature: &str) -> Option<String> {
-        let mut feature = Some(feature.to_owned());
-        if !self.level.block_grow_feature(pos, &mut feature) {
-            return None;
-        }
-        feature.filter(|name| self.feature_exists(name))
+    pub(crate) fn grow_feature_event<'a>(
+        &self,
+        pos: BlockPos,
+        feature: &'a str,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        self.level
+            .block_grow_feature(pos, feature)
+            .filter(|name| self.feature_exists(name))
     }
 
     /// `TreeGrower.hasFlowers`: a flower within 2 blocks horizontally, 1 vertically.
