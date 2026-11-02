@@ -2214,9 +2214,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   progress stage 0 through 9.
 - **`native_block_lock_check(player, name, pos, locked)`**: a guest checks the lock on the container at `pos`;
   `locked` starts with vanilla's result and may be changed. The guest's state is not swapped in.
-- **`native_block_tool_modification(stack, pos, face, simulated, final_state, cancel)`**: a tool transforms a block on
-  either side. `final_state` starts as the proposed state ID; replace it or set it to `None` to suppress the change.
-  Set `cancel` to suppress it regardless of `final_state`. Do not modify the level when `simulated` is true.
+- **`native_block_tool_modification(stack, tool, final_state, cancel)`**: a tool considers an action on either side.
+  `tool` describes the player, hand, click and ability. `final_state` starts as the proposed state ID, or `None` when
+  vanilla has no result; replace it or set it to `None`. Set `cancel` to suppress the action regardless of the state.
+  Do not modify the level when `tool.simulated` is true; current calls pass false.
 - **`native_block_fade(dimension, pos, from, to, cancel)`** (on `GameLevel`): ice or snow melts, or coral dies. `from`
   and `to` are block state IDs. Set `cancel` to keep the old block.
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or

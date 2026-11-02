@@ -12645,32 +12645,25 @@ impl Game<'_> {
             .transformers()
             .apply(self.items(), registry, &id, face_name, &around)
             .and_then(|(_, t, state)| Some((registry.resolve(&state).ok()?, t)));
-        if crate::mod_api::mods().is_empty() {
-            let (new, t) = vanilla?;
-            return Some((
+        let result = |new, t: &horizon_client::block_transform::Transform| {
+            (
                 new,
                 t.sound.clone(),
                 t.loot.clone(),
                 t.damage,
                 t.particle.clone(),
-            ));
+            )
+        };
+        if crate::mod_api::mods().is_empty() {
+            let (new, t) = vanilla?;
+            return Some(result(new, t));
         }
         use crate::mod_api::ToolAbility::*;
         let actions: &[_] = match id.as_str() {
             "minecraft:axe" => &[AxeStrip, AxeScrape, AxeWaxOff],
             "minecraft:shovel" => &[ShovelFlatten],
             "minecraft:hoe" => &[HoeTill],
-            _ => {
-                return vanilla.map(|(new, t)| {
-                    (
-                        new,
-                        t.sound.clone(),
-                        t.loot.clone(),
-                        t.damage,
-                        t.particle.clone(),
-                    )
-                });
-            }
+            _ => return vanilla.map(|(new, t)| result(new, t)),
         };
         let vanilla_action = vanilla.as_ref().map(|(_, t)| match t.particle.as_str() {
             "scrape" => AxeScrape,
@@ -12701,23 +12694,17 @@ impl Game<'_> {
             if let Some(new) = state {
                 if matches_vanilla {
                     let (_, t) = vanilla?;
-                    return Some((
-                        new,
-                        t.sound.clone(),
-                        t.loot.clone(),
-                        t.damage,
-                        t.particle.clone(),
-                    ));
+                    return Some(result(new, t));
                 }
-                let sound = match ability {
-                    AxeStrip => "minecraft:item.axe.strip",
-                    AxeScrape => "minecraft:item.axe.scrape",
-                    AxeWaxOff => "minecraft:item.axe.wax_off",
-                    ShovelFlatten => "minecraft:item.shovel.flatten",
-                    HoeTill => "minecraft:item.hoe.till",
+                let (sound, particle) = match ability {
+                    AxeStrip => ("minecraft:item.axe.strip", "none"),
+                    AxeScrape => ("minecraft:item.axe.scrape", "scrape"),
+                    AxeWaxOff => ("minecraft:item.axe.wax_off", "wax_off"),
+                    ShovelFlatten => ("minecraft:item.shovel.flatten", "none"),
+                    HoeTill => ("minecraft:item.hoe.till", "none"),
                     ShovelDouse => unreachable!(),
                 };
-                return Some((new, sound.to_owned(), None, 1, "none".to_owned()));
+                return Some((new, sound.to_owned(), None, 1, particle.to_owned()));
             }
         }
         None
