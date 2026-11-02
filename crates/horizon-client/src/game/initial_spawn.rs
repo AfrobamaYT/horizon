@@ -111,6 +111,7 @@ impl Game<'_> {
             self.native_create_spawn_position(&mut position, &mut rotation, &mut cancel);
             if cancel {
                 self.spawn_hook_cancelled = true;
+                self.level.world_spawn = Some(position);
                 self.level.world_spawn_angle = rotation;
                 return Ok(Some(position));
             }
