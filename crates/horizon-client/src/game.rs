@@ -95,6 +95,7 @@ mod composter;
 mod consume;
 mod control;
 mod copper_golems;
+mod cosmetics;
 mod creaking;
 mod creative_hotbar;
 mod creatures;
@@ -213,6 +214,7 @@ mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
 mod native_lifecycle;
+mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
 mod native_mobs;
@@ -1175,12 +1177,12 @@ impl LevelAccess for GameLevel<'_> {
     fn block_grow_feature<'a>(
         &mut self,
         pos: BlockPos,
-        feature: &'a str,
+        feature: Option<&'a str>,
     ) -> Option<std::borrow::Cow<'a, str>> {
         if !self.native_authoritative || crate::mod_api::mods().is_empty() {
-            return Some(std::borrow::Cow::Borrowed(feature));
+            return feature.map(std::borrow::Cow::Borrowed);
         }
-        let mut feature = Some(feature.to_owned());
+        let mut feature = feature.map(str::to_owned);
         let mut cancel = false;
         self.native_block_grow_feature(self.dimension, pos, &mut feature, &mut cancel);
         feature.filter(|_| !cancel).map(std::borrow::Cow::Owned)
@@ -2791,6 +2793,8 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
     skin_slots: horizon_client::skins::SkinSlots,
+    /// Cosmetics on players (game/cosmetics.rs), off by default.
+    cosmetics: cosmetics::Cosmetics,
     /// Atlas trim slots in use: (sprite name, slot), least recently drawn first.
     trim_slots: Vec<(String, usize)>,
     cart_models: minecarts::CartModels,
@@ -9586,6 +9590,15 @@ impl Game<'_> {
             maps: Some(&maps),
         };
         let env = Env {
+            player: self
+                .lan_acting_uuid
+                .or_else(|| self.remote.as_ref().map(|r| r.profile())),
+            player_entity_id: Some(self.own_entity_id()),
+            side: if self.serving.is_some() {
+                horizon_client::menu::LogicalSide::Server
+            } else {
+                horizon_client::menu::LogicalSide::Client
+            },
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -11882,6 +11895,7 @@ impl Game<'_> {
         self.score = Default::default();
         self.fns = Default::default();
         self.world_tables = self.build_world_tables();
+        self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
         // The registries a preload or an earlier world read are not this
@@ -13381,6 +13395,7 @@ impl Game<'_> {
                 self.remote.is_none(),
                 &mut next_float,
                 Some(self.border.geometry()),
+                &self.res.motion().fluids,
             )
         });
         self.orbs = orbs;
@@ -18296,6 +18311,8 @@ impl<'a> Game<'a> {
         audio: Audio,
         prepared: Option<GameCpuResources>,
     ) -> Result<Self> {
+        // A scoped hook on this thread asks this game's parts.
+        horizon_client::mod_api::mark_game_thread();
         let root = options.resources.clone();
         let registry = pack.assets.registry;
         // Until a world is opened the streamer is idle.
@@ -18647,6 +18664,7 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
+            cosmetics: Default::default(),
             trim_slots: Vec::new(),
             cart_models: prepared.cart_models,
             riding: None,
@@ -19201,6 +19219,21 @@ impl Game<'_> {
             data_maps,
         })
     }
+    /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
+    /// that attach parts to a block or item it doesn't have are an error.
+    pub(super) fn resolve_parts(&self) -> Result<()> {
+        let items = self.items();
+        let registry = self.pack.assets.registry;
+        horizon_client::mod_api::resolve_parts(
+            &items.block_tags,
+            &items.item_tags,
+            horizon_client::mod_api::KnownIds {
+                block: &|id| registry.default_state(id).is_some(),
+                item: &|id| items.items.contains_key(id),
+            },
+        )
+        .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
+    }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
     pub(super) fn reload_world_tables(&mut self) {
@@ -19208,6 +19241,9 @@ impl Game<'_> {
             return;
         }
         self.world_tables = self.build_world_tables();
+        if let Err(e) = self.resolve_parts() {
+            log::warn!("Horizon: {e}");
+        }
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.

@@ -303,8 +303,9 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 3] = [
+const HANDLES: [(&str, &str); 4] = [
     ("entity", "EntityRef"),
+    ("living", "LivingRef"),
     ("level", "LevelRef"),
     ("player", "PlayerRef"),
 ];
@@ -792,6 +793,7 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
         let mod_item = fresh_name("mod_hook", &mut used);
         let part_list = fresh_name("parts", &mut used);
         let part_item = fresh_name("part", &mut used);
+        let part_table = fresh_name("part_table", &mut used);
         let replacement = fresh_name("replacement", &mut used);
         let contract = api["contract"].as_str().ok_or("contract missing")?;
         let out = api.get("out").and_then(|v| v.as_str());
@@ -867,7 +869,7 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
-                Some((part_trait, format!("super::parts().{table}(|| {id})")))
+                Some((part_trait, format!("{table}(|| {id})")))
             }
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
@@ -1022,7 +1024,9 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     call(&part_item, "break 'hook"),
                 );
                 (
-                    format!("let {part_list} = {lookup};"),
+                    format!(
+                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup};"
+                    ),
                     if matches!(contract, "cancel" | "replace") {
                         format!("'hook: {{ {calls} }}")
                     } else {
@@ -1261,6 +1265,9 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) struct StackedOnOther<'a> {
+            pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
+        }
         pub(super) struct Corners;
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
         pub(super) struct ItemEnergyBuffer;
@@ -1372,7 +1379,7 @@ mod tests {
     struct Registrar;
     /// No parts: the scoped dispatch calls the mods only.
     struct Parts;
-    fn parts() -> Parts {
+    fn parts(_: &'static str) -> Parts {
         Parts
     }
     impl Parts {
