@@ -19202,6 +19202,7 @@ impl Game<'_> {
         if let Err(e) = self.resolve_parts() {
             log::warn!("Horizon: {e}");
         }
+        self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
