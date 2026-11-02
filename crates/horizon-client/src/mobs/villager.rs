@@ -186,7 +186,7 @@ pub fn sleep_pose(m: &Mob) -> Option<(f32, [f32; 2])> {
 /// hurt or without its bed wakes up (`LivingEntity.hurtServer`,
 /// `LivingEntity.checkBedExists`), and lies the way its bed faces
 /// (`getBedOrientation`). The brain does the rest.
-pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>, sleep_checked: bool) {
     if m.extra.ints[0] > 0 {
         m.extra.ints[0] -= 1;
     }
@@ -198,11 +198,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if let Some(p) = bed {
             m.extra.ints[1] = bed_facing_code(w.prop(p[0], p[1], p[2], "facing"));
         }
-        let may_continue = ext_mut(m)
-            .may_continue_sleeping
-            .take()
-            .unwrap_or(bed.is_some());
-        if m.hurt_time > 0 || !may_continue {
+        if m.hurt_time > 0 || (!sleep_checked && bed.is_none()) {
             stop_sleeping(m, w, events);
             super::villager_brain::woken(m, w.game_time);
         }

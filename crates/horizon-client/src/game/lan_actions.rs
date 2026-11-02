@@ -3937,9 +3937,13 @@ impl Game<'_> {
             let block = self.world.block(head[0], head[1], head[2]);
             let gone = g.dead || g.health <= 0.0;
             let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
-            let problem = self.sleep_problem(bed_exists, true);
-            let mut may_continue = None;
-            if !gone {
+            let modded = !horizon_client::mod_api::mods().is_empty();
+            let mut keep_sleeping = !gone;
+            if !modded {
+                keep_sleeping &= self.sleep_problem(bed_exists, true).is_none();
+            } else if keep_sleeping && bed_exists {
+                let problem = self.sleep_problem(true, true);
+                let mut may_continue = None;
                 self.native_can_continue_sleeping(
                     g.uuid,
                     &g.name,
@@ -3948,8 +3952,22 @@ impl Game<'_> {
                     problem,
                     &mut may_continue,
                 );
+                keep_sleeping = may_continue.unwrap_or(problem.is_none());
             }
-            if gone || !may_continue.unwrap_or(problem.is_none()) {
+            if modded && keep_sleeping {
+                let problem = self.sleep_problem(bed_exists, false);
+                let mut may_continue = None;
+                self.native_can_continue_sleeping(
+                    g.uuid,
+                    &g.name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
+                keep_sleeping = may_continue.unwrap_or(problem.is_none());
+            }
+            if !keep_sleeping {
                 self.wake_guest(host, gi);
             } else {
                 // LivingEntity.tick: a sleeper's xRot is 0.
