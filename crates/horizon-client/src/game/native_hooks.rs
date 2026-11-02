@@ -1009,7 +1009,16 @@ impl GameLevel<'_> {
         new_state: &mut BlockStateId,
         cancel: &mut bool,
     ) {
-        let _ = (dimension, pos, liquid_pos, state, new_state, cancel);
+        mod_api::dispatch_fluid_place_block(
+            self,
+            mod_api::mods(),
+            dimension,
+            pos,
+            liquid_pos,
+            state,
+            new_state,
+            cancel,
+        );
     }
 
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
@@ -5960,7 +5969,7 @@ impl Game<'_> {
         snapshots: &[ReplacedBlockSnapshot],
         cancel: &mut bool,
     ) {
-        let _ = (state, snapshots, cancel);
+        mod_api::dispatch_entity_multi_place(self, mod_api::mods(), state, snapshots, cancel);
     }
 
     /// A tool is about to transform a block. Cancel or replace the final state;
@@ -5975,7 +5984,16 @@ impl Game<'_> {
         final_state: &mut Option<BlockStateId>,
         cancel: &mut bool,
     ) {
-        let _ = (stack, pos, face, simulated, final_state, cancel);
+        mod_api::dispatch_block_tool_modification(
+            self,
+            mod_api::mods(),
+            stack,
+            pos,
+            face,
+            simulated,
+            final_state,
+            cancel,
+        );
     }
 
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
