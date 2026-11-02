@@ -7492,9 +7492,22 @@ impl Game<'_> {
                     .play("minecraft:item.honeycomb.wax_on", Some(at), 1.0, 1.0);
             }
             waxes
-        } else if let Some((_, sound, _, _, particle)) =
+        } else if let Some((new, sound, _, _, particle)) =
             self.block_transform(stack, hit.pos, hit.face)
         {
+            let mut final_state = Some(new);
+            let mut cancel = false;
+            self.native_block_tool_modification(
+                stack,
+                hit.pos,
+                hit.face,
+                false,
+                &mut final_state,
+                &mut cancel,
+            );
+            if cancel || final_state.is_none() {
+                return false;
+            }
             self.transform_particle(&particle, hit.pos);
             self.audio.play(&sound, Some(at), 1.0, 1.0);
             true
