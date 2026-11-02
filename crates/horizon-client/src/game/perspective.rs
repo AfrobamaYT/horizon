@@ -1054,9 +1054,10 @@ impl Game<'_> {
     /// The entity id the local player has on its server: the one it was
     /// given at login on a client, else the acting player's own.
     pub(super) fn own_entity_id(&self) -> i32 {
-        self.remote
-            .as_ref()
-            .map_or_else(|| self.player.as_ref().map_or(0, |p| p.entity_id), |r| r.entity_id)
+        self.remote.as_ref().map_or_else(
+            || self.player.as_ref().map_or(0, |p| p.entity_id),
+            |r| r.entity_id,
+        )
     }
     /// `ArrowLayer` and `BeeStingerLayer` (`StuckInBodyLayer`) for a player:
     /// the arrows and bee stingers stuck in the body, placed from the entity

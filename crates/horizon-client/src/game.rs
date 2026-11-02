@@ -837,6 +837,26 @@ impl Screen {
         }
     }
 }
+fn vanilla_tool_state(
+    transformer: &str,
+    particle: &str,
+    ability: crate::mod_api::ToolAbility,
+    state: BlockStateId,
+) -> Option<BlockStateId> {
+    use crate::mod_api::ToolAbility::*;
+    let action = match transformer {
+        "minecraft:axe" => match particle {
+            "scrape" => AxeScrape,
+            "wax_off" => AxeWaxOff,
+            _ => AxeStrip,
+        },
+        "minecraft:shovel" => ShovelFlatten,
+        "minecraft:hoe" => HoeTill,
+        _ => unreachable!(),
+    };
+    (action == ability).then_some(state)
+}
+
 struct Mining {
     pos: [i32; 3],
     progress: f32,
@@ -12676,24 +12696,11 @@ impl Game<'_> {
             "minecraft:hoe" => &[HoeTill],
             _ => return vanilla.map(|(new, t)| result(new, t)),
         };
-        let vanilla_action = vanilla.as_ref().map(|(_, t)| {
-            if id == "minecraft:axe" {
-                match t.particle.as_str() {
-                    "scrape" => AxeScrape,
-                    "wax_off" => AxeWaxOff,
-                    _ => AxeStrip,
-                }
-            } else {
-                actions[0]
-            }
-        });
         for &ability in actions {
-            let matches_vanilla = vanilla_action == Some(ability);
-            let mut state = if matches_vanilla {
-                vanilla.as_ref().map(|(state, _)| *state)
-            } else {
-                None
-            };
+            let mut state = vanilla
+                .as_ref()
+                .and_then(|(state, t)| vanilla_tool_state(&id, &t.particle, ability, *state));
+            let matches_vanilla = state.is_some();
             let mut cancel = false;
             let tool = crate::mod_api::ToolUse {
                 player: self.player.is_some().then(|| self.own_entity_id() as u32),
@@ -21359,6 +21366,25 @@ fn debug_crosshair_drawn(
 mod tests {
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    fn tool_transform_keeps_hoe_and_shovel_results_with_scrape_particle() {
+        use crate::mod_api::ToolAbility::{AxeScrape, HoeTill, ShovelFlatten};
+        let result = BlockStateId(42);
+        for (transformer, ability) in [
+            ("minecraft:hoe", HoeTill),
+            ("minecraft:shovel", ShovelFlatten),
+        ] {
+            assert_eq!(
+                vanilla_tool_state(transformer, "scrape", ability, result),
+                Some(result)
+            );
+            assert_eq!(
+                vanilla_tool_state(transformer, "scrape", AxeScrape, result),
+                None
+            );
+        }
+    }
 
     /// `MinecraftServer.computeNextAutosaveInterval`: three hundred seconds of
     /// ticks at the rate the server runs at, never fewer than a hundred.
