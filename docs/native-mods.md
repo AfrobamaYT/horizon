@@ -2380,6 +2380,7 @@ a dimension.
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
 (`entity`, `level`) also becomes a method of that handle.
