@@ -4258,6 +4258,17 @@ impl Game<'_> {
                 }
                 3 => {
                     let mode = p.param as i32;
+                    if !horizon_client::mod_api::mods().is_empty()
+                        && let Some((uuid, current)) =
+                            self.remote.as_ref().map(|r| (r.profile, r.game_mode))
+                    {
+                        self.native_client_player_change_game_type(
+                            self.own_entity_id(),
+                            uuid,
+                            current,
+                            mode,
+                        );
+                    }
                     self.set_mode_id(mode);
                     if let Some(r) = self.remote.as_mut() {
                         r.game_mode = mode;
@@ -4489,12 +4500,7 @@ impl Game<'_> {
             C::SystemChat(p) => {
                 // The component as sent, translated in the client's own
                 // language. ChatListener.handleOverlay for the action bar.
-                let mut text = remote_text(&p.content);
-                let mut cancel = false;
-                self.native_client_chat_received(&mut text, p.overlay, 0, None, &mut cancel);
-                if cancel {
-                    return Ok(());
-                }
+                let text = remote_text(&p.content);
                 if p.overlay {
                     self.say_system_queued(&text);
                     self.titles.set_overlay(text, false);
@@ -4610,40 +4616,15 @@ impl Game<'_> {
                     }
                     return Ok(());
                 }
-                let mut line = line;
-                let mut cancel = false;
-                self.native_client_chat_received(
-                    &mut line,
-                    false,
-                    p.sender,
-                    Some(&p.chat_type),
-                    &mut cancel,
-                );
-                if cancel {
-                    if let Some(signature) = &signature {
-                        self.mark_message_processed(signature, false);
-                    }
-                } else {
-                    self.handle_player_chat(line, signature, trust, narration);
-                }
+                self.handle_player_chat(line, signature, trust, narration);
             }
             C::DisguisedChat(p) => {
                 let content = horizon_client::scoreboard::tag_to_json(&p.message);
                 let narration = self
                     .decorate_chat(&p.chat_type, &content, Decoration::Narration)
                     .plain();
-                let mut line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
-                let mut cancel = false;
-                self.native_client_chat_received(
-                    &mut line,
-                    false,
-                    0,
-                    Some(&p.chat_type),
-                    &mut cancel,
-                );
-                if !cancel {
-                    self.handle_player_chat(line, None, ChatTrust::Secure, narration);
-                }
+                let line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
+                self.handle_player_chat(line, None, ChatTrust::Secure, narration);
             }
             C::DeleteChat(p) => self.handle_delete_chat(&p.signature)?,
             C::PlayerInfoUpdate(p) => {
@@ -4682,19 +4663,7 @@ impl Game<'_> {
                             }
                         }
                     }
-                }
-                for e in p.entries {
-                    if let Some(mode) = e.game_mode
-                        && !horizon_client::mod_api::mods().is_empty()
-                        && let Some(info) = self
-                            .remote
-                            .as_ref()
-                            .and_then(|r| r.tab_players.get(&e.uuid))
-                            .cloned()
-                    {
-                        self.native_client_player_change_game_type(&info, info.game_mode, mode);
-                    }
-                    if let Some(r) = self.remote.as_mut() {
+                    for e in p.entries {
                         if let Some(t) = r.tab_players.get_mut(&e.uuid) {
                             if let Some(mode) = e.game_mode {
                                 t.game_mode = mode;
@@ -8870,13 +8839,6 @@ impl Game<'_> {
         if message.is_empty() || !self.chat_abilities().allows(message) {
             return;
         }
-        let mut outgoing = message.to_owned();
-        let mut cancel = false;
-        self.native_client_chat(message, &mut outgoing, &mut cancel);
-        if cancel {
-            return;
-        }
-        let message = outgoing.as_str();
         if let Some(command) = message.strip_prefix('/') {
             // The player's own RAM limit, which no server has a say in.
             if !self.ram_limit_command(command) {
@@ -8884,6 +8846,25 @@ impl Game<'_> {
             }
         } else {
             self.send_signed_chat(message);
+        }
+    }
+    /// ChatScreen.handleChatInput fires the client event for chat, not commands.
+    pub(super) fn send_chat_from_screen(&mut self, message: &str) {
+        if message.starts_with('/') || horizon_client::mod_api::mods().is_empty() {
+            self.send_chat(message);
+        } else if let Some(uuid) = self.remote.as_ref().map(|r| r.profile) {
+            let mut outgoing = message.to_owned();
+            let mut cancel = false;
+            self.native_client_chat(
+                self.own_entity_id(),
+                uuid,
+                message,
+                &mut outgoing,
+                &mut cancel,
+            );
+            if !cancel && !outgoing.is_empty() {
+                self.send_signed_chat(&outgoing);
+            }
         }
     }
     /// MultiPlayerGameMode.dropItem (key.drop): predict the removal, then send

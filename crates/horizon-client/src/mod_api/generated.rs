@@ -4547,6 +4547,49 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
+    /// `original_message` is immutable; change `message` or set `cancel` to
+    /// prevent sending. @API:client_chat@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn client_chat(&self, host: &mut dyn Host, event: &mut ClientChatEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
+    /// @API:client_pause_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn client_pause_change_pre(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPauseChangePreEvent,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.
+    /// @API:client_pause_change@.
+    fn client_pause_change_post(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPauseChangePostEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player's game type change.
+    /// @API:client_player_change_game_type@.
+    fn client_player_change_game_type(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerChangeGameTypeEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -14913,6 +14956,105 @@ pub fn dispatch_block_grow_feature(
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::client_chat`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientChatEvent<'a> {
+    pub player_id: i32,
+    pub player_uuid: u128,
+    pub original_message: &'a str,
+    pub message: &'a mut String,
+}
+pub fn dispatch_client_chat(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: i32,
+    player_uuid: u128,
+    original_message: &str,
+    message: &mut String,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ClientChatEvent {
+        player_id,
+        player_uuid,
+        original_message,
+        message,
+    };
+    for mod_hook in super::entered(mods, "client_chat") {
+        if matches!(mod_hook.client_chat(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::client_pause_change_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPauseChangePreEvent {
+    pub paused: bool,
+}
+pub fn dispatch_client_pause_change_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    paused: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ClientPauseChangePreEvent { paused };
+    for mod_hook in super::entered(mods, "client_pause_change_pre") {
+        if matches!(
+            mod_hook.client_pause_change_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::client_pause_change_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPauseChangePostEvent {
+    pub paused: bool,
+}
+pub fn dispatch_client_pause_change_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    paused: bool,
+) {
+    let mut event = ClientPauseChangePostEvent { paused };
+    for mod_hook in super::entered(mods, "client_pause_change_post") {
+        mod_hook.client_pause_change_post(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_change_game_type`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerChangeGameTypeEvent {
+    pub player_id: i32,
+    pub player_uuid: u128,
+    pub current_game_type: i32,
+    pub new_game_type: i32,
+}
+pub fn dispatch_client_player_change_game_type(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: i32,
+    player_uuid: u128,
+    current_game_type: i32,
+    new_game_type: i32,
+) {
+    let mut event = ClientPlayerChangeGameTypeEvent {
+        player_id,
+        player_uuid,
+        current_game_type,
+        new_game_type,
+    };
+    for mod_hook in super::entered(mods, "client_player_change_game_type") {
+        mod_hook.client_player_change_game_type(host, &mut event);
     }
 }
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

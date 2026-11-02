@@ -975,7 +975,7 @@ impl Game<'_> {
             {
                 return;
             }
-            self.send_chat(&message);
+            self.send_chat_from_screen(&message);
             return;
         }
         if let Some(command) = message.strip_prefix('/') {

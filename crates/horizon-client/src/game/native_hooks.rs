@@ -8535,44 +8535,49 @@ impl Game<'_> {
     /// prevent sending. @API:client_chat@.
     pub(super) fn native_client_chat(
         &mut self,
+        player_id: i32,
+        player_uuid: u128,
         original_message: &str,
         message: &mut String,
         cancel: &mut bool,
     ) {
-        let _ = (original_message, message, cancel);
-    }
-    /// NeoForge's `ClientChatReceivedEvent`: change or suppress a received line;
-    /// `overlay` for the action bar; system messages have a nil sender and no
-    /// chat type. @API:client_chat_received@.
-    pub(super) fn native_client_chat_received(
-        &mut self,
-        message: &mut Text,
-        overlay: bool,
-        sender: u128,
-        chat_type: Option<&horizon_protocol::packets::play::ChatTypeBound>,
-        cancel: &mut bool,
-    ) {
-        let _ = (message, overlay, sender, chat_type, cancel);
+        mod_api::dispatch_client_chat(
+            self,
+            mod_api::mods(),
+            player_id,
+            player_uuid,
+            original_message,
+            message,
+            cancel,
+        );
     }
     /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
     /// @API:client_pause_change@.
     pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
-        let _ = (paused, cancel);
+        mod_api::dispatch_client_pause_change_pre(self, mod_api::mods(), paused, cancel);
     }
     /// NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.
     /// @API:client_pause_change@.
     pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
-        let _ = (paused,);
+        mod_api::dispatch_client_pause_change_post(self, mod_api::mods(), paused);
     }
-    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe a player info update.
+    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player's game type change.
     /// @API:client_player_change_game_type@.
     pub(super) fn native_client_player_change_game_type(
         &mut self,
-        info: &horizon_client::tab_list::TabPlayer,
+        player_id: i32,
+        player_uuid: u128,
         current_game_type: i32,
         new_game_type: i32,
     ) {
-        let _ = (info, current_game_type, new_game_type);
+        mod_api::dispatch_client_player_change_game_type(
+            self,
+            mod_api::mods(),
+            player_id,
+            player_uuid,
+            current_game_type,
+            new_game_type,
+        );
     }
     /// A line in chat from the client.
     pub(super) fn native_chat(&mut self, text: &str) {
