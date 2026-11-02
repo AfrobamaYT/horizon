@@ -4521,35 +4521,11 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
-    /// A player is about to place a block with a companion. `snapshots`
-    /// contains the previous states at the primary and companion positions.
-    /// Set `cancel` to prevent the placement. @API:entity_multi_place@.
-    ///
-    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
-    fn entity_multi_place(&self, host: &dyn Host, event: &mut EntityMultiPlaceEvent<'_>) -> Flow {
-        let _ = host;
-        let _ = event;
-        Flow::Continue
-    }
     /// Called on the server before a landing converts farmland to its base block.
     /// @API:farmland_trample@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn farmland_trample(&self, event: &mut FarmlandTrampleEvent) -> Flow {
-        let _ = event;
-        Flow::Continue
-    }
-    /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
-    /// `cancel` to prevent placement or change `new_state` to replace it.
-    /// Server-side. @API:fluid_place_block@.
-    ///
-    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
-    fn fluid_place_block(
-        &self,
-        level: &dyn LevelHost,
-        event: &mut FluidPlaceBlockEvent<'_>,
-    ) -> Flow {
-        let _ = level;
         let _ = event;
         Flow::Continue
     }
@@ -13879,30 +13855,6 @@ pub fn dispatch_block_tool_modification(
         }
     }
 }
-/// What [`Hooks::entity_multi_place`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct EntityMultiPlaceEvent<'a> {
-    pub state: BlockStateId,
-    pub snapshots: &'a [ReplacedBlockSnapshot],
-}
-pub fn dispatch_entity_multi_place(
-    host: &dyn Host,
-    mods: &[Box<dyn Hooks>],
-    state: BlockStateId,
-    snapshots: &[ReplacedBlockSnapshot],
-    cancel: &mut bool,
-) {
-    if *cancel {
-        return;
-    }
-    let mut event = EntityMultiPlaceEvent { state, snapshots };
-    for mod_hook in super::entered(mods, "entity_multi_place") {
-        if matches!(mod_hook.entity_multi_place(host, &mut event), Flow::Cancel) {
-            *cancel = true;
-            break;
-        }
-    }
-}
 /// What [`Hooks::farmland_trample`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct FarmlandTrampleEvent {
@@ -13930,42 +13882,6 @@ pub fn dispatch_farmland_trample(
     };
     for mod_hook in super::entered(mods, "farmland_trample") {
         if matches!(mod_hook.farmland_trample(&mut event), Flow::Cancel) {
-            *cancel = true;
-            break;
-        }
-    }
-}
-/// What [`Hooks::fluid_place_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct FluidPlaceBlockEvent<'a> {
-    pub dimension: LevelDimension,
-    pub pos: BlockPos,
-    pub liquid_pos: BlockPos,
-    pub state: BlockStateId,
-    pub new_state: &'a mut BlockStateId,
-}
-pub fn dispatch_fluid_place_block(
-    level: &dyn LevelHost,
-    mods: &[Box<dyn Hooks>],
-    dimension: LevelDimension,
-    pos: BlockPos,
-    liquid_pos: BlockPos,
-    state: BlockStateId,
-    new_state: &mut BlockStateId,
-    cancel: &mut bool,
-) {
-    if *cancel {
-        return;
-    }
-    let mut event = FluidPlaceBlockEvent {
-        dimension,
-        pos,
-        liquid_pos,
-        state,
-        new_state,
-    };
-    for mod_hook in super::entered(mods, "fluid_place_block") {
-        if matches!(mod_hook.fluid_place_block(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }

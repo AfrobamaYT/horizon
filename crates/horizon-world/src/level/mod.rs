@@ -141,9 +141,7 @@ pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, Sta
 pub use falling::Landing;
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
-pub use place::{
-    MultiPlacement, PlaceContext, PlaceOutcome, PlacementContext, ReplacedBlockSnapshot,
-};
+pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
 pub use states::{BlockId, PropKey, StateTable};
 pub use tick::{Precipitation, PrecipitationKind, RandomTickMask};
 pub use ticks::Ticks;
@@ -329,15 +327,6 @@ pub trait LevelAccess {
     /// its random draws, which a refusal doesn't change. The default allows.
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
-    }
-    /// Returns the state to place for a liquid conversion, or None to cancel.
-    fn fluid_place_block(
-        &self,
-        _pos: BlockPos,
-        _liquid_pos: BlockPos,
-        state: BlockStateId,
-    ) -> Option<BlockStateId> {
-        Some(state)
     }
     fn allow_fluid_level_change(
         &self,

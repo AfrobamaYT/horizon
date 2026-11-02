@@ -2171,9 +2171,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `pos`. Set `cancel` to keep it.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
-- **`native_fluid_place_block(dimension, pos, liquid_pos, state, new_state, cancel)`** (on `GameLevel`):
-  liquid is about to place `state` at `pos`, originating at `liquid_pos`. Change `new_state` to replace the
-  proposed state, or set `cancel` to prevent placement. Server-side.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
 - **`native_leaves_decay(dimension, pos, cancel)`** (on `GameLevel`): a non-persistent leaf block at distance 7 is
@@ -2204,9 +2201,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_block_tool_modification(stack, pos, face, simulated, final_state, cancel)`**: a tool transforms a block on
   either side. `final_state` starts as the proposed state ID; replace it or set it to `None` to suppress the change.
   Set `cancel` to suppress it regardless of `final_state`. Do not modify the level when `simulated` is true.
-- **`native_entity_multi_place(state, snapshots, cancel)`**: a player is about to place multiple blocks, such as a bed,
-  door, tall plant or pale moss carpet with a topper, on the client or authoritative player path. `state` is the
-  proposed primary state; `snapshots` contains the previous positions and state IDs. Set `cancel` to prevent placement.
 - **`native_block_fade(dimension, pos, from, to, cancel)`** (on `GameLevel`): ice or snow melts, or coral dies. `from`
   and `to` are block state IDs. Set `cancel` to keep the old block.
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or

@@ -1150,26 +1150,6 @@ impl LevelAccess for GameLevel<'_> {
         }
         !canceled
     }
-    fn fluid_place_block(
-        &self,
-        pos: BlockPos,
-        liquid_pos: BlockPos,
-        state: BlockStateId,
-    ) -> Option<BlockStateId> {
-        let mut new_state = state;
-        let mut cancel = false;
-        if self.native_authoritative {
-            self.native_fluid_place_block(
-                self.dimension,
-                pos,
-                liquid_pos,
-                state,
-                &mut new_state,
-                &mut cancel,
-            );
-        }
-        (!cancel).then_some(new_state)
-    }
     fn allow_fluid_level_change(
         &self,
         pos: BlockPos,
@@ -6536,16 +6516,6 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        if !crate::mod_api::mods().is_empty()
-            && let Some(placement) = self.preview_multi_place_context(&ctx)
-        {
-            let mut cancel = false;
-            self.native_entity_multi_place(placement.state, &placement.snapshots, &mut cancel);
-            if cancel {
-                self.use_failed = true;
-                return Ok(true);
-            }
-        }
         let outcome = self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx));
         let PlaceOutcome::Placed { pos, state } = outcome else {
             self.process_level_events()?;

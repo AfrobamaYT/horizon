@@ -1051,7 +1051,6 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct FluidState;
         pub(super) struct PlacementContext;
-        pub(super) struct ReplacedBlockSnapshot;
         #[derive(Clone, Copy)]
         pub(super) struct BlockPos;
         #[derive(Clone, Copy)]

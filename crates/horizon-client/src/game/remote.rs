@@ -43,7 +43,7 @@ use horizon_protocol::{
 };
 use horizon_world::{
     attachments::{Attachments, Holder},
-    level::{InteractionResult, LevelAccess},
+    level::InteractionResult,
     nbt::Tag,
     registry::BlockStateId,
     stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},
@@ -7469,23 +7469,6 @@ impl Game<'_> {
                     self.with_hand(hand, |g| g.start_eating(info));
                 }
                 if let Some(placed) = &placed {
-                    if !crate::mod_api::mods().is_empty()
-                        && let Some(stack) = held.as_ref()
-                        && let Some(placement) = self.preview_multi_place(&hit, stack)
-                    {
-                        let mut cancel = false;
-                        self.native_entity_multi_place(
-                            placement.state,
-                            &placement.snapshots,
-                            &mut cancel,
-                        );
-                        if cancel {
-                            if let Some(r) = self.remote.as_mut() {
-                                r.placing = None;
-                            }
-                            return true;
-                        }
-                    }
                     self.predict_place(placed, seq);
                     self.with_hand(hand, Game::consume_held);
                 } else if let Some(r) = self.remote.as_mut() {
@@ -7815,61 +7798,6 @@ impl Game<'_> {
         }
     }
 
-    /// Preview multi-block placement without consuming the world's random stream.
-    pub(super) fn preview_multi_place_context(
-        &mut self,
-        ctx: &horizon_world::level::PlaceContext,
-    ) -> Option<horizon_world::level::MultiPlacement> {
-        self.with_level(|b, level, ticks| {
-            if ctx.item != "minecraft:pale_moss_carpet"
-                && b.multi_placement(level, ticks, ctx).is_none()
-            {
-                return None;
-            }
-            let random = level.random().clone();
-            let mut dry = DryLevel::new(level);
-            dry.random = random;
-            let horizon_world::level::PlaceOutcome::Placed { pos, state } =
-                b.place_block(&mut dry, &mut horizon_world::level::Ticks::default(), ctx)
-            else {
-                return None;
-            };
-            if dry.changed.len() < 2 {
-                return None;
-            }
-            let mut snapshots = vec![horizon_world::level::ReplacedBlockSnapshot {
-                pos,
-                state: dry.base.block_state(pos),
-            }];
-            snapshots.extend(dry.changed.keys().filter(|&&p| p != pos).map(|&pos| {
-                horizon_world::level::ReplacedBlockSnapshot {
-                    pos,
-                    state: dry.base.block_state(pos),
-                }
-            }));
-            Some(horizon_world::level::MultiPlacement { state, snapshots })
-        })
-    }
-
-    fn preview_multi_place(
-        &mut self,
-        hit: &super::Hit,
-        stack: &ItemStack,
-    ) -> Option<horizon_world::level::MultiPlacement> {
-        let ctx = horizon_world::level::PlaceContext {
-            clicked_pos: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-            face: horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize],
-            hit: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
-            inside: hit.face == [0; 3],
-            yaw: self.yaw,
-            pitch: self.pitch,
-            sneaking: self.keys.contains(&KeyCode::ShiftLeft),
-            item: stack.item.to_string(),
-            can_use_game_master_blocks: self.can_use_game_master_blocks(),
-        };
-        self.preview_multi_place_context(&ctx)
-    }
-
     /// Run BlockItem.place on a disposable level: where it placed and the
     /// blocks it set. The real level supplies collision shapes and
     /// building-blocking entities; random draws, scheduled ticks and events
@@ -7890,9 +7818,7 @@ impl Game<'_> {
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
         self.with_level(|b, level, _| {
-            let random = level.random().clone();
             let mut level = DryLevel::new(level);
-            level.random = random;
             match b.place_block(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),

@@ -923,7 +923,7 @@ use horizon_core::{
 use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
-    level::{BlockId, LevelAccess, PlacementContext, ReplacedBlockSnapshot, Ticks},
+    level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::Compound,
     registry::{BlockRegistry, BlockStateId},
 };
@@ -994,31 +994,6 @@ impl GameLevel<'_> {
         new: BlockStateId,
     ) {
         mod_api::dispatch_block_changed(self, mod_api::mods(), dimension, pos, old, new);
-    }
-
-    /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
-    /// `cancel` to prevent placement or change `new_state` to replace it.
-    /// Server-side. @API:fluid_place_block@.
-    #[inline(always)]
-    pub(super) fn native_fluid_place_block(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        liquid_pos: BlockPos,
-        state: BlockStateId,
-        new_state: &mut BlockStateId,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_fluid_place_block(
-            self,
-            mod_api::mods(),
-            dimension,
-            pos,
-            liquid_pos,
-            state,
-            new_state,
-            cancel,
-        );
     }
 
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
@@ -5959,19 +5934,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
-    /// A player is about to place a block with a companion. `snapshots`
-    /// contains the previous states at the primary and companion positions.
-    /// Set `cancel` to prevent the placement. @API:entity_multi_place@.
-    #[inline(never)]
-    pub(super) fn native_entity_multi_place(
-        &self,
-        state: BlockStateId,
-        snapshots: &[ReplacedBlockSnapshot],
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_entity_multi_place(self, mod_api::mods(), state, snapshots, cancel);
-    }
-
     /// A tool is about to transform a block. Cancel or replace the final state;
     /// `None` suppresses the transformation. @API:block_tool_modification@.
     #[inline(never)]
