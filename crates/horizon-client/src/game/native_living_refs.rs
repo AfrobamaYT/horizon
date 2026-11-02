@@ -120,6 +120,87 @@ impl Game<'_> {
         player.attributes.value(Some(key), kind).ok()
     }
 
+    /// The entity's health (`LivingEntity.getHealth`; Paper's
+    /// `Damageable#getHealth`). During a player's turn only that player
+    /// resolves: the hub is out for their action, and other players'
+    /// handles read `None` until it is back. API @API:living_health@.
+    pub(super) fn native_living_health(&self, living: LivingRef) -> Option<f32> {
+        match self.native_living_target(living)? {
+            Target::Player => Some(self.player.as_ref()?.health.health()),
+            Target::Guest(conn) => Some(self.command_guest(conn)?.health),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)
+                .map(|m| m.health),
+            // An armor stand carries the fixed 20 the game gives it: lava
+            // does not hurt it and splash water reads the very field.
+            Target::Stand(id) => self
+                .armor_stands
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.health),
+            Target::Dragon(id) => self
+                .dragon
+                .as_ref()
+                .filter(|d| d.id == id)
+                .map(|d| d.health),
+            _ => None,
+        }
+    }
+    /// The entity's maximum health (`LivingEntity.getMaxHealth`; Paper's
+    /// `Damageable#getMaxHealth`). Players and guests read their attribute
+    /// map; a mob, an armor stand and the dragon their own fields (the
+    /// armor stand the fixed 20 the game seeds it with, the dragon its
+    /// 200) until live attribute maps cover them. API @API:living_health@.
+    pub(super) fn native_living_max_health(&mut self, living: LivingRef) -> Option<f32> {
+        match self.native_living_target(living)? {
+            Target::Player | Target::Guest(_) => self
+                .native_living_attribute(
+                    living,
+                    "minecraft:max_health",
+                    horizon_world::attribute_map::ValueKind::Computed,
+                )
+                .map(|max| max as f32),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)
+                .map(|m| m.attrs.max_health),
+            Target::Stand(_) => Some(20.0),
+            Target::Dragon(_) => Some(super::dragon::MAX_HEALTH),
+            _ => None,
+        }
+    }
+    /// Whether the entity is alive (`LivingEntity.isAlive`; Paper's
+    /// `Entity#isDead` is its inverse). A dying mob, mid death
+    /// animation, is not. API @API:living_health@.
+    pub(super) fn native_living_alive(&self, living: LivingRef) -> Option<bool> {
+        match self.native_living_target(living)? {
+            Target::Player => Some(!self.player.as_ref()?.health.dead_or_dying()),
+            Target::Guest(conn) => Some({
+                let g = self.command_guest(conn)?;
+                !g.dead && g.health > 0.0
+            }),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)
+                .map(|m| m.alive()),
+            Target::Stand(id) => self
+                .armor_stands
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.health > 0.0),
+            Target::Dragon(id) => self
+                .dragon
+                .as_ref()
+                .filter(|d| d.id == id)
+                .map(|d| d.health > 0.0),
+            _ => None,
+        }
+    }
+
     /// The stack in `slot` (`LivingEntity.getItemBySlot`). Players, guests,
     /// mobs and armor stands store main hand, off hand, head, chest, legs and
     /// feet. Players, guests and mobs also store body and saddle. Dragon

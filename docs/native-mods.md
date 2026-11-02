@@ -2443,6 +2443,13 @@ a dimension.
   range, as `Level.playSound(null, entity, ...)` does. `/stopsound` and `/playsound` send through the same code. They
   return false for a stale handle or a player who isn't online. Looping, fading and a handle to a playing sound need
   client handles.
+- `living.health(host)` is `LivingEntity.getHealth` (Paper's `Damageable#getHealth`), `max_health` is
+  `getMaxHealth` (players and guests read their attribute map; an armor stand the fixed 20 the game seeds it
+  with — lava does not hurt it, and splash water reads the very field — and the dragon its 200, from their own
+  fields until live attribute maps cover them) and `alive` is `isAlive`
+  (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
+  player swap an outer player's displaced record is unavailable, and during a player's turn the other
+  players' handles read `None` until the hub is back.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
