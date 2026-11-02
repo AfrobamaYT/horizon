@@ -3949,6 +3949,17 @@ impl Game<'_> {
         );
     }
 
+    /// A player's ability to harvest the block at `pos` may be changed.
+    /// @API:player_harvest_check@.
+    pub(super) fn native_player_harvest_check(
+        &mut self,
+        pos: [i32; 3],
+        state: u32,
+        can_harvest: &mut bool,
+    ) {
+        let _ = (pos, state, can_harvest);
+    }
+
     /// A player's destroy speed for the block at `pos` may be changed or canceled.
     /// @API:player_break_speed@.
     pub(super) fn native_player_break_speed(

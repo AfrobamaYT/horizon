@@ -402,8 +402,9 @@ impl Game<'_> {
         if self.player.as_ref().is_some_and(|p| !p.ground.on_ground) {
             speed /= 5.0;
         }
-        let harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
+        let mut harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
         let hardness = facts.hardness;
+        self.native_player_harvest_check(pos, state.0, &mut harvest);
         let mut canceled = false;
         self.native_player_break_speed(pos, state.0, speed, &mut speed, &mut canceled);
         if canceled {
