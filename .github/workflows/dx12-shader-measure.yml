@@ -34,13 +34,19 @@ jobs:
           gh release download "$tag" --repo microsoft/DirectXShaderCompiler --pattern "$asset" --dir "$RUNNER_TEMP"
           7z x -y -o"$RUNNER_TEMP/dxc" "$RUNNER_TEMP/$asset" > /dev/null
           ls "$RUNNER_TEMP/dxc/bin/x64"
-      - name: FXC and DXC, three rounds each, alternated
+      - name: FXC and DXC, each in a new game folder, then started again in it
         run: |
           set -euo pipefail
           exe="$PWD/target/release/examples/boot_pipelines.exe"
-          for round in 1 2 3; do
-            WGPU_DX12_COMPILER=fxc "$exe"
-            PATH="$RUNNER_TEMP/dxc/bin/x64:$PATH" WGPU_DX12_COMPILER=dxc "$exe"
+          for round in 1 2; do
+            for compiler in fxc dxc; do
+              home=$(mktemp -d)
+              for run in cold warm warm; do
+                echo "{\"round\":$round,\"run\":\"$run\"}"
+                PATH="$RUNNER_TEMP/dxc/bin/x64:$PATH" HORIZON_HOME="$home" WGPU_DX12_COMPILER=$compiler "$exe"
+              done
+              echo "{\"cache_bytes\":$(stat -c %s "$home/cache/dx12-shaders.bin")}"
+            done
           done | tee "$RUNNER_TEMP/compile.jsonl"
       - uses: actions/upload-artifact@v4
         with:
