@@ -8,9 +8,6 @@ pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub player_flyable_fall: fn(i32, f32, f32, &mut Option<crate::landing::PlayerFlyableFall>),
-    }
-}
-
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
