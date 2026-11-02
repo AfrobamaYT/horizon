@@ -233,11 +233,18 @@ impl Game<'_> {
             };
             // StringDecomposer.iterateFormatted: `§` codes a server leaves
             // inside the team prefix or the name itself apply at draw time.
-            let shown = match team {
+            let mut shown = match team {
                 Some(t) => t.formatted_name(member),
                 None => member,
+            };
+            // Every frame: build the username only for a mod to read.
+            if player
+                && hooks
+                && let Some(uuid) = self.remote_player_uuid(m.id)
+            {
+                shown = self.player_text(&name, uuid);
             }
-            .resolve_legacy();
+            let shown = shown.resolve_legacy();
             let shown = text
                 .map(|text| Text::literal(text).resolve_legacy())
                 .unwrap_or(shown);

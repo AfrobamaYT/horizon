@@ -495,6 +495,39 @@ fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     }
 }
 
+/// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
+/// type, so a panic in it names the mod, the hook and the part.
+fn entered_parts<'a, P: ?Sized>(
+    parts: &'a [Attached<P>],
+    hook: &'static str,
+) -> impl Iterator<Item = &'a P> {
+    let mut guard = None;
+    parts.iter().map(move |attached| {
+        // The last part's mark goes first, as in `Entered`.
+        drop(guard.take());
+        guard = Some(crate::crash::enter_native_mod(
+            crate::crash::NativeModCall {
+                id: MOD_IDS
+                    .get()
+                    .and_then(|ids| ids.get(attached.mod_index))
+                    .copied(),
+                index: attached.mod_index,
+                hook,
+                part: Some(attached.type_name),
+            },
+        ));
+        &*attached.part
+    })
+}
+
+/// Mod `index` of [`mods`] by its `[mod] id`, or by its place when the build didn't name them.
+fn mod_name(index: usize) -> String {
+    MOD_IDS
+        .get()
+        .and_then(|ids| ids.get(index))
+        .map_or_else(|| format!("native mod #{index}"), |id| (*id).to_owned())
+}
+
 struct Entered<'a> {
     mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
     hook: &'static str,
@@ -513,6 +546,7 @@ impl<'a> Iterator for Entered<'a> {
                 id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
                 index,
                 hook: self.hook,
+                part: None,
             },
         ));
         Some(hooks)
@@ -546,6 +580,9 @@ pub trait LevelHost {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
     /// `Level.isClientSide`, through `LevelAccess::is_client_side`.
     fn is_client_side(&self) -> bool;
+    /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
+    /// unknown state.
+    fn state_block(&self, state: BlockStateId) -> Option<&str>;
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
@@ -606,6 +643,10 @@ macro_rules! level_attachment_host {
     )+ };
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
+
+mod part_table;
+pub use part_table::{Attached, Parts, Registrar};
+pub(crate) use part_table::{install_parts, parts};
 
 mod generated;
 pub use generated::Hooks;

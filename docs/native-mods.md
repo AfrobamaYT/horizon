@@ -2897,6 +2897,44 @@ hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in i
 A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
 leaves `hooks` out.
 
+### Parts
+
+A part is code a trait mod attaches to one block, block entity, item or mod menu type, its own or vanilla's
+([the spec](https://github.com/arismoko/horizon/issues/41)). A mod attaches its parts once, at startup, in
+`Hooks::register`:
+
+```rust
+struct Gauge;
+impl BlockPart for Gauge {
+    fn has_analog_output(&self, _: &dyn LevelHost, event: &mut HasAnalogOutputEvent) {
+        event.output = true;
+    }
+    fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+        event.output = 15;
+    }
+}
+
+impl Hooks for MyMod {
+    fn register(&self, r: &mut Registrar) {
+        r.block_part("minecraft:stone", Gauge);
+    }
+}
+```
+
+A hook whose catalog entry has a `scope` (`block`, `block_entity`, `item`, `menu`) and a `key`, the argument
+naming the thing it is about, has a method on that scope's trait: `BlockPart`, `BlockEntityPart` (a
+`BlockPart` too), `ItemPart` and `MenuPart`, with the same signature as on `Hooks`. The game asks every mod's
+`Hooks` method first, then the parts attached to that thing, in dispatch order, through the hook's contract: a
+`Cancel` or a replacement from a mod skips the parts. A part's kind is its type: the same kind twice on one
+thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
+adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
+
+A block entity part names its block entity type and the blocks that hold one, as vanilla's
+`BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
+The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
+find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
+block hooks) by block.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
@@ -2926,7 +2964,11 @@ A new hook needs its fragment in `tools/native-hook-fragments/` with its `mod_ap
 `{"contract": "cancel", "out": "cancel"}`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
 The generator adds the hook's trait method and replaces the placeholder with the `dispatch_<hook>` call.
-Every hook needs a `mod_api` entry: the check fails naming any hook without one. A body that is neither the
+Every hook needs a `mod_api` entry: the check fails naming any hook without one. A hook that stands in for a
+method a vanilla block, block entity, item or menu overrides also gets a `scope` and a `key`
+(`{"contract": "collect", "out": "output", "scope": "block", "key": "state"}`): the key is a
+`BlockStateId` (with a level host to name its block), an `&ItemStack`, a `ModBlockEntity` or an id `&str`, and
+the generator also puts the method on that scope's part trait ([Parts](#parts)). A body that is neither the
 placeholder nor already calls the dispatch is an error, and the generator never changes it. Hooks that are
 free functions outside `Game` are wired by hand: those crates can't see the mod list, so each calls a callback
 the executable installs once, such as `NativeLoadHooks` in `horizon-world` and `NativeClientHooks` in the
