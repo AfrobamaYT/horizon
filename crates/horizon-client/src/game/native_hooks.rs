@@ -7080,7 +7080,7 @@ impl Game<'_> {
     /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
     /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
     /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
-    /// item loses. Set `canceled` and nothing is blocked. No `self`, as
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `canceled` and nothing is blocked. No `self`, as
     /// `native_living_incoming_damage`: the game is in the middle of the hit.
     /// @API:living_shield_block@.
     pub(super) fn native_living_shield_block(

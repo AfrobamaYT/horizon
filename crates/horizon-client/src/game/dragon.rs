@@ -1391,12 +1391,13 @@ impl Game<'_> {
             .into_iter()
             .find(|(part, _)| *part == id)
             .map(|(_, b)| b);
-        let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         // The sweep and the sounds read the charge, which the hit then spends.
+        let sweep = self.sweep_before_hit("minecraft:ender_dragon", false);
+        let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
             self.attack_effects(
                 area,
-                "minecraft:ender_dragon",
+                sweep,
                 None,
                 false,
                 super::mace::Spared::Nothing,

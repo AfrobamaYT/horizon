@@ -76,7 +76,8 @@ pub struct ShieldBlock {
     pub blocked: bool,
     /// The damage the item stops, kept within 0 and the hit's damage.
     pub blocked_damage: f32,
-    /// The durability the item loses (`ItemDamageFunction` of what it stops).
+    /// The durability the item loses (`ItemDamageFunction` of what it stops). Below 0,
+    /// vanilla's `ItemDamageFunction` of the final `blocked_damage` applies.
     pub shield_damage: i32,
 }
 /// The game's native shield hook (`native_living_shield_block`), set once by the game:
@@ -888,7 +889,14 @@ impl HurtWorld for Environment<'_> {
             return Ok(0.0);
         };
         self.blocked = block.blocked_damage;
-        self.shield_damage = block.shield_damage;
+        // `setShieldDamage` below 0: the item's own `itemDamage` of what is stopped.
+        self.shield_damage = if block.shield_damage < 0 {
+            self.blocking
+                .as_ref()
+                .map_or(0, |b| b.rules.item_damage.apply(block.blocked_damage))
+        } else {
+            block.shield_damage
+        };
         self.fully_blocked = self.blocked >= damage;
         Ok(self.blocked)
     }
