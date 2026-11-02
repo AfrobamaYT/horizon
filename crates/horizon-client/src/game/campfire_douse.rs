@@ -42,14 +42,14 @@ impl Game<'_> {
         if self.keys.contains(&KeyCode::ShiftLeft) {
             return false;
         }
-        let Some(mut state) = self.campfire_to_douse(pos, held) else {
+        let (Some(held), Some(mut state)) = (held, self.campfire_to_douse(pos, held)) else {
             return false;
         };
         state.properties.insert("lit".into(), "false".into());
         let Ok(unlit) = self.pack.assets.registry.resolve(&state) else {
             return false;
         };
-        let Some(unlit) = self.modified_campfire(hit, held.unwrap(), unlit) else {
+        let Some(unlit) = self.modified_campfire(hit, held, unlit) else {
             return false;
         };
         let signal = state.properties.get("signal_fire").map(String::as_str) == Some("true");
