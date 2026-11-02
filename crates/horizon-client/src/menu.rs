@@ -3541,6 +3541,7 @@ pub(crate) mod tests {
                     }
                 },
                 living_breathe: |_, _, _, _, _| {},
+                has_mods: || false,
                 player_name_format: |_, _| {},
                 player_tab_list_name_format: |_, _, _| {},
                 ingredient: |_, _, _| {},

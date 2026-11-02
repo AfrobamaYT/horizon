@@ -119,6 +119,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
+        has_mods: || !crate::mod_api::mods().is_empty(),
         player_name_format: |username, displayname| {
             crate::mod_api::dispatch_player_name_format(crate::mod_api::mods(), username, displayname);
         },

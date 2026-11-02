@@ -307,9 +307,12 @@ pub fn native_player_name_format(username: &crate::text::Text, displayname: &mut
 }
 
 fn formatted_player_name(name: &str, component: Tag) -> Tag {
+    if !crate::native_client_hooks::has_mods() {
+        return component;
+    }
     let username = crate::text::Text::literal(name);
     let original = crate::scoreboard::tag_to_json(&component);
-    let mut displayname = username.clone().with_component(original.clone());
+    let mut displayname = crate::scoreboard::comp_text(&original).with_component(original.clone());
     native_player_name_format(&username, &mut displayname);
     let result = displayname.component();
     if result == original {
