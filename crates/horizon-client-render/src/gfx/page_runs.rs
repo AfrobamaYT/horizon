@@ -29,6 +29,11 @@ pub(super) struct Run {
     pub tag: [u32; 3],
 }
 
+/// The band of a section `distance` from the camera (squared, as bits).
+pub(super) fn band(distance: u64) -> u64 {
+    (f64::from_bits(distance).sqrt() / BAND) as u64
+}
+
 #[derive(Default)]
 pub(super) struct PageRuns {
     runs: Vec<Run>,
@@ -58,7 +63,7 @@ impl PageRuns {
         tag: [u32; 3],
     ) {
         if len > 0 {
-            let band = (f64::from_bits(distance).sqrt() / BAND) as u64;
+            let band = band(distance);
             self.runs.push(Run {
                 key: u64::from(group) << GROUP_SHIFT | band << 32 | u64::from(page),
                 start: start as u32,

@@ -103,6 +103,22 @@ impl Sides {
         }
     }
 
+    /// A sort with these parts' `ends` and `planes`, for tests.
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        ends: [u32; 14],
+        grouped: bool,
+        split: bool,
+        planes: [f32; 7],
+    ) -> Self {
+        Self {
+            ends,
+            grouped,
+            split,
+            planes,
+        }
+    }
+
     /// The number of solid quads the buckets hold.
     pub fn quads(&self) -> u32 {
         self.ends[13]
@@ -126,6 +142,26 @@ impl Sides {
             Bucket::Other => true,
         };
         self.runs(seen, part, draw);
+    }
+
+    /// How many quads `part` draws facing every way (`every`).
+    pub fn part_quads(&self, part: Part) -> u32 {
+        let mut quads = 0;
+        self.every(part, |_, count| quads += count);
+        quads
+    }
+
+    /// The facts `visible_from` reads, for the GPU to find the same runs
+    /// (gpu_lists.wgsl): the parts' ends, the planes' bits,
+    /// then 1 when grouped plus 2 when split.
+    pub fn gpu_row(&self) -> [u32; 22] {
+        let mut row = [0; 22];
+        row[..14].copy_from_slice(&self.ends);
+        for (to, plane) in row[14..21].iter_mut().zip(self.planes) {
+            *to = plane.to_bits();
+        }
+        row[21] = u32::from(self.grouped) | u32::from(self.split) << 1;
+        row
     }
 
     /// The runs of `part`'s quads facing every way.

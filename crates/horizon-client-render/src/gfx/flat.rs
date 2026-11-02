@@ -223,6 +223,7 @@ fn buffer(
 /// from `shadow[0]` (solid) and `shadow[1]` (translucent) on are a shader
 /// pack's shadow camera's, with calls of their own. Phase 1's draws before
 /// `passes[0]` and from `passes[1]` on, the two solid passes' on Metal, too.
+/// The list starts at index `base` (the GPU-made lists' rooms come first: `gpu_lists`).
 #[allow(clippy::too_many_arguments)]
 fn plan(
     draws: &[[u32; 5]],
@@ -235,6 +236,7 @@ fn plan(
     calls: &mut Vec<Call>,
     ranges: &mut Vec<Range>,
     segments: &mut Vec<(Source, u64, u64)>,
+    base: u64,
 ) -> Plan {
     calls.clear();
     ranges.clear();
@@ -242,7 +244,7 @@ fn plan(
     let (mut phase1_calls, mut solid_calls) = (None, None);
     let mut shadow_calls = [None; 2];
     let mut pass_calls = [None; 2];
-    let mut total = 0u64;
+    let mut total = base;
     let mut by_source: Vec<(Source, Vec<Range>)> = Vec::new();
     for (i, (d, &(page, sorted))) in draws.iter().zip(pages).enumerate() {
         if i == phase1_draws {
@@ -540,6 +542,8 @@ impl Flat {
         phase2: Option<&wgpu::Buffer>,
         origins: impl Iterator<Item = (u32, [f32; 4])>,
         sorted_page: impl Fn(u32) -> wgpu::Buffer,
+        mut lists: Option<&mut super::gpu_lists::GpuLists>,
+        eye: Option<[f32; 3]>,
         timing: Option<&mut super::pack_timing::PassTiming>,
     ) -> bool {
         self.phase2_group = None;
@@ -577,6 +581,8 @@ impl Flat {
                 bytemuck::cast_slice(&self.origin_data),
             );
         }
+        // The GPU-made lists' rooms come first in the index list.
+        let room = lists.as_mut().map_or(0, |l| l.rooms());
         let Plan {
             phase1_calls,
             solid_calls,
@@ -594,6 +600,7 @@ impl Flat {
             &mut self.calls,
             &mut self.range_data,
             &mut self.segments,
+            room,
         );
         self.phase1_calls = phase1_calls;
         self.solid_calls = solid_calls;
@@ -655,6 +662,9 @@ impl Flat {
                 0,
                 bytemuck::cast_slice(&self.phase2_call_data),
             );
+        }
+        if let Some(lists) = &mut lists {
+            lists.prepare(device, encoder, uploads, &self.indices, eye);
         }
         let ranges_at = |first: u64, count: u64| {
             wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -725,13 +735,17 @@ impl Flat {
             label: Some("Flatten section draws"),
             timestamp_writes: timing.and_then(|t| t.compute_writes("Flatten")),
         });
+        if let Some(lists) = &lists {
+            lists.dispatch(&mut pass);
+        }
         pass.set_pipeline(&self.flatten);
         for (group, count) in &groups {
             pass.set_bind_group(0, group, &[]);
             pass.dispatch_workgroups((*count).min(GROUP_LIMIT), count.div_ceil(GROUP_LIMIT), 1);
         }
         drop(pass);
-        for page in self.calls.iter().map(|c| c.page) {
+        let list_pages = lists.iter().flat_map(|l| l.calls().iter().map(|c| c.page));
+        for page in self.calls.iter().map(|c| c.page).chain(list_pages) {
             let table = self.pages[page as usize]
                 .as_mut()
                 .expect("a drawn page has its block table");
@@ -770,6 +784,27 @@ impl Flat {
         pass.set_pipeline(&self.flatten_seen);
         pass.set_bind_group(0, group, &[]);
         pass.dispatch_workgroups((*count).min(GROUP_LIMIT), count.div_ceil(GROUP_LIMIT), 1);
+    }
+
+    /// Draws pass `group`'s calls of `lists` (`gpu_lists::Out::Indices`, prepared with
+    /// this frame's `prepare`) with a flat pipeline set.
+    pub fn draw_lists<'a>(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        lists: &super::gpu_lists::GpuLists,
+        group: u8,
+        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+    ) {
+        if !lists.prepared() {
+            return;
+        }
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        for (k, call) in lists.calls().iter().enumerate() {
+            if call.group == group {
+                self.bind_page(pass, call.page, &vertices);
+                lists.draw_indexed(pass, k);
+            }
+        }
     }
 
     /// The camera's translucent calls.
@@ -897,6 +932,7 @@ mod tests {
             &mut calls,
             &mut ranges,
             &mut segments,
+            0,
         );
         assert_eq!(total, 6 * 13);
         assert_eq!(phase1_calls, solid_calls);
@@ -945,6 +981,7 @@ mod tests {
             &mut calls,
             &mut ranges,
             &mut segments,
+            0,
         );
         assert_eq!((plan.pass_calls, plan.solid_calls), ([3, 1], 4));
         let call = |page, first, count| Call { page, first, count };
@@ -980,6 +1017,7 @@ mod tests {
             &mut calls,
             &mut ranges,
             &mut segments,
+            0,
         );
         assert_eq!((plan.solid_calls, plan.shadow_calls), (3, [4, 5]));
         let call = |page, first, count| Call { page, first, count };
@@ -1008,6 +1046,7 @@ mod tests {
             &mut calls,
             &mut ranges,
             &mut segments,
+            0,
         );
         assert_eq!(
             plan,
@@ -1125,6 +1164,7 @@ mod tests {
                 &mut calls,
                 &mut ranges,
                 &mut segments,
+                0,
             );
             // Phase 2's draws as the test leaves them: instance counts of 0,
             // 1 where it saw the section.

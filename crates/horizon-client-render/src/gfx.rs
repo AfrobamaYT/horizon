@@ -112,6 +112,7 @@ mod cull;
 mod end_sky;
 mod flat;
 mod frame_gen;
+mod gpu_lists;
 mod hdr;
 mod hdr_icc;
 mod hdr_stats;
@@ -357,6 +358,8 @@ struct SectionGpu {
     sorted_indices: Option<(u32, u64)>,
     /// Its id for flat draws (`flat::Flat::add`), when they are on.
     flat_id: Option<u32>,
+    /// Its row for phase 1's lists made on the GPU (`gpu_lists::GpuLists::add`).
+    list_id: Option<u32>,
     /// When it began to fade in over the far terrain it replaces, which
     /// stays whole behind it until then: a section new where far tiles are
     /// drawn. Meshed again, it stays as it was.
@@ -447,12 +450,19 @@ impl Part {
 /// hold on `page` of `arena` (`part`) goes to its other pages in video memory,
 /// until the next range would pass `budget` bytes (it keeps what is left; the
 /// first range moves whatever its size, so none keeps the page closed), the
-/// copies into `encoder` and, in the section arena, the ranges' flat draw ids
-/// (`flat`) along. False when the other pages have no room left.
+/// copies into `encoder` and, in the section arena, the ranges' flat draw ids and
+/// GPU list rows (`ids`) along. False when the other pages have no room left.
+/// The flat draws and GPU lists that name a mesh's range, with what writes to them.
+type MeshIds<'a> = (
+    Option<&'a mut flat::Flat>,
+    Option<&'a mut gpu_lists::GpuLists>,
+    &'a wgpu::Device,
+    &'a mut upload::Uploads,
+);
 fn move_off_page<'a>(
     arena: &mut arena::Arena,
     encoder: &mut wgpu::CommandEncoder,
-    mut flat: Option<(&mut flat::Flat, &wgpu::Device, &mut upload::Uploads)>,
+    mut ids: Option<MeshIds<'_>>,
     meshes: impl Iterator<Item = &'a mut SectionGpu>,
     page: u32,
     part: Part,
@@ -474,9 +484,14 @@ fn move_off_page<'a>(
         };
         arena.copy(encoder, (page, start), to, vertices);
         arena.release(page, start, vertices);
-        if let (Some((flat, device, uploads)), Some(id)) = (&mut flat, s.flat_id) {
-            flat.remove(id);
-            s.flat_id = Some(flat.add(device, encoder, uploads, to.0, to.1, vertices));
+        if let Some((flat, lists, device, uploads)) = &mut ids {
+            if let (Some(flat), Some(id)) = (flat, s.flat_id) {
+                flat.remove(id);
+                s.flat_id = Some(flat.add(device, encoder, uploads, to.0, to.1, vertices));
+            }
+            if let (Some(lists), Some(id)) = (lists, s.list_id) {
+                lists.set(device, encoder, uploads, id, to.1 as u32, &s.sides);
+            }
         }
         part.set(s, to);
         *budget = budget.saturating_sub(bytes);
@@ -777,6 +792,8 @@ pub struct Renderer {
     flat: Option<flat::Flat>,
     /// `flat` draws this frame's sections (off: the per-section draws).
     flat_on: bool,
+    /// Phase 1's solid lists made on the GPU, in flat frames (with `flat`).
+    gpu_lists: Option<gpu_lists::GpuLists>,
     /// Occlusion culling of solid section draws, where the GPU's instance
     /// counts reach a multi-draw's entries (Vulkan, Metal).
     cull: Option<cull::Cull>,
@@ -3497,6 +3514,7 @@ impl Renderer {
                 .get_downlevel_capabilities()
                 .flags
                 .contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION);
+        let gpu_lists = flat.as_ref().map(|_| gpu_lists::GpuLists::new(&device));
         let batchable = translucent_batchable(
             &adapter.get_info(),
             multi_draw,
@@ -3611,6 +3629,7 @@ impl Renderer {
             solid_cutout,
             translucent,
             flat_on: flat.is_some(),
+            gpu_lists,
             cull_on: cull.is_some(),
             sides_on: true,
             cull,
@@ -4157,6 +4176,11 @@ impl Renderer {
         } else {
             None
         };
+        let sides = if mesh.sides.quads() == solid {
+            mesh.sides
+        } else {
+            Sides::unsorted(solid)
+        };
         // Flat draws name the blocks of its range in `arena`: split, its solid
         // quads alone (no frame draws flat then: `translucent_split`).
         let flat_id = self.flat.as_mut().filter(|_| main > 0).map(|f| {
@@ -4167,6 +4191,15 @@ impl Renderer {
                 page,
                 start,
                 main,
+            )
+        });
+        let list_id = self.gpu_lists.as_mut().filter(|_| main > 0).map(|l| {
+            l.add(
+                &self.device,
+                encoder,
+                &mut self.section_uploads,
+                start as u32,
+                &sides,
             )
         });
         let stride = std::mem::size_of::<TerrainVertex>() as u64;
@@ -4199,11 +4232,7 @@ impl Renderer {
             start,
             translucent_at,
             solid,
-            sides: if mesh.sides.quads() == solid {
-                mesh.sides
-            } else {
-                Sides::unsorted(solid)
-            },
+            sides,
             translucent,
             sort: translucency::SortState::new(
                 mesh.translucent
@@ -4215,6 +4244,7 @@ impl Renderer {
             ),
             sorted_indices,
             flat_id,
+            list_id,
             fading: None,
             leaving: None,
             animated_layers,
@@ -4287,6 +4317,9 @@ impl Renderer {
         if let (Some(flat), Some(id)) = (&mut self.flat, s.flat_id) {
             flat.remove(id);
         }
+        if let (Some(lists), Some(id)) = (&mut self.gpu_lists, s.list_id) {
+            lists.remove(id);
+        }
         if let Some((page, start)) = s.sorted_indices {
             self.sorted_indices
                 .release(page, start, u64::from(s.translucent) * 6);
@@ -4329,13 +4362,15 @@ impl Renderer {
             .sections
             .values_mut()
             .chain(self.lods.values_mut().flat_map(|tile| tile.meshes_mut()));
-        let flat = self
-            .flat
-            .as_mut()
-            .map(|f| (f, &self.device, &mut self.section_uploads));
+        let ids = Some((
+            self.flat.as_mut(),
+            self.gpu_lists.as_mut(),
+            &self.device,
+            &mut self.section_uploads,
+        ));
         let split = self.translucent_arena.is_some();
         let (arena, part) = (&mut self.arena, Part::Section { split });
-        if !move_off_page(arena, encoder, flat, meshes, page, part, &mut budget) {
+        if !move_off_page(arena, encoder, ids, meshes, page, part, &mut budget) {
             // The other pages have no room after all.
             arena.reopen();
         }
@@ -4639,6 +4674,11 @@ impl Renderer {
         if let Some(flat) = &mut self.flat {
             for id in released.iter().filter_map(|s| s.flat_id) {
                 flat.remove(id);
+            }
+        }
+        if let Some(lists) = &mut self.gpu_lists {
+            for id in released.iter().filter_map(|s| s.list_id) {
+                lists.remove(id);
             }
         }
         self.sorted_indices
@@ -5999,10 +6039,40 @@ impl Renderer {
                 (true, true) => &[(1, Quads::All)],
             }
         };
+        // Phase 1's sections can leave finding their facing quads to the GPU
+        // (`gpu_lists`) in frames drawn flat with nothing but the camera's
+        // terrain: no mirror, shader pack terrain or shadow, nor tiles.
+        let use_lists = gpu_lists_on()
+            && !pack_terrain
+            && shadow_view.is_none()
+            && mirror.is_none()
+            && visible_lods.is_empty()
+            && self.flat_on
+            && (self.flat.as_ref()).is_some_and(|f| self.drawn_sections >= f.min_sections);
+        if let Some(lists) = &mut self.gpu_lists {
+            lists.clear(&self.device);
+        }
+        let mut lists = self.gpu_lists.as_mut().filter(|_| use_lists);
         let mut opaque_draws = 0;
         for (i, v) in visible.iter().enumerate() {
             let s = self.sections.get(v.slot);
             let first_phase = cull.as_ref().is_none_or(|c| c.first(v.slot));
+            if first_phase
+                && let (Some(lists), Some(id)) = (&mut lists, s.list_id)
+                && lists.list(
+                    id,
+                    s.page,
+                    v.distance,
+                    &s.sides,
+                    parts(fade_code(s, &v.key) != 0),
+                    v.origin,
+                )
+            {
+                if let Some(c) = &mut cull {
+                    c.drawn(i, v.slot, s.sides.quads() * 6);
+                }
+                continue;
+            }
             let (draws, pages) = if first_phase {
                 (&mut self.draws, &mut self.draw_pages)
             } else {
@@ -6612,7 +6682,8 @@ impl Renderer {
         let flat_frame = match &mut self.flat {
             Some(flat)
                 if self.flat_on
-                    && !self.draws.is_empty()
+                    && (!self.draws.is_empty()
+                        || self.gpu_lists.as_ref().is_some_and(|l| l.listed() > 0))
                     && (self.drawn_sections >= flat.min_sections
                         || pack_terrain
                         || shadow_view.is_some()) =>
@@ -6651,6 +6722,8 @@ impl Renderer {
                                 Some((id, lod::instance(v.origin, v.fade)))
                             })),
                         |page| sorted.buffer(page).clone(),
+                        self.gpu_lists.as_mut().filter(|l| l.listed() > 0),
+                        eye.map(|e| e.to_array()),
                         self.own_timing.as_mut(),
                     )
                 })
@@ -6658,7 +6731,8 @@ impl Renderer {
             _ => false,
         };
         if flat_frame {
-            self.section_draw_calls = self.flat.as_ref().map_or(0, |f| f.shadow_calls[0]);
+            self.section_draw_calls = self.flat.as_ref().map_or(0, |f| f.shadow_calls[0])
+                + self.gpu_lists.as_ref().map_or(0, |l| l.calls().len());
         } else if self.multi_draw && !self.draws.is_empty() {
             if self.draws.len() as u64 > self.indirect_capacity {
                 self.indirect_capacity = (self.draws.len() as u64).next_power_of_two();
@@ -7259,19 +7333,26 @@ impl Renderer {
                     // Without a pack, on Metal, the opaque pass, then the cutout one
                     // (terrain.wgsl's `opaque_quad`), each over phase 1's lists with
                     // quads for it, and over all of phase 2's.
+                    // Each pass's GPU-made lists by group, too (`flat::Flat::list`).
                     let [opaque, cutout] = flat.pass_calls;
-                    let passes: &[(&wgpu::RenderPipeline, std::ops::Range<usize>)] = match pack_flat
-                    {
-                        Some(p) => &[(&p.0, 0..flat.phase1_calls)],
+                    type Passes<'p> =
+                        &'p [(&'p wgpu::RenderPipeline, std::ops::Range<usize>, &'p [u8])];
+                    let passes: Passes = match pack_flat {
+                        Some(p) => &[(&p.0, 0..flat.phase1_calls, &[0, 1])],
                         None if split_solid => &[
-                            (&flat.solid_opaque, 0..opaque),
-                            (&flat.solid_cutout, cutout..flat.phase1_calls),
+                            (&flat.solid_opaque, 0..opaque, &[0]),
+                            (&flat.solid_cutout, cutout..flat.phase1_calls, &[1]),
                         ],
-                        None => &[(&flat.solid, 0..flat.phase1_calls)],
+                        None => &[(&flat.solid, 0..flat.phase1_calls, &[0, 1])],
                     };
                     let draw = |pass: &mut wgpu::RenderPass<'_>| {
-                        for (pipeline, calls) in passes {
+                        for (pipeline, calls, groups) in passes {
                             pass.set_pipeline(pipeline);
+                            if let Some(lists) = &self.gpu_lists {
+                                for &group in *groups {
+                                    flat.draw_lists(pass, lists, group, vertices);
+                                }
+                            }
                             flat.draw(pass, &flat.calls[calls.clone()], vertices);
                         }
                     };
@@ -7301,7 +7382,7 @@ impl Renderer {
                             };
                             pass.set_bind_group(0, &self.group, &[]);
                             pack_frame(&mut pass);
-                            for (pipeline, _) in passes {
+                            for (pipeline, ..) in passes {
                                 pass.set_pipeline(pipeline);
                                 flat.draw_phase2(&mut pass, vertices);
                             }
@@ -8952,6 +9033,12 @@ fn projection_center(view_proj: Mat4) -> Option<Vec3> {
 /// `origin`; all of them when there is no eye.
 fn facing_runs(sides: &Sides, eye: Option<Vec3>, origin: [f32; 3], draw: impl FnMut(u32, u32)) {
     facing_runs_from(sides, eye, None, origin, Quads::All, draw)
+}
+/// Whether phase 1's solid lists may be made on the GPU (`flat::Flat::list`);
+/// `HORIZON_GPU_LISTS=0` keeps them on the CPU.
+fn gpu_lists_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("HORIZON_GPU_LISTS").as_deref() != Ok("0"))
 }
 /// `facing_runs` for the eye and, with `low`, every eye straight below it down to that
 /// camera-relative height (the water mirror's eye).
