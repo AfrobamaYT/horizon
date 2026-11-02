@@ -16,8 +16,9 @@ command. The original is read-only; a mod may change the outgoing `message` or s
 sending. It runs after Horizon's chat restrictions, but before command routing and signing. Client-owned
 commands and unattended commands do not pass through it. Bundles need "hooks": @API:client_chat@.
 
-`native_client_chat_received(message, cancel)` fires on the client for received player chat. A mod may
-change the displayed `Text` or set `cancel` to suppress it. Bundles need "hooks": @API:client_chat_received@.
+`native_client_chat_received(message, cancel)` fires on the client for received player, disguised and
+system chat, but not action-bar overlays. A mod may change the displayed `Text` or set `cancel` to
+suppress it. Bundles need "hooks": @API:client_chat_received@.
 
 ## Villager farming
 

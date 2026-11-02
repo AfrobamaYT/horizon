@@ -4433,9 +4433,16 @@ impl Game<'_> {
                 if p.overlay {
                     self.say_system_queued(&text);
                     self.titles.set_overlay(text, false);
-                } else if self.chat_line(text.clone(), horizon_client::chat::ChatSource::Server) {
-                    // handleSystemMessage: said once the chat takes it.
-                    self.say_system_chat_queued(&text);
+                } else {
+                    let mut text = text;
+                    let mut cancel = false;
+                    self.native_client_chat_received(&mut text, &mut cancel);
+                    if !cancel
+                        && self.chat_line(text.clone(), horizon_client::chat::ChatSource::Server)
+                    {
+                        // handleSystemMessage: said once the chat takes it.
+                        self.say_system_chat_queued(&text);
+                    }
                 }
             }
             C::PlayerChat(p) => {
@@ -4561,8 +4568,12 @@ impl Game<'_> {
                 let narration = self
                     .decorate_chat(&p.chat_type, &content, Decoration::Narration)
                     .plain();
-                let line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
-                self.handle_player_chat(line, None, ChatTrust::Secure, narration);
+                let mut line = self.decorate_chat(&p.chat_type, &content, Decoration::Chat);
+                let mut cancel = false;
+                self.native_client_chat_received(&mut line, &mut cancel);
+                if !cancel {
+                    self.handle_player_chat(line, None, ChatTrust::Secure, narration);
+                }
             }
             C::DeleteChat(p) => self.handle_delete_chat(&p.signature)?,
             C::PlayerInfoUpdate(p) => {
