@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_respawn_position",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_respawn_position",
+      "neoforge": "PlayerRespawnPositionEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "replace",
+        "out": "dimension, position, rotation, flags, saved"
+      }
+    }
+  ],
+  "rust_summary": "a player's respawn destination (`native_player_respawn_position`).",
+  "doc_summary": "A server player's default respawn destination (`native_player_respawn_position`). Bundles need \"hooks\": @API:player_respawn_position@."
+}

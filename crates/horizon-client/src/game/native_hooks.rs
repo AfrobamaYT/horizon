@@ -5404,6 +5404,20 @@ impl Game<'_> {
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
+    /// A server player's respawn destination before placement (NeoForge's
+    /// `PlayerRespawnPositionEvent`). `flags` holds copy-saved-position,
+    /// missing-respawn-block, and End-return, in that order.
+    pub(super) fn native_player_respawn_position(
+        &mut self,
+        player: u128,
+        dimension: &mut String,
+        position: &mut [f64; 3],
+        rotation: &mut [f32; 2],
+        flags: &mut [bool; 3],
+        saved: &mut Option<super::respawn_anchor::SavedRespawn>,
+    ) {
+        let _ = (player, dimension, position, rotation, flags, saved);
+    }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
     /// food and experience reset, with their state swapped in. Once for each

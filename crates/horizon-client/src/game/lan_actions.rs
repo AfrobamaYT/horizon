@@ -3412,14 +3412,40 @@ impl Game<'_> {
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
-        let level = elsewhere.map_or(super::Dim::Overworld, |c| c.dim);
-        let spawn = elsewhere.map_or(spawn, |c| {
+        let mut level = elsewhere.map_or(super::Dim::Overworld, |c| c.dim);
+        let mut spawn = elsewhere.map_or(spawn, |c| {
             [
                 f64::from(c.pos[0]) + 0.5,
                 f64::from(c.pos[1]),
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
+        // The default-world-spawn path has no respawn block to look up.
+        // Block-based destinations are resolved later by the trip machinery.
+        let default_spawn = own.is_none() && host.hub.guests[i].spawn.is_none();
+        let mut changed_destination = false;
+        let mut rotation = [host.hub.guests[i].yaw, host.hub.guests[i].pitch];
+        if default_spawn {
+            let mut dimension = level.id().to_owned();
+            let original_dimension = dimension.clone();
+            let original_spawn = spawn;
+            let original_rotation = rotation;
+            let mut flags = [true, false, false];
+            let mut saved = host.hub.guests[i].respawn_elsewhere.clone();
+            self.native_player_respawn_position(
+                uuid,
+                &mut dimension,
+                &mut spawn,
+                &mut rotation,
+                &mut flags,
+                &mut saved,
+            );
+            changed_destination = dimension != original_dimension
+                || spawn != original_spawn
+                || rotation != original_rotation;
+            level = super::Dim::from_id(&dimension);
+            host.hub.guests[i].respawn_elsewhere = if flags[0] { saved } else { None };
+        }
         let back = self.dim;
         let left = super::Dim::from_id(&host.hub.guests[i].dimension);
         let away = server && host.hub.guests[i].dimension != level.id();
@@ -3474,6 +3500,11 @@ impl Game<'_> {
             streaming: Some(&self.streaming),
         };
         host.hub.respawn(i, spawn, &ctx);
+        if changed_destination {
+            host.hub.guests[i].yaw = rotation[0];
+            host.hub.guests[i].pitch = rotation[1];
+            host.hub.teleport(i, Some(spawn));
+        }
         // ServerGamePacketListenerImpl.handleClientCommand: a hardcore world's
         // respawned player only watches.
         if self.level.hardcore {
@@ -3492,7 +3523,10 @@ impl Game<'_> {
         }
         if let Some(config) = elsewhere {
             self.respawn_trip(conn, config);
-        } else if in_frame_bed.is_none() && host.hub.guests[i].spawn.is_none() {
+        } else if !changed_destination
+            && in_frame_bed.is_none()
+            && host.hub.guests[i].spawn.is_none()
+        {
             // TeleportTransition.createDefault: no point of its own, so the
             // world spawn's free column once its chunks have loaded.
             self.world_spawn_trip(conn);
