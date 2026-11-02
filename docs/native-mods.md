@@ -2317,7 +2317,7 @@ a dimension.
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
-  `None` for a client, a stale handle, or a level that is parked rather than in place.
+  `None` for a client, a stale handle, or a closed level; parked levels can be read.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
 (`entity`, `level`) also becomes a method of that handle.

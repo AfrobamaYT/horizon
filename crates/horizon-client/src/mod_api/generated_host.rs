@@ -1265,7 +1265,7 @@ pub trait Host {
     }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a parked level. Unloaded blocks read
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
     /// as air; collision errors return no boxes, like `native_block_collision`.
     /// API @API:level_shapes@.
     fn level_block_shape(
@@ -1315,7 +1315,7 @@ impl EntityRef {
 impl LevelRef {
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a parked level. Unloaded blocks read
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
     /// as air; collision errors return no boxes, like `native_block_collision`.
     /// API @API:level_shapes@.
     pub fn block_shape(

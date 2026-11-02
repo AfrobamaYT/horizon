@@ -57,7 +57,7 @@ impl Game<'_> {
     }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a parked level. Unloaded blocks read
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
     /// as air; collision errors return no boxes, like `native_block_collision`.
     /// API @API:level_shapes@.
     pub(super) fn native_level_block_shape(
@@ -66,19 +66,29 @@ impl Game<'_> {
         pos: [i32; 3],
         kind: NativeBlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
-        if self.remote.is_some()
-            || self.native_lifecycle.epoch() != Some(level.epoch())
-            || self.dim.id() != level.dimension()
-        {
+        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
         }
+        let (world, anims) = if self.dim.id() == level.dimension() {
+            (&self.world, &self.be_anims)
+        } else {
+            let dim = self
+                .levels
+                .parked_dims()
+                .into_iter()
+                .find(|dim| dim.id() == level.dimension())?;
+            (
+                self.levels.parked_world(dim)?,
+                self.levels.parked_anims(dim)?,
+            )
+        };
         Some(match kind {
             NativeBlockShapeKind::Outline => self
-                .outline_boxes_in_context(pos, false)
+                .outline_boxes_in_context(world, anims, pos, false)
                 .into_iter()
                 .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
                 .collect(),
-            NativeBlockShapeKind::Collision => self.native_block_collision(pos),
+            NativeBlockShapeKind::Collision => self.native_block_collision_in(world, pos),
         })
     }
 
@@ -173,6 +183,34 @@ mod tests {
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
         let level = game.native_level("minecraft:overworld").unwrap();
+        assert!(
+            game.enter_command_level(super::super::Dim::Nether)
+                .is_some()
+        );
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.set(0, 64, 0, stone).unwrap();
+        assert!(
+            game.enter_command_level(super::super::Dim::Overworld)
+                .is_some()
+        );
+        let nether = game.native_level("minecraft:the_nether").unwrap();
+        let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
+        assert_eq!(
+            game.native_level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Outline),
+            Some(cube.clone())
+        );
+        assert_eq!(
+            game.native_level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Collision),
+            Some(cube)
+        );
         let shape = |game: &mut Game<'_>, name: &str, kind| {
             let state = game.pack.assets.registry.default_state(name).unwrap();
             game.world.set(0, 64, 0, state).unwrap();
