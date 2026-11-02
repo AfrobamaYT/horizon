@@ -1113,11 +1113,13 @@ impl Game<'_> {
     /// Minecraft.disconnect's `ClientPlayerNetworkEvent.LoggingOut`: on
     /// leaving a world, and on quitting the game from one.
     pub(super) fn client_logging_out(&mut self) {
-        let player_id = self
-            .player
-            .as_ref()
-            .and_then(|_| self.remote.as_ref().map(|r| r.entity_id));
-        self.native_client_player_logging_out(player_id, self.remote.is_some());
+        if let Some(remote) = &self.remote {
+            let player = self
+                .player
+                .as_ref()
+                .map(|_| (remote.entity_id, remote.profile));
+            self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
+        }
     }
 
     /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
@@ -1825,12 +1827,7 @@ impl Game<'_> {
                     name,
                     uuid,
                 } => {
-                    self.set_registries(registries.clone());
-                    self.native_client_tags_updated(
-                        &registries,
-                        "client_packet_received",
-                        self.integrated.is_none(),
-                    );
+                    self.set_registries(registries);
                     self.extras_joined();
                     // handleLogin: the level loading screen replaces any dialog.
                     self.close_dialogs();
@@ -1921,12 +1918,7 @@ impl Game<'_> {
                         r.custom_completions.clear();
                     }
                     self.ui.registries.custom_completions.clear();
-                    self.set_registries(registries.clone());
-                    self.native_client_tags_updated(
-                        &registries,
-                        "client_packet_received",
-                        self.integrated.is_none(),
-                    );
+                    self.set_registries(registries);
                 }
                 // handleTransfer: "Cannot transfer to server from
                 // singleplayer" (no ServerData), so the world just closes.
@@ -3040,19 +3032,6 @@ impl Game<'_> {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
             // thread, after all preceding packets (especially teleports).
             C::Ping(p) => self.send(S::Pong(p)),
-            C::UpdateTags(packet) => {
-                let should_update_static_data = self.integrated.is_none();
-                if let Some(remote) = self.remote.as_mut() {
-                    // Unlike vanilla's memory connection, this client keeps its own registry view.
-                    Arc::make_mut(&mut remote.registries).add_tags(&packet);
-                    let registries = remote.registries.clone();
-                    self.native_client_tags_updated(
-                        &registries,
-                        "client_packet_received",
-                        should_update_static_data,
-                    );
-                }
-            }
             // A native mod's server half to its client half.
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
@@ -3075,6 +3054,7 @@ impl Game<'_> {
                 if let Err(e) = self.resolve_parts() {
                     log::warn!("Horizon: {e}");
                 }
+                self.native_tags_updated(false);
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
                 self.level.hardcore = p.hardcore;
@@ -3119,15 +3099,12 @@ impl Game<'_> {
                 }
                 self.send(S::ClientInformation(info));
                 self.remote_chat_login();
-                self.native_client_player_logging_in(p.player_id, &p.spawn.dimension);
+                if let Some(remote) = &self.remote {
+                    self.native_client_player_logging_in(p.player_id, remote.profile);
+                }
             }
             C::Respawn(p) => {
-                let player_id = self.remote.as_ref().map(|r| r.entity_id);
-                let old_dimension = self
-                    .remote
-                    .as_ref()
-                    .and_then(|r| r.heard_level.clone())
-                    .unwrap_or_else(|| self.dim.id().to_owned());
+                let old_player = self.remote.as_ref().map(|r| (r.entity_id, r.profile));
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
@@ -3178,7 +3155,15 @@ impl Game<'_> {
                     r.camera = None;
                 }
                 self.capture(true);
-                self.native_client_player_clone(player_id, &old_dimension, &p.spawn.dimension);
+                if let Some((old_id, uuid)) = old_player {
+                    self.native_client_player_clone(
+                        old_id,
+                        self.own_entity_id(),
+                        uuid,
+                        died,
+                        dimension_changed,
+                    );
+                }
             }
             C::PlayerPosition(p) => self.remote_teleport(&p)?,
             C::PlayerRotation(p) => {

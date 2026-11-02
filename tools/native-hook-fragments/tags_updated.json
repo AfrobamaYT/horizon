@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "tags_updated",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tags_updated",
+      "neoforge": "TagsUpdatedEvent",
+      "side": "both",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "game tags being updated (`native_tags_updated`).",
+  "doc_summary": "game tags being updated: `native_tags_updated(server_data_load)` fires after resolving parts on server world load and reload (`true`) or client join (`false`). The client currently uses its own tags; play-phase updates are not applied. Bundles that use it need `\"hooks\": @API:tags_updated@`."
+}

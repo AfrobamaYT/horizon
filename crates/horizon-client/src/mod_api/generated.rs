@@ -4547,6 +4547,36 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// After the client replaces its player on respawn or dimension change
+    /// (NeoForge's `ClientPlayerNetworkEvent.Clone`). Client-side.
+    /// @API:client_player_clone@.
+    fn client_player_clone(&self, host: &mut dyn Host, event: &mut ClientPlayerCloneEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The client accepted a play login and initialized its level and player
+    /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
+    /// is the server's entity ID. Client-side,
+    /// once per connection, including single player. @API:client_player_logging_in@.
+    fn client_player_logging_in(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerLoggingInEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before client disconnect teardown (NeoForge's
+    /// `ClientPlayerNetworkEvent.LoggingOut`). The player may be absent.
+    /// Client-side. @API:client_player_logging_out@.
+    fn client_player_logging_out(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerLoggingOutEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -4667,6 +4697,11 @@ pub trait Hooks: Send + Sync {
     }
     /// A screen was observed opening, at most once per frame.
     fn screen_opening(&self, host: &dyn Host, event: &mut ScreenOpeningEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Tags are ready after a server data load or client join. @API:tags_updated@.
+    fn tags_updated(&self, host: &mut dyn Host, event: &mut TagsUpdatedEvent) {
         let _ = host;
         let _ = event;
     }
@@ -5476,7 +5511,8 @@ pub fn dispatch_neighbor_changed(
     changed: BlockId,
     moved: bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("neighbor_changed");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = NeighborChangedEvent {
         dimension,
         pos,
@@ -5509,7 +5545,8 @@ pub fn dispatch_random_tick(
     if *handled {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("random_tick");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = RandomTickEvent {
         dimension,
         pos,
@@ -5548,7 +5585,8 @@ pub fn dispatch_tick_block(
     if *handled {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("tick_block");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = TickBlockEvent {
         dimension,
         pos,
@@ -5593,7 +5631,8 @@ pub fn dispatch_update_shape(
     if new.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("update_shape");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = UpdateShapeEvent {
         dimension,
         pos,
@@ -5815,7 +5854,8 @@ pub fn dispatch_block_entity(
     if entity.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntityEvent { block };
     'hook: {
         for mod_hook in super::entered(mods, "block_entity") {
@@ -5844,7 +5884,8 @@ pub fn dispatch_block_entity_ticks(
     block: &str,
     ticks: &mut bool,
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity_ticks");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntityTicksEvent {
         block,
         ticks: *ticks,
@@ -5869,7 +5910,8 @@ pub fn dispatch_block_entity_tick(
     pos: [i32; 3],
     entity: &mut ModBlockEntity,
 ) {
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("block_entity_tick");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityTickEvent { pos, entity };
     for mod_hook in super::entered(mods, "block_entity_tick") {
         mod_hook.block_entity_tick(host, &mut event);
@@ -5893,7 +5935,8 @@ pub fn dispatch_block_entity_update_tag(
     if tag.is_some() {
         return;
     }
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("block_entity_update_tag");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityUpdateTagEvent { pos, entity };
     'hook: {
         for mod_hook in super::entered(mods, "block_entity_update_tag") {
@@ -5946,7 +5989,8 @@ pub fn dispatch_screen(
     if screen.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenEvent { block };
     'hook: {
         for mod_hook in super::entered(mods, "screen") {
@@ -5979,7 +6023,8 @@ pub fn dispatch_screen_draw(
     batch: &mut HudBatch,
     origin: [f32; 2],
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen_draw");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenDrawEvent {
         block,
         data,
@@ -6013,7 +6058,8 @@ pub fn dispatch_screen_click(
     if button.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen_click");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenClickEvent {
         block,
         data,
@@ -6051,7 +6097,8 @@ pub fn dispatch_screen_tooltip(
     at: [f32; 2],
     lines: &mut Vec<String>,
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen_tooltip");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenTooltipEvent {
         block,
         data,
@@ -6079,7 +6126,8 @@ pub fn dispatch_menu_button(
     entity: &mut ModBlockEntity,
     id: i32,
 ) {
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("menu_button");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonEvent { pos, entity, id };
     for mod_hook in super::entered(mods, "menu_button") {
         mod_hook.menu_button(host, &mut event);
@@ -6180,7 +6228,8 @@ pub fn dispatch_tooltip(
     stack: &ItemStack,
     lines: &mut Vec<(Text, u32)>,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("tooltip");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = TooltipEvent { stack, lines };
     for mod_hook in super::entered(mods, "tooltip") {
         mod_hook.tooltip(host, &mut event);
@@ -6207,7 +6256,8 @@ pub fn dispatch_use_item_on(
     if *claimed {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_item_on");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseItemOnEvent { stack, pos, face };
     'hook: {
         for mod_hook in super::entered(mods, "use_item_on") {
@@ -6238,7 +6288,8 @@ pub fn dispatch_use_item(
     if *claimed {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_item");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseItemEvent { stack };
     'hook: {
         for mod_hook in super::entered(mods, "use_item") {
@@ -6637,7 +6688,8 @@ pub fn dispatch_hurt_enemy(
     entity: u32,
     kind: &str,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("hurt_enemy");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = HurtEnemyEvent {
         stack,
         entity,
@@ -6704,7 +6756,8 @@ pub fn dispatch_block_signal(
     direct: bool,
     signal: &mut i32,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("block_signal");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = BlockSignalEvent {
         dimension,
         pos,
@@ -6733,7 +6786,8 @@ pub fn dispatch_is_signal_source(
     state: BlockStateId,
     source: &mut bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("is_signal_source");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = IsSignalSourceEvent {
         state,
         source: *source,
@@ -6928,7 +6982,8 @@ pub fn dispatch_menu_button_v2(
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("menu_button_v2");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonV2Event {
         pos,
         entity,
@@ -7176,7 +7231,8 @@ pub fn dispatch_item_bar(
     stack: &ItemStack,
     bar: &mut Option<(i32, u32)>,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("item_bar");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = ItemBarEvent { stack, bar };
     for mod_hook in super::entered(mods, "item_bar") {
         mod_hook.item_bar(host, &mut event);
@@ -7197,7 +7253,8 @@ pub fn dispatch_has_analog_output(
     state: BlockStateId,
     output: &mut bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("has_analog_output");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = HasAnalogOutputEvent {
         state,
         output: *output,
@@ -7228,7 +7285,8 @@ pub fn dispatch_analog_output(
     face: Direction,
     output: &mut i32,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("analog_output");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = AnalogOutputEvent {
         dimension,
         pos,
@@ -7275,7 +7333,8 @@ pub fn dispatch_dispense_item(
     if answer.is_some() {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("dispense_item");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = DispenseItemEvent {
         dimension,
         pos,
@@ -7311,7 +7370,8 @@ pub fn dispatch_tooltip_component(
     if size.is_some() {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("tooltip_component");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = TooltipComponentEvent { stack };
     'hook: {
         for mod_hook in super::entered(mods, "tooltip_component") {
@@ -7344,7 +7404,8 @@ pub fn dispatch_tooltip_component_draw(
     origin: [f32; 2],
     size: [f32; 2],
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("tooltip_component_draw");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = TooltipComponentDrawEvent {
         stack,
         batch,
@@ -7376,7 +7437,8 @@ pub fn dispatch_can_survive(
     if survives.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("can_survive");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = CanSurviveEvent {
         dimension,
         pos,
@@ -7417,7 +7479,8 @@ pub fn dispatch_may_place_on(
     if may.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("may_place_on");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = MayPlaceOnEvent {
         dimension,
         state,
@@ -7457,7 +7520,8 @@ pub fn dispatch_block_entity_submit(
     entity: &ModBlockEntity,
     draw: &mut BlockEntityDraw,
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity_submit");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntitySubmitEvent {
         pos,
         block,
@@ -7490,7 +7554,8 @@ pub fn dispatch_block_entity_render_bounding_box(
     entity: &ModBlockEntity,
     bounds: &mut [f32; 6],
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity_render_bounding_box");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntityRenderBoundingBoxEvent {
         pos,
         block,
@@ -7523,7 +7588,8 @@ pub fn dispatch_is_valid_bonemeal_target(
     if valid.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("is_valid_bonemeal_target");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = IsValidBonemealTargetEvent {
         dimension,
         pos,
@@ -7560,7 +7626,8 @@ pub fn dispatch_is_bonemeal_success(
     state: BlockStateId,
     success: &mut bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("is_bonemeal_success");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = IsBonemealSuccessEvent {
         dimension,
         pos,
@@ -7589,7 +7656,8 @@ pub fn dispatch_perform_bonemeal(
     pos: BlockPos,
     state: BlockStateId,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("perform_bonemeal");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = PerformBonemealEvent {
         dimension,
         pos,
@@ -7759,7 +7827,8 @@ pub fn dispatch_state_for_placement(
     if answer.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("state_for_placement");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = StateForPlacementEvent {
         dimension,
         state,
@@ -8034,7 +8103,8 @@ pub fn dispatch_item_decorations(
     y: f32,
     batch: &mut HudBatch,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("item_decorations");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = ItemDecorationsEvent { stack, x, y, batch };
     for mod_hook in super::entered(mods, "item_decorations") {
         mod_hook.item_decorations(host, &mut event);
@@ -8055,7 +8125,8 @@ pub fn dispatch_use_duration(
     stack: &ItemStack,
     duration: &mut i32,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_duration");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseDurationEvent {
         stack,
         duration: *duration,
@@ -8080,7 +8151,8 @@ pub fn dispatch_use_animation(
     stack: &ItemStack,
     animation: &mut UseAnimation,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_animation");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseAnimationEvent { stack, animation };
     for mod_hook in super::entered(mods, "use_animation") {
         mod_hook.use_animation(host, &mut event);
@@ -8932,7 +9004,8 @@ pub fn dispatch_menu_slot_rules(
     may_place: &mut bool,
     max_stack: &mut u32,
 ) {
-    let parts = super::parts().menu(|| Some(menu));
+    let part_table = super::parts("menu_slot_rules");
+    let parts = part_table.menu(|| Some(menu));
     let mut event = MenuSlotRulesEvent {
         menu,
         slot,
@@ -9000,7 +9073,8 @@ pub fn dispatch_on_use_tick(
     entity: Option<i32>,
     remaining: i32,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("on_use_tick");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = OnUseTickEvent {
         stack,
         entity,
@@ -9065,7 +9139,8 @@ pub fn dispatch_release_using(
     time_left: i32,
     used: &mut bool,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("release_using");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = ReleaseUsingEvent {
         stack,
         entity,
@@ -11205,7 +11280,8 @@ pub fn dispatch_fire_odds(
     if odds.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("fire_odds");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = FireOddsEvent { dimension, state };
     'hook: {
         for mod_hook in super::entered(mods, "fire_odds") {
@@ -11238,7 +11314,8 @@ pub fn dispatch_smoke_source(
     if smoke.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("smoke_source");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = SmokeSourceEvent { dimension, state };
     'hook: {
         for mod_hook in super::entered(mods, "smoke_source") {
@@ -11761,7 +11838,8 @@ pub fn dispatch_menu_quick_move(
     if *handled {
         return;
     }
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("menu_quick_move");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuQuickMoveEvent {
         pos,
         entity,
@@ -14915,6 +14993,69 @@ pub fn dispatch_block_grow_feature(
         }
     }
 }
+/// What [`Hooks::client_player_clone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerCloneEvent {
+    pub old_id: i32,
+    pub new_id: i32,
+    pub uuid: u128,
+    pub died: bool,
+    pub dimension_changed: bool,
+}
+pub fn dispatch_client_player_clone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    old_id: i32,
+    new_id: i32,
+    uuid: u128,
+    died: bool,
+    dimension_changed: bool,
+) {
+    let mut event = ClientPlayerCloneEvent {
+        old_id,
+        new_id,
+        uuid,
+        died,
+        dimension_changed,
+    };
+    for mod_hook in super::entered(mods, "client_player_clone") {
+        mod_hook.client_player_clone(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_logging_in`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerLoggingInEvent {
+    pub player_id: i32,
+    pub uuid: u128,
+}
+pub fn dispatch_client_player_logging_in(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: i32,
+    uuid: u128,
+) {
+    let mut event = ClientPlayerLoggingInEvent { player_id, uuid };
+    for mod_hook in super::entered(mods, "client_player_logging_in") {
+        mod_hook.client_player_logging_in(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_logging_out`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerLoggingOutEvent {
+    pub player_id: Option<i32>,
+    pub uuid: Option<u128>,
+}
+pub fn dispatch_client_player_logging_out(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: Option<i32>,
+    uuid: Option<u128>,
+) {
+    let mut event = ClientPlayerLoggingOutEvent { player_id, uuid };
+    for mod_hook in super::entered(mods, "client_player_logging_out") {
+        mod_hook.client_player_logging_out(host, &mut event);
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -15297,6 +15438,17 @@ pub fn dispatch_screen_opening(
     let mut event = ScreenOpeningEvent { screen };
     for mod_hook in super::entered(mods, "screen_opening") {
         mod_hook.screen_opening(host, &mut event);
+    }
+}
+/// What [`Hooks::tags_updated`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TagsUpdatedEvent {
+    pub server_data_load: bool,
+}
+pub fn dispatch_tags_updated(host: &mut dyn Host, mods: &[Box<dyn Hooks>], server_data_load: bool) {
+    let mut event = TagsUpdatedEvent { server_data_load };
+    for mod_hook in super::entered(mods, "tags_updated") {
+        mod_hook.tags_updated(host, &mut event);
     }
 }
 /// What [`Hooks::tooltip_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

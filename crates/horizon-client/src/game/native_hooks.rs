@@ -2104,23 +2104,16 @@ impl Game<'_> {
     pub(super) fn native_client_level_unload(&mut self, dimension: &str) {
         mod_api::dispatch_client_level_unload(self, mod_api::mods(), dimension);
     }
-    /// Client registry tags were updated from a server packet. The registry
-    /// view contains the synchronized data Horizon currently retains.
-    /// @API:client_tags_updated@.
-    pub(super) fn native_client_tags_updated(
-        &mut self,
-        registries: &horizon_protocol::registry::Dynamic,
-        cause: &str,
-        should_update_static_data: bool,
-    ) {
-        let _ = (registries, cause, should_update_static_data);
+    /// Tags are ready after a server data load or client join. @API:tags_updated@.
+    pub(super) fn native_tags_updated(&mut self, server_data_load: bool) {
+        mod_api::dispatch_tags_updated(self, mod_api::mods(), server_data_load);
     }
     /// The client accepted a play login and initialized its level and player
     /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
-    /// is the server's entity ID and `dimension` is the level key. Client-side,
+    /// is the server's entity ID. Client-side,
     /// once per connection, including single player. @API:client_player_logging_in@.
-    pub(super) fn native_client_player_logging_in(&mut self, player_id: i32, dimension: &str) {
-        let _ = (player_id, dimension);
+    pub(super) fn native_client_player_logging_in(&mut self, player_id: i32, uuid: u128) {
+        mod_api::dispatch_client_player_logging_in(self, mod_api::mods(), player_id, uuid);
     }
     /// Before client disconnect teardown (NeoForge's
     /// `ClientPlayerNetworkEvent.LoggingOut`). The player may be absent.
@@ -2128,20 +2121,30 @@ impl Game<'_> {
     pub(super) fn native_client_player_logging_out(
         &mut self,
         player_id: Option<i32>,
-        connected: bool,
+        uuid: Option<u128>,
     ) {
-        let _ = (player_id, connected);
+        mod_api::dispatch_client_player_logging_out(self, mod_api::mods(), player_id, uuid);
     }
     /// After the client replaces its player on respawn or dimension change
     /// (NeoForge's `ClientPlayerNetworkEvent.Clone`). Client-side.
     /// @API:client_player_clone@.
     pub(super) fn native_client_player_clone(
         &mut self,
-        player_id: Option<i32>,
-        old_dimension: &str,
-        new_dimension: &str,
+        old_id: i32,
+        new_id: i32,
+        uuid: u128,
+        died: bool,
+        dimension_changed: bool,
     ) {
-        let _ = (player_id, old_dimension, new_dimension);
+        mod_api::dispatch_client_player_clone(
+            self,
+            mod_api::mods(),
+            old_id,
+            new_id,
+            uuid,
+            died,
+            dimension_changed,
+        );
     }
     /// Once a tick, in every `Game`: the window's (in single player, on LAN
     /// and on servers), and the server's own (`native_window` is false
