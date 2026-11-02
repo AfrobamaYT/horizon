@@ -5842,8 +5842,17 @@ impl Game<'_> {
             let at = pos.map(f64::from);
             self.spawn_item(stack, at, dispenser::new_item_motion(), 10);
         }
-        let correct_tool =
+        let mut correct_tool =
             !facts.requires_tool || self.res.items().correct_for_drops(self.held(), &facts.name);
+        if !creative
+            && self
+                .res
+                .behaviours()
+                .data(state)
+                .is(horizon_world::level::classes::Class::Door)
+        {
+            self.native_player_harvest_check(pos, state.0, &mut correct_tool);
+        }
         let removed = self.with_level(|b, level, ticks| {
             b.player_destroy_block(
                 level,
@@ -5853,15 +5862,18 @@ impl Game<'_> {
                 correct_tool,
             )
         });
-        if removed && !creative {
+        if !creative {
             let held = self.held().cloned();
-            self.mine_block_with_held(&facts.name, facts.hardness);
-            let harvest = !facts.requires_tool
+            let mut harvest = !facts.requires_tool
                 || self
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if harvest {
+            self.native_player_harvest_check(pos, state.0, &mut harvest);
+            if removed {
+                self.mine_block_with_held(&facts.name, facts.hardness);
+            }
+            if removed && harvest {
                 // Block.playerDestroy: the mined statistic, the exhaustion and the drops.
                 self.award_stat("mined", &facts.name, 1);
                 if let Some(p) = self.player.as_mut() {
@@ -6991,8 +7003,9 @@ impl Game<'_> {
         {
             speed *= self.submerged_mining_speed();
         }
-        let harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
+        let mut harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
         let hardness = facts.hardness;
+        self.native_player_harvest_check(hit.pos, state.0, &mut harvest);
         let mut canceled = false;
         self.native_player_break_speed(hit.pos, state.0, speed, &mut speed, &mut canceled);
         let progress = if canceled {
