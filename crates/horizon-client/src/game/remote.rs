@@ -1105,6 +1105,11 @@ impl Game<'_> {
         if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
             return self.begin_closing_save(false);
         }
+        let player_id = self
+            .player
+            .as_ref()
+            .and_then(|_| self.remote.as_ref().map(|r| r.entity_id));
+        self.native_client_player_logging_out(player_id, self.remote.is_some());
         self.finish_perf();
         if reason.is_none() {
             // Leaving on purpose: nothing for auto-reconnect to retry.

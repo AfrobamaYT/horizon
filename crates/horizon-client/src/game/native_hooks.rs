@@ -1541,6 +1541,16 @@ impl Game<'_> {
     pub(super) fn native_client_player_logging_in(&mut self, player_id: i32, dimension: &str) {
         let _ = (player_id, dimension);
     }
+    /// Before client disconnect teardown (NeoForge's
+    /// `ClientPlayerNetworkEvent.LoggingOut`). The player may be absent.
+    /// Client-side. @API:client_player_logging_out@.
+    pub(super) fn native_client_player_logging_out(
+        &mut self,
+        player_id: Option<i32>,
+        connected: bool,
+    ) {
+        let _ = (player_id, connected);
+    }
     /// Once a tick, in every `Game`: the window's (in single player, on LAN
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
