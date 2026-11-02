@@ -1,0 +1,90 @@
+name: dx12 shader compile measure
+# A one-off measurement (perf-entry-startup), never merged: how long the renderer's start spends in
+# the DX12 shader compiler on a GitHub Windows runner (WARP, no GPU), FXC against DXC, and what
+# statically linking DXC costs in binary size. Runs only on pushes to its own branch.
+on:
+  push:
+    branches: [perf/dx12-fxc-measure]
+permissions:
+  contents: read
+jobs:
+  compile-time:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dx12-measure
+      - run: cargo build --release --locked -p horizon-client-render --example boot_pipelines
+      - name: DXC from Microsoft's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo microsoft/DirectXShaderCompiler --json tagName -q .tagName)
+          asset=$(gh release view "$tag" --repo microsoft/DirectXShaderCompiler --json assets -q '.assets[].name' | grep -E '^dxc_.*\.zip$' | grep -v -i -E 'pdb|clang|arm' | head -1)
+          echo "DXC $tag $asset"
+          gh release download "$tag" --repo microsoft/DirectXShaderCompiler --pattern "$asset" --dir "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/dxc" && unzip -q "$RUNNER_TEMP/$asset" -d "$RUNNER_TEMP/dxc"
+          ls "$RUNNER_TEMP/dxc/bin/x64"
+      - name: FXC and DXC, three rounds each, alternated
+        run: |
+          set -euo pipefail
+          exe="$PWD/target/release/examples/boot_pipelines.exe"
+          for round in 1 2 3; do
+            WGPU_DX12_COMPILER=fxc "$exe"
+            PATH="$RUNNER_TEMP/dxc/bin/x64:$PATH" WGPU_DX12_COMPILER=dxc "$exe"
+          done | tee "$RUNNER_TEMP/compile.jsonl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compile-time
+          path: ${{ runner.temp }}/compile.jsonl
+
+  static-dxc:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dx12-measure-size
+      - name: The game as released
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p horizon-client --bin horizon-client
+          stat -c '%s' target/release/horizon-client.exe | tee "$RUNNER_TEMP/size-fxc.txt"
+          (cd target/release && 7z a -tzip "$RUNNER_TEMP/fxc.zip" horizon-client.exe > /dev/null)
+          stat -c '%s' "$RUNNER_TEMP/fxc.zip" | tee "$RUNNER_TEMP/zip-fxc.txt"
+      - name: The game with DXC linked in
+        run: |
+          set -euo pipefail
+          sed -i 's/features = \["dx12"\]/features = ["dx12", "static-dxc"]/' crates/horizon-client-render/Cargo.toml
+          grep -n static-dxc crates/horizon-client-render/Cargo.toml
+          cargo build --release -p horizon-client --bin horizon-client
+          stat -c '%s' target/release/horizon-client.exe | tee "$RUNNER_TEMP/size-static-dxc.txt"
+          cargo build --release -p horizon-client-render --example boot_pipelines
+          for round in 1 2 3; do
+            WGPU_DX12_COMPILER=staticdxc target/release/examples/boot_pipelines.exe
+          done | tee "$RUNNER_TEMP/static-dxc.jsonl"
+          cd target/release && 7z a -tzip "$RUNNER_TEMP/fxc-vs-static.zip" horizon-client.exe > /dev/null
+          stat -c '%s' "$RUNNER_TEMP/fxc-vs-static.zip" | tee "$RUNNER_TEMP/zip-static-dxc.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: static-dxc
+          path: |
+            ${{ runner.temp }}/size-*.txt
+            ${{ runner.temp }}/zip-*.txt
+            ${{ runner.temp }}/static-dxc.jsonl
