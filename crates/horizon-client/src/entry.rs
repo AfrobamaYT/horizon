@@ -119,6 +119,11 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
+        farmland_trample: |entity, pos, state, distance, cancel| {
+            crate::mod_api::dispatch_farmland_trample(
+                crate::mod_api::mods(), entity, pos, state, distance, cancel,
+            );
+        },
         ingredient: |kind, data, items| {
             crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
         },

@@ -1701,6 +1701,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   block at `pos`. Set `cancel` to leave it closed. The guest's state is not swapped in.
 - **`native_moisture_change(dimension, pos, from, to, cancel)`** (on `GameLevel`): farmland at `pos` is about to
   change moisture. Set `cancel` to keep its old moisture.
+- **`native_farmland_trample(entity, pos, state, distance, cancel)`**: on the server, a living entity's landing is
+  about to convert farmland. `entity` is its ID, `state` is the farmland state ID, and `distance` is the fall distance.
+  Set `cancel` to prevent conversion; fall damage still applies.
 - **`native_sculk_bloom(dimension, pos)`**: after a sculk catalyst at `pos` takes experience, its block has entered
   the blooming state.
 - **`native_sponge_absorb(dimension, pos)`** (on `GameLevel`): a sponge at `pos` has absorbed water and become wet.

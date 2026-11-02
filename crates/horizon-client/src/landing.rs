@@ -25,6 +25,18 @@ use horizon_world::{
 };
 use std::{collections::BTreeMap, fs, path::Path};
 
+/// Called on the server before a landing converts farmland to its base block.
+#[inline(never)]
+pub fn native_farmland_trample(
+    entity: u32,
+    pos: [i32; 3],
+    state: u32,
+    distance: f64,
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::farmland_trample(entity, pos, state, distance, cancel);
+}
+
 pub fn load(root: &Path, properties: &MovementProperties<'_>) -> Result<BlockLandingRegistry> {
     let raw: BTreeMap<String, serde_json::Value> =
         serde_json::from_slice(&fs::read(root.join("landing-definitions.json"))?)?;
@@ -460,6 +472,22 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
     }
     fn entity_dimensions(&self) -> (f32, f32) {
         (self.player.dimensions.width, self.player.dimensions.height)
+    }
+    fn cancel_farmland_trample(
+        &mut self,
+        position: BlockPos,
+        state: BlockStateId,
+        distance: f64,
+    ) -> bool {
+        let mut cancel = false;
+        native_farmland_trample(
+            self.player.entity_id as u32,
+            [position.x, position.y, position.z],
+            state.0,
+            distance,
+            &mut cancel,
+        );
+        cancel
     }
     fn suppressing_bounce(&mut self) -> Result<bool> {
         Ok(self.player.shift_key_down)
