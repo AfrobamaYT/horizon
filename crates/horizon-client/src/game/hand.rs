@@ -403,7 +403,13 @@ impl Game<'_> {
             speed /= 5.0;
         }
         let harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
-        speed / facts.hardness / if harvest { 30.0 } else { 100.0 }
+        let hardness = facts.hardness;
+        let mut canceled = false;
+        self.native_player_break_speed(pos, state.0, speed, &mut speed, &mut canceled);
+        if canceled {
+            return 0.0;
+        }
+        speed / hardness / if harvest { 30.0 } else { 100.0 }
     }
     /// A key for the main-hand stack (`destroyingItem`): its item and components.
     pub(super) fn main_hand_key(&self) -> String {

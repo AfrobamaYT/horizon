@@ -3949,6 +3949,19 @@ impl Game<'_> {
         );
     }
 
+    /// A player's destroy speed for the block at `pos` may be changed or canceled.
+    /// @API:player_break_speed@.
+    pub(super) fn native_player_break_speed(
+        &mut self,
+        pos: [i32; 3],
+        state: u32,
+        original_speed: f32,
+        new_speed: &mut f32,
+        canceled: &mut bool,
+    ) {
+        let _ = (pos, state, original_speed, new_speed, canceled);
+    }
+
     /// A guest's block inventory lock check at `pos`. `locked` is the
     /// vanilla result and may be changed. The guest's state is not swapped in.
     /// @API:block_lock_check@.
