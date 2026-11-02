@@ -2724,8 +2724,8 @@ mod tests {
     use super::*;
 
     /// A remote client's columns all arrive at once around a camera looking
-    /// east: every section it sees meshes before any behind it, and the
-    /// count of sections in view still to mesh falls to 0 with them.
+    /// east: every section it sees meshes before any column it doesn't see,
+    /// and the count of sections in view still to mesh falls to 0 with them.
     #[test]
     fn sections_in_the_camera_view_mesh_before_those_behind_it() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2752,16 +2752,13 @@ mod tests {
         });
         let terrain = crate::testgen::TestTerrain::new(assets.registry, &biomes).unwrap();
         let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
-        // One section high, so a column the camera sees is a section it sees.
-        let shape = crate::chunk::LevelShape::new(0, 16, 16, true).unwrap();
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
-        world.shape = shape;
+        let layout = world.layout();
         // One worker: sections mesh in the order the queue gives them.
         let mut streaming = Streaming::new(Arc::new(terrain), context, 1);
         streaming.remote = true;
         // Far enough that every column is in the view distance.
         streaming.radius = 12;
-        let eye = [8.0, 8.0, 8.0];
         let view = CameraView {
             frustum: crate::gfx::Frustum::of_view(&crate::gfx::View::screen(
                 -90.0,
@@ -2770,21 +2767,29 @@ mod tests {
                 16.0 / 9.0,
                 512.0,
             )),
-            eye,
+            eye: [8.0, 72.0, 8.0],
         };
         streaming.view = Some(view);
         for x in -7..=7 {
             for z in -7..=7 {
-                let mut chunk = Chunk::with_layout(x, z, shape.column());
-                chunk.set(3, 2, 5, stone);
+                let mut chunk = Chunk::with_layout(x, z, layout);
+                chunk.set(3, 70, 5, stone);
                 chunk.lit = true;
                 streaming.insert_remote(&mut world, chunk);
             }
         }
-        let seen = |&(x, sy, z): &(i32, i32, i32)| {
-            let y = sy * 16;
+        let column_seen = |&(x, _, z): &(i32, i32, i32)| {
+            view.sees(
+                [x * 16, layout.min_y(), z * 16],
+                [x * 16 + 16, layout.max_y() + 1, z * 16 + 16],
+            )
+        };
+        let section_seen = |&(x, sy, z): &(i32, i32, i32)| {
+            let y = layout.section_y(sy as usize);
             view.sees([x * 16, y, z * 16], [x * 16 + 16, y + 16, z * 16 + 16])
         };
+        // The columns with all their neighbours, 13 x 13, each section meshed once.
+        let all = 169 * layout.sections();
         let mut order = Vec::new();
         let mut pending_in_view = Vec::new();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
@@ -2796,20 +2801,24 @@ mod tests {
             order.extend(uploads.iter().map(|(key, _)| *key));
             streaming.free(uploads);
             // The edge columns stay dirty: their neighbours never come (`ready`).
-            if order.len() >= 169 && !streaming.busy() {
+            if order.len() >= all && !streaming.busy() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        // The columns with all their neighbours, 13 x 13, each meshed once.
-        assert_eq!(order.len(), 169);
-        let first_behind = order.iter().position(|k| !seen(k)).expect("some behind");
-        assert!(first_behind > 0, "some in view");
+        assert_eq!(order.len(), all);
+        // No section the camera sees waits for a column it doesn't see. (A seen
+        // column's sections above or below the view go with it, after its others.)
+        let behind = order
+            .iter()
+            .position(|k| !column_seen(k))
+            .expect("columns behind");
+        assert!(order[..behind].iter().any(section_seen), "sections in view");
         assert!(
-            order[first_behind..].iter().all(|k| !seen(k)),
-            "a section in view meshed after one behind: {order:?}"
+            !order[behind..].iter().any(section_seen),
+            "a section in view meshed after a column behind the camera: {order:?}"
         );
-        // Once the sections in view are done the count is 0 while those behind still mesh.
+        // Once the sections in view are done the count is 0 while others still mesh.
         assert!(
             pending_in_view
                 .iter()
