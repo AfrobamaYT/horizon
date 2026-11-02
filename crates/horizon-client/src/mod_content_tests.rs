@@ -3418,6 +3418,11 @@ fn biome_modifiers_refuse_unknown_names() {
             r#"{"type":"neoforge:add_spawns","biomes":"minecraft:plains","spawners":[]}"#,
             "biome modifier type \"add_spawns\" skipped",
         ),
+        (
+            r#"{"type":"neoforge:add_features","biomes":"minecraft:plains",
+                "features":{"type":"horizon:climate","temperature":{"min":1}},"step":"underground_ores"}"#,
+            "placed feature set type \"horizon:climate\" is not read",
+        ),
     ]
     .into_iter()
     .enumerate()
