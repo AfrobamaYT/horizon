@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "right_click_empty",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_right_click_empty",
+      "side": "client",
+      "cancellable": false,
+      "neoforge": "PlayerInteractEvent.RightClickEmpty",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "Local player right-clicks empty space with an empty hand (`native_right_click_empty`).",
+  "doc_summary": "The local player right-clicks empty space with an empty hand (`native_right_click_empty(hand)`). This client-side event is not cancellable and does not notify the server. Bundles need \"hooks\": @API:right_click_empty@."
+}

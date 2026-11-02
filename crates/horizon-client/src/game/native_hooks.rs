@@ -1751,6 +1751,11 @@ impl Game<'_> {
     pub(super) fn native_left_click_empty(&mut self) {
         let _ = ();
     }
+    /// The local player right-clicks empty space with an empty `hand`.
+    /// Client-side only; the server does not receive this event.
+    pub(super) fn native_right_click_empty(&mut self, hand: Hand) {
+        let _ = (hand,);
+    }
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
     /// (`[0, 1, 0]` is the top): where `ServerPlayerGameMode.handleBlockBreakAction`
     /// takes a dig's start, after its reach, spawn protection and world border

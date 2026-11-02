@@ -613,6 +613,8 @@ pub trait HandWorld {
     fn hit(&mut self) -> Hit;
     /// A left click fell through to the empty-space attack branch.
     fn left_click_empty(&mut self) {}
+    /// A right click hit empty space with an empty hand.
+    fn right_click_empty(&mut self, _hand: Hand) {}
     fn is_air(&mut self, pos: [i32; 3]) -> bool;
     /// `MultiPlayerGameMode.localPlayerMode`.
     fn creative(&self) -> bool;
@@ -901,7 +903,11 @@ impl Clicks {
                         UseResult::Pass => {}
                     }
                 }
-                Hit::Miss => {}
+                Hit::Miss => {
+                    if w.held_empty(hand) {
+                        w.right_click_empty(hand);
+                    }
+                }
             }
             if !w.held_empty(hand)
                 && let UseResult::Success { swing } = w.use_item(hand)
