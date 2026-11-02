@@ -3269,7 +3269,8 @@ fn configured_features_load_from_the_26_3_path() {
             ("data/zinc/worldgen/configured_feature/old.json", feature),
         ],
     );
-    let root = resource_root(&base, &[m], &scratch.join("cache")).unwrap();
+    let root = scratch.join("out");
+    build(&base, &[m], &root).unwrap();
     let bundle: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(root.join("worldgen/features.json")).unwrap()).unwrap();
     assert_eq!(
