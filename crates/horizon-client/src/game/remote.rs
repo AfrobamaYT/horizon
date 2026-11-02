@@ -3045,6 +3045,8 @@ impl Game<'_> {
                 self.native_client_player_logging_in(p.player_id, &p.spawn.dimension);
             }
             C::Respawn(p) => {
+                let player_id = self.remote.as_ref().map(|r| r.entity_id);
+                let old_dimension = self.dim.id().to_owned();
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
@@ -3090,6 +3092,7 @@ impl Game<'_> {
                     r.camera = None;
                 }
                 self.capture(true);
+                self.native_client_player_clone(player_id, &old_dimension, &p.spawn.dimension);
             }
             C::PlayerPosition(p) => self.remote_teleport(&p)?,
             C::PlayerRotation(p) => {

@@ -1551,6 +1551,17 @@ impl Game<'_> {
     ) {
         let _ = (player_id, connected);
     }
+    /// After the client replaces its player on respawn or dimension change
+    /// (NeoForge's `ClientPlayerNetworkEvent.Clone`). Client-side.
+    /// @API:client_player_clone@.
+    pub(super) fn native_client_player_clone(
+        &mut self,
+        player_id: Option<i32>,
+        old_dimension: &str,
+        new_dimension: &str,
+    ) {
+        let _ = (player_id, old_dimension, new_dimension);
+    }
     /// Once a tick, in every `Game`: the window's (in single player, on LAN
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
