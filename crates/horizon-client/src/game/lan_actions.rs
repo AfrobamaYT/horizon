@@ -3878,7 +3878,7 @@ impl Game<'_> {
             let gone = g.dead || g.health <= 0.0;
             let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
             let problem = self.sleep_problem(bed_exists, true);
-            let mut may_continue = problem.is_none();
+            let mut may_continue = None;
             if !gone {
                 self.native_can_continue_sleeping(
                     g.uuid,
@@ -3889,7 +3889,7 @@ impl Game<'_> {
                     &mut may_continue,
                 );
             }
-            if gone || !may_continue {
+            if gone || !may_continue.unwrap_or(problem.is_none()) {
                 self.wake_guest(host, gi);
             } else {
                 // LivingEntity.tick: a sleeper's xRot is 0.

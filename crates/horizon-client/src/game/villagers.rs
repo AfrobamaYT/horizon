@@ -504,28 +504,32 @@ impl Game<'_> {
         true
     }
     /// `LivingEntity.checkBedExists`' `CanContinueSleepingEvent` for each sleeping villager
-    /// and wandering trader, asked just before their tick, which acts on the answer.
+    /// and wandering trader, asked just before their tick, which acts on the answer, for those in
+    /// entity-ticking chunks.
     pub(super) fn sync_sleeping_mobs(&mut self) {
         if self.remote.is_some() {
             return;
         }
+        let ticking = self.entity_ticking_area();
         let sleepers: Vec<_> = self
             .mobs
             .iter()
             .filter_map(|m| {
                 let pos = villager::sleeping_pos(m)?;
-                let uuid = horizon_client::lan::playerdata::ints_uuid(m.uuid);
-                Some((m.id, uuid, m.kind.id.clone(), pos))
+                let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
+                (self.world.loaded(x, z) && ticking(x, z)).then(|| (m.id, m.kind.id.clone(), pos))
             })
             .collect();
-        for (id, uuid, kind, pos) in sleepers {
+        for (id, kind, pos) in sleepers {
+            let uuid = horizon_client::lan::playerdata::ints_uuid(self.uuid_for(id));
             let bed = self.world.block(pos[0], pos[1], pos[2]);
             let bed_exists = self.res.facts().get(bed).name.ends_with("_bed");
             let problem = self.sleep_problem(bed_exists, false);
-            let mut may_continue = problem.is_none();
+            let mut may_continue = None;
             self.native_can_continue_sleeping(uuid, "", &kind, pos, problem, &mut may_continue);
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                villager::ext_mut(m).may_continue_sleeping = Some(may_continue);
+                villager::ext_mut(m).may_continue_sleeping =
+                    Some(may_continue.unwrap_or(problem.is_none()));
             }
         }
     }

@@ -3402,8 +3402,8 @@ impl Game<'_> {
     /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
     /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
     /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
-    /// none when nothing is wrong. `may_continue` starts as `problem.is_none()` (`mayContinueSleeping`);
-    /// set it true to keep them asleep, false to wake them. The player's state is not swapped in
+    /// none when nothing is wrong. `may_continue` starts empty, meaning `problem.is_none()` (`mayContinueSleeping`);
+    /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
     /// on a guest tick. @API:can_continue_sleeping@.
     pub(super) fn native_can_continue_sleeping(
         &mut self,
@@ -3412,7 +3412,7 @@ impl Game<'_> {
         kind: &str,
         pos: [i32; 3],
         problem: Option<SleepProblem>,
-        may_continue: &mut bool,
+        may_continue: &mut Option<bool>,
     ) {
         let _ = (entity, name, kind, pos, problem, may_continue);
     }

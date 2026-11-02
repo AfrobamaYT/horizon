@@ -14661,7 +14661,7 @@ impl Game<'_> {
                 .is_none_or(|p| p.health.dead_or_dying());
             let bed_exists = self.res.facts().get(bed).name.ends_with("_bed");
             let problem = self.sleep_problem(bed_exists, true);
-            let mut may_continue = problem.is_none();
+            let mut may_continue = None;
             if !dead
                 && let Some((player, name)) = self
                     .lan
@@ -14677,7 +14677,7 @@ impl Game<'_> {
                     &mut may_continue,
                 );
             }
-            let wakes = !may_continue;
+            let wakes = !may_continue.unwrap_or(problem.is_none());
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
             if (self.screen != Screen::Chat && self.keys.contains(&KeyCode::ShiftLeft))
