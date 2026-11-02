@@ -375,14 +375,18 @@ impl Game<'_> {
     }
     /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`.
     pub(super) fn destroy_progress(&mut self, pos: [i32; 3]) -> f32 {
-        let block_break_speed = self.block_break_speed();
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let facts = self.res.facts().get(state);
         if facts.hardness == -1.0 {
             return 0.0;
         }
-        let held = self.held();
-        let mut speed = self.items().mining_speed(held, &facts.name);
+        let mut harvest =
+            !facts.requires_tool || self.items().correct_for_drops(self.held(), &facts.name);
+        let hardness = facts.hardness;
+        self.native_player_harvest_check(pos, state.0, &mut harvest);
+        let block_break_speed = self.block_break_speed();
+        let facts = self.res.facts().get(state);
+        let mut speed = self.items().mining_speed(self.held(), &facts.name);
         speed = self.modify_destroy_speed(speed);
         speed *= block_break_speed;
         if let Some(eye) = self.eye_position()
@@ -402,9 +406,6 @@ impl Game<'_> {
         if self.player.as_ref().is_some_and(|p| !p.ground.on_ground) {
             speed /= 5.0;
         }
-        let mut harvest = !facts.requires_tool || self.items().correct_for_drops(held, &facts.name);
-        let hardness = facts.hardness;
-        self.native_player_harvest_check(pos, state.0, &mut harvest);
         let mut canceled = false;
         self.native_player_break_speed(pos, state.0, speed, &mut speed, &mut canceled);
         if canceled {
