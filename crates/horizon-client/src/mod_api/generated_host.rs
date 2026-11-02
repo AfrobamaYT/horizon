@@ -1203,6 +1203,35 @@ pub trait Host {
     fn instance_dir(&self) -> PathBuf {
         unimplemented!("Host::instance_dir")
     }
+    /// Find a block entity in a loaded chunk of an open server level. A block
+    /// entity temporarily taken out for its tick cannot be read in that tick.
+    /// API @API:block_entity_refs@.
+    fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::block_entity")
+    }
+    /// The block entity's type (`BlockEntity.getType`). API @API:block_entity_refs@.
+    fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<String> {
+        let _ = entity;
+        unimplemented!("Host::block_entity_kind")
+    }
+    /// The block entity's position. API @API:block_entity_refs@.
+    fn block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
+        let _ = entity;
+        unimplemented!("Host::block_entity_position")
+    }
+    /// The block entity's level. API @API:block_entity_refs@.
+    fn block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
+        let _ = entity;
+        unimplemented!("Host::block_entity_level")
+    }
+    /// The data saved without identity or position metadata
+    /// (`BlockEntity.saveWithoutMetadata`). API @API:block_entity_refs@.
+    fn block_entity_data(&self, entity: BlockEntityRef) -> Option<Compound> {
+        let _ = entity;
+        unimplemented!("Host::block_entity_data")
+    }
     /// The most recently extracted world frame's camera, if one exists.
     fn camera(&self) -> Option<NativeCamera> {
         unimplemented!("Host::camera")
@@ -1303,6 +1332,25 @@ pub trait Host {
     fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
         let _ = player;
         unimplemented!("Host::player_abilities")
+    }
+}
+impl BlockEntityRef {
+    /// The block entity's type (`BlockEntity.getType`). API @API:block_entity_refs@.
+    pub fn kind(self, host: &dyn Host) -> Option<String> {
+        host.block_entity_kind(self)
+    }
+    /// The block entity's position. API @API:block_entity_refs@.
+    pub fn position(self, host: &dyn Host) -> Option<[i32; 3]> {
+        host.block_entity_position(self)
+    }
+    /// The block entity's level. API @API:block_entity_refs@.
+    pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
+        host.block_entity_level(self)
+    }
+    /// The data saved without identity or position metadata
+    /// (`BlockEntity.saveWithoutMetadata`). API @API:block_entity_refs@.
+    pub fn data(self, host: &dyn Host) -> Option<Compound> {
+        host.block_entity_data(self)
     }
 }
 impl EntityRef {

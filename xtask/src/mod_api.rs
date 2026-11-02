@@ -298,10 +298,11 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 3] = [
+const HANDLES: [(&str, &str); 4] = [
     ("entity", "EntityRef"),
     ("level", "LevelRef"),
     ("player", "PlayerRef"),
+    ("block_entity", "BlockEntityRef"),
 ];
 
 /// A helper's method on its handle (`receiver`): `entity_position(entity)` on

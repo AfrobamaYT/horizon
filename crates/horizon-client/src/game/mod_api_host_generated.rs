@@ -489,6 +489,21 @@ impl Host for super::Game<'_> {
     fn instance_dir(&self) -> PathBuf {
         self.native_instance_dir()
     }
+    fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
+        self.native_block_entity_ref(level, pos)
+    }
+    fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<String> {
+        self.native_block_entity_kind(entity)
+    }
+    fn block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
+        self.native_block_entity_position(entity)
+    }
+    fn block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
+        self.native_block_entity_level(entity)
+    }
+    fn block_entity_data(&self, entity: BlockEntityRef) -> Option<Compound> {
+        self.native_block_entity_data(entity)
+    }
     fn camera(&self) -> Option<NativeCamera> {
         self.native_camera()
     }
