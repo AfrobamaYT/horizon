@@ -558,4 +558,7 @@ impl Host for super::Game<'_> {
     fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
         self.native_player_abilities(player)
     }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
+    }
 }
