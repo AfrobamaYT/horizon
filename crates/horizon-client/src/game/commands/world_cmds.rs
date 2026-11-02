@@ -198,7 +198,7 @@ impl Game<'_> {
             }
             Target::Mob(id) => {
                 let attacker = cause.or(by).and_then(|t| match t {
-                    Target::Player => Some(Who::Player),
+                    Target::Player | Target::Guest(_) => Some(Who::Player),
                     Target::Mob(i) => Some(Who::Mob(i)),
                     _ => None,
                 });
@@ -213,7 +213,19 @@ impl Game<'_> {
                     .find(|m| m.id == id)
                     .is_some_and(|m| m.damage(amount, damage));
                 if hurt {
-                    self.resolve_player_responsible(id, damage);
+                    match cause.or(by) {
+                        Some(player @ (Target::Player | Target::Guest(_))) => {
+                            let player = match player {
+                                Target::Guest(conn) => Some(conn),
+                                _ => self.lan_acting,
+                            };
+                            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                                mob.ai.last_hurt_by_player = 100;
+                            }
+                            self.last_hurt_by_player.insert(id, player);
+                        }
+                        _ => self.resolve_player_responsible(id, damage),
+                    }
                 }
                 hurt
             }
