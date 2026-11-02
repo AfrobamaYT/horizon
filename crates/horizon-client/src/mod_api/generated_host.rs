@@ -1373,6 +1373,13 @@ pub trait Host {
         let _ = player;
         unimplemented!("Host::player_abilities")
     }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
 }
 impl BlockEntityRef {
     /// The block entity's type (`BlockEntity.getType`). API @API:block_entity_refs@.
