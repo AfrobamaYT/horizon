@@ -303,7 +303,12 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 2] = [("entity", "EntityRef"), ("level", "LevelRef")];
+const HANDLES: [(&str, &str); 4] = [
+    ("entity", "EntityRef"),
+    ("living", "LivingRef"),
+    ("level", "LevelRef"),
+    ("player", "PlayerRef"),
+];
 
 /// A helper's method on its handle (`receiver`): `entity_position(entity)` on
 /// `Host` is also `EntityRef::position(self, host)`, which calls it. The
@@ -788,6 +793,7 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
         let mod_item = fresh_name("mod_hook", &mut used);
         let part_list = fresh_name("parts", &mut used);
         let part_item = fresh_name("part", &mut used);
+        let part_table = fresh_name("part_table", &mut used);
         let replacement = fresh_name("replacement", &mut used);
         let contract = api["contract"].as_str().ok_or("contract missing")?;
         let out = api.get("out").and_then(|v| v.as_str());
@@ -863,7 +869,7 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
-                Some((part_trait, format!("super::parts().{table}(|| {id})")))
+                Some((part_trait, format!("{table}(|| {id})")))
             }
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
@@ -1018,7 +1024,9 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                     call(&part_item, "break 'hook"),
                 );
                 (
-                    format!("let {part_list} = {lookup};"),
+                    format!(
+                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup};"
+                    ),
                     if matches!(contract, "cancel" | "replace") {
                         format!("'hook: {{ {calls} }}")
                     } else {
@@ -1097,9 +1105,15 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
-        let native = format!("native_{name}");
         let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let method = one_function(game.iter().map(|(_, method)| method), &native)?;
+        let native = target
+            .rsplit("::")
+            .next()
+            .ok_or("helper target missing method")?;
+        if !native.starts_with("native_") {
+            return Err(format!("invalid helper target {target}"));
+        }
+        let method = one_function(game.iter().map(|(_, method)| method), native)?;
         let (module, _) = game
             .iter()
             .find(|(_, other)| std::ptr::eq(other, method))
@@ -1251,6 +1265,9 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) struct StackedOnOther<'a> {
+            pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
+        }
         pub(super) struct Corners;
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
         pub(super) struct ItemEnergyBuffer;
@@ -1362,7 +1379,7 @@ mod tests {
     struct Registrar;
     /// No parts: the scoped dispatch calls the mods only.
     struct Parts;
-    fn parts() -> Parts {
+    fn parts(_: &'static str) -> Parts {
         Parts
     }
     impl Parts {
@@ -2075,6 +2092,39 @@ mod tests {
 
     #[test]
     fn dispatch_contracts() {
+        struct Weapon;
+        impl Hooks for Weapon {
+            fn living_knockback(&self, event: &mut LivingKnockbackEvent<'_>) -> Flow {
+                assert_eq!(
+                    (event.entity, event.kind, event.attacker),
+                    (12, "minecraft:armor_stand", 7)
+                );
+                assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+                assert_eq!(event.strength, 0.4);
+                event.strength *= 2.0;
+                event.x = -event.x;
+                Flow::Cancel
+            }
+        }
+        let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
+        let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
+        dispatch_living_knockback(
+            &weapon_mods,
+            12,
+            "minecraft:armor_stand",
+            "minecraft:player_attack",
+            0,
+            0,
+            7,
+            None,
+            None,
+            &mut strength,
+            &mut x,
+            &mut z,
+            &mut canceled,
+        );
+        assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
+        assert!(canceled);
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = (1..=2)
             .map(|id| {

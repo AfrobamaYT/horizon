@@ -1809,7 +1809,11 @@ pub trait Hooks: Send + Sync {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
+    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
+    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
+    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
+    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
+    /// native mod is loaded. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -4528,8 +4532,9 @@ pub trait Hooks: Send + Sync {
         Flow::Continue
     }
     /// A sapling, azalea, mushroom or fungus at `pos` is about to grow into the
-    /// configured `feature`. Set `cancel`, or `feature` to `None`, to keep the
-    /// block; set `feature` to another key to grow that one. Server-side.
+    /// configured `feature`, `None` when vanilla has none to place (a lone dark
+    /// oak sapling). Set `cancel`, or `feature` to `None`, to keep the block;
+    /// set `feature` to another key to grow that one. Server-side.
     /// Mods can use `level.random()` to access the growth random source.
     /// @API:block_grow_feature@.
     ///
@@ -4586,6 +4591,14 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
+    /// @API:item_stacked_on_other@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn item_stacked_on_other(&self, event_: &mut ItemStackedOnOtherEvent<'_, '_>) -> Flow {
+        let _ = event_;
+        Flow::Continue
     }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
@@ -5472,7 +5485,8 @@ pub fn dispatch_neighbor_changed(
     changed: BlockId,
     moved: bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("neighbor_changed");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = NeighborChangedEvent {
         dimension,
         pos,
@@ -5505,7 +5519,8 @@ pub fn dispatch_random_tick(
     if *handled {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("random_tick");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = RandomTickEvent {
         dimension,
         pos,
@@ -5544,7 +5559,8 @@ pub fn dispatch_tick_block(
     if *handled {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("tick_block");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = TickBlockEvent {
         dimension,
         pos,
@@ -5589,7 +5605,8 @@ pub fn dispatch_update_shape(
     if new.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("update_shape");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = UpdateShapeEvent {
         dimension,
         pos,
@@ -5811,7 +5828,8 @@ pub fn dispatch_block_entity(
     if entity.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntityEvent { block };
     'hook: {
         for mod_hook in super::entered(mods, "block_entity") {
@@ -5840,7 +5858,8 @@ pub fn dispatch_block_entity_ticks(
     block: &str,
     ticks: &mut bool,
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity_ticks");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntityTicksEvent {
         block,
         ticks: *ticks,
@@ -5865,7 +5884,8 @@ pub fn dispatch_block_entity_tick(
     pos: [i32; 3],
     entity: &mut ModBlockEntity,
 ) {
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("block_entity_tick");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityTickEvent { pos, entity };
     for mod_hook in super::entered(mods, "block_entity_tick") {
         mod_hook.block_entity_tick(host, &mut event);
@@ -5889,7 +5909,8 @@ pub fn dispatch_block_entity_update_tag(
     if tag.is_some() {
         return;
     }
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("block_entity_update_tag");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = BlockEntityUpdateTagEvent { pos, entity };
     'hook: {
         for mod_hook in super::entered(mods, "block_entity_update_tag") {
@@ -5942,7 +5963,8 @@ pub fn dispatch_screen(
     if screen.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenEvent { block };
     'hook: {
         for mod_hook in super::entered(mods, "screen") {
@@ -5975,7 +5997,8 @@ pub fn dispatch_screen_draw(
     batch: &mut HudBatch,
     origin: [f32; 2],
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen_draw");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenDrawEvent {
         block,
         data,
@@ -6009,7 +6032,8 @@ pub fn dispatch_screen_click(
     if button.is_some() {
         return;
     }
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen_click");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenClickEvent {
         block,
         data,
@@ -6047,7 +6071,8 @@ pub fn dispatch_screen_tooltip(
     at: [f32; 2],
     lines: &mut Vec<String>,
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("screen_tooltip");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = ScreenTooltipEvent {
         block,
         data,
@@ -6075,7 +6100,8 @@ pub fn dispatch_menu_button(
     entity: &mut ModBlockEntity,
     id: i32,
 ) {
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("menu_button");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonEvent { pos, entity, id };
     for mod_hook in super::entered(mods, "menu_button") {
         mod_hook.menu_button(host, &mut event);
@@ -6176,7 +6202,8 @@ pub fn dispatch_tooltip(
     stack: &ItemStack,
     lines: &mut Vec<(Text, u32)>,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("tooltip");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = TooltipEvent { stack, lines };
     for mod_hook in super::entered(mods, "tooltip") {
         mod_hook.tooltip(host, &mut event);
@@ -6203,7 +6230,8 @@ pub fn dispatch_use_item_on(
     if *claimed {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_item_on");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseItemOnEvent { stack, pos, face };
     'hook: {
         for mod_hook in super::entered(mods, "use_item_on") {
@@ -6234,7 +6262,8 @@ pub fn dispatch_use_item(
     if *claimed {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_item");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseItemEvent { stack };
     'hook: {
         for mod_hook in super::entered(mods, "use_item") {
@@ -6633,7 +6662,8 @@ pub fn dispatch_hurt_enemy(
     entity: u32,
     kind: &str,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("hurt_enemy");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = HurtEnemyEvent {
         stack,
         entity,
@@ -6700,7 +6730,8 @@ pub fn dispatch_block_signal(
     direct: bool,
     signal: &mut i32,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("block_signal");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = BlockSignalEvent {
         dimension,
         pos,
@@ -6729,7 +6760,8 @@ pub fn dispatch_is_signal_source(
     state: BlockStateId,
     source: &mut bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("is_signal_source");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = IsSignalSourceEvent {
         state,
         source: *source,
@@ -6924,7 +6956,8 @@ pub fn dispatch_menu_button_v2(
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("menu_button_v2");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuButtonV2Event {
         pos,
         entity,
@@ -7172,7 +7205,8 @@ pub fn dispatch_item_bar(
     stack: &ItemStack,
     bar: &mut Option<(i32, u32)>,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("item_bar");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = ItemBarEvent { stack, bar };
     for mod_hook in super::entered(mods, "item_bar") {
         mod_hook.item_bar(host, &mut event);
@@ -7193,7 +7227,8 @@ pub fn dispatch_has_analog_output(
     state: BlockStateId,
     output: &mut bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("has_analog_output");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = HasAnalogOutputEvent {
         state,
         output: *output,
@@ -7224,7 +7259,8 @@ pub fn dispatch_analog_output(
     face: Direction,
     output: &mut i32,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("analog_output");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = AnalogOutputEvent {
         dimension,
         pos,
@@ -7271,7 +7307,8 @@ pub fn dispatch_dispense_item(
     if answer.is_some() {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("dispense_item");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = DispenseItemEvent {
         dimension,
         pos,
@@ -7307,7 +7344,8 @@ pub fn dispatch_tooltip_component(
     if size.is_some() {
         return;
     }
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("tooltip_component");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = TooltipComponentEvent { stack };
     'hook: {
         for mod_hook in super::entered(mods, "tooltip_component") {
@@ -7340,7 +7378,8 @@ pub fn dispatch_tooltip_component_draw(
     origin: [f32; 2],
     size: [f32; 2],
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("tooltip_component_draw");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = TooltipComponentDrawEvent {
         stack,
         batch,
@@ -7372,7 +7411,8 @@ pub fn dispatch_can_survive(
     if survives.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("can_survive");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = CanSurviveEvent {
         dimension,
         pos,
@@ -7413,7 +7453,8 @@ pub fn dispatch_may_place_on(
     if may.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("may_place_on");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = MayPlaceOnEvent {
         dimension,
         state,
@@ -7453,7 +7494,8 @@ pub fn dispatch_block_entity_submit(
     entity: &ModBlockEntity,
     draw: &mut BlockEntityDraw,
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity_submit");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntitySubmitEvent {
         pos,
         block,
@@ -7486,7 +7528,8 @@ pub fn dispatch_block_entity_render_bounding_box(
     entity: &ModBlockEntity,
     bounds: &mut [f32; 6],
 ) {
-    let parts = super::parts().block_entity(|| Some(block));
+    let part_table = super::parts("block_entity_render_bounding_box");
+    let parts = part_table.block_entity(|| Some(block));
     let mut event = BlockEntityRenderBoundingBoxEvent {
         pos,
         block,
@@ -7519,7 +7562,8 @@ pub fn dispatch_is_valid_bonemeal_target(
     if valid.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("is_valid_bonemeal_target");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = IsValidBonemealTargetEvent {
         dimension,
         pos,
@@ -7556,7 +7600,8 @@ pub fn dispatch_is_bonemeal_success(
     state: BlockStateId,
     success: &mut bool,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("is_bonemeal_success");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = IsBonemealSuccessEvent {
         dimension,
         pos,
@@ -7585,7 +7630,8 @@ pub fn dispatch_perform_bonemeal(
     pos: BlockPos,
     state: BlockStateId,
 ) {
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("perform_bonemeal");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = PerformBonemealEvent {
         dimension,
         pos,
@@ -7755,7 +7801,8 @@ pub fn dispatch_state_for_placement(
     if answer.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("state_for_placement");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = StateForPlacementEvent {
         dimension,
         state,
@@ -8030,7 +8077,8 @@ pub fn dispatch_item_decorations(
     y: f32,
     batch: &mut HudBatch,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("item_decorations");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = ItemDecorationsEvent { stack, x, y, batch };
     for mod_hook in super::entered(mods, "item_decorations") {
         mod_hook.item_decorations(host, &mut event);
@@ -8051,7 +8099,8 @@ pub fn dispatch_use_duration(
     stack: &ItemStack,
     duration: &mut i32,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_duration");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseDurationEvent {
         stack,
         duration: *duration,
@@ -8076,7 +8125,8 @@ pub fn dispatch_use_animation(
     stack: &ItemStack,
     animation: &mut UseAnimation,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("use_animation");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = UseAnimationEvent { stack, animation };
     for mod_hook in super::entered(mods, "use_animation") {
         mod_hook.use_animation(host, &mut event);
@@ -8794,6 +8844,9 @@ pub struct LivingKnockbackEvent<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
     pub strength: f64,
     pub x: f64,
     pub z: f64,
@@ -8805,6 +8858,9 @@ pub fn dispatch_living_knockback(
     damage_type: &str,
     causing: i32,
     direct: i32,
+    attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
     strength: &mut f64,
     x: &mut f64,
     z: &mut f64,
@@ -8819,6 +8875,9 @@ pub fn dispatch_living_knockback(
         damage_type,
         causing,
         direct,
+        attacker,
+        attacker_main,
+        attacker_off,
         strength: *strength,
         x: *x,
         z: *z,
@@ -8919,7 +8978,8 @@ pub fn dispatch_menu_slot_rules(
     may_place: &mut bool,
     max_stack: &mut u32,
 ) {
-    let parts = super::parts().menu(|| Some(menu));
+    let part_table = super::parts("menu_slot_rules");
+    let parts = part_table.menu(|| Some(menu));
     let mut event = MenuSlotRulesEvent {
         menu,
         slot,
@@ -8987,7 +9047,8 @@ pub fn dispatch_on_use_tick(
     entity: Option<i32>,
     remaining: i32,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("on_use_tick");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = OnUseTickEvent {
         stack,
         entity,
@@ -9052,7 +9113,8 @@ pub fn dispatch_release_using(
     time_left: i32,
     used: &mut bool,
 ) {
-    let parts = super::parts().item(|| Some(&*stack.item));
+    let part_table = super::parts("release_using");
+    let parts = part_table.item(|| Some(&*stack.item));
     let mut event = ReleaseUsingEvent {
         stack,
         entity,
@@ -11192,7 +11254,8 @@ pub fn dispatch_fire_odds(
     if odds.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("fire_odds");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = FireOddsEvent { dimension, state };
     'hook: {
         for mod_hook in super::entered(mods, "fire_odds") {
@@ -11225,7 +11288,8 @@ pub fn dispatch_smoke_source(
     if smoke.is_some() {
         return;
     }
-    let parts = super::parts().block(|| level.state_block(state));
+    let part_table = super::parts("smoke_source");
+    let parts = part_table.block(|| level.state_block(state));
     let mut event = SmokeSourceEvent { dimension, state };
     'hook: {
         for mod_hook in super::entered(mods, "smoke_source") {
@@ -11748,7 +11812,8 @@ pub fn dispatch_menu_quick_move(
     if *handled {
         return;
     }
-    let parts = super::parts().block_entity_kind(|| Some(&*entity.id));
+    let part_table = super::parts("menu_quick_move");
+    let parts = part_table.block_entity_kind(|| Some(&*entity.id));
     let mut event = MenuQuickMoveEvent {
         pos,
         entity,
@@ -14999,6 +15064,27 @@ pub fn dispatch_item_container(
     for mod_hook in super::entered(mods, "item_container") {
         if let Some(replacement) = mod_hook.item_container(host, &mut event) {
             *slots = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_stacked_on_other`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemStackedOnOtherEvent<'a, 'b> {
+    pub event: &'a mut StackedOnOther<'b>,
+}
+pub fn dispatch_item_stacked_on_other(
+    mods: &[Box<dyn Hooks>],
+    event: &mut StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event_ = ItemStackedOnOtherEvent { event };
+    for mod_hook in super::entered(mods, "item_stacked_on_other") {
+        if matches!(mod_hook.item_stacked_on_other(&mut event_), Flow::Cancel) {
+            *canceled = true;
             break;
         }
     }
