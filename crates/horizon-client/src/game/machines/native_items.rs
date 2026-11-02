@@ -253,13 +253,14 @@ impl Game<'_> {
 /// for that side, by the rules hoppers follow.
 impl Game<'_> {
     /// The container at `pos` the item capability reaches: a block entity with slots, where the
-    /// world is simulated. Not a composter, which has no block entity.
+    /// world is simulated. Not a composter, which has no block entity, nor a block entity
+    /// without slots (a sign, a banner, a mod's without a container).
     fn capability_view(&self, pos: [i32; 3]) -> Option<View> {
         if !self.native_simulates() {
             return None;
         }
         let view = self.containers().view((pos[0], pos[1], pos[2]), false)?;
-        (!matches!(view.kind, Kind::Composter(_))).then_some(view)
+        takes_from(&view).then_some(view)
     }
     /// The type id of the mod block entity at `pos` (`mymod:press`), which its capability parts
     /// are registered by. None for a vanilla block entity, for none, and for the mod block entity
