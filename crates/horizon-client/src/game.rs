@@ -12676,6 +12676,7 @@ impl Game<'_> {
             "minecraft:hoe" => &[HoeTill],
             _ => return vanilla.map(|(new, t)| result(new, t)),
         };
+        // BlockTransformData has no ability field; vanilla's axe entries use these particles.
         let vanilla_action = vanilla.as_ref().map(|(_, t)| match t.particle.as_str() {
             "scrape" => AxeScrape,
             "wax_off" => AxeWaxOff,
