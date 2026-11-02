@@ -611,10 +611,6 @@ pub use horizon_items::use_animation::consumable_animation;
 /// What the click handling reads and does in the world.
 pub trait HandWorld {
     fn hit(&mut self) -> Hit;
-    /// A left click fell through to the empty-space attack branch.
-    fn left_click_empty(&mut self) {}
-    /// A right click hit empty space with an empty hand.
-    fn right_click_empty(&mut self, _hand: Hand) {}
     fn is_air(&mut self, pos: [i32; 3]) -> bool;
     /// `MultiPlayerGameMode.localPlayerMode`.
     fn creative(&self) -> bool;
@@ -827,10 +823,7 @@ impl Clicks {
                 self.destroying.start(w, pos, face);
                 end = w.is_air(pos);
             }
-            Hit::Block { .. } | Hit::Miss => {
-                w.left_click_empty();
-                miss = true;
-            }
+            Hit::Block { .. } | Hit::Miss => miss = true,
         }
         if miss {
             if !w.creative() {
@@ -903,11 +896,7 @@ impl Clicks {
                         UseResult::Pass => {}
                     }
                 }
-                Hit::Miss => {
-                    if w.held_empty(hand) {
-                        w.right_click_empty(hand);
-                    }
-                }
+                Hit::Miss => {}
             }
             if !w.held_empty(hand)
                 && let UseResult::Success { swing } = w.use_item(hand)

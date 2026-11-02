@@ -737,12 +737,6 @@ impl HandWorld for GameHands<'_, '_> {
             None => Hit::Miss,
         }
     }
-    fn left_click_empty(&mut self) {
-        self.game.native_left_click_empty();
-    }
-    fn right_click_empty(&mut self, hand: Hand) {
-        self.game.native_right_click_empty(hand);
-    }
     fn is_air(&mut self, pos: [i32; 3]) -> bool {
         let state = self.game.world.block(pos[0], pos[1], pos[2]);
         self.game.res.facts().get(state).name.ends_with("air")
