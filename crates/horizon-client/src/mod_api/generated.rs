@@ -4588,6 +4588,21 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's display name was formatted. Replace `displayname` to change it.
+    /// Both sides. @API:player_name_format@.
+    ///
+    /// Every mod gets `event.displayname` in order and may add, change or remove displayname.
+    fn player_name_format(&self, event: &mut PlayerNameFormatEvent<'_>) {
+        let _ = event;
+    }
+    /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
+    /// `player`, None to let the client choose it. Replace `display_name` to
+    /// change it. @API:player_tab_list_name_format@.
+    ///
+    /// Every mod gets `event.display_name` in order and may add, change or remove display_name.
+    fn player_tab_list_name_format(&self, event: &mut PlayerTabListNameFormatEvent<'_>) {
+        let _ = event;
+    }
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
     /// API @API:render_hand_pose@.
@@ -14995,6 +15010,47 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::player_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerNameFormatEvent<'a> {
+    pub username: &'a Text,
+    pub displayname: &'a mut Text,
+}
+pub fn dispatch_player_name_format(
+    mods: &[Box<dyn Hooks>],
+    username: &Text,
+    displayname: &mut Text,
+) {
+    let mut event = PlayerNameFormatEvent {
+        username,
+        displayname,
+    };
+    for mod_hook in super::entered(mods, "player_name_format") {
+        mod_hook.player_name_format(&mut event);
+    }
+}
+/// What [`Hooks::player_tab_list_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTabListNameFormatEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub display_name: &'a mut Option<Text>,
+}
+pub fn dispatch_player_tab_list_name_format(
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    display_name: &mut Option<Text>,
+) {
+    let mut event = PlayerTabListNameFormatEvent {
+        player,
+        name,
+        display_name,
+    };
+    for mod_hook in super::entered(mods, "player_tab_list_name_format") {
+        mod_hook.player_tab_list_name_format(&mut event);
+    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
