@@ -3270,12 +3270,15 @@ fn biome_base(tag: &str) -> PathBuf {
             bundle(&[
                 (
                     "minecraft:plains",
-                    r#"{"temperature":0.8,"features":[[],["minecraft:lake"],[],[],[],[],["minecraft:ore_coal"]]}"#,
+                    r#"{"temperature":0.8,"downfall":0.4,"features":[[],["minecraft:lake"],[],[],[],[],["minecraft:ore_coal"]]}"#,
                 ),
-                ("minecraft:desert", r#"{"features":[["minecraft:fossil"]]}"#),
+                (
+                    "minecraft:desert",
+                    r#"{"temperature":2.0,"downfall":0.0,"features":[["minecraft:fossil"]]}"#,
+                ),
                 (
                     "minecraft:nether_wastes",
-                    r#"{"temperature":2.0,"features":[[],[],[],[],[],[],["minecraft:ore_coal"]]}"#,
+                    r#"{"temperature":2.0,"downfall":0.0,"features":[[],[],[],[],[],[],["minecraft:ore_coal"]]}"#,
                 ),
             ]),
         ),
@@ -3344,6 +3347,129 @@ fn biome_features(root: &Path) -> BTreeMap<String, serde_json::Value> {
             (id, v["features"].clone())
         })
         .collect()
+}
+
+#[test]
+fn biome_modifier_climate_rejects_malformed_ranges() {
+    for climate in [
+        r#"{"type":"horizon:climate","temperature":{"min":"warm"}}"#,
+        r#"{"type":"horizon:climate","temperature":{"min":null,"max":1}}"#,
+        r#"{"type":"horizon:climate","temperature":null}"#,
+        r#"{"type":"horizon:climate","temperature":{"min":2,"max":1}}"#,
+        r#"{"type":"horizon:climate","temperature":{"minimum":1}}"#,
+        r#"{"type":"horizon:climate","temperature":{}}"#,
+        r#"{"type":"horizon:climate"}"#,
+    ] {
+        let base = biome_base("biome-invalid-climate");
+        let scratch = base.parent().unwrap().to_owned();
+        let modifier = format!(
+            r#"{{"type":"neoforge:add_features","biomes":{climate},"features":"zinc:ore_zinc","step":"underground_ores"}}"#
+        );
+        let m = zinc_mod(&scratch.join("zinc"), &[("bad", &modifier)]);
+        assert!(
+            build(&base, &[m], &scratch.join("out")).is_err(),
+            "{climate}"
+        );
+        fs::remove_dir_all(&scratch).unwrap();
+    }
+}
+
+#[test]
+fn biome_modifier_climate_standalone_includes_bounds() {
+    let base = biome_base("biome-climate-alone");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "warm",
+            r#"{
+        "type":"neoforge:add_features",
+        "biomes":{"type":"horizon:climate","temperature":{"min":2,"max":2},"downfall":{"max":0}},
+        "features":"zinc:ore_zinc","step":"underground_ores"}"#,
+        )],
+    );
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let features = biome_features(&out);
+    assert_eq!(
+        features["minecraft:desert"][6],
+        serde_json::json!(["zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:nether_wastes"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:plains"][6],
+        serde_json::json!(["minecraft:ore_coal"])
+    );
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+#[test]
+fn biome_modifier_climate_combines_with_holder_sets() {
+    let base = biome_base("biome-climate");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "warm",
+            r##"{
+        "type":"neoforge:add_features",
+        "biomes":{"type":"neoforge:and","values":["#minecraft:is_overworld",
+            {"type":"horizon:climate","temperature":{"min":0.8,"max":0.8},
+             "downfall":{"min":0.4}}]},
+        "features":"zinc:ore_zinc","step":"underground_ores"}"##,
+        )],
+    );
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let features = biome_features(&out);
+    assert_eq!(
+        features["minecraft:plains"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:desert"][0],
+        serde_json::json!(["minecraft:fossil"])
+    );
+    assert_eq!(
+        features["minecraft:nether_wastes"][6],
+        serde_json::json!(["minecraft:ore_coal"])
+    );
+    fs::remove_dir_all(&scratch).unwrap();
+}
+
+#[test]
+fn biome_modifier_climate_nested_or_not() {
+    let base = biome_base("biome-climate-or-not");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[(
+            "select",
+            r##"{
+        "type":"neoforge:add_features", "features":"zinc:ore_zinc", "step":"underground_ores",
+        "biomes":{"type":"neoforge:or","values":["minecraft:plains",
+            {"type":"neoforge:not","value":{"type":"horizon:climate","temperature":{"min":1}}}]}}"##,
+        )],
+    );
+    let out = scratch.join("out");
+    build(&base, &[m], &out).unwrap();
+    let features = biome_features(&out);
+    assert_eq!(
+        features["minecraft:plains"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        features["minecraft:nether_wastes"][6],
+        serde_json::json!(["minecraft:ore_coal"])
+    );
+    assert_eq!(
+        features["minecraft:desert"][0],
+        serde_json::json!(["minecraft:fossil"])
+    );
+    fs::remove_dir_all(&scratch).unwrap();
 }
 
 /// `neoforge:add_features` puts a mod's ore at the end of its step in every
@@ -3527,6 +3653,11 @@ fn biome_modifiers_refuse_unknown_names() {
         (
             r#"{"type":"neoforge:add_spawns","biomes":"minecraft:plains","spawners":[]}"#,
             "biome modifier type \"add_spawns\" skipped",
+        ),
+        (
+            r#"{"type":"neoforge:add_features","biomes":"minecraft:plains",
+                "features":{"type":"horizon:climate","temperature":{"min":1}},"step":"underground_ores"}"#,
+            "placed feature set type \"horizon:climate\" is not read",
         ),
     ]
     .into_iter()
