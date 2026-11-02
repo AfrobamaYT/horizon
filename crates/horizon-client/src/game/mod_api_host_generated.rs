@@ -545,4 +545,7 @@ impl Host for super::Game<'_> {
     ) -> Option<Vec<EntityRef>> {
         self.native_level_entities_in(level, min, max)
     }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
+    }
 }
