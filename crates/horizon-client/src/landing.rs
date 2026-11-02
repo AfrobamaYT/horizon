@@ -302,11 +302,13 @@ impl MotionWorld<'_, '_, '_> {
         // Player.causeFallDamage exempts players with the mayfly ability,
         // including creative players who are currently walking.
         if self.player.may_fly {
-            let mut fall = PlayerFlyableFall {
-                distance: distance as f32,
-                multiplier,
-            };
-            native_player_flyable_fall(self.player.entity_id, &mut fall);
+            if !self.player.replaying {
+                let mut fall = PlayerFlyableFall {
+                    distance: distance as f32,
+                    multiplier,
+                };
+                native_player_flyable_fall(self.player.entity_id, &mut fall);
+            }
             if let Some((state, position, original_distance)) = contact {
                 self.mod_block_fall(state, position, original_distance, 0.0);
             }
