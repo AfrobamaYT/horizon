@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "a tool transforming a block (`native_block_tool_modification`).",
-  "doc_summary": "`native_block_tool_modification(stack, pos, face, simulated, final_state, cancel)` hears a tool transform a block. Set `cancel` or set `final_state` to `None` to prevent it, or replace the state ID. Bundles need \"hooks\": @API:block_tool_modification@."
+  "doc_summary": "`native_block_tool_modification(stack, tool, final_state, cancel)` hears a tool action. `ToolUse` describes the player, hand, hit and ability; `final_state` may start as `None`. Cancel, remove or replace the state. Bundles need \"hooks\": @API:block_tool_modification@."
 }

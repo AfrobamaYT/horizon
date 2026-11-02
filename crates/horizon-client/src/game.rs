@@ -6198,7 +6198,7 @@ impl Game<'_> {
                 self.swing_arm();
                 return Ok(true);
             }
-            if self.use_campfire_douse(hit.pos, held.as_ref())? {
+            if self.use_campfire_douse(hit, held.as_ref())? {
                 self.swing_arm();
                 return Ok(true);
             }
@@ -12590,10 +12590,10 @@ impl Game<'_> {
     pub(super) fn block_transform(
         &self,
         stack: &ItemStack,
-        pos: [i32; 3],
-        face: [i32; 3],
+        hit: &Hit,
     ) -> Option<(BlockStateId, String, Option<String>, u32, String)> {
         use horizon_client::block_transform::Around;
+        let Hit { pos, face, .. } = *hit;
         struct Column<'w> {
             world: &'w World,
             registry: &'w horizon_world::registry::BlockRegistry,
@@ -12640,18 +12640,87 @@ impl Game<'_> {
             registry,
             pos,
         };
-        let (_, t, state) =
-            self.res
-                .transformers()
-                .apply(self.items(), registry, &id, face_name, &around)?;
-        let new = registry.resolve(&state).ok()?;
-        Some((
-            new,
-            t.sound.clone(),
-            t.loot.clone(),
-            t.damage,
-            t.particle.clone(),
-        ))
+        let vanilla = self
+            .res
+            .transformers()
+            .apply(self.items(), registry, &id, face_name, &around)
+            .and_then(|(_, t, state)| Some((registry.resolve(&state).ok()?, t)));
+        if crate::mod_api::mods().is_empty() {
+            let (new, t) = vanilla?;
+            return Some((
+                new,
+                t.sound.clone(),
+                t.loot.clone(),
+                t.damage,
+                t.particle.clone(),
+            ));
+        }
+        use crate::mod_api::ToolAbility::*;
+        let actions: &[_] = match id.as_str() {
+            "minecraft:axe" => &[AxeStrip, AxeScrape, AxeWaxOff],
+            "minecraft:shovel" => &[ShovelFlatten],
+            "minecraft:hoe" => &[HoeTill],
+            _ => {
+                return vanilla.map(|(new, t)| {
+                    (
+                        new,
+                        t.sound.clone(),
+                        t.loot.clone(),
+                        t.damage,
+                        t.particle.clone(),
+                    )
+                });
+            }
+        };
+        let vanilla_action = vanilla.as_ref().map(|(_, t)| match t.particle.as_str() {
+            "scrape" => AxeScrape,
+            "wax_off" => AxeWaxOff,
+            _ => actions[0],
+        });
+        for &ability in actions {
+            let matches_vanilla = vanilla_action == Some(ability);
+            let mut state = if matches_vanilla {
+                vanilla.as_ref().map(|(state, _)| *state)
+            } else {
+                None
+            };
+            let mut cancel = false;
+            let tool = crate::mod_api::ToolUse {
+                player: self.player.as_ref().map(|p| p.entity_id as u32),
+                hand: self.hand,
+                pos,
+                face,
+                click: hit.point,
+                ability,
+                simulated: false,
+            };
+            self.native_block_tool_modification(stack, &tool, &mut state, &mut cancel);
+            if cancel {
+                return None;
+            }
+            if let Some(new) = state {
+                if matches_vanilla {
+                    let (_, t) = vanilla?;
+                    return Some((
+                        new,
+                        t.sound.clone(),
+                        t.loot.clone(),
+                        t.damage,
+                        t.particle.clone(),
+                    ));
+                }
+                let sound = match ability {
+                    AxeStrip => "minecraft:item.axe.strip",
+                    AxeScrape => "minecraft:item.axe.scrape",
+                    AxeWaxOff => "minecraft:item.axe.wax_off",
+                    ShovelFlatten => "minecraft:item.shovel.flatten",
+                    HoeTill => "minecraft:item.hoe.till",
+                    ShovelDouse => unreachable!(),
+                };
+                return Some((new, sound.to_owned(), None, 1, "none".to_owned()));
+            }
+        }
+        None
     }
     /// `BlockTransformer.TransformParticle.send`: its level event.
     pub(super) fn transform_particle(&mut self, particle: &str, pos: [i32; 3]) {
@@ -12663,20 +12732,10 @@ impl Game<'_> {
         }
     }
     /// `BlockTransformer.transformBlock` for a held axe, hoe or shovel.
-    fn use_block_transformer(
-        &mut self,
-        stack: &ItemStack,
-        pos: [i32; 3],
-        face: [i32; 3],
-    ) -> Result<bool> {
-        let Some((new, sound, loot, damage, particle)) = self.block_transform(stack, pos, face)
-        else {
-            return Ok(false);
-        };
-        let mut final_state = Some(new);
-        let mut cancel = false;
-        self.native_block_tool_modification(stack, pos, face, false, &mut final_state, &mut cancel);
-        let Some(new) = final_state.filter(|_| !cancel) else {
+    fn use_block_transformer(&mut self, stack: &ItemStack, hit: &Hit) -> Result<bool> {
+        let pos = hit.pos;
+        let face = hit.face;
+        let Some((new, sound, loot, damage, particle)) = self.block_transform(stack, hit) else {
             return Ok(false);
         };
         // BlockTransformer.transformBlock: ITEM_USED_ON_BLOCK before the swap.
@@ -12996,7 +13055,7 @@ impl Game<'_> {
             }
             return Ok(UseResult::Success { swing: true });
         }
-        if self.use_block_transformer(stack, hit.pos, hit.face)? {
+        if self.use_block_transformer(stack, &hit)? {
             return Ok(UseResult::Success { swing: true });
         }
         if item == "honeycomb" {

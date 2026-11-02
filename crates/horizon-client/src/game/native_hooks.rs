@@ -882,7 +882,7 @@ use super::{
 };
 use horizon_client::mod_api::{
     self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
-    ServerTickPhase, WorldPhase,
+    ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -6192,9 +6192,7 @@ impl Game<'_> {
     pub(super) fn native_block_tool_modification(
         &self,
         stack: &ItemStack,
-        pos: [i32; 3],
-        face: [i32; 3],
-        simulated: bool,
+        tool: &ToolUse,
         final_state: &mut Option<BlockStateId>,
         cancel: &mut bool,
     ) {
@@ -6202,9 +6200,7 @@ impl Game<'_> {
             self,
             mod_api::mods(),
             stack,
-            pos,
-            face,
-            simulated,
+            tool,
             final_state,
             cancel,
         );

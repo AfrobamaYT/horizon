@@ -13889,18 +13889,14 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
 #[non_exhaustive]
 pub struct BlockToolModificationEvent<'a> {
     pub stack: &'a ItemStack,
-    pub pos: [i32; 3],
-    pub face: [i32; 3],
-    pub simulated: bool,
+    pub tool: &'a ToolUse,
     pub final_state: &'a mut Option<BlockStateId>,
 }
 pub fn dispatch_block_tool_modification(
     host: &dyn Host,
     mods: &[Box<dyn Hooks>],
     stack: &ItemStack,
-    pos: [i32; 3],
-    face: [i32; 3],
-    simulated: bool,
+    tool: &ToolUse,
     final_state: &mut Option<BlockStateId>,
     cancel: &mut bool,
 ) {
@@ -13909,9 +13905,7 @@ pub fn dispatch_block_tool_modification(
     }
     let mut event = BlockToolModificationEvent {
         stack,
-        pos,
-        face,
-        simulated,
+        tool,
         final_state,
     };
     for mod_hook in super::entered(mods, "block_tool_modification") {
