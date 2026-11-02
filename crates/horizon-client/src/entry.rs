@@ -62,6 +62,9 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     if crate::gfx::native_render::install(renderers).is_err() {
         log::warn!("Trait renderers already installed; keeping the first list");
     }
+    if let Err(refused) = crate::mod_api::install_parts(crate::mod_api::mods()) {
+        panic!("Mod parts refused:\n{}", refused.join("\n"));
+    }
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |id, table| {
@@ -109,6 +112,9 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 max_stack,
             );
         },
+        living_heal: |entity, amount, cancel| {
+            crate::mod_api::dispatch_living_heal(crate::mod_api::mods(), entity, amount, cancel);
+        },
         living_breathe: |entity, kind, can_breathe, consume, refill| {
             crate::mod_api::dispatch_living_breathe(
                 crate::mod_api::mods(),
@@ -119,8 +125,57 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
+        has_mods: || !crate::mod_api::mods().is_empty(),
+        player_name_format: |username, displayname| {
+            crate::mod_api::dispatch_player_name_format(
+                crate::mod_api::mods(),
+                username,
+                displayname,
+            );
+        },
+        player_tab_list_name_format: |player, name, display_name| {
+            crate::mod_api::dispatch_player_tab_list_name_format(
+                crate::mod_api::mods(),
+                player,
+                name,
+                display_name,
+            );
+        },
+        living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+            crate::mod_api::dispatch_living_drown(
+                crate::mod_api::mods(),
+                entity,
+                kind,
+                is_drowning,
+                damage_amount,
+                bubble_count,
+                cancel,
+            );
+        },
+        living_fall: |entity, kind, distance, multiplier, cancel| {
+            crate::mod_api::dispatch_living_fall(
+                crate::mod_api::mods(),
+                entity,
+                kind,
+                distance,
+                multiplier,
+                cancel,
+            );
+        },
+        living_jump: |entity, kind| {
+            crate::mod_api::dispatch_living_jump(crate::mod_api::mods(), entity, kind);
+        },
         ingredient: |kind, data, items| {
             crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
+        },
+        ingredient_test: |kind, data, stack, accept| {
+            crate::mod_api::dispatch_ingredient_test(
+                crate::mod_api::mods(),
+                kind,
+                data,
+                stack,
+                accept,
+            );
         },
     })
     .is_err()

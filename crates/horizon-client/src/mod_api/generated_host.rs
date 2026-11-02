@@ -93,7 +93,8 @@ pub trait Host {
         let _ = seed;
         unimplemented!("Host::draw_item")
     }
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map. On a client it is the
+    /// copy of what the server synced: `set` and `remove` change only the copy.
     fn attachments(&mut self, holder: Holder) -> AttachmentResult<&mut Attachments> {
         let _ = holder;
         unimplemented!("Host::attachments")
@@ -1163,7 +1164,7 @@ pub trait Host {
     /// for a player who is off (who joins hidden), until a mod sets it again
     /// or the server stops. Works anywhere on a server, inside a player's
     /// hook too; false on a client and in a world nobody else can join.
-    /// API @API:hide_player@.
+    /// API 314.
     fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
         let _ = uuid;
         let _ = level;
@@ -1172,7 +1173,7 @@ pub trait Host {
     /// Draw a stack and its slot decorations, except the count, at `at`,
     /// `size` GUI pixels square. False when nothing was drawn: an unknown item
     /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
-    /// API @API:item_stack@.
+    /// API 313.
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
         let _ = batch;
         let _ = stack;
@@ -1180,13 +1181,283 @@ pub trait Host {
         let _ = size;
         unimplemented!("Host::item_stack")
     }
+    /// A mod's own RGBA image, uploaded into the HUD atlas slot
+    /// [`MOD_IMAGE_SPRITE`](crate::hud::MOD_IMAGE_SPRITE) and drawn with
+    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
+    /// is `width * height` pixels of four bytes, each side at most
+    /// [`MOD_IMAGE_SIZE`](crate::hud::MOD_IMAGE_SIZE); false when it is not that
+    /// size. The upload costs a texture patch of the image, so send one when the
+    /// image changed, not every frame. API 355.
+    fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        let _ = width;
+        let _ = height;
+        let _ = rgba;
+        unimplemented!("Host::mod_image")
+    }
     /// The instance (game) folder, which its players share: `saves/`,
     /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
     /// title's screens create worlds and read packs there. A world's own
     /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
     /// The folder the game runs in (`--player-dir` moves a player's options
-    /// and servers only, not the instance). Nothing is created. API @API:native_instance_dir@.
+    /// and servers only, not the instance). Nothing is created. API 326.
     fn instance_dir(&self) -> PathBuf {
         unimplemented!("Host::instance_dir")
+    }
+    /// The most recently extracted world frame's camera, if one exists.
+    fn camera(&self) -> Option<NativeCamera> {
+        unimplemented!("Host::camera")
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        let _ = pos;
+        unimplemented!("Host::block_collision")
+    }
+    /// The entity `id` (the id events carry) as a handle for the `entity_*`
+    /// methods: None on a client, with no world open, or for no such entity
+    /// in the level in place or among the server's players. API
+    /// @API:entity_handles@.
+    fn entity(&self, id: u32) -> Option<EntityRef> {
+        let _ = id;
+        unimplemented!("Host::entity")
+    }
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
+    /// client, with no world open, or for a dimension the server hasn't
+    /// loaded. API @API:entity_handles@.
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        let _ = dimension;
+        unimplemented!("Host::level")
+    }
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_position")
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_block_position")
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
+        let _ = entity;
+        unimplemented!("Host::entity_rotation")
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+        let _ = entity;
+        unimplemented!("Host::entity_kind")
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        let _ = entity;
+        unimplemented!("Host::entity_uuid")
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+        let _ = entity;
+        unimplemented!("Host::entity_level")
+    }
+    /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
+    /// empty ones included, kept in its `minecraft:container`. None for an
+    /// item without slots, and for an empty stack.
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        let _ = stack;
+        unimplemented!("Host::item_container_slots")
+    }
+    /// `ResourceHandler.insert`: as much of `item` as fits into one item of
+    /// `stack`, topping up the slots that hold the same item and components
+    /// first, then the first empty ones (`SimpleContainer.addItem`'s order),
+    /// no slot past its limit (99, or the item's own when less). A shulker
+    /// box never goes in. The count that went in, and the single item it
+    /// becomes (the item itself when none did). The stack given is not
+    /// changed: shrink it by one and hand out the result, or leave the result
+    /// unused to simulate. None where the item has no slots.
+    fn item_container_insert(
+        &self,
+        stack: &ItemStack,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        let _ = stack;
+        let _ = item;
+        unimplemented!("Host::item_container_insert")
+    }
+    /// `ResourceHandler.extract`: up to `max` out of slot `slot` of one item
+    /// of `stack`. What came out (none when the slot is empty or past the
+    /// item's slots), and the single item it becomes. The stack given is not
+    /// changed, as with `native_item_container_insert`. None where the item
+    /// has no slots.
+    fn item_container_extract(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        max: u32,
+    ) -> Option<(Option<ItemStack>, ItemStack)> {
+        let _ = stack;
+        let _ = slot;
+        let _ = max;
+        unimplemented!("Host::item_container_extract")
+    }
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    fn level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        let _ = level;
+        let _ = min;
+        let _ = max;
+        unimplemented!("Host::level_entities_in")
+    }
+    /// Resolve an online UUID on this server. During a player swap only the
+    /// acting player is available; other players return None because swaps can
+    /// nest and their records may hold displaced state. API @API:player_read@.
+    fn player(&self, uuid: u128) -> Option<PlayerRef> {
+        let _ = uuid;
+        unimplemented!("Host::player")
+    }
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    fn player_game_mode(&self, player: PlayerRef) -> Option<i32> {
+        let _ = player;
+        unimplemented!("Host::player_game_mode")
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_creative")
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_spectator")
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_may_build")
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+        let _ = player;
+        unimplemented!("Host::player_food")
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+        let _ = player;
+        unimplemented!("Host::player_abilities")
+    }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
+}
+impl EntityRef {
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    pub fn position(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_position(self)
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    pub fn block_position(self, host: &dyn Host) -> Option<[i32; 3]> {
+        host.entity_block_position(self)
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    pub fn rotation(self, host: &dyn Host) -> Option<[f32; 2]> {
+        host.entity_rotation(self)
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    pub fn kind(self, host: &dyn Host) -> Option<String> {
+        host.entity_kind(self)
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    pub fn uuid(self, host: &mut dyn Host) -> Option<u128> {
+        host.entity_uuid(self)
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
+        host.entity_level(self)
+    }
+}
+impl LevelRef {
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    pub fn entities_in(
+        self,
+        host: &dyn Host,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        host.level_entities_in(self, min, max)
+    }
+}
+impl PlayerRef {
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    pub fn game_mode(self, host: &dyn Host) -> Option<i32> {
+        host.player_game_mode(self)
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    pub fn is_creative(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_creative(self)
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    pub fn is_spectator(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_spectator(self)
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    pub fn may_build(self, host: &dyn Host) -> Option<bool> {
+        host.player_may_build(self)
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    pub fn food(self, host: &dyn Host) -> Option<NativePlayerFood> {
+        host.player_food(self)
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    pub fn abilities(self, host: &dyn Host) -> Option<NativePlayerAbilities> {
+        host.player_abilities(self)
     }
 }

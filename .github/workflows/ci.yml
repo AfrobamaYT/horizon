@@ -1,4 +1,5 @@
 name: checks
+run-name: ${{ inputs.upstream_sync && format('Upstream sync {0}', inputs.upstream_sync) || github.event.pull_request.title || github.event.head_commit.message || github.workflow }}
 # verify: every pull request and every push to main, on GitHub's runners (the repository is public). It is the
 # check main requires, so it never has a condition: a skipped job counts as passed, and every run of this workflow
 # must report a real verify (a pull request that changes no Rust finishes it in seconds instead).
@@ -7,12 +8,19 @@ name: checks
 # request that changes a harness, oracle, probe or the runner: the rest are checked on main by parity-main. A fork's pull
 # request runs it only when a maintainer adds the run-parity label (.github/workflows/run-parity.yml), so labels
 # never start this workflow. See docs/release-flow.md.
+# Fork limit: with SELF_HOSTED_CI=off, parity-scope runs hosted, but a harness change or run-parity label
+# can queue parity indefinitely because the fork has no horizon-game runner.
 on:
   push:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      upstream_sync:
+        description: 'Upstream sync short SHA and request ID (automation only; skips manual vanilla/JFR probes)'
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -24,16 +32,50 @@ env:
   HORIZON_TELEMETRY_URL: "off"
 
 jobs:
+  # Dyna's image enforces the event and repository check again in job-started.sh.
+  # GitHub's external-contributor approval is the third lock.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      self_hosted: ${{ steps.runner.outputs.self_hosted }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: runner
+        env:
+          ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          EVENT: ${{ github.event_name }}
+          SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+
+  pool-watch:
+    needs: changes
+    if: needs.changes.outputs.self_hosted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/dyna_ci_pool_watch.py
+
   # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
   # and every merge to main starting this workflow, three jobs a run left the pool's queue tens of minutes deep.
   #
-  # Where: GitHub's runners. With the repository variable SELF_HOSTED_CI=all (for when that pool is full: their 4 CPUs
+  # Dyna's slot shares a 40 GiB persistent cache between verify and launcher; the pool wipes it above that size.
+  # Where: Dyna when its switch and lease allow it, otherwise GitHub's runners. With the repository variable
+  # SELF_HOSTED_CI=all (for when that pool is full: their 4 CPUs
   # are about one GitHub runner, docs/ci-runners.md), main's pushes and this repository's own pull requests run on
   # playhorizon's checks runners (label playhorizon-ci); a fork's pull request never does (and the runners refuse it
   # themselves). There the build folder persists (CARGO_TARGET_DIR, outside the checkout), so the apt packages,
   # Python and the Rust cache steps are GitHub's only.
   verify:
-    runs-on: ${{ vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    needs: changes
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -57,21 +99,30 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          python tools/check_public_tree.py
+          python3 tools/check_public_tree.py
           if [ "$EVENT" = pull_request ]; then
-            python tools/check_public_tree.py --range "$BASE_SHA..$HEAD_SHA"
+            python3 tools/check_public_tree.py --range "$BASE_SHA..$HEAD_SHA"
           else
-            python tools/check_public_tree.py --history
+            python3 tools/check_public_tree.py --history
           fi
       - name: Test offline research tooling
-        run: python -m unittest discover -s tests -v
+        run: python3 -m unittest discover -s tests -v
+      - name: Install Dyna runner dependencies without root
+        if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
+        run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
         if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
+          DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
             sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          elif [ "$DYNA" = true ]; then
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
@@ -96,14 +147,16 @@ jobs:
         run: |
           cargo +stable test --workspace --lib --bins --tests
           # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
-          # prepared vanilla data, so without it they pass at once.
-          cargo +stable test --workspace --lib mod_content::tests:: -- --ignored
+          # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
+          # recompiling the workspace with a different dependency graph.
+          cargo +stable test --workspace --lib --bins --tests mod_content::tests:: -- --ignored
           cargo +stable test --workspace --doc
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
-    runs-on: ${{ vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    needs: changes
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -116,14 +169,23 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py --launcher "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Install Dyna runner dependencies without root
+        if: steps.launcher.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
+        run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust and the headers GPUI links against
         if: steps.launcher.outputs.required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
+          DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
             sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
               libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
+          elif [ "$DYNA" = true ]; then
+            if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+              curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+            fi
+            export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
@@ -181,7 +243,7 @@ jobs:
   # game directory in HORIZON_MINECRAFT_DIR and the pinned server jar in
   # HORIZON_SERVER_JAR. Start them by hand: gh workflow run checks --ref <branch>.
   vanilla-parity:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4
@@ -529,7 +591,7 @@ jobs:
           RUSTUP_TOOLCHAIN: stable
         run: python tools/test_float_log_parity.py
   jfr-analysis:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.upstream_sync
     runs-on: [self-hosted, linux, horizon-game]
     steps:
       - uses: actions/checkout@v4
