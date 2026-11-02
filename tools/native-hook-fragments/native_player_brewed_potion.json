@@ -10,6 +10,6 @@
       }
     }
   ],
-  "rust_summary": "A player took a brewing stand potion slot (`native_player_brewed_potion`).",
-  "doc_summary": "A player took a stack from a brewing stand potion slot: `native_player_brewed_potion(player, stack)`. Both sides. Bundles need \"hooks\": @API:player_brewed_potion@."
+  "rust_summary": "A player took a potion from a brewing stand (`native_player_brewed_potion`).",
+  "doc_summary": "A player took a potion from a brewing stand bottle slot: `native_player_brewed_potion(player, stack)`. Both sides. Bundles need \"hooks\": @API:player_brewed_potion@."
 }

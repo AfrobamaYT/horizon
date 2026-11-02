@@ -303,8 +303,6 @@ pub struct Menu {
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
-    /// Stacks taken from brewing stand potion slots, for the player hook.
-    pub potion_taken: Vec<ItemStack>,
     /// `LivingEntity.onEquipItem` calls that change the item: the
     /// `EquipmentSlot` name and the new stack, in order, for the caller.
     pub equipped: Vec<(&'static str, Option<ItemStack>)>,
@@ -764,7 +762,6 @@ impl Menu {
             crafted: Vec::new(),
             item_crafted: Vec::new(),
             brewed: Vec::new(),
-            potion_taken: Vec::new(),
             equipped: Vec::new(),
             merchant: None,
             stone: Stonecutter::default(),
@@ -1697,7 +1694,6 @@ impl Menu {
     /// `ResultSlot.onTake` and the other `Slot.onTake` overrides.
     fn on_take(&mut self, env: &Env, s: usize, taken: &ItemStack) {
         if self.slots[s].role == Role::Potion {
-            self.potion_taken.push(taken.clone());
             // BrewingStandMenu.PotionSlot.onTake: a stack with potion contents.
             if matches!(
                 &*taken.item,

@@ -135,24 +135,16 @@ impl Game<'_> {
         };
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
-        let potion_taken = std::mem::take(&mut menu.potion_taken);
         let crafted = std::mem::take(&mut menu.crafted);
         let item_crafted = std::mem::take(&mut menu.item_crafted);
         menu.drops.clear();
         store_player(menu, &mut host.hub.guests[gi]);
-        if !potion_taken.is_empty() {
-            let conn = host.hub.guests[gi].conn;
-            self.as_guest(host, conn, |g| {
-                let player = g.native_acting_id();
-                for stack in &potion_taken {
-                    g.native_player_brewed_potion(player, stack);
-                }
-            });
-        }
         if !brewed.is_empty() {
             let conn = host.hub.guests[gi].conn;
             self.as_guest(host, conn, |g| {
+                let player = g.native_acting_id();
                 for stack in &brewed {
+                    g.native_player_brewed_potion(player, stack);
                     g.trigger_brewed_potion(stack);
                 }
             });

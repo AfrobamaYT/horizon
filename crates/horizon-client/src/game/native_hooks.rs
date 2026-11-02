@@ -3841,9 +3841,9 @@ impl Game<'_> {
     pub(super) fn native_brewing_complete(&self, pos: [i32; 3]) {
         mod_api::dispatch_brewing_complete(self, mod_api::mods(), pos);
     }
-    /// A player took a stack from a brewing stand potion slot. @API:player_brewed_potion@.
+    /// A player took a potion from a brewing stand bottle slot. @API:player_brewed_potion@.
     pub(super) fn native_player_brewed_potion(&mut self, player: u128, stack: &ItemStack) {
-        let _ = (player, stack);
+        mod_api::dispatch_player_brewed_potion(self, mod_api::mods(), player, stack);
     }
     /// An item was placed on a campfire at `pos` and began cooking. @API:campfire_start@.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
