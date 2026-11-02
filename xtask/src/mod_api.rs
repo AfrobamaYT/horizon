@@ -303,8 +303,9 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 3] = [
+const HANDLES: [(&str, &str); 4] = [
     ("entity", "EntityRef"),
+    ("living", "LivingRef"),
     ("level", "LevelRef"),
     ("player", "PlayerRef"),
 ];
@@ -1264,6 +1265,9 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
+        pub(super) struct StackedOnOther<'a> {
+            pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
+        }
         pub(super) struct Corners;
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
         pub(super) struct ItemEnergyBuffer;
