@@ -385,8 +385,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !self.feature_exists(feature) {
             return false;
         }
+        let mut feature = Some(feature.to_owned());
+        if !self.level.block_grow_feature(pos, &mut feature) {
+            return false;
+        }
+        let Some(feature) = feature.filter(|name| self.feature_exists(name)) else {
+            return false;
+        };
         self.remove_sapling(pos);
-        if self.place_configured_feature(feature, pos) {
+        if self.place_configured_feature(&feature, pos) {
             return true;
         }
         self.set_block(pos, state, flags::UPDATE_NONE);

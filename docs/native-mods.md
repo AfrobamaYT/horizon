@@ -1717,6 +1717,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   progress stage 0 through 9.
 - **`native_block_lock_check(player, name, pos, locked)`**: a guest checks the lock on the container at `pos`;
   `locked` starts with vanilla's result and may be changed. The guest's state is not swapped in.
+- **`native_block_grow_feature(dimension, pos, feature, cancel)`** (on `GameLevel`): a sapling, azalea,
+  mushroom or fungus is about to grow into a feature. Set `cancel` or `feature` to `None` to prevent growth;
+  replace `feature` with a configured feature key to select another. An unresolved key prevents growth.
+  Server-side. Bundles need `"hooks": @API:block_grow_feature@`.
 - **`native_block_fade(dimension, pos, from, to, cancel)`** (on `GameLevel`): ice or snow melts, or coral dies. `from`
   and `to` are block state IDs. Set `cancel` to keep the old block.
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or

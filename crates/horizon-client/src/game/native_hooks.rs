@@ -636,6 +636,19 @@ impl GameLevel<'_> {
         mod_api::dispatch_sponge_absorb(self, mod_api::mods(), dimension, pos);
     }
 
+    /// A block at `pos` is about to grow into a feature. Server-side.
+    /// @API:block_grow_feature@.
+    #[inline(always)]
+    pub(super) fn native_block_grow_feature(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        feature: &mut Option<String>,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, feature, cancel);
+    }
+
     /// A block at `pos` is about to fade from `from` to `to` because of
     /// melting or coral death. Set `cancel` to keep it. Server-side.
     /// @API:block_fade@.

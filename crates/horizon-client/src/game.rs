@@ -1169,6 +1169,13 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn block_grow_feature(&self, pos: BlockPos, feature: &mut Option<String>) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_grow_feature(self.dimension, pos, feature, &mut cancel);
+        }
+        !cancel
+    }
     fn allow_block_burn(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
         if self.native_authoritative {

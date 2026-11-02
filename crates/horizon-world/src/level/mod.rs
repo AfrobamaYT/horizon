@@ -343,6 +343,10 @@ pub trait LevelAccess {
     fn allow_block_burn(&self, _pos: BlockPos) -> bool {
         true
     }
+    /// Select or cancel the feature a block is about to grow into.
+    fn block_grow_feature(&self, _pos: BlockPos, _feature: &mut Option<String>) -> bool {
+        true
+    }
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
     }
