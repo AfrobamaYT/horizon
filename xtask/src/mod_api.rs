@@ -2093,9 +2093,10 @@ mod tests {
             }
         }
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Backstab)];
+        let held = ItemStack::default();
         for (source_z, weapon, expected) in [
-            (-1.0, Some(&ItemStack), 12.0),
-            (1.0, Some(&ItemStack), 4.0),
+            (-1.0, Some(&held), 12.0),
+            (1.0, Some(&held), 4.0),
             (-1.0, None, 4.0),
         ] {
             let (mut amount, mut canceled) = (4.0, false);
