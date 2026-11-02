@@ -8498,13 +8498,22 @@ impl Game<'_> {
         } else if !self.entity_targeted()
             && let Some(hit) = self.pick()
         {
+            let air = self
+                .res
+                .facts()
+                .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
+            if air {
+                self.native_left_click_empty();
+            }
             self.remote_mining(true);
             instant = self
                 .res
                 .facts()
                 .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
         } else {
-            self.native_left_click_empty();
+            if !self.entity_targeted() {
+                self.native_left_click_empty();
+            }
             if !self.creative {
                 self.clicks.miss_time = 10;
             }
