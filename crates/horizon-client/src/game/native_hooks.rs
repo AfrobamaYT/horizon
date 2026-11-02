@@ -7425,6 +7425,16 @@ impl Game<'_> {
     ) {
         let _ = (message, cancel);
     }
+    /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
+    /// @API:client_pause_change_pre@.
+    pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
+        let _ = (paused, cancel);
+    }
+    /// NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.
+    /// @API:client_pause_change_post@.
+    pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
+        let _ = (paused,);
+    }
     /// A line in chat from the client.
     pub(super) fn native_chat(&mut self, text: &str) {
         let focused = self.screen == Screen::Chat;
