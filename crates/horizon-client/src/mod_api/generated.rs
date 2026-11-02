@@ -1855,11 +1855,6 @@ pub trait Hooks: Send + Sync {
     /// click, drag and shift-click that puts an item in a slot, several times for
     /// one shift-click: answer from `stack` alone, and fast. API
     /// 130.
-    /// A pickup click before item stack overrides run.
-    fn item_stacked_on_other(&self, event: &mut ItemStackedOnOtherEvent<'_, '_>) -> Flow {
-        let _ = event;
-        Flow::Continue
-    }
     fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
         let _ = event;
     }
@@ -2211,13 +2206,6 @@ pub trait Hooks: Send + Sync {
     /// `WaterAnimal`'s or an axolotl's own air logic. API 144.
     fn living_breathe(&self, event: &mut LivingBreatheEvent<'_>) {
         let _ = event;
-    }
-    /// Called when a player with mayfly reaches `Player.causeFallDamage`.
-    ///
-    /// Return `Some` to set `replacement`; the first mod returning `Some` wins.
-    fn player_flyable_fall(&self, event: &mut PlayerFlyableFallEvent) -> Option<PlayerFlyableFall> {
-        let _ = event;
-        None
     }
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
@@ -7681,24 +7669,6 @@ pub fn dispatch_experience_orb_merge(
         }
     }
 }
-/// What [`Hooks::item_stacked_on_other`] is told.
-#[non_exhaustive]
-pub struct ItemStackedOnOtherEvent<'a, 'b> {
-    pub event: &'a mut StackedOnOther<'b>,
-}
-pub fn dispatch_item_stacked_on_other(
-    mods: &[Box<dyn Hooks>],
-    event: &mut StackedOnOther<'_>,
-    canceled: &mut bool,
-) {
-    let mut event = ItemStackedOnOtherEvent { event };
-    for mod_hook in mods {
-        if matches!(mod_hook.item_stacked_on_other(&mut event), Flow::Cancel) {
-            *canceled = true;
-            break;
-        }
-    }
-}
 /// What [`Hooks::menu_slot_rules`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MenuSlotRulesEvent<'a> {
@@ -8235,31 +8205,6 @@ pub fn dispatch_data_map_types(
     let mut event = DataMapTypesEvent { types };
     for mod_hook in mods {
         mod_hook.data_map_types(host, &mut event);
-    }
-}
-/// What [`Hooks::player_flyable_fall`] is told.
-#[non_exhaustive]
-pub struct PlayerFlyableFallEvent {
-    pub player: u32,
-    pub distance: f32,
-    pub multiplier: f32,
-}
-pub fn dispatch_player_flyable_fall(
-    mods: &[Box<dyn Hooks>],
-    player: u32,
-    distance: f32,
-    multiplier: f32,
-    replacement: &mut Option<PlayerFlyableFall>,
-) {
-    if replacement.is_some() {
-        return;
-    }
-    let mut event = PlayerFlyableFallEvent { player, distance, multiplier };
-    for mod_hook in mods {
-        if let Some(value) = mod_hook.player_flyable_fall(&mut event) {
-            *replacement = Some(value);
-            break;
-        }
     }
 }
 /// What [`Hooks::living_breathe`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

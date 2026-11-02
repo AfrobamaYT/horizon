@@ -2829,7 +2829,6 @@ impl Menu {
     /// plain click, ending with `slot.setChanged()`.
     fn pickup(&mut self, env: &Env, s: usize, primary: bool) {
         let slot = self.slots[s];
-        let mut canceled = false;
         let mut event = StackedOnOther {
             slot: s,
             primary,
@@ -2837,13 +2836,14 @@ impl Menu {
             clicked: &mut self.containers[slot.container][slot.index],
             cancellation_result: false,
         };
+        let mut canceled = false;
         native_item_stacked_on_other(&mut event, &mut canceled);
-        let handled = event.cancellation_result;
-        if !(if canceled {
-            handled
+        let handled = if canceled {
+            event.cancellation_result
         } else {
             self.bundle_click(env, s, primary)
-        }) {
+        };
+        if !handled {
             self.pickup_inner(env, s, primary);
         }
         self.slot_changed(env, s);

@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "a pickup click before item stack overrides (`native_item_stacked_on_other`).",
-  "doc_summary": "A pickup click calls `native_item_stacked_on_other` before item overrides, on both sides. Mods can change the carried and clicked stacks. Canceling skips the overrides; `cancellation_result` decides whether the rest of the click is also skipped. Bundles that use it need `\"hooks\": @API:native_item_stacked_on_other@`."
+  "doc_summary": "a pickup click before the item overrides, on both sides: `native_item_stacked_on_other(event, canceled)` gets the slot, the button and the carried and clicked stacks, which it may change. Canceling skips the overrides (a bundle's); `cancellation_result` then says whether the rest of the click is skipped too. Bundles that use it need `\"hooks\": @API:native_item_stacked_on_other@`."
 }

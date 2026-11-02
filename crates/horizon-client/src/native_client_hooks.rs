@@ -31,7 +31,10 @@ pub(crate) fn menu_slot_rules(
     }
 }
 
-pub(crate) fn item_stacked_on_other(event: &mut crate::menu::StackedOnOther<'_>, canceled: &mut bool) {
+pub(crate) fn item_stacked_on_other(
+    event: &mut crate::menu::StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.item_stacked_on_other)(event, canceled);
     }
