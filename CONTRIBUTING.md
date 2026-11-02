@@ -100,8 +100,7 @@ enough), then claim it. `/unclaim` gives it back. Issues labelled `tracker`, `pr
 claimed whole: claim one of the issues a tracker lists, or open one for the part you take.
 
 A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
-5 days, with a comment: open a draft early. You can hold 8 open issues at a time, not counting the ones your
-pull requests already fix. Agents claim the same way.
+5 days, with a comment: open a draft early. Agents claim the same way.
 
 When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
 it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.

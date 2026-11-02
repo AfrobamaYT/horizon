@@ -2184,9 +2184,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `pos`. Set `cancel` to keep it.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
-- **`native_fluid_place_block(dimension, pos, liquid_pos, state, new_state, cancel)`** (on `GameLevel`):
-  liquid is about to place `state` at `pos`, originating at `liquid_pos`. Change `new_state` to replace the
-  proposed state, or set `cancel` to prevent placement. Server-side.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
   at `pos` is about to change level. Levels run from 0 through 8. Set `cancel` to keep the old level.
 - **`native_leaves_decay(dimension, pos, cancel)`** (on `GameLevel`): a non-persistent leaf block at distance 7 is
@@ -2195,9 +2192,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   block at `pos`. Set `cancel` to leave it closed. The guest's state is not swapped in.
 - **`native_moisture_change(dimension, pos, from, to, cancel)`** (on `GameLevel`): farmland at `pos` is about to
   change moisture. Set `cancel` to keep its old moisture.
-- **`native_farmland_trample(entity, pos, state, distance, cancel)`**: on the server, a living entity's landing is
-  about to convert farmland. `entity` is its ID, `state` is the farmland state ID, and `distance` is the fall distance.
-  Set `cancel` to prevent conversion; fall damage still applies.
 - **`native_sculk_bloom(dimension, pos)`**: after a sculk catalyst at `pos` takes experience, its block has entered
   the blooming state.
 - **`native_sponge_absorb(dimension, pos)`** (on `GameLevel`): a sponge at `pos` has absorbed water and become wet.
@@ -2214,10 +2208,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   progress stage 0 through 9.
 - **`native_block_lock_check(player, name, pos, locked)`**: a guest checks the lock on the container at `pos`;
   `locked` starts with vanilla's result and may be changed. The guest's state is not swapped in.
-- **`native_block_tool_modification(stack, tool, final_state, cancel)`**: a tool considers an action on either side.
-  `tool` describes the player, hand, click and ability. `final_state` starts as the proposed state ID, or `None` when
-  vanilla has no result; replace it or set it to `None`. Set `cancel` to suppress the action regardless of the state.
-  Do not modify the level when `tool.simulated` is true; current calls pass false.
 - **`native_block_fade(dimension, pos, from, to, cancel)`** (on `GameLevel`): ice or snow melts, or coral dies. `from`
   and `to` are block state IDs. Set `cancel` to keep the old block.
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or
