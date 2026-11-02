@@ -404,11 +404,11 @@ fn ruby_mod(dir: &Path) -> ContentMod {
         ),
         (
             "data/ruby/horizon/item/ruby.json",
-            r#"{"template": "minecraft:diamond", "max_stack_size": 16, "rarity": "rare"}"#,
+            r#"{"template": "minecraft:diamond", "max_stack_size": 16, "rarity": "rare", "block": "ruby:ruby_glass"}"#,
         ),
         (
             "data/ruby/horizon/item/ruby_sword.json",
-            r#"{"template": "minecraft:iron_sword", "components": {"minecraft:max_damage": 900,
+            r#"{"template": "minecraft:iron_sword", "block": "minecraft:wheat", "components": {"minecraft:max_damage": 900,
                 "minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage",
                     "id": "minecraft:base_attack_damage", "amount": 7.0,
                     "operation": "add_value", "slot": "mainhand"}],
@@ -601,7 +601,78 @@ fn content_root_loads_with_every_table() {
     assert!(ruby_block.fire_resistant && !iron_block.fire_resistant);
     let gem = &items.items["ruby:ruby"];
     assert_eq!(gem.max_stack, 16);
+    assert_eq!(gem.block, Some(BlockStateId(n + 65)));
+    let binding = independent_behaviours.item_binding("ruby:ruby").unwrap();
+    assert_eq!(
+        binding.block,
+        independent_behaviours.block(BlockStateId(n + 65))
+    );
+    // Exercise the same binding as server placement, including its emitted sound.
+    {
+        use horizon_core::{
+            geometry::{Direction, Vec3},
+            position::BlockPos,
+            random::LegacyRandom,
+        };
+        use horizon_world::level::{LevelAccess, LevelEvent, PlaceContext, PlaceOutcome, Ticks};
+        struct TestLevel {
+            blocks: std::collections::HashMap<BlockPos, BlockStateId>,
+            air: BlockStateId,
+            random: LegacyRandom,
+            events: Vec<LevelEvent>,
+        }
+        impl LevelAccess for TestLevel {
+            fn block_state(&self, pos: BlockPos) -> BlockStateId {
+                *self.blocks.get(&pos).unwrap_or(&self.air)
+            }
+            fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+                Some(self.blocks.insert(pos, state).unwrap_or(self.air))
+            }
+            fn is_loaded(&self, _: BlockPos) -> bool {
+                true
+            }
+            fn random(&mut self) -> &mut LegacyRandom {
+                &mut self.random
+            }
+            fn game_time(&self) -> i64 {
+                0
+            }
+            fn emit(&mut self, event: LevelEvent) {
+                self.events.push(event);
+            }
+        }
+        let floor = BlockPos::new(0, 0, 0);
+        let wheat = new.default_state("minecraft:wheat").unwrap();
+        let mut level = TestLevel {
+            blocks: [(floor, iron)].into_iter().collect(),
+            air: new.default_state("minecraft:air").unwrap(),
+            random: LegacyRandom::new(1),
+            events: Vec::new(),
+        };
+        let ctx = PlaceContext {
+            clicked_pos: floor,
+            face: Direction::Up,
+            hit: Vec3::new(0.5, 1.0, 0.5),
+            inside: false,
+            yaw: 0.0,
+            pitch: 0.0,
+            sneaking: false,
+            item: "ruby:ruby_sword".into(),
+            can_use_game_master_blocks: false,
+        };
+        let denied = independent_behaviours.place_block(&mut level, &mut Ticks::new(1), &ctx);
+        assert!(matches!(denied, PlaceOutcome::Failed));
+        assert!(level.events.is_empty());
+        level
+            .blocks
+            .insert(floor, new.default_state("minecraft:farmland").unwrap());
+        let placed = independent_behaviours.place_block(&mut level, &mut Ticks::new(1), &ctx);
+        assert!(matches!(placed, PlaceOutcome::Placed { state, .. } if state == wheat));
+        assert!(level.events.iter().any(|e| matches!(e, LevelEvent::Sound { sound, .. } if &**sound == "minecraft:item.crop.plant")));
+    }
     let sword = &items.items["ruby:ruby_sword"];
+    assert_eq!(sword.block, new.default_state("minecraft:wheat"));
+    assert_eq!(items.items["minecraft:iron_block"].block, Some(iron));
     let iron_sword = &items.items["minecraft:iron_sword"];
     assert_eq!((sword.max_damage, iron_sword.max_damage), (900, 250));
     assert_eq!(sword.modifiers.len(), 1);
@@ -666,6 +737,25 @@ fn refuses_unknown_templates_and_vanilla_ids() {
     let e = build(&base, std::slice::from_ref(&m), &scratch.join("out")).unwrap_err();
     assert!(e.to_string().contains("is not a block"), "{e}");
     m.content.blocks[0].template = "minecraft:iron_block".into();
+    let gem = m
+        .content
+        .items
+        .iter_mut()
+        .find(|i| i.id == "ruby:ruby")
+        .unwrap();
+    gem.block = Some("minecraft:not_a_block".into());
+    let e = build(&base, std::slice::from_ref(&m), &scratch.join("out")).unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("block \"minecraft:not_a_block\" is not a block"),
+        "{e}"
+    );
+    m.content
+        .items
+        .iter_mut()
+        .find(|i| i.id == "ruby:ruby")
+        .unwrap()
+        .block = Some("ruby:ruby_glass".into());
     let stew = m
         .content
         .items
