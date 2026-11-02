@@ -5404,6 +5404,15 @@ impl Game<'_> {
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`).
+    pub(super) fn native_create_spawn_position(
+        &mut self,
+        position: &mut [i32; 3],
+        cancel: &mut bool,
+    ) {
+        let _ = (position, cancel);
+    }
     /// A server player's respawn destination before placement (NeoForge's
     /// `PlayerRespawnPositionEvent`). `flags` holds copy-saved-position,
     /// missing-respawn-block, and End-return, in that order.
