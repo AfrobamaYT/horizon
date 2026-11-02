@@ -6,7 +6,8 @@
 //! The entities are those of the level in place (the one a hook runs in) and
 //! the server's players, whatever their level.
 use super::{Dim, Game, commands::Target};
-use horizon_client::mod_api::{EntityRef, LevelRef};
+use horizon_client::mod_api::{EntityRef, LevelRef, NativeBlockUpdateFlags};
+use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
     /// What a handle names now, or None for a stale or foreign one.
@@ -54,6 +55,47 @@ impl Game<'_> {
             .chain(self.levels.parked_dims())
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.id()))
+    }
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    pub(super) fn native_level_set_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) {
+            return false;
+        }
+        self.native_set_block(level.dimension(), pos, state, flags.bits())
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    pub(super) fn native_level_destroy_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        drop: bool,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) {
+            return false;
+        }
+        let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        let changed = self.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, drop));
+        let _ = self.process_level_events();
+        changed
+    }
+    fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        self.remote.is_none()
+            && (self.serving.is_some() || self.options.dedicated.is_some())
+            && self.native_lifecycle.epoch() == Some(level.epoch())
+            && self.dim.id() == level.dimension()
+            && self.world.loaded(pos[0], pos[2])
+            && (self.world.layout().min_y()..self.world.layout().max_y()).contains(&pos[1])
     }
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.

@@ -1303,6 +1303,32 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::item_container_extract")
     }
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    fn level_set_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        let _ = level;
+        let _ = pos;
+        let _ = state;
+        let _ = flags;
+        unimplemented!("Host::level_set_block")
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    fn level_destroy_block(&mut self, level: LevelRef, pos: [i32; 3], drop: bool) -> bool {
+        let _ = level;
+        let _ = pos;
+        let _ = drop;
+        unimplemented!("Host::level_destroy_block")
+    }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.
@@ -1341,5 +1367,26 @@ impl EntityRef {
     /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
     pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
         host.entity_level(self)
+    }
+}
+impl LevelRef {
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    pub fn set_block(
+        self,
+        host: &mut dyn Host,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        host.level_set_block(self, pos, state, flags)
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    pub fn destroy_block(self, host: &mut dyn Host, pos: [i32; 3], drop: bool) -> bool {
+        host.level_destroy_block(self, pos, drop)
     }
 }

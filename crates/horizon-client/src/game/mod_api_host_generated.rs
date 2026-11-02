@@ -537,6 +537,18 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn level_set_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        self.native_level_set_block(level, pos, state, flags)
+    }
+    fn level_destroy_block(&mut self, level: LevelRef, pos: [i32; 3], drop: bool) -> bool {
+        self.native_level_destroy_block(level, pos, drop)
+    }
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
         self.native_recipe_book_category(kind)
     }
