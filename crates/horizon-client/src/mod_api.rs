@@ -27,6 +27,7 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::landing::PlayerFlyableFall;
 pub use crate::menu::StackedOnOther;
 pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};

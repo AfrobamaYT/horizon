@@ -3572,6 +3572,7 @@ pub(crate) mod tests {
                 },
                 item_stacked_on_other: |_, _| {},
                 living_breathe: |_, _, _, _, _| {},
+                player_flyable_fall: |_, _, _, _| {},
                 ingredient: |_, _, _| {},
             });
         assert!(installed.is_ok());

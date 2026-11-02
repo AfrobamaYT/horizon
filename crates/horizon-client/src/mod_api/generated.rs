@@ -2212,6 +2212,13 @@ pub trait Hooks: Send + Sync {
     fn living_breathe(&self, event: &mut LivingBreatheEvent<'_>) {
         let _ = event;
     }
+    /// Called when a player with mayfly reaches `Player.causeFallDamage`.
+    ///
+    /// Return `Some` to set `replacement`; the first mod returning `Some` wins.
+    fn player_flyable_fall(&self, event: &mut PlayerFlyableFallEvent) -> Option<PlayerFlyableFall> {
+        let _ = event;
+        None
+    }
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
     /// push a `horizon_mods::content::Block` per block, the same declaration
@@ -8228,6 +8235,31 @@ pub fn dispatch_data_map_types(
     let mut event = DataMapTypesEvent { types };
     for mod_hook in mods {
         mod_hook.data_map_types(host, &mut event);
+    }
+}
+/// What [`Hooks::player_flyable_fall`] is told.
+#[non_exhaustive]
+pub struct PlayerFlyableFallEvent {
+    pub player: u32,
+    pub distance: f32,
+    pub multiplier: f32,
+}
+pub fn dispatch_player_flyable_fall(
+    mods: &[Box<dyn Hooks>],
+    player: u32,
+    distance: f32,
+    multiplier: f32,
+    replacement: &mut Option<PlayerFlyableFall>,
+) {
+    if replacement.is_some() {
+        return;
+    }
+    let mut event = PlayerFlyableFallEvent { player, distance, multiplier };
+    for mod_hook in mods {
+        if let Some(value) = mod_hook.player_flyable_fall(&mut event) {
+            *replacement = Some(value);
+            break;
+        }
     }
 }
 /// What [`Hooks::living_breathe`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_flyable_fall",
+      "target": "horizon_client::landing::native_player_flyable_fall",
+      "neoforge": "PlayerFlyableFallEvent",
+      "side": "both",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "replace",
+        "out": "replacement"
+      }
+    }
+  ],
+  "rust_summary": "a flyable player's fall (`native_player_flyable_fall`).",
+  "doc_summary": "A player with mayfly reaches `native_player_flyable_fall` before the fall damage early return. Mods can replace the notified distance and multiplier; the early return still prevents fall damage. Bundles need \"hooks\": @API:player_flyable_fall@."
+}
