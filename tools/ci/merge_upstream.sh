@@ -10,8 +10,6 @@ fi
 export GIT_AUTHOR_NAME=arismoko GIT_COMMITTER_NAME=arismoko
 export GIT_AUTHOR_EMAIL=19542195+arismoko@users.noreply.github.com
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
-# The mod-API generated files (merge=mod-api-generated in .gitattributes) keep our side; verify checks them.
-git config merge.mod-api-generated.driver true
 sha=$(git rev-parse --short upstream/main)
 if git -c commit.gpgsign=false merge --no-ff -m "Merge upstream main $sha" upstream/main; then
   exit 0

@@ -108,11 +108,14 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(git(self.work, "show", "-s", "--format=%B"),
                              f"Merge upstream main {git(self.work, 'rev-parse', '--short', 'upstream/main')}")
             self.assertTrue(any(call[1:3] == ("issue", "close") for call in self.calls))
-            self.open_issues, self.open_pulls = [], [{"number": 5}]
+            self.open_pulls = [{"number": 5}]
             git(self.work, "checkout", "-q", "main")
             git(self.work, "reset", "-q", "--hard", self.before)
+            self.open_issues = [{"number": 9, "title": sync.TITLE}]
+            self.calls.clear()
             self.assertEqual(sync.sync(), 0)
             check.assert_called_once()
+            self.assertTrue(any(call[1:3] == ("issue", "close") for call in self.calls))
         print("CLEAN: two-parent merge; exact identity/message; verified SHA opened as a pull request; main untouched; issue closed; NOOP skips checks")
 
     def test_open_pull_request_branch_only_grows(self):
@@ -197,6 +200,29 @@ class SyncTests(unittest.TestCase):
                 self.assertEqual(git(self.origin, "rev-parse", "main"), self.before)
                 self.assertEqual(git(self.origin, "for-each-ref", sync.STAGING), "")
         print("DEDUP: same SHA in body/comment stays quiet; new SHA comments once; no pushes in either case")
+
+    def test_open_pull_request_refuses_workflow_change_from_main(self):
+        with patch.object(sync, "verify", return_value="https://github.com/checks/1"):
+            self.assertEqual(sync.sync(), 0)
+        self.open_pulls = [{"number": 5}]
+        git(self.work, "checkout", "-q", "main")
+        git(self.work, "reset", "-q", "--hard", self.before)
+        workflow = self.work / ".github/workflows/checks.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("name: checks\n")
+        git(self.work, "add", ".")
+        git(self.work, "commit", "-m", "fork workflow change")
+        git(self.work, "push", "origin", "main")
+        self.add_upstream_commit("later.txt")
+        staged = git(self.origin, "rev-parse", "sync/upstream")
+        self.calls.clear()
+        with patch.object(sync, "verify") as check:
+            self.assertEqual(sync.sync(), 1)
+            check.assert_not_called()
+        self.assertEqual(git(self.origin, "rev-parse", "sync/upstream"), staged)
+        issue = next(call[-1] for call in self.calls if call[1:3] == ("issue", "create"))
+        self.assertIn(".github/workflows/checks.yml", issue)
+        print("OPEN PR + MAIN WORKFLOWS: a workflow change main brings into the branch is handed to an agent, not pushed")
 
     def test_red_checks_leave_main_unchanged_and_open_new_issue(self):
         with patch.object(sync, "verify", side_effect=RuntimeError("verify failed")):

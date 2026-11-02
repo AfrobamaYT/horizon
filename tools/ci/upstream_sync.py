@@ -99,9 +99,15 @@ def sync():
             raise RuntimeError(f"Merge failed with exit code {result.returncode}; nothing pushed.")
         head = command("git", "rev-parse", "HEAD")
         if head == start and (pull is not None or result.returncode == 3):
+            if issue is not None:
+                command("gh", "issue", "close", str(issue), "--repo", repo, "--comment",
+                        f"🤖 Agent: Upstream `{upstream}` is already in main or the open sync pull request. "
+                        f"[Sync run]({run_url}).")
             print("Upstream main is already in main or the open sync pull request.")
             return 0
-        workflows = command("git", "diff", "--name-only", main, head, "--", ".github/workflows")
+        # What this push adds to the branch: from its current tip while a pull request is open, else from main.
+        pushed_from = f"origin/{BRANCH}" if pull is not None else main
+        workflows = command("git", "diff", "--name-only", pushed_from, head, "--", ".github/workflows")
         if workflows:
             if issue is not None:
                 thread = json.loads(command("gh", "issue", "view", str(issue), "--repo", repo,
