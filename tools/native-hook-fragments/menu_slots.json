@@ -1,0 +1,9 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "menu_slot_backing", "side": "server", "target": "horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_backing", "receiver": "menu"}
+  ],
+  "rust_summary": "a player's open menu's slots as item places: `ItemPlace::MenuSlot` (`forMenuSlot`), written through the storage `menu.slot_backing(host, slot)` names, and `MenuRef::cursor`.",
+  "doc_summary": "a player's open menu's slots as item places (`ItemAccess.forMenuSlot`): `ItemPlace::MenuSlot { menu, slot }` reads, inserts into and extracts from the storage the slot shows, its own slot only, in a transaction. `menu.slot_backing(host, slot)` names that storage: the player's `ENTITY_ITEMS` index, a block entity's or an entity's slot, the ender chest's, the inventory crafting grid's or result, or a mod's chest menu's slot. A write to the crafting grid recomputes the result at the root commit; the result itself takes nothing and gives nothing. `menu.cursor()` is the cursor's place. A mod's chest menu's slots are written the same way. Bundles need \"hooks\": @API:menu_slots@.",
+  "comments": ["crates/horizon-client/src/game/native_menu_refs.rs"]
+}

@@ -373,10 +373,6 @@
       "target": "horizon_client::game::native_menus::Game<'_>::native_open_menu", "side": "server"
     },
     {
-      "name": "set_menu_items",
-      "target": "horizon_client::game::native_menus::Game<'_>::native_set_menu_items", "side": "server"
-    },
-    {
       "name": "close_menu",
       "target": "horizon_client::game::native_menus::Game<'_>::native_close_menu", "side": "server"
     },

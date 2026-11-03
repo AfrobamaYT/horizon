@@ -9,8 +9,8 @@
 //! it is, journaled: an abort puts it back, at every level of an item inside an item. A handler
 //! answering more than it was asked is a mod bug, named once, and the write aborts.
 use super::{
-    Capability, Direction, Hand, Host, ITEMS, ItemResource, ItemStack, LevelRef, ResourceHandler,
-    Transaction,
+    Capability, Direction, ENTITY_ITEMS, Hand, Host, ITEMS, ItemResource, ItemStack, LevelRef,
+    MenuRef, MenuSlotBacking, ResourceHandler, Transaction,
 };
 use std::{collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
 
@@ -43,6 +43,10 @@ pub enum ItemPlace {
     /// Slot `slot` of the item at `parent`, through its [`ITEM_ITEMS`] handler: a backpack in a
     /// backpack.
     Nested { parent: Box<ItemPlace>, slot: usize },
+    /// Slot `slot` of a player's open menu, `menu` (`forMenuSlot`): the storage the slot shows
+    /// ([`MenuRef::slot_backing`]), its own slot only. Nothing where the menu is closed,
+    /// replaced or its player gone; nothing goes into or out of the crafting result.
+    MenuSlot { menu: MenuRef, slot: usize },
     /// A place a mod keeps, such as an accessory slot: read and written by the [`PlaceProvider`]
     /// it registered as `provider`, which alone knows what `key` means.
     Mod { provider: &'static str, key: u64 },
@@ -238,6 +242,7 @@ impl ItemPlace {
             ItemPlace::Mod { provider, key } => {
                 super::place_provider(provider)?.1.stack(host, *key)
             }
+            ItemPlace::MenuSlot { menu, slot } => menu.slot(host, *slot)?,
             _ => host.game_stack(self),
         }
         .filter(|stack| stack.count > 0)
@@ -323,16 +328,21 @@ impl ItemPlace {
         if amount == 0 {
             return 0;
         }
-        // Through index `slot` of `handler`, then for an insert the whole handler, each in
-        // passes while one moves something (`Inventory.add`'s and NeoForge's loops: a handler
-        // may move less per call than it could): what `slot` doesn't take goes to the other
-        // indices (`forHandlerIndex`).
+        // Through index `slot` of `handler`, then for an insert that `spills` the whole handler,
+        // each in passes while one moves something (`Inventory.add`'s and NeoForge's loops: a
+        // handler may move less per call than it could): what `slot` doesn't take goes to the
+        // other indices (`forHandlerIndex`).
         let through = |handler: Capability<dyn ResourceHandler<ItemResource>>,
                        host: &mut dyn Host,
                        tx: &Transaction,
-                       slot: usize| {
+                       slot: usize,
+                       spills: bool| {
             let mut left = amount;
-            let passes: &[bool] = if insert { &[false, true] } else { &[false] };
+            let passes: &[bool] = if insert && spills {
+                &[false, true]
+            } else {
+                &[false]
+            };
             for &anywhere in passes {
                 while left > 0 {
                     let moved = match (insert, anywhere) {
@@ -356,11 +366,33 @@ impl ItemPlace {
                 slot,
             } => {
                 let handler = level.capability(host, &ITEMS, *pos, *side).ok_or(())?;
-                through(handler, host, tx, *slot)
+                through(handler, host, tx, *slot, true)
             }
             ItemPlace::Nested { parent, slot } => {
                 let handler = parent.capability(host, &ITEM_ITEMS).ok_or(())?;
-                through(handler, host, tx, *slot)
+                through(handler, host, tx, *slot, true)
+            }
+            ItemPlace::MenuSlot { menu, slot } => {
+                let (handler, index) = match menu.slot_backing(host, *slot).ok_or(())? {
+                    MenuSlotBacking::Player(index) => {
+                        let player = menu.player.entity();
+                        (player.capability(host, &ENTITY_ITEMS), index)
+                    }
+                    MenuSlotBacking::BlockEntity { level, pos, slot } => {
+                        (level.capability(host, &ITEMS, pos, None), slot)
+                    }
+                    MenuSlotBacking::Entity { entity, slot } => {
+                        (entity.capability(host, &ENTITY_ITEMS), slot)
+                    }
+                    MenuSlotBacking::CraftResult => return Ok(0),
+                    _ => {
+                        return Ok(match insert {
+                            true => host.game_insert(self, resource.to_stack(amount), tx),
+                            false => host.game_extract(self, resource.to_stack(amount), tx),
+                        });
+                    }
+                };
+                through(handler.ok_or(())?, host, tx, index, false)
             }
             ItemPlace::Mod { provider, key } => {
                 let (owner, provider) = super::place_provider(provider).ok_or(())?;

@@ -198,6 +198,34 @@ impl Game<'_> {
         result
     }
 
+    /// `InventoryMenu.slotsChanged` for guest `uuid`'s crafting grid written outside a click
+    /// (a mod's menu slot write, at the root commit): the result made again from the grid, with
+    /// `native_prepare_item_craft` as a click has it, kept by the guest and their menu. The
+    /// client hears it with the tick's inventory sync.
+    pub(super) fn guest_craft_result(&mut self, uuid: u128) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        if let Some(g) = host
+            .hub
+            .guests
+            .iter_mut()
+            .find(|g| g.placed && g.uuid == uuid)
+        {
+            let mut result = self
+                .recipes()
+                .find(&g.craft_grid, 2)
+                .map(|(_, stack)| stack);
+            self.native_prepare_item_craft(uuid, &g.name, None, &mut result);
+            g.craft_result.clone_from(&result);
+            let play = host.play.get_mut(&g.conn);
+            if let Some(menu) = play.and_then(|p| p.crafting.inventory.as_mut()) {
+                menu.set_slot(&self.menu_env(), 0, result);
+            }
+        }
+        self.lan = Some(host);
+    }
+
     /// A click on the guest's inventory menu (window 0): `InventoryMenu`,
     /// crafting grid included. False for other windows.
     pub(super) fn lan_inventory_click(

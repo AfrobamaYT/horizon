@@ -17,7 +17,9 @@
 //! whole on its first write, from wherever the player's state lives then: the local player's or
 //! a guest's, swapped in by `native_as_player`. An item a write drops from a player waits for
 //! the root commit too. An item entity's stack is kept on its first write; one emptied stays,
-//! empty, until the root commit removes it.
+//! empty, until the root commit removes it. A guest's menu storage (ender chest, crafting grid,
+//! a mod's chest menu) is kept whole on its first write through a menu slot; a crafting grid
+//! changed by the transaction has its result made again at the root commit.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::items::ItemStack;
 use horizon_client::mod_api::TransactionSeal;
@@ -42,6 +44,8 @@ pub(super) struct Level {
     mob_lengths: HashMap<u32, usize>,
     /// Each item entity's stack before this transaction first wrote it.
     item_entities: HashMap<u32, ItemStack>,
+    /// Each guest's menu storage before this transaction first wrote it, by UUID.
+    menus: HashMap<u128, KeptMenus>,
     /// What the root commit does, in order.
     after: Vec<After>,
 }
@@ -61,6 +65,13 @@ struct KeptPlayer {
     carried: Option<ItemStack>,
 }
 
+#[derive(Clone)]
+struct KeptMenus {
+    ender_items: Vec<Option<ItemStack>>,
+    craft_grid: [Option<ItemStack>; 4],
+    native_menu: Vec<Option<ItemStack>>,
+}
+
 /// What a write tells the world, at the root commit.
 pub(super) enum After {
     /// `BlockEntity.setChanged`.
@@ -75,6 +86,9 @@ pub(super) enum After {
     Spawn([f64; 3], ItemStack),
     /// The item entity with this id was emptied: removed, unless it holds items again.
     Emptied(u32),
+    /// The crafting grid of the guest with this UUID changed: its result is made again
+    /// (`InventoryMenu.slotsChanged`).
+    CraftGrid(u128),
 }
 
 impl Level {
@@ -131,6 +145,9 @@ impl Game<'_> {
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
                 }
+                for (uuid, kept) in level.menus {
+                    outer.menus.entry(uuid).or_insert(kept);
+                }
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -168,6 +185,21 @@ impl Game<'_> {
             armor: self.armor.clone(),
             offhand: self.offhand.clone(),
             carried: self.carried.clone(),
+        });
+    }
+    /// Keeps the menu storage of guest `uuid` as it is, if a transaction is open and hasn't yet.
+    pub(super) fn journal_menus(&mut self, uuid: u128) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        let mut guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
+        let Some(g) = guests.find(|g| g.placed && g.uuid == uuid) else {
+            return;
+        };
+        level.menus.entry(uuid).or_insert_with(|| KeptMenus {
+            ender_items: g.ender_items.clone(),
+            craft_grid: g.craft_grid.clone(),
+            native_menu: g.native_menu.clone(),
         });
     }
     /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
@@ -254,6 +286,7 @@ impl Game<'_> {
                     self.remove_dropped(i);
                 }
             }
+            After::CraftGrid(uuid) => self.guest_craft_result(uuid),
         }
     }
     fn root_commit(&mut self, level: Level) {
@@ -330,6 +363,17 @@ impl Game<'_> {
         for (id, kept) in level.item_entities {
             if let Some(e) = self.dropped.iter_mut().find(|e| e.id == id) {
                 e.stack = kept;
+            }
+        }
+        let guests = self
+            .lan
+            .iter_mut()
+            .flat_map(|host| host.hub.guests.iter_mut());
+        for g in guests {
+            if let Some(kept) = level.menus.get(&g.uuid).filter(|_| g.placed) {
+                g.ender_items.clone_from(&kept.ender_items);
+                g.craft_grid.clone_from(&kept.craft_grid);
+                g.native_menu.clone_from(&kept.native_menu);
             }
         }
         for (uuid, kept) in level.players {

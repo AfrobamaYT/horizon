@@ -138,15 +138,6 @@ impl Game<'_> {
         self.lan = Some(host);
         window
     }
-    /// Replaces what the player's open native menu shows; sent with the
-    /// tick's container sync.
-    pub(super) fn native_set_menu_items(&mut self, uuid: u128, items: Vec<Option<ItemStack>>) {
-        if let Some(conn) = self.native_conn(uuid)
-            && let Some(host) = self.lan.as_mut()
-        {
-            host.hub.set_native_menu(conn, items);
-        }
-    }
     /// Closes the player's native menu (a `native_menu_closed` follows).
     pub(super) fn native_close_menu(&mut self, uuid: u128) {
         if let Some(conn) = self.native_conn(uuid)
