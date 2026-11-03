@@ -444,6 +444,8 @@ pub struct Menu {
     /// `GrindstoneEvent.OnPlaceItem`'s experience for the result now in the
     /// slot, or -1 for vanilla's.
     grind_xp: i32,
+    /// `AnvilMenu.createResult` ran since `anvil_update` last asked.
+    anvil_made: bool,
     /// The enchanting table's item changed to an enchantable one: the caller
     /// (with a level) fills the costs and clues (`slotsChanged`'s
     /// `access.execute`).
@@ -469,19 +471,72 @@ pub struct Anvil {
     pub only_renaming: bool,
 }
 
-/// What `AnvilUpdateEvent` asks about once both anvil inputs are in, and
-/// what the mods may set: an `output` (none until a mod sets one), its level
-/// `cost` (from the inputs' repair costs) and `material_cost`, the units of
-/// `right` used (0 or more than it holds: all of it).
+/// What `AnvilUpdateEvent` asks about once `createResult` made vanilla's
+/// result with a left input, and what the mods may change: the `output`,
+/// its level `cost` and `material_cost`, the units of `right` used (0 or
+/// more than it holds: all of it), each starting at vanilla's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnvilUpdate {
     pub left: ItemStack,
-    pub right: ItemStack,
+    pub right: Option<ItemStack>,
     /// The rename box's text, `None` when the client sent none.
     pub name: Option<String>,
+    /// Vanilla's result for these inputs (`getVanillaResult`), whatever
+    /// the mods set.
+    pub vanilla: AnvilVanilla,
     pub output: Option<ItemStack>,
-    pub cost: i64,
+    pub xp_cost: i32,
     pub material_cost: i32,
+}
+
+/// `AnvilUpdateEvent.VanillaResult`: the output, level cost and material
+/// cost `createResult` made.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilVanilla {
+    pub output: Option<ItemStack>,
+    pub xp_cost: i32,
+    pub material_cost: i32,
+}
+
+impl AnvilUpdate {
+    /// The question about `vanilla`, the result `createResult` made from
+    /// these inputs and name: the output, level cost and material cost
+    /// start at its own.
+    pub fn new(
+        left: ItemStack,
+        right: Option<ItemStack>,
+        name: Option<String>,
+        vanilla: &crate::stations::AnvilResult,
+    ) -> Self {
+        let vanilla = AnvilVanilla {
+            output: vanilla.result.clone(),
+            xp_cost: vanilla.cost,
+            material_cost: i32::try_from(vanilla.repair_item_count_cost).unwrap_or(i32::MAX),
+        };
+        Self {
+            left,
+            right,
+            name,
+            output: vanilla.output.clone(),
+            xp_cost: vanilla.xp_cost,
+            material_cost: vanilla.material_cost,
+            vanilla,
+        }
+    }
+
+    /// The mods' answer, in place of `result`: a cancel leaves no result at
+    /// cost 0; otherwise their output, level cost (0 or more) and material
+    /// cost. A changed output is no longer only a rename.
+    pub fn answer(self, cancel: bool, result: &mut crate::stations::AnvilResult) {
+        if cancel {
+            *result = crate::stations::AnvilResult::default();
+            return;
+        }
+        result.only_renaming &= self.output == self.vanilla.output;
+        result.cost = self.xp_cost.max(0);
+        result.repair_item_count_cost = self.material_cost.max(0) as u32;
+        result.result = self.output;
+    }
 }
 
 /// What `GrindstoneEvent.OnPlaceItem` asks about once the inputs changed,
@@ -930,6 +985,7 @@ impl Menu {
             grind_hook: false,
             grind_take: None,
             grind_xp: -1,
+            anvil_made: false,
             enchant_changed: false,
             enchant_button: None,
             may_build: true,
@@ -1265,43 +1321,44 @@ impl Menu {
         }
         self.data[0] = out.cost;
         self.containers[RESULT][0] = out.result;
+        self.anvil_made = true;
     }
 
-    /// `AnvilUpdateEvent`'s question about the result `createResult` just
-    /// made, or `None` when vanilla alone decides: the event is asked only
-    /// with both inputs in.
-    pub fn anvil_update(&self) -> Option<AnvilUpdate> {
-        let [Some(left), Some(right)] = [0, 1].map(|i| self.containers[MAIN][i].clone()) else {
+    /// The anvil's result, cost and state as `createResult` left them.
+    fn anvil_state(&self) -> crate::stations::AnvilResult {
+        crate::stations::AnvilResult {
+            result: self.containers[RESULT][0].clone(),
+            cost: self.data[0],
+            repair_item_count_cost: self.anvil.repair_count,
+            only_renaming: self.anvil.only_renaming,
+        }
+    }
+
+    /// `AnvilUpdateEvent`'s question once `createResult` ran since the last
+    /// one (an input or the name changed, even back to what it was), or
+    /// `None`: it didn't, or with no left input, where vanilla has no result.
+    pub fn anvil_update(&mut self) -> Option<AnvilUpdate> {
+        if !std::mem::take(&mut self.anvil_made) {
             return None;
-        };
-        Some(AnvilUpdate {
-            cost: i64::from(left.repair_cost()) + i64::from(right.repair_cost()),
-            name: self.anvil.name.clone(),
+        }
+        let left = self.containers[MAIN][0].clone()?;
+        let right = self.containers[MAIN][1].clone();
+        Some(AnvilUpdate::new(
             left,
             right,
-            output: None,
-            material_cost: 0,
-        })
+            self.anvil.name.clone(),
+            &self.anvil_state(),
+        ))
     }
 
-    /// The mods' answer to [`Self::anvil_update`]: a cancel leaves no result
-    /// (at cost 1, `createResult`'s start); an output replaces vanilla's,
-    /// with its cost (clamped to 0 or more) and material cost; otherwise
-    /// vanilla's result stays.
+    /// The mods' answer to [`Self::anvil_update`] (see [`AnvilUpdate::answer`]).
     pub fn anvil_updated(&mut self, update: AnvilUpdate, cancel: bool) {
-        if !cancel && update.output.is_none() {
-            return;
-        }
-        self.anvil.only_renaming = false;
-        if cancel {
-            self.anvil.repair_count = 0;
-            self.data[0] = 1;
-            self.containers[RESULT][0] = None;
-            return;
-        }
-        self.anvil.repair_count = update.material_cost.max(0) as u32;
-        self.data[0] = update.cost.clamp(0, i64::from(i32::MAX)) as i32;
-        self.containers[RESULT][0] = update.output;
+        let mut state = self.anvil_state();
+        update.answer(cancel, &mut state);
+        self.anvil.only_renaming = state.only_renaming;
+        self.anvil.repair_count = state.repair_item_count_cost;
+        self.data[0] = state.cost;
+        self.containers[RESULT][0] = state.result;
     }
 
     /// `GrindstoneEvent.OnPlaceItem`'s question about the result
@@ -3688,7 +3745,9 @@ pub(crate) mod tests {
     /// A test `Env` with no vanilla data: the anvil's and grindstone's own
     /// results don't matter where the mods answer.
     fn bare_env(test: impl FnOnce(&Env)) {
-        let root = std::env::temp_dir().join(format!("horizon-bare-{}", std::process::id()));
+        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("horizon-bare-{}-{run}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
         let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
@@ -3712,35 +3771,104 @@ pub(crate) mod tests {
         });
     }
 
-    /// `AnvilUpdateEvent`: asked only with both inputs in; a mod's output
-    /// takes its cost and uses its material cost of the right input when
-    /// taken; a cancel leaves no result at cost 1.
+    /// `AnvilUpdateEvent`: not asked without a left input, and once per
+    /// `createResult`; a mod's output takes its cost and uses its material
+    /// cost of the right input when taken; a cancel leaves no result at
+    /// cost 0.
     #[test]
     fn an_anvil_update_sets_the_result_cost_and_material_or_cancels() {
         bare_env(|env| {
             let mut menu = Menu::new(Kind::Anvil);
-            menu.set_slot(env, 0, stack("iron_sword", 1));
-            assert_eq!(menu.anvil_update(), None);
             menu.set_slot(env, 1, stack("diamond", 5));
+            assert_eq!(menu.anvil_update(), None);
+            menu.set_slot(env, 0, stack("iron_sword", 1));
             let mut update = menu.anvil_update().unwrap();
-            assert_eq!((update.output.as_ref(), update.material_cost), (None, 0));
+            assert_eq!(menu.anvil_update(), None);
+            assert_eq!((&update.vanilla.output, &update.output), (&None, &None));
             update.output = stack("netherite_sword", 1);
-            update.cost = 7;
+            update.xp_cost = 7;
             update.material_cost = 2;
             menu.anvil_updated(update.clone(), false);
-            assert_eq!(menu.slot(2), stack("netherite_sword", 1).as_ref());
-            assert_eq!(menu.data[0], 7);
+            assert_eq!(
+                (menu.slot(2), menu.data[0]),
+                (stack("netherite_sword", 1).as_ref(), 7)
+            );
             menu.levels = 30;
             menu.click(env, 2, 0, Input::Pickup).unwrap();
             assert_eq!(menu.carried, stack("netherite_sword", 1));
-            assert_eq!(menu.slot(1), stack("diamond", 3).as_ref());
-            assert_eq!(menu.slot(0), None);
+            assert_eq!(
+                (menu.slot(0), menu.slot(1)),
+                (None, stack("diamond", 3).as_ref())
+            );
 
             let mut menu = Menu::new(Kind::Anvil);
             menu.set_slot(env, 0, stack("iron_sword", 1));
             menu.set_slot(env, 1, stack("diamond", 5));
+            menu.anvil_update().unwrap();
             menu.anvil_updated(update, true);
-            assert_eq!((menu.slot(2), menu.data[0]), (None, 1));
+            assert_eq!((menu.slot(2), menu.data[0]), (None, 0));
+        });
+    }
+
+    /// `AnvilUpdateEvent` on a rename with no right input: asked with the
+    /// text and vanilla's renamed result, which the output and cost start
+    /// at; a mod that only changes the cost keeps vanilla's result, and a
+    /// cancel leaves none.
+    #[test]
+    fn an_anvil_rename_alone_starts_at_vanillas_result() {
+        bare_env(|env| {
+            let renamed = || {
+                let mut menu = Menu::new(Kind::Anvil);
+                menu.set_slot(env, 0, stack("iron_sword", 1));
+                menu.anvil_update();
+                assert!(menu.rename(env, "Edge"));
+                menu
+            };
+            let mut menu = renamed();
+            let vanilla = (menu.slot(2).cloned(), menu.data[0]);
+            assert!(vanilla.0.is_some());
+            let mut update = menu.anvil_update().unwrap();
+            assert_eq!(
+                (update.right.as_ref(), update.name.as_deref()),
+                (None, Some("Edge"))
+            );
+            assert_eq!(
+                (&update.vanilla.output, &update.output),
+                (&vanilla.0, &vanilla.0)
+            );
+            assert_eq!(
+                (update.vanilla.xp_cost, update.xp_cost),
+                (vanilla.1, vanilla.1)
+            );
+            update.xp_cost = 5;
+            menu.anvil_updated(update.clone(), false);
+            assert_eq!((menu.slot(2).cloned(), menu.data[0]), (vanilla.0, 5));
+
+            let mut menu = renamed();
+            menu.anvil_update().unwrap();
+            menu.anvil_updated(update, true);
+            assert_eq!((menu.slot(2), menu.data[0]), (None, 0));
+        });
+    }
+
+    /// A rename beside a right input the anvil can't use changes neither
+    /// the (empty) result nor the cost, but `createResult` ran: the mods
+    /// are asked, and their output is the result.
+    #[test]
+    fn an_anvil_rename_that_changes_no_result_is_asked() {
+        bare_env(|env| {
+            let mut menu = Menu::new(Kind::Anvil);
+            menu.set_slot(env, 0, stack("iron_sword", 1));
+            menu.set_slot(env, 1, stack("dirt", 1));
+            menu.anvil_update().unwrap();
+            let before = (menu.slot(2).cloned(), menu.data[0]);
+            assert!(menu.rename(env, "Edge"));
+            assert_eq!((menu.slot(2).cloned(), menu.data[0]), before);
+            let mut update = menu.anvil_update().unwrap();
+            assert_eq!(update.name.as_deref(), Some("Edge"));
+            update.output = stack("golden_sword", 1);
+            menu.anvil_updated(update, false);
+            assert_eq!(menu.slot(2), stack("golden_sword", 1).as_ref());
         });
     }
 

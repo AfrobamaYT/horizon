@@ -188,17 +188,28 @@ impl Game<'_> {
                             .enumerate()
                             .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
                 });
+            // AnvilUpdateEvent, after createResult made vanilla's result
+            // (a rename that changes nothing else too): before PrepareAnvil.
+            // A cancelled take's undo is no createResult.
+            if gs.kind == StationKind::Anvil
+                && let Some(mut update) = gs.menu.anvil_update()
+                && !cancelled
+                && !horizon_client::mod_api::mods().is_empty()
+            {
+                let guest = &host.hub.guests[gi];
+                let mut cancel = false;
+                self.native_anvil_update(
+                    guest.uuid,
+                    guest.entity_id,
+                    gs.pos,
+                    &mut update,
+                    &mut cancel,
+                );
+                gs.menu.anvil_updated(update, cancel);
+            }
             if recomputed && gs.kind == StationKind::Anvil {
                 let guest = &host.hub.guests[gi];
-                let (uuid, name, entity_id) = (guest.uuid, guest.name.clone(), guest.entity_id);
-                // AnvilUpdateEvent, inside createResult: before PrepareAnvil.
-                if !horizon_client::mod_api::mods().is_empty()
-                    && let Some(mut update) = gs.menu.anvil_update()
-                {
-                    let mut cancel = false;
-                    self.native_anvil_update(uuid, entity_id, gs.pos, &mut update, &mut cancel);
-                    gs.menu.anvil_updated(update, cancel);
-                }
+                let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(2).cloned();
                 self.native_prepare_anvil(uuid, &name, gs.pos, &mut result, &mut gs.menu.data[0]);
                 let env = self.menu_env();

@@ -5744,13 +5744,14 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_anvil_craft_post(self, mod_api::mods(), player, name, pos, craft);
     }
-    /// An anvil at `pos` made its result with both inputs in, for the server
-    /// player `player` (UUID) and `player_entity_id` (`AnvilUpdateEvent`, in
-    /// `AnvilMenu.createResult`): `update` holds the inputs, the rename text,
-    /// the level cost from their repair costs, and no output. Set its
-    /// `output` (with `cost` and `material_cost`) to replace vanilla's
-    /// result; set `cancel` for no result. Asked again whenever an input or
-    /// the name changes, before `prepare_anvil`. Server-side.
+    /// An anvil at `pos` made vanilla's result with a left input, for
+    /// `player` (UUID) and `player_entity_id` (`AnvilUpdateEvent`, after
+    /// `AnvilMenu.createResult`), whenever an input or the name changed:
+    /// `update` holds the inputs (the right one may be empty, for a rename),
+    /// the rename text and vanilla's result, and its `output`, `xp_cost`
+    /// and `material_cost` start at vanilla's for the mods to change; set
+    /// `cancel` for no result. Before `prepare_anvil`. Both sides: the
+    /// server's menu, and a server's client menu with the local player.
     /// @API:anvil_update@.
     pub(super) fn native_anvil_update(
         &mut self,

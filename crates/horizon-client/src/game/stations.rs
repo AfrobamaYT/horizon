@@ -350,6 +350,9 @@ pub(super) struct Station {
     anvil_last: Option<ItemStack>,
     /// Anvil on a server: the name last sent (the client menu's `itemName`).
     pub(super) anvil_sent: Option<String>,
+    /// Anvil on a server: the inputs and name the client's
+    /// `AnvilUpdateEvent` was last asked about, and the result it left.
+    anvil_answer: Option<(Vec<Option<ItemStack>>, String, AnvilResult)>,
     pub(super) last_sound: u64,
     /// Villager trading state.
     pub(super) merchant: Option<Box<super::trading::MerchantState>>,
@@ -383,6 +386,7 @@ impl Station {
             scrolling: false,
             anvil_last: None,
             anvil_sent: None,
+            anvil_answer: None,
             last_sound: 0,
             merchant: None,
             beacon: [None; 2],
@@ -727,6 +731,38 @@ impl Game<'_> {
                     &hover,
                     creative,
                 );
+                // AnvilUpdateEvent on a server's client menu, as on the
+                // server: asked when an input or the name changed (this
+                // recomputes on every click), its answer kept until then.
+                if self.remote.is_some()
+                    && let Some(left) = s.inputs[0].clone()
+                    && !horizon_client::mod_api::mods().is_empty()
+                {
+                    match &s.anvil_answer {
+                        Some((inputs, asked, answer)) if *inputs == s.inputs && *asked == name => {
+                            s.anvil = answer.clone();
+                        }
+                        _ => {
+                            let mut update = horizon_client::menu::AnvilUpdate::new(
+                                left,
+                                s.inputs[1].clone(),
+                                Some(name.clone()),
+                                &s.anvil,
+                            );
+                            let mut cancel = false;
+                            let (player, entity_id) = (self.own_uuid(), self.own_entity_id());
+                            self.native_anvil_update(
+                                player,
+                                entity_id,
+                                s.pos,
+                                &mut update,
+                                &mut cancel,
+                            );
+                            update.answer(cancel, &mut s.anvil);
+                            s.anvil_answer = Some((s.inputs.clone(), name, s.anvil.clone()));
+                        }
+                    }
+                }
                 s.result = s.anvil.result.clone();
             }
             Kind::Grindstone => {
