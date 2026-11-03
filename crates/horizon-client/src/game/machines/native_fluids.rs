@@ -314,7 +314,8 @@ impl Game<'_> {
     }
     /// How much of `fluid` tank `tank` of those `side` reaches at `pos` holds when empty: a mod
     /// block's fillable tank its capacity, a cauldron a bucket; none for another tank, a
-    /// drain-only one, or a fluid the tanks there don't take (`game_holds`).
+    /// drain-only one, or a fluid the tanks there don't take: other than water and lava, or
+    /// with components into a mod block's tanks.
     pub(in crate::game) fn native_fluid_tank_capacity(
         &self,
         pos: [i32; 3],
@@ -334,8 +335,8 @@ impl Game<'_> {
     }
     /// Puts as much of `fluid` as tank `tank` of those `side` reaches at `pos` takes: a mod
     /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
-    /// whole thirds, lava only whole into an empty one, its components discarded
-    /// (`game_holds`). What didn't fit. `simulate` changes
+    /// whole thirds, lava only whole into an empty one, discarding the fluid's components as
+    /// NeoForge's `CauldronFluidContent` does. What didn't fit. `simulate` changes
     /// nothing and answers as the real call.
     pub(in crate::game) fn native_fluid_tank_insert(
         &mut self,

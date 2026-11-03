@@ -3010,8 +3010,11 @@ millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept 
 fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
 components. The game's own answer is a mod block's tanks by side (`block_entity_fluids`) and a cauldron, one tank
 of 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity and is answered by
-position, and a powder snow cauldron holds no fluid. `host.transfer_fluids(from, from_side, to, to_side, max)` moves
-one fluid between two handlers: each source tank is planned with `simulate` at both ends, then moved.
+position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
+discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
+components are dropped. A mod block's saved tanks take no fluid with components. `host.transfer_fluids(from, from_side, to, to_side, max)` moves
+one fluid between two handlers: each source tank is planned with `simulate` at both ends, then moved with the
+same requests, the target filled in passes until one takes nothing; what it doesn't take goes back to the source.
 `native_fluid_insert`, `native_fluid_extract`, `native_fluid_tanks` and `native_move_fluids` use a mod's handler
 where one is registered; they name a fluid by its id, so they leave fluids with components alone.
 
