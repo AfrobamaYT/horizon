@@ -99,6 +99,9 @@ pub(super) struct NativeSound {
     /// The connection of a player who doesn't hear it, as
     /// `Level.playSound(except, ...)`.
     pub except: Option<u32>,
+    /// The entity the sound follows (`ClientboundSoundEntityPacket`), sent
+    /// from `at`, where it was when the mod queued the sound.
+    pub entity: Option<i32>,
 }
 
 /// Mob-system state owned by the game.

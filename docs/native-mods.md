@@ -2448,6 +2448,12 @@ a dimension.
   `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
   place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
   client only.
+- `player.stop_sound(host, sound, source)` sends `StopSoundCommand`'s packet to that player (`None` for any sound or
+  source), `player.play_sound(host, sound, source, volume, pitch)` plays a sound for them only at their position, and
+  `entity.play_bound_sound(host, sound, source, volume, pitch)` plays one that follows the entity for the players in
+  range, as `Level.playSound(null, entity, ...)` does. `/stopsound` and `/playsound` send through the same code. They
+  return false for a stale handle or a player who isn't online. Looping, fading and a handle to a playing sound need
+  client handles.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.

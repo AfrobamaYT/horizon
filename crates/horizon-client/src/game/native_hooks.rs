@@ -7957,7 +7957,7 @@ pub(super) fn mod_particles_ok(
         && options.scale.is_finite()
 }
 
-fn sound_id(id: &str) -> bool {
+pub(super) fn sound_id(id: &str) -> bool {
     let Some((namespace, path)) = id.split_once(':') else {
         return false;
     };
@@ -8035,6 +8035,7 @@ impl GameLevel<'_> {
             volume,
             pitch,
             except: None,
+            entity: None,
         });
         true
     }
