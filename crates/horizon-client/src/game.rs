@@ -12949,7 +12949,7 @@ impl Game<'_> {
         });
         // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
         let mut amounts = [amount; 4];
-        if !horizon_client::mod_api::mods().is_empty()
+        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
             let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
@@ -14197,7 +14197,7 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<Vertex>,
     ) {
-        if !crate::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::RenderArm) {
             let eye = self.eye_position().unwrap_or_default();
             let mut draw = BlockEntityDraw::posed(
                 partial,
@@ -15744,7 +15744,7 @@ impl Game<'_> {
         if wait {
             self.save.flush()?;
         }
-        if !horizon_client::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::LevelSave) {
             self.native_level_save(self.dim.id());
         }
         Ok(())
