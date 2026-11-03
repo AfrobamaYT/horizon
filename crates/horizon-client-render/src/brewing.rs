@@ -297,6 +297,22 @@ impl BrewingStand {
     }
     /// `BrewingStandBlockEntity.serverTick`.
     pub fn tick(&mut self, brewing: &Brewing, items: &Items, providers: &Providers) -> BrewTick {
+        let (mut out, due) = self.tick_to_brew(brewing, items, providers);
+        if due {
+            self.brew(brewing, items, &mut out);
+        }
+        self.sync_bottles(&mut out);
+        out
+    }
+    /// `serverTick` up to its `doBrew` call: true when the brew is due now.
+    /// A caller asking mods around `doBrew` runs [`Self::brew`] itself, then
+    /// [`Self::sync_bottles`].
+    pub fn tick_to_brew(
+        &mut self,
+        brewing: &Brewing,
+        items: &Items,
+        providers: &Providers,
+    ) -> (BrewTick, bool) {
         let mut out = BrewTick::default();
         if self.fuel <= 0
             && let Some(fuel) = self.items[4].as_mut()
@@ -314,11 +330,12 @@ impl BrewingStand {
             }
         }
         let brewable = self.brewable(brewing);
+        let mut due = false;
         if self.brew_time > 0 {
             self.brew_time -= 1;
             let same = self.items[3].as_ref().map(|s| s.item.clone()) == self.ingredient;
             if self.brew_time == 0 && brewable {
-                self.brew(brewing, items, &mut out);
+                due = true;
             } else if !brewable || !same {
                 self.brew_time = 0;
             }
@@ -329,6 +346,11 @@ impl BrewingStand {
             self.total_brew_time = self.brew_time;
             self.ingredient = self.items[3].as_ref().map(|s| s.item.clone());
         }
+        (out, due)
+    }
+    /// The end of `serverTick`: the `has_bottle_*` block state when the
+    /// bottle slots filled or emptied.
+    pub fn sync_bottles(&mut self, out: &mut BrewTick) {
         let bottles = [
             self.items[0].is_some(),
             self.items[1].is_some(),
@@ -338,9 +360,25 @@ impl BrewingStand {
             self.last_bottles = Some(bottles);
             out.bottles = Some(bottles);
         }
-        out
     }
-    fn brew(&mut self, brewing: &Brewing, items: &Items, out: &mut BrewTick) {
+    /// `doBrew` once `PotionBrewEvent.Pre` asked the mods with `asked`, a
+    /// copy of the five slots, and whether they cancelled: a cancel puts the
+    /// mods' slots in and skips the brew; otherwise vanilla brews and the
+    /// copy is dropped. Without mods (`None`) this is `doBrew`.
+    pub fn brew_after_pre(
+        &mut self,
+        asked: Option<([Option<ItemStack>; 5], bool)>,
+        brewing: &Brewing,
+        items: &Items,
+        out: &mut BrewTick,
+    ) {
+        match asked {
+            Some((stacks, true)) => self.items = stacks,
+            _ => self.brew(brewing, items, out),
+        }
+    }
+    /// `BrewingStandBlockEntity.doBrew`.
+    pub fn brew(&mut self, brewing: &Brewing, items: &Items, out: &mut BrewTick) {
         let Some(ingredient) = self.items[3].clone() else {
             return;
         };

@@ -4718,6 +4718,32 @@ impl Game<'_> {
     pub(super) fn native_brewing_complete(&self, pos: [i32; 3]) {
         mod_api::dispatch_brewing_complete(self, mod_api::mods(), pos);
     }
+    /// A brewing stand at `pos` is about to brew (`PotionBrewEvent.Pre`,
+    /// in `BrewingStandBlockEntity.doBrew`): `stacks` is a copy of its five
+    /// slots (three bottles, the ingredient, the fuel). Set `cancel` to skip
+    /// vanilla's brew: the stand then takes `stacks` as the mods left them,
+    /// uses no ingredient and plays no brew sound, and neither
+    /// `potion_brew_post` nor `brewing_complete` fires. Uncancelled, changes
+    /// to `stacks` are dropped. Server-side. @API:potion_brew_pre@.
+    pub(super) fn native_potion_brew_pre(
+        &mut self,
+        pos: [i32; 3],
+        stacks: &mut [Option<ItemStack>; 5],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_potion_brew_pre(self, mod_api::mods(), pos, stacks, cancel);
+    }
+    /// A brewing stand at `pos` brewed (`PotionBrewEvent.Post`, at the end of
+    /// `BrewingStandBlockEntity.doBrew`): `stacks` holds its five slots after
+    /// the brew, and what the mods leave there is the stand's. Fires before
+    /// `brewing_complete`. Server-side. @API:potion_brew_post@.
+    pub(super) fn native_potion_brew_post(
+        &mut self,
+        pos: [i32; 3],
+        stacks: &mut [Option<ItemStack>; 5],
+    ) {
+        mod_api::dispatch_potion_brew_post(self, mod_api::mods(), pos, stacks);
+    }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_campfire_start(self, mod_api::mods(), pos, item);

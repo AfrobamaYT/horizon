@@ -4802,6 +4802,28 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A brewing stand at `pos` brewed (`PotionBrewEvent.Post`, at the end of
+    /// `BrewingStandBlockEntity.doBrew`): `stacks` holds its five slots after
+    /// the brew, and what the mods leave there is the stand's. Fires before
+    /// `brewing_complete`. Server-side. @API:potion_brew_post@.
+    fn potion_brew_post(&self, host: &mut dyn Host, event: &mut PotionBrewPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A brewing stand at `pos` is about to brew (`PotionBrewEvent.Pre`,
+    /// in `BrewingStandBlockEntity.doBrew`): `stacks` is a copy of its five
+    /// slots (three bottles, the ingredient, the fuel). Set `cancel` to skip
+    /// vanilla's brew: the stand then takes `stacks` as the mods left them,
+    /// uses no ingredient and plays no brew sound, and neither
+    /// `potion_brew_post` nor `brewing_complete` fires. Uncancelled, changes
+    /// to `stacks` are dropped. Server-side. @API:potion_brew_pre@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn potion_brew_pre(&self, host: &mut dyn Host, event: &mut PotionBrewPreEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
     /// Invalid declarations are logged and skipped; the first valid category
@@ -15766,6 +15788,47 @@ pub fn dispatch_player_xp_level_change(
         }
     }
     *levels = event.levels;
+}
+/// What [`Hooks::potion_brew_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PotionBrewPostEvent<'a> {
+    pub pos: [i32; 3],
+    pub stacks: &'a mut [Option<ItemStack>; 5],
+}
+pub fn dispatch_potion_brew_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    stacks: &mut [Option<ItemStack>; 5],
+) {
+    let mut event = PotionBrewPostEvent { pos, stacks };
+    for mod_hook in super::entered(mods, "potion_brew_post") {
+        mod_hook.potion_brew_post(host, &mut event);
+    }
+}
+/// What [`Hooks::potion_brew_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PotionBrewPreEvent<'a> {
+    pub pos: [i32; 3],
+    pub stacks: &'a mut [Option<ItemStack>; 5],
+}
+pub fn dispatch_potion_brew_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    stacks: &mut [Option<ItemStack>; 5],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PotionBrewPreEvent { pos, stacks };
+    for mod_hook in super::entered(mods, "potion_brew_pre") {
+        if matches!(mod_hook.potion_brew_pre(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

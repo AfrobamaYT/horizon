@@ -2935,7 +2935,7 @@ impl Game<'_> {
         let fuel_item = was_unfueled
             .then(|| b.items[4].as_ref().map(|s| s.item.clone()))
             .flatten();
-        let out = b.tick(
+        let (mut out, due) = b.tick_to_brew(
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
@@ -2943,13 +2943,43 @@ impl Game<'_> {
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
         let ingredient = started.then(|| b.ingredient.clone()).flatten();
+        let hooked = !horizon_client::mod_api::mods().is_empty();
+        let stacks = (due && hooked).then(|| b.items.clone());
+        let at = [pos.0, pos.1, pos.2];
+        if due {
+            // `doBrew`, with PotionBrewEvent.Pre before it and .Post after.
+            let asked = stacks.map(|mut stacks| {
+                let mut cancel = false;
+                self.native_potion_brew_pre(at, &mut stacks, &mut cancel);
+                (stacks, cancel)
+            });
+            let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+                return Ok(());
+            };
+            b.brew_after_pre(
+                asked,
+                &world_stations!(self).brewing,
+                world_items!(self),
+                &mut out,
+            );
+            self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
+            if out.brewed && hooked {
+                let mut stacks = b.items.clone();
+                self.native_potion_brew_post(at, &mut stacks);
+                if let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) {
+                    b.items = stacks;
+                }
+            }
+        }
+        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+            return Ok(());
+        };
+        b.sync_bottles(&mut out);
         if consumed_fuel && let Some(item) = fuel_item {
-            let (x, y, z) = pos;
-            self.native_brewing_fuel([x, y, z], &item);
+            self.native_brewing_fuel(at, &item);
         }
         if let Some(ingredient) = ingredient {
-            let (x, y, z) = pos;
-            self.native_brewing_start([x, y, z], &ingredient);
+            self.native_brewing_start(at, &ingredient);
         }
         if out != brewing::BrewTick::default() {
             let (x, y, z) = pos;

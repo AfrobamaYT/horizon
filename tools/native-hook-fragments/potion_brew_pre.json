@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "potion_brew_pre",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_potion_brew_pre",
+      "neoforge": "PotionBrewEvent.Pre",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A brewing stand is about to brew (`native_potion_brew_pre`).",
+  "doc_summary": "A brewing stand is about to brew, where `BrewingStandBlockEntity.doBrew` starts: `native_potion_brew_pre(pos, stacks, cancel)`. `stacks` is a copy of the stand's five slots (three bottles, the ingredient, the fuel). Set `cancel` to replace vanilla's brew: the stand takes `stacks` as the mods left them, the ingredient is not used and no brew sound plays, and neither `potion_brew_post` nor `brewing_complete` fires. Uncancelled, changes to `stacks` are dropped. Server-side. Bundles need \"hooks\": @API:potion_brew_pre@."
+}
