@@ -31,7 +31,6 @@ impl Report {
             "api": self.facts.api,
             "side": self.facts.side,
             "capabilities": self.facts.capabilities,
-            "api_level": self.facts.api_level,
             "game": self.facts.game,
             "requires": requires,
             "sha256": self.sha256,
@@ -68,9 +67,6 @@ impl Report {
             ")\n  {} bytes, SHA-256 {}, {signed}\n",
             self.size, self.sha256
         );
-        if let Some(level) = f.api_level {
-            out += &format!("  needs mod API level {level} or newer\n");
-        }
         for c in &f.capabilities {
             out += &format!("  may {}\n", c.describe());
         }
