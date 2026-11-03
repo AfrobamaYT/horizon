@@ -14,6 +14,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     marker::PhantomData,
+    num::NonZeroU32,
     rc::Rc,
     sync::{
         Arc, LazyLock, OnceLock,
@@ -54,8 +55,12 @@ impl<P: ?Sized> Clone for Attached<P> {
 pub struct Parts {
     /// Block parts, and block entity parts as the block parts they also are.
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
-    /// The same block parts, resolved by state for this game's registry.
-    block_states: Vec<Option<Arc<[Attached<dyn BlockPart>]>>>,
+    /// The same block parts by state for this game's registry: an index into
+    /// `block_slices` (one-based, so `None` names no parts), four bytes a
+    /// state.
+    block_states: Vec<Option<NonZeroU32>>,
+    /// The parts `block_states` indexes, one entry per block that has any.
+    block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
     /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
     block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     /// Block entity parts by block entity type, for the hooks asked by the entity
@@ -213,15 +218,21 @@ pub(crate) fn resolve_parts(
         "block",
     );
     add_tagged(&mut parts.items, &installed.tags.items, item_tags, "item");
-    let by_name: HashMap<&str, Arc<[Attached<dyn BlockPart>]>> = parts
-        .blocks
-        .iter()
-        .map(|(name, parts)| (&**name, Arc::from(parts.clone())))
-        .collect();
+    let mut names: HashMap<&str, NonZeroU32> = HashMap::with_capacity(parts.blocks.len());
+    let mut block_slices: Vec<Arc<[Attached<dyn BlockPart>]>> =
+        Vec::with_capacity(parts.blocks.len());
+    for (name, attached) in &parts.blocks {
+        names.insert(
+            name,
+            NonZeroU32::new(block_slices.len() as u32 + 1).unwrap(),
+        );
+        block_slices.push(Arc::from(attached.clone()));
+    }
     let mut block_states = Vec::with_capacity(known.state_count);
     for state in 0..known.state_count {
-        block_states.push(by_name.get((known.state_block)(state)).cloned());
+        block_states.push(names.get((known.state_block)(state)).copied());
     }
+    parts.block_slices = block_slices;
     parts.block_states = block_states;
     GAME_PARTS.set(Some(Rc::new(parts)));
     Ok(())
@@ -293,8 +304,11 @@ impl Parts {
     pub(crate) fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
         self.block_states
             .get(state.0 as usize)
-            .and_then(Option::as_deref)
-            .unwrap_or(&[])
+            .and_then(|index| *index)
+            .map_or(
+                &[],
+                |index| &self.block_slices[index.get() as usize - 1][..],
+            )
     }
 
     // Each takes the thing's id as a closure: with nothing attached in that scope the id is never
