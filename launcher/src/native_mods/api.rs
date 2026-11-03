@@ -126,6 +126,14 @@ pub(super) fn stage(
         .map(|&i| (i, &bundles[i]))
         .filter(|(_, b)| b.api.is_some())
         .collect();
+    if mods.is_empty() {
+        return Ok(false);
+    }
+    if !fs::read_to_string(stage.join("crates/horizon-client/src/mod_api.rs"))
+        .is_ok_and(|source| source.contains("pub struct ModEntry {"))
+    {
+        return Err(crate::i18n::tr("This game source does not support named native mod entries. Update Horizon and rebuild the mods against this game.").into());
+    }
     let mut packages = std::collections::HashMap::new();
     for (_, bundle) in &mods {
         let path = bundle
@@ -139,9 +147,6 @@ pub(super) fn stage(
             .and_then(toml::Value::as_str)
             .ok_or_else(|| format!("{}: missing package name", path.display()))?;
         packages.insert(bundle.id.as_str(), name.to_owned());
-    }
-    if mods.is_empty() {
-        return Ok(false);
     }
     let mut deps = toml::Table::new();
     for name in ["horizon-client", "horizon-threads", "horizon-mods"] {
@@ -375,7 +380,12 @@ mod tests {
         let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'engine'\n");
         let bundle = super::super::bundle(&dir, None).unwrap();
         let stage_dir = dir.join("workspace");
-        fs::create_dir_all(stage_dir.join("crates/horizon-client")).unwrap();
+        fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
+        fs::write(
+            stage_dir.join("crates/horizon-client/src/mod_api.rs"),
+            include_str!("../../../crates/horizon-client/src/mod_api.rs"),
+        )
+        .unwrap();
         fs::write(stage_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         fs::write(
             stage_dir.join("crates/horizon-client/Cargo.toml"),
@@ -441,6 +451,31 @@ mod tests {
             game["build-dependencies"]["horizon-mod-api-gen"]["path"].as_str(),
             Some("../horizon-mod-api-gen")
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unsupported_source_is_refused_before_staging() {
+        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'engine'\n");
+        let stage_dir = dir.join("workspace");
+        let source = stage_dir.join("crates/horizon-client/src");
+        fs::create_dir_all(&source).unwrap();
+        let resolution = super::super::dependencies::Resolution { order: vec![0] };
+        for text in ["", "pub fn name_mods(ids: &[&str]) {}"] {
+            fs::write(source.join("mod_api.rs"), text).unwrap();
+            let bundle = super::super::bundle(&dir, None).unwrap();
+            let error = stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap_err();
+            assert!(error.contains("Update Horizon and rebuild"), "{error}");
+            assert!(!stage_dir.join(GAME).exists());
+            assert!(!stage_dir.join("native-api").exists());
+        }
+        assert!(!stage(
+            &stage_dir,
+            &[],
+            &[],
+            &super::super::dependencies::Resolution { order: vec![] },
+        )
+        .unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
 

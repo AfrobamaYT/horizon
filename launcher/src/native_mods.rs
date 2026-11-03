@@ -1706,6 +1706,13 @@ fn pipeline(
     progress: &impl Fn(Step),
 ) -> Result<Built, String> {
     let started = std::time::Instant::now();
+    let built_on = about(base);
+    if is_native(base) && built_on.is_none() {
+        return Err(trf(
+            "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.",
+            &[("version", base)],
+        ));
+    }
     backend::need_prepared(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
     // The mods are copied first: the build and its key use the copy, whatever happens to the
@@ -1719,7 +1726,6 @@ fn pipeline(
         log_warning(&warning);
     }
     // A native build starts from the release or Nightly it was made from, on its own revision.
-    let built_on = about(base);
     let origin = built_on.as_ref().map_or(base, |a| a.base.as_str());
     let mut ids = std::collections::HashSet::new();
     for b in &found {
@@ -3251,6 +3257,22 @@ mod tests {
         );
         let client = flags(&d, Target::Client);
         assert!(!client.contains(&"--no-default-features".into()));
+    }
+
+    #[test]
+    fn a_native_build_without_a_record_is_refused_before_preparation() {
+        let error = pipeline(
+            "native-missing-record-test",
+            Path::new("missing-mod-folder"),
+            false,
+            Profile::Dev,
+            Target::Client,
+            &|_| panic!("invalid records must not start a build"),
+        )
+        .err()
+        .expect("invalid build refused");
+        assert!(error.contains("native-mods.json record"), "{error}");
+        assert!(error.contains("Rebuild it"), "{error}");
     }
 
     /// A record (`native-mods.json`) must name its target ([`about`]).

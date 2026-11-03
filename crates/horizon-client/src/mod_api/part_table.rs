@@ -1785,9 +1785,7 @@ pub(crate) mod tests {
         // Offered 2 apples, it keeps none and answers 7 taken: undone, and the slot stays empty.
         assert_eq!(insert(&mut shelf_, &shelf_slot(1), apples(2)), 0);
         assert_eq!(shelf_.slots, [Some(apples(10)), None, None]);
-        assert!(super::super::item_place::warned_about(
-            "doubler"
-        ));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
