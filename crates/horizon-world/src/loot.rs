@@ -639,11 +639,14 @@ fn cost(v: &Value) -> (i32, i32) {
 }
 
 impl LootData {
-    /// Load from a resource root holding `items.json` and `data/`: loot
-    /// tables, item modifiers, predicates, tags and recipes of every
-    /// namespace, vanilla's enchantments. `overlay` adds a world's data
-    /// packs over it.
-    pub fn load(root: &Path, overlay: &PackOverlay) -> io::Result<Self> {
+    /// Load tables, modifiers, predicates, tags and recipes from `data/`,
+    /// and item metadata from the owning load's default-component snapshot.
+    /// `overlay` adds a world's data packs over the resource root.
+    pub fn load(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+    ) -> io::Result<Self> {
         let all = root.join("data");
         let data = all.join("minecraft");
         let tables = shared_tables(root, overlay)?;
@@ -653,8 +656,8 @@ impl LootData {
         let mut predicates = HashMap::new();
         load_kind(&all, "predicate", &mut predicates)?;
         overlay_map(overlay, "predicate", &mut predicates);
-        let raw = crate::item_defaults::read(root)?;
-        let items = raw
+        let items = defaults
+            .entries()
             .iter()
             .map(|(name, c)| {
                 (

@@ -3,7 +3,12 @@
 
 use crate::native_load_context::LoadContext;
 use serde_json::{Map, Value};
-use std::{collections::BTreeMap, fs, io, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 /// The largest stack size a native mod may set: `ItemStack.count` is a `u32`,
 /// but the count is a VarInt on the wire and is saved as an `int`, so a
@@ -17,6 +22,12 @@ const STACK_SIZE: &str = "minecraft:max_stack_size";
 /// `value` as a stack size in `1..=max`, or None when it is not a number.
 fn stack_size(value: &Value, max: i64) -> Option<i64> {
     value.as_f64().map(|n| (n as i64).clamp(1, max))
+}
+
+// Root-keyed caches must also distinguish two snapshots of the same files.
+fn next_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Hook point for NeoForge's `ModifyDefaultComponentsEvent`: asked once per
@@ -35,11 +46,17 @@ pub fn native_modify_default_components(
 /// native changes before publishing this; consumers only borrow its entries.
 pub struct ItemDefaults {
     entries: BTreeMap<String, Value>,
+    generation: u64,
 }
 
 impl ItemDefaults {
     pub fn entries(&self) -> &BTreeMap<String, Value> {
         &self.entries
+    }
+
+    /// Identity for caches of metadata derived from this snapshot.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Apply the registration-time event before the snapshot is shared.
@@ -69,6 +86,7 @@ impl ItemDefaults {
                 },
             }
         }
+        self.generation = next_generation();
     }
 }
 
@@ -85,7 +103,10 @@ pub fn read(root: &Path) -> io::Result<ItemDefaults> {
             *value = size.into();
         }
     }
-    Ok(ItemDefaults { entries })
+    Ok(ItemDefaults {
+        entries,
+        generation: next_generation(),
+    })
 }
 
 #[cfg(test)]

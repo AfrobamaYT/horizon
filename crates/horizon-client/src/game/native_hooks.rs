@@ -8154,8 +8154,12 @@ impl Game<'_> {
     /// where the WebAssembly mod of the same id kept its storage, so a
     /// player's settings carry over. Not created here.
     pub(super) fn native_data_dir(&self, mod_id: &str) -> PathBuf {
-        let mods = Self::game_dir().join(mod_list::DIR);
-        mods.join(".horizon-mod-data").join(mod_id)
+        Self::mod_data_root().join(mod_id)
+    }
+    pub(super) fn mod_data_root() -> PathBuf {
+        Self::game_dir()
+            .join(mod_list::DIR)
+            .join(".horizon-mod-data")
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {

@@ -666,10 +666,14 @@ fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
 impl ItemRenderer {
     /// Load item definitions, item prototypes (`items.json`), every model,
     /// the special renderers' entity models and the grass colormap.
-    pub fn load(root: &Path) -> crate::Result<Self> {
+    pub fn load(
+        root: &Path,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+    ) -> crate::Result<Self> {
         Self::load_with_library(
             root,
             crate::model_library::ParsedModels::load(root).into_item_library(),
+            defaults,
         )
     }
     /// Reuse the immutable models prepared with the block resources at `root`.
@@ -677,8 +681,9 @@ impl ItemRenderer {
     pub fn load_with_library(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> crate::Result<Self> {
-        Self::load_tables(root, library, true)
+        Self::load_tables(root, library, true, defaults)
     }
     /// What a dedicated server reads: the item prototypes (the stacks'
     /// default components) and ids, without the client item definitions,
@@ -687,17 +692,22 @@ impl ItemRenderer {
     pub fn load_for_server(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> crate::Result<Self> {
-        Self::load_tables(root, library, false)
+        Self::load_tables(root, library, false, defaults)
     }
     fn load_tables(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
         drawn: bool,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> crate::Result<Self> {
-        let prototypes: BTreeMap<String, Components> = horizon_world::item_defaults::read(root)?
-            .into_iter()
-            .map(|(item, components)| Ok((item, serde_json::from_value(components)?)))
+        let prototypes: BTreeMap<String, Components> = defaults
+            .entries()
+            .iter()
+            .map(|(item, components)| {
+                Ok((item.clone(), serde_json::from_value(components.clone())?))
+            })
             .collect::<serde_json::Result<_>>()?;
         let models = ItemModels {
             definitions: if drawn {

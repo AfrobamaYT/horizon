@@ -3,8 +3,8 @@
 //! for the condition, entry and modifier types used by block drops).
 use crate::{Result, blocks::BlockFacts};
 use horizon_core::random::RandomSource;
-use horizon_world::loot::PackOverlay;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
+use horizon_world::{item_defaults::ItemDefaults, loot::PackOverlay};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -683,6 +683,7 @@ impl Items {
         registry: &BlockRegistry,
         facts: &BlockFacts,
         overlay: &PackOverlay,
+        defaults: &ItemDefaults,
     ) -> Result<Self> {
         let mut block_for_item: HashMap<&str, BlockStateId> = HashMap::new();
         for (i, s) in facts.states.iter().enumerate() {
@@ -693,7 +694,7 @@ impl Items {
                     .or_insert(BlockStateId(i as u32));
             }
         }
-        let mut items = Self::load_with(root, &block_for_item, overlay)?;
+        let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
         let path = root.join(MOD_ITEM_BLOCKS);
         match fs::read(&path) {
             Ok(bytes) => {
@@ -717,15 +718,15 @@ impl Items {
     }
     /// Every item's default components and the tags, without the block <->
     /// item mapping (for headless tools that never place blocks).
-    pub fn catalog(root: &Path, overlay: &PackOverlay) -> Result<Self> {
-        Self::load_with(root, &HashMap::new(), overlay)
+    pub fn catalog(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
+        Self::load_with(root, &HashMap::new(), overlay, defaults)
     }
     fn load_with(
         root: &Path,
         block_for_item: &HashMap<&str, BlockStateId>,
         overlay: &PackOverlay,
+        defaults: &ItemDefaults,
     ) -> Result<Self> {
-        let raw = horizon_world::item_defaults::read(root)?;
         let entity_tags = load_tags(root, "entity_type", overlay)?;
         let path = root.join(MOD_CRAFT_REMAINDERS);
         let mod_remainders: HashMap<String, String> = match fs::read(&path) {
@@ -737,7 +738,7 @@ impl Items {
         };
         let mut items = HashMap::new();
         let mut order = Vec::new();
-        for (name, c) in &raw {
+        for (name, c) in defaults.entries() {
             let id: Arc<str> = Arc::from(name.as_str());
             let tool = c["minecraft:tool"]["rules"]
                 .as_array()
@@ -961,7 +962,9 @@ impl Items {
             loot,
             songs: load_songs(root),
             instruments: load_instruments(root),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(root, overlay)),
+            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
+                root, overlay, defaults,
+            )),
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -985,7 +988,7 @@ impl Items {
     /// Only the block and item tags (and the enchantment registry, which the
     /// station rules and loot functions are built from), for tools that need
     /// tag membership.
-    pub fn tags_only(root: &Path, overlay: &PackOverlay) -> Result<Self> {
+    pub fn tags_only(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
         Ok(Self {
             items: HashMap::new(),
             order: Vec::new(),
@@ -996,7 +999,9 @@ impl Items {
             loot: Default::default(),
             songs: HashMap::new(),
             instruments: HashMap::new(),
-            enchantments: Arc::new(crate::enchant::Enchantments::load_with(root, overlay)),
+            enchantments: Arc::new(crate::enchant::Enchantments::load_with(
+                root, overlay, defaults,
+            )),
         })
     }
     /// An item table with only tags, for unit tests of item rules.

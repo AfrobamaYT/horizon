@@ -12,6 +12,24 @@ pub enum RegistrationPhase {
     StandaloneModels,
 }
 
+/// Read-only view of the currently loaded code mods.
+pub struct LoadedMods<'a> {
+    entries: &'a [ModEntry],
+}
+
+impl LoadedMods<'_> {
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: super::mods(),
+        }
+    }
+
+    /// Mod IDs in dispatch order.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|entry| entry.id)
+    }
+}
+
 /// A registration phase's view. Declarations go on the hook's event; there is
 /// no world, handle constructor, transaction or game Host at this point.
 ///
@@ -34,14 +52,14 @@ pub enum RegistrationPhase {
 /// ```
 pub struct RegistrationContext<'a> {
     phase: RegistrationPhase,
-    mods: &'a [ModEntry],
+    mods: LoadedMods<'a>,
 }
 
 impl RegistrationContext<'_> {
     pub(crate) fn new(phase: RegistrationPhase) -> Self {
         Self {
             phase,
-            mods: super::mods(),
+            mods: LoadedMods::new(),
         }
     }
 
@@ -50,9 +68,9 @@ impl RegistrationContext<'_> {
         self.phase
     }
 
-    /// Loaded native mod IDs, in dispatch order.
-    pub fn mods(&self) -> impl Iterator<Item = &str> {
-        self.mods.iter().map(|entry| entry.id)
+    /// The loaded-mod view, independent of this phase's event or registrar.
+    pub fn mods(&self) -> &LoadedMods<'_> {
+        &self.mods
     }
 }
 

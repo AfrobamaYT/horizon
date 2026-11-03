@@ -52,13 +52,23 @@ struct State {
     properties: Option<BTreeMap<String, String>>,
 }
 
+struct CachedIdentity {
+    generation: u64,
+    hash: [u8; 32],
+}
+
 /// Hash the network order and each state's name and properties, not its gameplay facts.
-pub fn identity(root: &Path) -> Result<[u8; 32], IdentityError> {
+pub fn identity(
+    root: &Path,
+    item_defaults: &horizon_world::item_defaults::ItemDefaults,
+) -> Result<[u8; 32], IdentityError> {
     // Keep each resource root stable and avoid reparsing its large facts file for every join.
-    static IDENTITIES: OnceLock<Mutex<HashMap<PathBuf, [u8; 32]>>> = OnceLock::new();
+    static IDENTITIES: OnceLock<Mutex<HashMap<PathBuf, CachedIdentity>>> = OnceLock::new();
     let mut identities = IDENTITIES.get_or_init(Default::default).lock().unwrap();
-    if let Some(hash) = identities.get(root) {
-        return Ok(*hash);
+    if let Some(cached) = identities.get(root)
+        && cached.generation == item_defaults.generation()
+    {
+        return Ok(cached.hash);
     }
     let bytes = std::fs::read(root.join("facts.json")).map_err(IdentityError::Read)?;
     let mut hash = hash_facts(&bytes)?;
@@ -80,9 +90,8 @@ pub fn identity(root: &Path) -> Result<[u8; 32], IdentityError> {
         // Defaults are not sent in a stack patch. Both peers must therefore
         // agree on their values as well as the registered wire IDs, native
         // mods' changes included.
-        let items = horizon_world::item_defaults::read(root).map_err(IdentityError::Read)?;
         let mut defaults = Vec::new();
-        for (item, components) in items {
+        for (item, components) in item_defaults.entries() {
             for (name, value) in components.as_object().into_iter().flatten() {
                 if horizon_protocol::item::custom::id(name).is_some() {
                     defaults.push((defaults.len() as u64, format!("{item}\0{name}\0{value}")));
@@ -93,7 +102,13 @@ pub fn identity(root: &Path) -> Result<[u8; 32], IdentityError> {
             hash = hash_entries(hash, "horizon:nbt_component_defaults/v1", &defaults);
         }
     }
-    identities.insert(root.to_owned(), hash);
+    identities.insert(
+        root.to_owned(),
+        CachedIdentity {
+            generation: item_defaults.generation(),
+            hash,
+        },
+    );
     Ok(hash)
 }
 

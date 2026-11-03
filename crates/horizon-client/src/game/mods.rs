@@ -4,12 +4,59 @@
 use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::{RegistrationContext, RegistrationPhase};
 use horizon_client::mod_list::{self, Installed};
-use std::path::PathBuf;
+use horizon_world::{
+    item_defaults::ItemDefaults,
+    native_load_context::{LoadContext, LoadInputs},
+};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Default)]
 pub(super) struct ModsState {
     /// `--dev-mod PATH`: always on.
     pub(super) dev: Vec<PathBuf>,
+}
+
+/// Immutable metadata and defaults shared by this resource generation's loads.
+pub(super) struct ItemData {
+    pub(super) context: LoadContext,
+    pub(super) defaults: ItemDefaults,
+}
+
+impl ItemData {
+    pub(super) fn load(root: &Path, role: ExecutionRole) -> horizon_client::Result<Self> {
+        let mut registries: BTreeMap<_, _> = builtin_registries(root)?
+            .registries
+            .into_iter()
+            .map(|(name, ids)| (name, ids.names))
+            .collect();
+        if let Some(types) = registries.get_mut("minecraft:data_component_type") {
+            types
+                .extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
+        }
+        let inputs = LoadInputs::new(
+            registries,
+            Game::mod_data_root(),
+            crate::mod_api::LoadedMods::new()
+                .ids()
+                .map(str::to_owned)
+                .collect(),
+        );
+        let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs));
+        let mut defaults = horizon_world::item_defaults::read(root)?;
+        defaults.apply_native(&context);
+        Ok(Self { context, defaults })
+    }
+}
+
+fn builtin_registries(root: &Path) -> horizon_client::Result<horizon_protocol::registry::Builtin> {
+    let path = horizon_protocol::registry::Builtin::find(root).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "registries.json not found")
+    })?;
+    Ok(horizon_protocol::registry::Builtin::load(&path)?)
 }
 
 /// Freeze native component IDs before reading content or opening a connection.
@@ -24,9 +71,7 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
     if names.is_empty() {
         return Ok(());
     }
-    let path =
-        horizon_protocol::registry::Builtin::find(root).ok_or("registries.json not found")?;
-    let builtin = horizon_protocol::registry::Builtin::load(&path)?;
+    let builtin = builtin_registries(root)?;
     let types = builtin
         .get("minecraft:data_component_type")
         .ok_or("missing data component registry")?;
@@ -413,7 +458,10 @@ mod tests {
                 event: &mut StandaloneModelsEvent<'_>,
             ) {
                 assert_eq!(context.phase(), RegistrationPhase::StandaloneModels);
-                assert_eq!(context.mods().collect::<Vec<_>>(), ["registration_test"]);
+                assert_eq!(
+                    context.mods().ids().collect::<Vec<_>>(),
+                    ["registration_test"]
+                );
                 self.0.fetch_add(1, Ordering::Relaxed);
                 event.models.push("registration_test:block/shaft".into());
             }

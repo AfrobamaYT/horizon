@@ -6,7 +6,9 @@
 use std::sync::{Arc, OnceLock};
 
 mod phase;
-pub use phase::{DataLoadContext, DataLoadOrigin, RegistrationContext, RegistrationPhase};
+pub use phase::{
+    DataLoadContext, DataLoadOrigin, LoadedMods, RegistrationContext, RegistrationPhase,
+};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod reload_order;

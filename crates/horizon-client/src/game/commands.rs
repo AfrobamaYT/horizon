@@ -1388,16 +1388,11 @@ impl Game<'_> {
             .with_component_fields(vec![("hover_event".into(), shown)])
     }
     pub(super) fn item_rarity(&self, item: &str) -> String {
-        static RARITY: std::sync::OnceLock<std::collections::HashMap<String, String>> =
-            std::sync::OnceLock::new();
-        let map = RARITY.get_or_init(|| {
-            horizon_world::item_defaults::read(&self.options.resources)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|(k, c)| c["minecraft:rarity"].as_str().map(|r| (k, r.to_owned())))
-                .collect()
-        });
-        map.get(item).cloned().unwrap_or_else(|| "common".into())
+        self.items()
+            .enchantments
+            .props
+            .get(item)
+            .map_or_else(|| "common".into(), |props| props.rarity.clone())
     }
     fn cmd_give(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Item(ItemInput { id, components, .. })) = ctx.get("item").cloned() else {
