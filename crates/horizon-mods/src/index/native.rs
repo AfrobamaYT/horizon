@@ -99,21 +99,14 @@ pub struct Manifest {
     pub mixins: String,
 }
 
-pub fn revision(value: &str) -> bool {
-    value.len() == 40
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
 impl Manifest {
     pub fn check(&self) -> Result<(), String> {
         if self.schema != 1
             || !valid_id(&self.id)
             || self.version.is_empty()
             || self.game.is_empty()
-            || !revision(&self.horizon)
-            || !revision(&self.mixins)
+            || !crate::manifest::revision(&self.horizon)
+            || !crate::manifest::revision(&self.mixins)
         {
             return Err(
                 "invalid native manifest: schema 1, id, version, game and exact revisions required"

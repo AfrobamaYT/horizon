@@ -153,7 +153,7 @@ fn new_native(
         return Err(format!("mod id {id}: 64 characters at most"));
     }
     let horizon = horizon.ok_or("native projects require --horizon <40 hex digits>")?;
-    if !horizon_mods::index::native::revision(horizon) {
+    if !horizon_mods::manifest::revision(horizon) {
         return Err("--horizon: a Horizon commit is 40 lowercase hex digits".into());
     }
     let compatibility = format!("[compatibility]\nhorizon_revision = \"{horizon}\"\n");
@@ -235,7 +235,8 @@ fn build_in(root: &Path) -> Result<PathBuf, String> {
     }
     let manifest_text = std::fs::read_to_string(root.join(MANIFEST))
         .map_err(|e| format!("{MANIFEST}: {e} (run this in a mod's folder)"))?;
-    let manifest = Manifest::parse(&manifest_text)?;
+    let package = Package::read(root)?;
+    let manifest = package.manifest;
     if root.join("Cargo.toml").exists() {
         return Err("a Cargo.toml: code mods are native now (docs/native-mods.md)".into());
     }
@@ -246,7 +247,10 @@ fn build_in(root: &Path) -> Result<PathBuf, String> {
     for name in &content.files {
         files.push((name.as_str(), reader.read(name)?));
     }
-    let files: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    let mut files: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    if let Some(icon) = &package.icon {
+        files.push(("icon.png", icon.bytes()));
+    }
     let dir = root.join("target/horizon-mod");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.hmod", manifest.id));

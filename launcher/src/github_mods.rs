@@ -220,7 +220,7 @@ fn commit_of(api: Api, link: &Link, reference: &str) -> Result<String, String> {
     })?;
     found["sha"]
         .as_str()
-        .filter(|s| format::revision(s))
+        .filter(|s| horizon_mods::manifest::revision(s))
         .map(str::to_owned)
         .ok_or_else(|| format!("GitHub did not name the commit of {reference}."))
 }
@@ -438,7 +438,7 @@ pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
 /// (`[compatibility] horizon_revision`). An unpacked `.hmod` (`horizon-native.json`) keeps the
 /// pins and hook points its manifest names. The zip is the same for the same files.
 pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
-    let horizon = bundle.horizon.clone().filter(|h| format::revision(h)).ok_or_else(|| {
+    let horizon = bundle.horizon.clone().filter(|h| horizon_mods::manifest::revision(h)).ok_or_else(|| {
         format!(
             "{} has no [compatibility] horizon_revision (40 hex digits): add the Horizon commit it was made for.",
             bundle.id

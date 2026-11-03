@@ -42,6 +42,109 @@ pub struct Manifest {
     /// that are on may share one (`content::clash`).
     #[serde(default)]
     pub namespaces: Vec<String>,
+    /// Exact build pins and optional raw injections for a code mod.
+    pub native: Option<Native>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Native {
+    pub game: String,
+    pub horizon: String,
+    pub mixins: String,
+    #[serde(default)]
+    pub injection: Vec<Injection>,
+    #[serde(default)]
+    pub post_build: Vec<PostBuild>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PostBuild {
+    pub bin: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Injection {
+    pub id: String,
+    pub target: Option<String>,
+    pub hook: Option<String>,
+    pub hook_version: Option<u32>,
+    pub kind: InjectionKind,
+    pub helper: String,
+    #[serde(default)]
+    pub cancellable: bool,
+    pub argument: Option<usize>,
+    #[serde(default)]
+    pub bindings: Vec<Binding>,
+    pub priority: Option<i32>,
+    pub selector: Option<String>,
+    pub ordinal: Option<usize>,
+    pub require: Option<usize>,
+    pub fingerprint: Option<String>,
+    pub slice: Option<Slice>,
+    pub variable: Option<Variable>,
+    pub result: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum InjectionKind {
+    Head,
+    BeforeCall,
+    Overwrite,
+    Return,
+    ModifyArg,
+    ModifyConstant,
+    WrapOperation,
+    ModifyArgs,
+    ModifyVariable,
+    ModifyExpressionValue,
+    AfterCall,
+    AfterAssign,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    pub name: String,
+    pub ty: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Slice {
+    pub from: Option<Anchor>,
+    pub to: Option<Anchor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Anchor {
+    pub selector: String,
+    pub ordinal: usize,
+    pub require: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Variable {
+    pub name: String,
+    pub ordinal: usize,
+    pub at: Access,
+    #[serde(default)]
+    pub parameter: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Access {
+    Store,
+    Load,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -79,6 +182,14 @@ impl fmt::Display for Capability {
     }
 }
 
+/// Whether a source pin is an exact lowercase Git object id.
+pub fn revision(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
@@ -91,6 +202,13 @@ impl Manifest {
                 "{MANIFEST}: id {:?} is not [a-z0-9_]{{1,64}}",
                 m.id
             ));
+        }
+        if let Some(native) = &m.native {
+            if native.game.is_empty() || !revision(&native.horizon) || !revision(&native.mixins) {
+                return Err(format!(
+                    "{MANIFEST}: native requires game and exact revisions"
+                ));
+            }
         }
         if m.api != API {
             return Err(format!(
@@ -142,7 +260,29 @@ impl Package {
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
         let mut icon = None;
+        let mut has_cargo = false;
+        let mut has_source = false;
         let toml = if metadata.is_dir() {
+            for old in [
+                "horizon-native.json",
+                "horizon-mixin.toml",
+                "native",
+                "rust",
+            ] {
+                if std::fs::symlink_metadata(path.join(old)).is_ok() {
+                    return Err(format!("{old}: unsupported package path"));
+                }
+            }
+            if std::fs::symlink_metadata(path.join("Cargo.toml")).is_ok() {
+                check_folder_file(path, "Cargo.toml")?;
+                has_cargo = true;
+            }
+            if let Ok(source) = std::fs::symlink_metadata(path.join("src")) {
+                if !source.is_dir() {
+                    return Err("src: unsupported package path".into());
+                }
+                has_source = true;
+            }
             let icon_path = path.join("icon.png");
             match std::fs::symlink_metadata(&icon_path) {
                 Ok(metadata) => {
@@ -179,9 +319,18 @@ impl Package {
                 let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
                 let name = entry.name().map_err(|e| e.to_string())?.into_owned();
                 let mode = entry.unix_mode().unwrap_or_default();
+                let first = name.split('/').next().unwrap_or("");
+                if matches!(
+                    first,
+                    "horizon-native.json" | "horizon-mixin.toml" | "native" | "rust"
+                ) {
+                    return Err(format!("{name}: unsupported package path"));
+                }
+                has_source |= first == "src";
                 if entry.is_dir() && matches!(mode & 0o170000, 0 | 0o040000) {
                     continue;
                 }
+                has_cargo |= name == "Cargo.toml";
                 check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
                 if name == "icon.png" {
                     if icon.is_some() {
@@ -211,10 +360,11 @@ impl Package {
             }
             toml
         };
-        Ok(Package {
-            manifest: Manifest::parse(&toml)?,
-            icon,
-        })
+        let manifest = Manifest::parse(&toml)?;
+        if has_cargo != manifest.native.is_some() || has_source != has_cargo {
+            return Err("inconsistent native package declaration and source".into());
+        }
+        Ok(Package { manifest, icon })
     }
     /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
     /// A `.hmod` holding only native code has none.
@@ -413,6 +563,51 @@ capabilities = ["registries"]
                 .side,
             Side::Both
         );
+    }
+
+    #[test]
+    fn native_manifest_requires_exact_pins_and_known_fields() {
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n[[native.post_build]]\nbin = 'bake'\nargs = ['one']\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let manifest = Manifest::parse(&format!("{EXAMPLE}{native}")).unwrap();
+        assert_eq!(manifest.native.unwrap().post_build[0].bin, "bake");
+        assert!(
+            Manifest::parse(&format!(
+                "{EXAMPLE}{}",
+                native.replace(&"a".repeat(40), "main")
+            ))
+            .is_err()
+        );
+        assert!(Manifest::parse(&format!("{EXAMPLE}{native}unexpected = true\n")).is_err());
+    }
+
+    #[test]
+    fn package_kind_requires_matching_source_and_native_declaration() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-package-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        assert!(Package::read(&root).is_ok());
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = 'unrelated'\nversion = '7.0.0'\n",
+        )
+        .unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        assert!(Package::read(&root).is_err());
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), format!("{EXAMPLE}{native}")).unwrap();
+        assert_eq!(Package::read(&root).unwrap().manifest.id, "ruby");
+        std::fs::create_dir(root.join("native")).unwrap();
+        assert!(Package::read(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
