@@ -587,6 +587,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
         std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
         std::mem::swap(&mut self.level.player_extra, &mut g.saved);
+        std::mem::swap(&mut self.level.last_death, &mut g.last_death);
         std::mem::swap(&mut self.stats, &mut play.stats);
         std::mem::swap(&mut self.hook, &mut play.hook);
         let adv_loaded = std::mem::replace(&mut self.adv.loaded, true);
@@ -1014,6 +1015,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
         std::mem::swap(&mut self.level.recipe_book, &mut g.recipe_book);
         std::mem::swap(&mut self.level.player_extra, &mut g.saved);
+        std::mem::swap(&mut self.level.last_death, &mut g.last_death);
         std::mem::swap(&mut self.stats, &mut play.stats);
         std::mem::swap(&mut self.hook, &mut play.hook);
         self.adv.loaded = adv_loaded;
@@ -4348,7 +4350,7 @@ impl Game<'_> {
 
     /// `ServerPlayer.die` for a guest whose health has run out: the death
     /// message, the loot and experience, the death screen.
-    fn guest_die(&mut self, gi: usize, conn: u32) {
+    pub(super) fn guest_die(&mut self, gi: usize, conn: u32) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };

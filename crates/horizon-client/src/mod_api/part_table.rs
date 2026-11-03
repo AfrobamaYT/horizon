@@ -4,10 +4,11 @@
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread; that table
 //! also indexes the block parts by state, so the state-keyed hooks look theirs up without the
 //! block's name.
+use super::ticket_controller::{self, ControllerInfo};
 use super::{
     BlockEntityPart, BlockPart, BlockSide, BlockStateId, Capability, CapabilityKey,
     EntityCapabilityKey, EntityRef, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart,
-    ModEntry, PlaceProvider, ServerHost,
+    ModEntry, PlaceProvider, ServerHost, TicketController,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -100,9 +101,11 @@ pub type BlockProvider<T> = dyn Fn(&mut dyn ServerHost, BlockSide) -> Option<Box
 /// What answers an item capability for one item: given where the stack lives, its handler, or
 /// none to leave it to the next provider.
 pub type ItemProvider<T> = dyn Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync;
-/// What answers an entity capability for one entity type: given the entity, its handler, or none
-/// to leave it to the next provider.
-pub type EntityProvider<T> = dyn Fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>> + Send + Sync;
+/// What answers an entity capability for one entity type: given the entity and the lookup's
+/// context (its [`EntityCapabilityKey`]'s `C`), its handler, or none to leave it to the next
+/// provider.
+pub type EntityProvider<T, C = ()> =
+    dyn Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync;
 
 /// Which things a capability's providers are registered by.
 #[derive(Clone, Copy)]
@@ -124,6 +127,15 @@ struct TagParts {
 struct Installed {
     keys: Parts,
     tags: TagParts,
+    /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
+    controllers: Vec<ControllerInfo>,
+}
+
+/// The ticket controllers registered at startup.
+pub(super) fn installed_controllers() -> &'static [ControllerInfo] {
+    INSTALLED
+        .get()
+        .map_or(&[], |installed| installed.controllers.as_slice())
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
@@ -495,6 +507,7 @@ pub struct Registrar {
     registered: usize,
     parts: Parts,
     tags: TagParts,
+    controllers: Vec<ControllerInfo>,
     refused: Vec<String>,
 }
 
@@ -506,8 +519,27 @@ impl Registrar {
             registered: 0,
             parts: Parts::default(),
             tags: TagParts::default(),
+            controllers: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
+    /// does once at startup, and keep the handle for `chunk.set_mod_forced`. `name` is
+    /// `quarry` or `mymod:quarry`; the controller's id is in the calling mod's namespace
+    /// (`mymod:quarry`), and another mod's namespace refuses the mods at startup, as does an id
+    /// registered twice. `validates` is whether it validates its saved tickets: the
+    /// `validate_tickets` hook then runs for it when a level loads them (NeoForge's
+    /// `LoadingValidationCallback`). A world's tickets of a controller no loaded mod registers are
+    /// dropped when it loads.
+    pub fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController {
+        ticket_controller::register(
+            &mut self.controllers,
+            &mut self.refused,
+            self.mod_id,
+            name,
+            validates,
+        )
     }
 
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
@@ -608,15 +640,15 @@ impl Registrar {
     }
     /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
     /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
-    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot| Some(Box::new(Cargo(robot))))`.
+    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot, ()| Some(Box::new(Cargo(robot))))`.
     /// Asked as [`block_entity_capability`](Self::block_entity_capability)'s are.
-    pub fn entity_capability<T: ?Sized + 'static>(
+    pub fn entity_capability<T: ?Sized + 'static, C: 'static>(
         &mut self,
-        key: &EntityCapabilityKey<T>,
+        key: &EntityCapabilityKey<T, C>,
         kind: &str,
-        provider: impl Fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        let provider: Arc<EntityProvider<T>> = Arc::new(provider);
+        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
         self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
@@ -627,13 +659,13 @@ impl Registrar {
     }
     /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
     /// as a mod that replaces how a player's inventory is reached.
-    pub fn entity_capability_before_game<T: ?Sized + 'static>(
+    pub fn entity_capability_before_game<T: ?Sized + 'static, C: 'static>(
         &mut self,
-        key: &EntityCapabilityKey<T>,
+        key: &EntityCapabilityKey<T, C>,
         kind: &str,
-        provider: impl Fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        let provider: Arc<EntityProvider<T>> = Arc::new(provider);
+        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
         self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
@@ -786,25 +818,41 @@ fn namespaced(id: &str) -> bool {
         .is_some_and(|(namespace, path)| !namespace.is_empty() && !path.is_empty())
 }
 
+/// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
+fn register_all(mods: &[ModEntry]) -> Registrar {
+    let mut registrar = Registrar::new(mods[0].id);
+    for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
+        registrar.mod_id = mods[index].id;
+        registrar.mod_index = index;
+        hooks.register(&mut registrar);
+    }
+    registrar
+}
+
+/// The ticket controllers `mods` register, for a test's mods.
+#[cfg(any(test, feature = "testing"))]
+pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
+    if mods.is_empty() {
+        return Vec::new();
+    }
+    register_all(mods).controllers
+}
+
 /// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
 pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
-    let installed = if let Some(first) = mods.first() {
-        let mut registrar = Registrar::new(first.id);
-        for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
-            registrar.mod_id = mods[index].id;
-            registrar.mod_index = index;
-            hooks.register(&mut registrar);
-        }
+    let installed = if mods.is_empty() {
+        Installed::default()
+    } else {
+        let registrar = register_all(mods);
         if !registrar.refused.is_empty() {
             return Err(registrar.refused);
         }
         Installed {
             keys: registrar.parts,
             tags: registrar.tags,
+            controllers: registrar.controllers,
         }
-    } else {
-        Installed::default()
     };
     #[cfg(test)]
     TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
@@ -965,7 +1013,20 @@ pub(crate) mod tests {
             r.block_entity_capability_before_game(&ITEMS, "test:item_overstates", |_, _| {
                 Some(Box::new(ItemOverstates))
             });
-            r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _| Some(Box::new(Cargo)));
+            r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _, ()| {
+                Some(Box::new(Cargo))
+            });
+            // A battery reached from any side but below, as a mod's sided entity storage.
+            r.entity_capability(
+                &ENTITY_ENERGY,
+                "minecraft:armor_stand",
+                |_, entity, side| {
+                    (side != Some(Direction::Down)).then(|| Box::new(EntityBattery(entity)) as _)
+                },
+            );
+            r.entity_capability(&ENTITY_FLUIDS, "minecraft:armor_stand", |_, entity, _| {
+                Some(Box::new(EntityTank(entity)))
+            });
             r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
                 Some(Box::new(Pouch(place.clone())))
             });
@@ -1628,7 +1689,7 @@ pub(crate) mod tests {
             ..Player::default()
         };
         let host: &mut dyn ServerHost = &mut player;
-        let items = entity(1).capability(host, &ENTITY_ITEMS).unwrap();
+        let items = entity(1).capability(host, &ENTITY_ITEMS, ()).unwrap();
         assert_eq!(items.owner(), "the game");
         assert_eq!(items.size(host), 41);
         let (sticks, helmet_) = (ItemResource::of(&stick()), ItemResource::of(&helmet()));
@@ -1680,10 +1741,10 @@ pub(crate) mod tests {
         let host: &mut dyn ServerHost = &mut player;
         // A pig has no items; a mod's robot has its provider's; a player in a parked level
         // is asked nothing.
-        assert!(entity(2).capability(host, &ENTITY_ITEMS).is_none());
-        let robot = entity(3).capability(host, &ENTITY_ITEMS).unwrap();
+        assert!(entity(2).capability(host, &ENTITY_ITEMS, ()).is_none());
+        let robot = entity(3).capability(host, &ENTITY_ITEMS, ()).unwrap();
         assert_eq!((robot.owner(), robot.size(host)), ("doubler".to_owned(), 3));
-        assert!(entity(4).capability(host, &ENTITY_ITEMS).is_none());
+        assert!(entity(4).capability(host, &ENTITY_ITEMS, ()).is_none());
     }
 
     /// Items counted with what they hold: a pouch's sticks, a bag's pouch and its sticks.
@@ -2006,6 +2067,111 @@ pub(crate) mod tests {
         }
     }
 
+    const ROBOT_ENERGY: AttachmentType<u32> = AttachmentType {
+        namespace: "test",
+        name: "energy",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    pub(crate) const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
+        namespace: "test",
+        name: "fluid",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
+    struct EntityBattery(EntityRef);
+    impl EnergyHandler for EntityBattery {
+        fn amount(&self, host: &mut dyn ServerHost) -> u32 {
+            ROBOT_ENERGY
+                .get_existing(host, Holder::Entity(self.0.id()))
+                .unwrap()
+                .unwrap_or(0)
+        }
+        fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
+            1000
+        }
+        fn insert(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            let moved = amount.min(1000 - held);
+            ROBOT_ENERGY
+                .set(host, Holder::Entity(self.0.id()), held + moved)
+                .unwrap();
+            moved
+        }
+        fn extract(&self, host: &mut dyn ServerHost, _: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            let moved = amount.min(held);
+            ROBOT_ENERGY
+                .set(host, Holder::Entity(self.0.id()), held - moved)
+                .unwrap();
+            moved
+        }
+    }
+
+    struct EntityTank(EntityRef);
+    impl ResourceHandler<FluidResource> for EntityTank {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
+            1
+        }
+        fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
+            (self.amount(host, 0) > 0)
+                .then(|| FluidResource::of(&FluidStack::new("minecraft:water", 1)))
+        }
+        fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
+            ROBOT_FLUID
+                .get_existing(host, Holder::Entity(self.0.id()))
+                .unwrap()
+                .unwrap_or(0)
+        }
+        fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
+            if index == 0 && resource == &FluidResource::of(&FluidStack::new("minecraft:water", 1))
+            {
+                1000
+            } else {
+                0
+            }
+        }
+        fn insert(
+            &self,
+            host: &mut dyn ServerHost,
+            _: &Transaction,
+            index: usize,
+            resource: &FluidResource,
+            amount: u32,
+        ) -> u32 {
+            let held = self.amount(host, index);
+            let moved = amount.min(self.capacity(host, index, resource).saturating_sub(held));
+            ROBOT_FLUID
+                .set(host, Holder::Entity(self.0.id()), held + moved)
+                .unwrap();
+            moved
+        }
+        fn extract(
+            &self,
+            host: &mut dyn ServerHost,
+            _: &Transaction,
+            index: usize,
+            resource: &FluidResource,
+            amount: u32,
+        ) -> u32 {
+            let held = self.amount(host, index);
+            let moved = if self.capacity(host, index, resource) > 0 {
+                amount.min(held)
+            } else {
+                0
+            };
+            ROBOT_FLUID
+                .set(host, Holder::Entity(self.0.id()), held - moved)
+                .unwrap();
+            moved
+        }
+    }
+
     /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending
     /// on another's `[api]` crate does: its vats answer the same capability.
     struct Chemist;
@@ -2029,6 +2195,32 @@ pub(crate) mod tests {
         install_parts(&mods).unwrap();
         mark_game_thread();
         mods
+    }
+
+    /// Install a weak-power part on glass for a real-game query.
+    pub(crate) fn weak_power_game_thread() {
+        struct WeakPower;
+        impl BlockPart for WeakPower {
+            fn should_check_weak_power(
+                &self,
+                _: &dyn LevelHost,
+                event: &mut ShouldCheckWeakPowerEvent,
+            ) {
+                event.check = true;
+            }
+        }
+        struct WeakPowerMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for WeakPowerMod {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:glass", WeakPower);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("weak_power_test", Box::new(WeakPowerMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
     }
 
     /// Install a redstone connector on glass for real-game tests.
@@ -3167,6 +3359,46 @@ pub(crate) mod tests {
             assert!(p.given.is_empty());
             assert!(super::super::super::item_place::warned_about("doubler"));
         }
+    }
+
+    #[test]
+    fn ticket_controllers_get_the_callers_namespace_and_refuse_anothers() {
+        let mut r = Registrar::new("first");
+        r.register_ticket_controller("quarry", true);
+        r.register_ticket_controller("first:drill", false);
+        assert!(r.refused.is_empty(), "{:?}", r.refused);
+        let ids: Vec<_> = r
+            .controllers
+            .iter()
+            .map(|c| (&*c.id, c.validates))
+            .collect();
+        assert_eq!(ids, [("first:quarry", true), ("first:drill", false)]);
+        // Another mod's namespace, and no name at all.
+        r.register_ticket_controller("second:quarry", true);
+        r.register_ticket_controller("first:", true);
+        r.register_ticket_controller("", true);
+        assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
+        assert!(r.refused[0].contains("first registered ticket controller \"second:quarry\""));
+        assert!(r.refused[0].contains("not its own"));
+        assert!(r.refused[1].contains("no name") && r.refused[2].contains("no name"));
+        assert_eq!(r.controllers.len(), 2);
+    }
+
+    #[test]
+    fn a_ticket_controller_registered_twice_refuses_the_mods_naming_mod_and_id() {
+        let mut r = Registrar::new("first");
+        r.register_ticket_controller("quarry", true);
+        r.register_ticket_controller("first:quarry", false);
+        r.mod_id = "second";
+        // The same path under another mod is another id.
+        r.register_ticket_controller("quarry", true);
+        assert_eq!(r.refused.len(), 1, "{:?}", r.refused);
+        assert_eq!(
+            r.refused[0],
+            "first registered ticket controller first:quarry twice"
+        );
+        assert_eq!(r.controllers.len(), 2);
+        assert_eq!(&*r.controllers[1].id, "second:quarry");
     }
 
     #[test]

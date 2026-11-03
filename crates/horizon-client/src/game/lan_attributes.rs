@@ -167,7 +167,7 @@ impl Game<'_> {
                         a,
                         finalize::base_value(m, x.attr),
                         AttributeModifier {
-                            id: x.id.to_owned(),
+                            id: x.id.to_string(),
                             amount: x.amount,
                             operation: match x.op {
                                 Op::AddValue => 0,
@@ -280,7 +280,7 @@ impl Game<'_> {
     pub(super) fn stand_attributes(
         &self,
         id: u32,
-        equipment: &[Option<horizon_client::items::ItemStack>; 6],
+        equipment: &horizon_items::equipment::Equipment,
     ) -> Vec<AttributeSnapshot> {
         const KIND: &str = "minecraft:armor_stand";
         let mut out = Vec::new();
