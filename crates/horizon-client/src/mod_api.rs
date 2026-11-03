@@ -1412,7 +1412,8 @@ pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
-    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
+    Attached, BlockEntityProviders, BlockProvider, ItemProvider, Parts, Registrar,
+    block_entity_providers,
 };
 pub(crate) use part_table::{
     KnownIds, answered, ask_providers, install_parts, mark_game_thread, parts, place_provider,

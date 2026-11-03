@@ -10,6 +10,7 @@ use std::{
     any::{Any, TypeId, type_name},
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
+    marker::PhantomData,
     rc::Rc,
     sync::{
         Arc, LazyLock, OnceLock,
@@ -361,29 +362,45 @@ pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
     ask(false, host).map_or(Answer::Nobody, Answer::Mod)
 }
 
-/// A mod's handler for capability `key` at `at`, where the game would answer with its own
-/// unless a mod comes first: one registered `before_game`, else, where the game has no answer
-/// (`game`), the first mod's. With no provider registered for `key` and the block entity's
-/// type, the game isn't asked, so a vanilla container's lookup costs one table check.
-pub fn block_entity_capability<T: ?Sized + 'static>(
+/// The providers mods registered for capability `key` and the type of the block entity at
+/// `at`, for the game's own lookups (a hopper's): none where no mod registered one, so a
+/// vanilla container's lookup costs one table check and allocates nothing, and the game needn't
+/// work out its own answer. [`BlockEntityProviders::ask`] then asks them.
+pub fn block_entity_providers<T: ?Sized + 'static>(
     key: &CapabilityKey<T>,
-    host: &mut dyn Host,
+    host: &dyn Host,
     at: BlockSide,
-    game: impl FnOnce(&mut dyn Host) -> bool,
-) -> Option<Capability<T>> {
+) -> Option<BlockEntityProviders<T>> {
     let parts = providers(false, key.name, host, |host| at.kind(host));
-    if parts.is_empty() {
-        return None;
-    }
-    let answer = ask_providers::<BlockProvider<T>, T>(
+    (!parts.is_empty()).then_some(BlockEntityProviders {
         parts,
-        host,
-        |provider, host| provider(host, at),
-        game,
-    );
-    match answer {
-        Answer::Mod(found) => Some(found),
-        Answer::Game | Answer::Nobody => None,
+        at,
+        handler: PhantomData,
+    })
+}
+
+/// A block entity's providers of one capability ([`block_entity_providers`]).
+pub struct BlockEntityProviders<T: ?Sized + 'static> {
+    parts: &'static [CapabilityPart],
+    at: BlockSide,
+    handler: PhantomData<fn() -> Box<T>>,
+}
+
+impl<T: ?Sized + 'static> BlockEntityProviders<T> {
+    /// A mod's handler where the game would answer with its own unless a mod comes first: one
+    /// registered `before_game`, else, where the game has no answer (`game`), the first mod's.
+    pub fn ask(self, host: &mut dyn Host, game: bool) -> Option<Capability<T>> {
+        let at = self.at;
+        let answer = ask_providers::<BlockProvider<T>, T>(
+            self.parts,
+            host,
+            |provider, host| provider(host, at),
+            |_| game,
+        );
+        match answer {
+            Answer::Mod(found) => Some(found),
+            Answer::Game | Answer::Nobody => None,
+        }
     }
 }
 
@@ -1610,6 +1627,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_mod_reads_a_vanilla_chests_items_from_the_game_with_no_provider_for_it() {
+        game_thread();
+        let mut world = PipeWorld {
+            chest: Some(stick()),
+            ..PipeWorld::default()
+        };
+        let host: &mut dyn Host = &mut world;
+        // No mod registered an items provider for the chest's type: the game's hoppers have no
+        // mod's handler to look for there, yet a mod reading it gets the game's own slots.
+        assert!(block_entity_providers(&ITEMS, host, on(CHEST, None)).is_none());
+        let chest = here().capability(host, &ITEMS, CHEST, None).unwrap();
+        assert_eq!(chest.owner(), "the game");
+        assert_eq!(chest.size(host), 1);
+        assert_eq!(chest.resource(host, 0), Some(ItemResource::of(&stick())));
+    }
+
+    #[test]
     fn a_capability_part_answers_by_side_and_forwards_to_its_neighbours_capability() {
         game_thread();
         let mut world = PipeWorld::default();
@@ -2503,29 +2537,25 @@ pub(crate) mod tests {
                 pos: [x, 64, 0],
                 side: None,
             };
-            let game_slots = |host: &mut dyn Host| host.container_size(at).is_some();
-            block_entity_capability(&ITEMS, host, at, game_slots).map(|found| found.size(host))
+            let game_slots = host.container_size(at).is_some();
+            let providers = block_entity_providers(&ITEMS, host, at)?;
+            providers
+                .ask(host, game_slots)
+                .map(|found| found.size(host))
         };
         assert_eq!(mod_only(host, 7), Some(1));
         assert_eq!(mod_only(host, 8), None);
         assert_eq!(mod_only(host, 9), Some(3));
-        // With no provider for the block entity's type, or no type (a vanilla one), the game
-        // isn't asked at all: a hopper's lookup costs one table check.
-        let mut asked = false;
+        // With no provider for the block entity's type, or no type (a vanilla one), there are
+        // no providers to ask, so the game needn't work out its own answer: a hopper's lookup
+        // costs one table check.
         let at = BlockSide {
             level: here(),
             pos: [8, 64, 0],
             side: None,
         };
-        let vanilla: &mut dyn Host = &mut TypeOf(None);
-        let mut game = |_: &mut dyn Host| {
-            asked = true;
-            true
-        };
-        assert!(block_entity_capability(&ITEMS, vanilla, at, &mut game).is_none());
-        let unknown: &mut dyn Host = &mut TypeOf(Some("test:unregistered"));
-        assert!(block_entity_capability(&ITEMS, unknown, at, &mut game).is_none());
-        assert!(!asked);
+        assert!(block_entity_providers(&ITEMS, &TypeOf(None), at).is_none());
+        assert!(block_entity_providers(&ITEMS, &TypeOf(Some("test:unregistered")), at).is_none());
 
         // Item providers in the same order, for the item in a player's hand: with no game slots
         // (damage 0), the first mod's that answers; with them (damage 1), the game's; for two

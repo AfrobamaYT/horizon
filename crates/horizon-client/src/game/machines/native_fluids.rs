@@ -265,10 +265,9 @@ impl Game<'_> {
             pos,
             side: Some(side),
         };
-        let host: &mut dyn Host = self;
-        mod_api::block_entity_capability(&mod_api::FLUIDS, host, at, |host| {
-            host.fluid_tank_count(at).is_some()
-        })
+        let providers = mod_api::block_entity_providers(&mod_api::FLUIDS, self, at)?;
+        let game = self.native_fluid_tank_count(at).is_some();
+        providers.ask(self, game)
     }
     /// The saved tanks of the mod block entity at `pos`, `n` of them.
     fn tank_state(&self, pos: [i32; 3], n: usize) -> Option<Vec<Tank>> {
