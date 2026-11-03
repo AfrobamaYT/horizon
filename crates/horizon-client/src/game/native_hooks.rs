@@ -9927,8 +9927,11 @@ impl Game<'_> {
     /// The open mod screen's tooltip under the cursor (`native_screen_tooltip`).
     pub(super) fn draw_native_screen_tooltip(&mut self, batch: &mut HudBatch) {
         // Over no item: an empty slot still gets the mod's hint (which fuel it takes).
+        // A carried stack hides only slot tooltips, as AbstractContainerScreen's;
+        // the screen's other parts keep theirs, as a vanilla widget's tooltip does.
         let slot = self.slot_at(batch, self.cursor.0, self.cursor.1);
-        if self.carried.is_some() || slot.is_some_and(|i| self.slot_view(i).is_some()) {
+        let carried = self.carried.is_some();
+        if screen_tooltip_hidden(carried, slot, |i| self.slot_view(i).is_some()) {
             return;
         }
         let Some((block, data, at)) = self.native_screen_at() else {
@@ -10214,8 +10217,28 @@ fn mod_screen_opens(
     None
 }
 
+/// Whether a mod screen's tooltip stays hidden: only over a slot that has an
+/// item, or while a stack is carried (`AbstractContainerScreen.renderTooltip`
+/// hides a hovered slot's tooltip then; a widget's still shows).
+fn screen_tooltip_hidden(
+    carried: bool,
+    slot: Option<usize>,
+    has_item: impl FnOnce(usize) -> bool,
+) -> bool {
+    slot.is_some_and(|i| carried || has_item(i))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn carried_stack_hides_only_slot_tooltips() {
+        use super::screen_tooltip_hidden as hidden;
+        assert!(!hidden(true, None, |_| unreachable!()));
+        assert!(hidden(true, Some(3), |_| false));
+        assert!(hidden(false, Some(3), |_| true));
+        assert!(!hidden(false, Some(3), |_| false));
+        assert!(!hidden(false, None, |_| unreachable!()));
+    }
     #[test]
     fn hand_pose_rejects_invalid_components() {
         let identity = super::hand_pose_matrix([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
