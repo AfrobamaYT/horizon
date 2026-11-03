@@ -705,8 +705,7 @@ one, where vanilla gives the `by` one.
   `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
 
 - [entities](#entities) for server mods: `native_summon(dimension, kind, pos, nbt)` spawns any entity from its compound
-  as `/summon` does. `native_set_display` sets a display's transformation, eased over ticks, to pose a mod's own
-  item models.
+  as `/summon` does.
 
 - `native_item_bar(stack, bar)`: the small bar `GuiGraphicsExtractor.itemDecorations` draws under an item,
   wherever the game shows one. `bar` arrives holding
@@ -2366,12 +2365,9 @@ names the level it means by its `dimension` (`minecraft:overworld`), as `native_
 - `native_summon(dimension, kind, pos, nbt)` spawns an entity of `kind` from its compound, as `/summon <kind> <pos> <nbt>`
   does (passengers included), and returns its id. None on a client, for another dimension, a position outside `/summon`'s
   bounds, a chunk that isn't loaded, a kind Horizon can't load, or one a mod kept out with `native_entity_join_level`.
-- `native_set_display(dimension, id, &NativeDisplay)` sets a `block_display`, `item_display` or `text_display`'s
-  transformation (translation, left rotation, scale, right rotation; quaternions `[x, y, z, w]`), the ticks players see it
-  ease over (`interpolation`) and its teleport duration (`teleport`, 0 to 59). Each call restarts the ease on clients.
 
 A model that moves (a turning gun barrel, a thrown projectile) is an `item_display` showing an item whose model comes from
-the mod's `.hmod` assets: summon it once, then move and pose it from a tick hook. Easing between ticks happens on each
+the mod's `.hmod` assets: summon it once, then move it and pose it with `DisplayRef` from a tick hook. Easing between ticks happens on each
 client, so a call a tick looks smooth.
 
 ### Entity and level handles

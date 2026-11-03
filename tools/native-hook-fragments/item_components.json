@@ -5,6 +5,12 @@
       "name": "item_default_component",
       "side": "both",
       "target": "horizon_client::game::native_components::Game<'_>::native_item_default_component"
+    },
+    {
+      "name": "item_has_enchantment_effect",
+      "side": "both",
+      "backend": true,
+      "target": "horizon_client::game::native_components::Game<'_>::native_item_has_enchantment_effect"
     }
   ]
 }
