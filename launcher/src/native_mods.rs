@@ -395,7 +395,7 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 }
 
 const MANIFEST: &str = "horizon-mixin.toml";
-/// A registry download's manifest (`.hmod`, `horizon_mods::index::native`), beside `native/`.
+/// A registry download's `horizon-mod.toml` at the `.hmod` package root.
 const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
