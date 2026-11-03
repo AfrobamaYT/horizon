@@ -3105,12 +3105,11 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let mut station = super::Station::new(super::Kind::Anvil, [0; 3]);
                 station.inputs[0] = Some(super::ItemStack::new("minecraft:iron_sword", 1));
-                assert!(mod_api::listened(HookId::AnvilUpdate));
-                game.update_anvil_answer(&mut station, "first".into());
                 assert!(!mod_api::listened(HookId::AnvilUpdate));
-                assert_eq!(station.anvil_answer.as_ref().unwrap().1, "first");
+                game.update_anvil_answer(&mut station, "first".into());
+                assert!(station.anvil_answer.is_none());
                 game.update_anvil_answer(&mut station, "second".into());
-                assert_eq!(station.anvil_answer.as_ref().unwrap().1, "first");
+                assert!(station.anvil_answer.is_none());
             });
         });
         let calls = Arc::new(AtomicUsize::new(0));

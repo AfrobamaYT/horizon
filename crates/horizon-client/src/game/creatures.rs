@@ -7962,7 +7962,7 @@ fn breeding_credit(
 mod mob_subscription_tests {
     #[test]
     #[ignore = "needs prepared resources"]
-    fn empty_mod_stops_deferring_after_each_default_handler() {
+    fn empty_mod_never_defers_taming_or_block_destruction() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
         #[mod_api::__subscriptions]
@@ -7971,7 +7971,7 @@ mod mob_subscription_tests {
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let world = game.mob_world_base(&[]);
-                assert!(world.asks_animal_tame && world.asks_living_destroy_block);
+                assert!(!world.asks_animal_tame && !world.asks_living_destroy_block);
                 let mut cancel = false;
                 game.native_animal_tame(1, 1, 2, "minecraft:horse", &mut cancel);
                 game.native_living_destroy_block(
@@ -8624,7 +8624,7 @@ mod conversion_subscriber_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
-    fn post_only_listener_survives_pre_pruning() {
+    fn post_only_listener_is_subscribed_without_a_pre_listener() {
         struct DefaultMod;
         #[mod_api::__subscriptions]
         impl Hooks for DefaultMod {}

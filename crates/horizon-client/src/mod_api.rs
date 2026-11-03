@@ -2253,7 +2253,11 @@ pub use generated::*;
 /// Internal test-fixture attribute for modules with multiple hook sets; mods use `#[mod_api::horizon_mod]`.
 #[doc(hidden)]
 pub use horizon_mod_api_macros::__subscriptions;
-/// Derive subscriptions from the methods in a hook implementation.
+/// Mark a hook implementation and derive its subscriptions.
+///
+/// On `impl Hooks`, also exports `pub fn hooks()` using the mod's `Default`
+/// implementation. Put that impl at the crate root so the launcher finds it.
+/// On `impl RenderHooks`, derives subscriptions without another export.
 ///
 /// An implementation without the attribute does not compile:
 /// ```compile_fail
@@ -2261,7 +2265,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// struct Mod;
 /// impl Hooks for Mod {}
 /// ```
-/// A misspelled hook is rejected by the attribute:
+/// Rustc rejects a misspelled trait method (E0407):
 /// ```compile_fail,E0407
 /// use horizon_client::mod_api::{self, Hooks};
 /// #[derive(Default)]
