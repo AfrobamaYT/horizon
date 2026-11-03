@@ -32,8 +32,6 @@ const PREFIX: &str = "native-";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
-/// The features of the release's own game (game-build.yml).
-const FEATURES: &str = "horizon-client/mods";
 
 /// What a native build is compiled for. `Performance`, the default, is the workspace's `fast` (16
 /// codegen units, incremental, thin-local LTO only), so changing a mod recompiles only `horizon-client`'s
