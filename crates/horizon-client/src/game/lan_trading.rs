@@ -3,7 +3,7 @@
 //! with vanilla's packets: OpenScreen (`minecraft:merchant`), MerchantOffers,
 //! the select trade packet, container clicks and the content sync after each.
 use super::{
-    Game, lan::LanHost, lan_actions::guest_within_entity_range, stations::Kind as StationKind,
+    Game, lan_actions::guest_within_entity_range, stations::Kind as StationKind,
     trading::MerchantState,
 };
 use horizon_client::{

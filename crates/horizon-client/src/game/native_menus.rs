@@ -87,14 +87,14 @@ impl Game<'_> {
         items: Vec<Option<ItemStack>>,
     ) -> Option<i32> {
         let conn = self.native_conn(uuid)?;
-        let mut host = self.lan.take()?;
         // ServerPlayer.openMenu closes the menu that was open.
-        self.guest_close_all(&mut host, conn);
-        let window =
-            host.hub
-                .open_native_menu(conn, rows, component_nbt(&title.component()), items);
-        self.lan = Some(host);
-        window
+        self.guest_close_all(conn);
+        self.lan.as_mut()?.hub.open_native_menu(
+            conn,
+            rows,
+            component_nbt(&title.component()),
+            items,
+        )
     }
     /// Closes the player's native menu (a `native_menu_closed` follows).
     pub(super) fn native_close_menu(&mut self, uuid: u128) {
