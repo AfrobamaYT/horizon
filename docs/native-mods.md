@@ -2476,6 +2476,9 @@ a dimension.
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+- `host.block_entity(level, pos)` finds a block entity in a loaded chunk, including in parked levels;
+  `kind`, `position`, `level` and `data` read it. A removed or temporarily taken-out entity reads `None`;
+  a replacement at the same position resolves to the new entity, unlike vanilla's object identity.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
@@ -2483,7 +2486,7 @@ a dimension.
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags. Bundles need `"hooks": ["level_block_writes"]`.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
-(`entity`, `level`) also becomes a method of that handle.
+(`entity`, `level`, `block_entity`) also becomes a method of that handle.
 
 ### Mobs drawn by a mod
 
