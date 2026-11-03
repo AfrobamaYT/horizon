@@ -19,7 +19,7 @@ pub use crate::game::{
     ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
     NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
     NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake,
+    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
 };
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
@@ -444,6 +444,15 @@ impl LevelRef {
     }
 }
 
+/// The empty-context block shape requested from a level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockShapeKind {
+    /// Selection outline (`BlockState.getShape`).
+    Outline,
+    /// Collision shape (`BlockState.getCollisionShape`).
+    Collision,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
@@ -763,8 +772,10 @@ macro_rules! level_attachment_host {
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
+mod capability;
+pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar};
+pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
 
 mod generated;
@@ -830,6 +841,41 @@ mod tests {
                 Flow::Continue
             }
         }
+    }
+
+    struct MorePhantoms;
+
+    impl Hooks for MorePhantoms {
+        fn player_spawn_phantoms(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerSpawnPhantomsEvent<'_>,
+        ) -> Option<PhantomSpawnResult> {
+            *event.phantoms = event.phantoms.map(|count| count + 2);
+            None
+        }
+    }
+
+    #[test]
+    fn phantom_listener_can_increase_the_default_count() {
+        let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut count = Some(3);
+        let mut result = None;
+        dispatch_player_spawn_phantoms(
+            &mut host,
+            &mods,
+            7,
+            "Probe",
+            [0; 3],
+            &mut count,
+            &mut result,
+        );
+        assert_eq!(count, Some(5));
+        assert!(result.is_none());
     }
 
     /// Asks the host to tell a player without anyone having implemented it.
