@@ -163,6 +163,7 @@ pub(super) fn content_root(
             register_mob_effects(&mods);
             register_entity_types(&mods);
             register_menu_types(&mods);
+            horizon_client::mod_content::set_fluid_looks(&mods);
             out
         }
         Err(e) => {
@@ -170,6 +171,7 @@ pub(super) fn content_root(
             register_mob_effects(&[]);
             register_entity_types(&[]);
             register_menu_types(&[]);
+            horizon_client::mod_content::set_fluid_looks(&[]);
             root.to_owned()
         }
     }

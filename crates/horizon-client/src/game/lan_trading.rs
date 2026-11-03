@@ -609,6 +609,7 @@ mod tests {
     use super::super::native_merchant_refs::tests::{offer, spawn};
     use super::*;
     use crate::game::lan::LanSettings;
+    use crate::mod_api::ServerHost;
     use horizon_client::{
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
         merchant::{MerchantOffer, Trader},
@@ -872,10 +873,10 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trade_hook_fired_by_a_real_select_can_write_the_open_trade() {
-        use horizon_client::mod_api::{self, Hooks, Host, TradeSelectEvent};
+        use horizon_client::mod_api::{self, Hooks, TradeSelectEvent};
         struct Observer(Seen);
         impl Hooks for Observer {
-            fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+            fn trade_select(&self, host: &mut dyn ServerHost, event: &mut TradeSelectEvent<'_>) {
                 let merchant = event
                     .villager
                     .and_then(|id| host.entity(id))

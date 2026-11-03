@@ -986,18 +986,19 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ServerHost;
     use std::sync::Arc;
 
     #[test]
     #[ignore = "needs prepared resources"]
     fn arriving_vehicle_is_announced_once_after_destination_entities() {
-        use crate::mod_api::{self, EntityJoinLevelEvent, Flow, Hooks, Host};
+        use crate::mod_api::{self, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::Mutex;
         struct Observer(Arc<Mutex<Vec<u32>>>);
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.0.lock().unwrap().push(event.entity);
