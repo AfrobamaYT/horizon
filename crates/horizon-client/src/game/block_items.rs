@@ -506,11 +506,7 @@ mod tests {
             );
             // Without Ctrl the item carries nothing.
             let plain = game.picked_stack([1, 64, 0], false).expect("picked");
-            assert!(
-                components(&plain)
-                    .get(&"minecraft:block_entity_data".into())
-                    .is_none()
-            );
+            assert!(!components(&plain).contains_key(&"minecraft:block_entity_data".into()));
 
             game.apply_placed_item([2, 64, 0], &picked, false);
             let Some(BlockEntity::Mod(second)) = game.world.block_entities.get(&(2, 64, 0)) else {
