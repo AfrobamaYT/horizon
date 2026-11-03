@@ -9,6 +9,7 @@ pub struct NativeClientHooks {
     pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
+    pub farmland_trample: fn(u32, [i32; 3], u32, f64, &mut bool),
     pub has_mods: fn() -> bool,
     pub player_name_format: fn(&crate::text::Text, &mut crate::text::Text),
     pub player_tab_list_name_format: fn(u128, &str, &mut Option<crate::text::Text>),
@@ -62,6 +63,18 @@ pub(crate) fn living_breathe(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_breathe)(entity, kind, can_breathe, consume, refill);
+    }
+}
+
+pub(crate) fn farmland_trample(
+    entity: u32,
+    pos: [i32; 3],
+    state: u32,
+    distance: f64,
+    cancel: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.farmland_trample)(entity, pos, state, distance, cancel);
     }
 }
 

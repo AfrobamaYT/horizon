@@ -537,10 +537,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         target: FluidState,
     ) {
         let b = self.b;
-        if !self
-            .level
-            .allow_spread(Spread::Fluid, rel(pos, direction.opposite()), pos)
-        {
+        let from = rel(pos, direction.opposite());
+        if !self.level.allow_spread(Spread::Fluid, from, pos) {
             return;
         }
         if !is_water(kind)
@@ -548,7 +546,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && b.is_water_fluid(self.fluid_at(pos).kind())
         {
             if b.instance_of(state, Class::Liquid) {
-                self.set_block_and_update(pos, b.default_of(b.named.stone));
+                if let Some(state) =
+                    self.level
+                        .fluid_place_block(pos, from, b.default_of(b.named.stone))
+                {
+                    self.set_block_and_update(pos, state);
+                }
             }
             self.level_event(1501, pos, 0);
             return;
@@ -690,12 +693,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 } else {
                     b.named.cobblestone
                 };
-                self.set_block_and_update(pos, b.default_of(block));
+                if let Some(state) = self.level.fluid_place_block(pos, pos, b.default_of(block)) {
+                    self.set_block_and_update(pos, state);
+                }
                 self.level_event(1501, pos, 0);
                 return false;
             }
             if over_soul_soil && b.is_block(self.state(neighbour), b.named.blue_ice) {
-                self.set_block_and_update(pos, b.default_of(b.named.basalt));
+                if let Some(state) =
+                    self.level
+                        .fluid_place_block(pos, pos, b.default_of(b.named.basalt))
+                {
+                    self.set_block_and_update(pos, state);
+                }
                 self.level_event(1501, pos, 0);
                 return false;
             }
@@ -741,7 +751,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             return;
                         }
                         let fire = self.fire_state_for(test);
-                        self.set_block_and_update(test, fire);
+                        if let Some(state) = self.level.fluid_place_block(test, pos, fire) {
+                            self.set_block_and_update(test, state);
+                        }
                         return;
                     }
                 } else if self
@@ -765,7 +777,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         continue;
                     }
                     let fire = self.fire_state_for(test);
-                    self.set_block_and_update(above(test), fire);
+                    if let Some(state) = self.level.fluid_place_block(above(test), pos, fire) {
+                        self.set_block_and_update(above(test), state);
+                    }
                 }
             }
         }

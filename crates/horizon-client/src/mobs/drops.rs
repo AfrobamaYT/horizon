@@ -4,7 +4,7 @@
 //! sequence), `Mob.dropCustomDeathLoot` (equipment by drop chance, with the
 //! entity random), the species' extra drops (an enderman's carried block) and
 //! the experience orbs.
-use super::{Mob, Species, equine, gear, raider, render::DYE_NAMES, species};
+use super::{Mob, Species, equine, gear, raider, render::DYE_NAMES};
 use crate::random_sequences::RandomSequences;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::{
@@ -228,22 +228,16 @@ pub fn can_be_baby(s: Species) -> bool {
             | S::ZombifiedPiglin
     )
 }
-/// Whether the species keeps its body armour in `extra.head`.
-pub fn head_is_body(s: Species) -> bool {
-    species::body_slot(s) || equine::is_equine(s)
-}
-
 /// The item a mob has in an `EquipmentSlot` (by name), with its enchantments.
 pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
-    let body = head_is_body(m.species());
     let (item, index) = match slot {
         "mainhand" => (m.extra.main_hand.as_deref(), Some(gear::MAIN)),
         "offhand" => (m.extra.off_hand.as_deref(), Some(gear::OFF)),
-        "head" if !body => (m.extra.head.as_deref(), Some(gear::HEAD)),
+        "head" => (m.extra.head.as_deref(), Some(gear::HEAD)),
         "chest" => (m.extra.chest.as_deref(), Some(gear::CHEST)),
         "legs" => (m.extra.legs.as_deref(), Some(gear::LEGS)),
         "feet" => (m.extra.feet.as_deref(), Some(gear::FEET)),
-        "body" if body => (m.extra.head.as_deref(), None),
+        "body" => (m.extra.body.as_deref(), None),
         "saddle" => {
             let saddle = m.saddle_item()?;
             let mut stack = loot_stack(&saddle.item, 1);
@@ -283,12 +277,12 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
     Some(stack)
 }
 /// The `finalize` slot of a drop slot's name, for the slots a stack is kept in.
-fn slot_index(m: &Mob, slot: &str) -> Option<usize> {
+fn slot_index(slot: &str) -> Option<usize> {
     use super::finalize as f;
     Some(match slot {
         "mainhand" => f::MAINHAND,
         "offhand" => f::OFFHAND,
-        "head" if !head_is_body(m.species()) => f::HEAD,
+        "head" => f::HEAD,
         "chest" => f::CHEST,
         "legs" => f::LEGS,
         "feet" => f::FEET,
@@ -297,7 +291,7 @@ fn slot_index(m: &Mob, slot: &str) -> Option<usize> {
 }
 /// The whole stack the mob kept in `slot` (by name), when it kept one.
 fn stored_slot_stack(m: &Mob, slot: &str) -> Option<crate::items::ItemStack> {
-    super::finalize::stored_stack(m, slot_index(m, slot)?)
+    super::finalize::stored_stack(m, slot_index(slot)?)
 }
 /// The drop of what the mob has in `slot`, given its `stack` after the drop
 /// rolls: the whole stack the mob kept (with the rolled damage), else the loot stack.
@@ -312,7 +306,6 @@ fn slot_drop(m: &Mob, slot: &str, stack: LootStack) -> Drop {
 }
 /// `setItemSlot(slot, EMPTY)`.
 pub fn clear_slot(m: &mut Mob, slot: &str) {
-    let body = head_is_body(m.species());
     let index = match slot {
         "mainhand" => {
             m.extra.set_main_hand(None);
@@ -322,7 +315,7 @@ pub fn clear_slot(m: &mut Mob, slot: &str) {
             m.extra.off_hand = None;
             gear::OFF
         }
-        "head" if !body => {
+        "head" => {
             m.extra.head = None;
             gear::HEAD
         }
@@ -338,8 +331,8 @@ pub fn clear_slot(m: &mut Mob, slot: &str) {
             m.extra.feet = None;
             gear::FEET
         }
-        "body" if body => {
-            m.extra.head = None;
+        "body" => {
+            m.extra.body = None;
             m.extra.body_damage = 0;
             m.extra.body_extra = None;
             return;

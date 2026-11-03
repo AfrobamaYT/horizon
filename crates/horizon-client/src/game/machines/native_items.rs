@@ -322,6 +322,23 @@ impl Game<'_> {
             ..stack
         })
     }
+    /// How many of `stack` slot `slot` of those `side` reaches at `pos` holds when empty, as
+    /// NeoForge's `isValid` and `getCapacityAsLong` answer: none where it may not go in (a
+    /// furnace's output, `canPlaceItem`), else the slot's limit for it.
+    pub(in crate::game) fn native_container_capacity(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> u32 {
+        let Some(view) = self.capability_view(pos) else {
+            return 0;
+        };
+        view.slots_for_face(side)
+            .get(slot)
+            .map_or(0, |&slot| self.containers().capacity(&view, slot, stack))
+    }
     /// Takes up to `max` out of slot `slot` of those `side` reaches at `pos`; through a side,
     /// only what that side may take (`canTakeItemThroughFace`). What came out. `simulate`
     /// changes nothing.

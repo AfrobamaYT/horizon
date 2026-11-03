@@ -598,6 +598,37 @@ pub struct NativeLifecycleContext {
     pub tick: NativeTickId,
 }
 
+/// Tool action requested by a block interaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToolAbility {
+    AxeStrip,
+    AxeScrape,
+    AxeWaxOff,
+    ShovelFlatten,
+    ShovelDouse,
+    HoeTill,
+}
+
+/// Read-only context for a tool modification.
+#[non_exhaustive]
+pub struct ToolUse {
+    /// The acting entity ID, if present.
+    pub player: Option<u32>,
+    /// The hand holding the tool.
+    pub hand: crate::first_person::Hand,
+    /// The clicked block position.
+    pub pos: [i32; 3],
+    /// The clicked face's direction.
+    pub face: [i32; 3],
+    /// The click position in world coordinates.
+    pub click: [f64; 3],
+    /// The action being considered.
+    pub ability: ToolAbility,
+    /// Whether this is a simulation. Current vanilla calls pass false.
+    pub simulated: bool,
+}
+
 /// The ordered list of mods shared by the client and server.
 pub type Mods = Arc<[Box<dyn Hooks>]>;
 
@@ -784,10 +815,13 @@ mod capability;
 pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
+mod item_place;
+pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
-    KnownIds, capability_mod, install_parts, mark_game_thread, parts, resolve_parts,
+    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
+    place_provider, resolve_parts,
 };
 
 mod generated {
@@ -1047,5 +1081,80 @@ mod tests {
         };
         let mut claimed = false;
         dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+    }
+
+    /// Records what `player_brewed_potion` told it.
+    struct BrewWatcher(Arc<Mutex<Vec<(u128, i32, ItemStack)>>>);
+
+    impl Hooks for BrewWatcher {
+        fn player_brewed_potion(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerBrewedPotionEvent<'_>,
+        ) {
+            let seen = (event.player, event.player_entity_id, event.stack.clone());
+            self.0.lock().unwrap().push(seen);
+        }
+    }
+
+    /// `BrewingStandMenu.PotionSlot.onTake`: a pickup and a shift-click on a
+    /// bottle slot each tell a listening mod once, with the taken stack and
+    /// the player's UUID and entity id; with no listener nothing is kept.
+    #[test]
+    fn a_bottle_slot_take_tells_the_listener_once_with_the_player() {
+        use crate::menu::{Env, Input, Kind, LogicalSide, Menu};
+        let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = crate::items::Items::for_tests(Default::default());
+        let overlay = &horizon_world::loot::PackOverlay::NONE;
+        let recipes = crate::crafting::Recipes::load(&root, &items, overlay).unwrap();
+        let brewing = crate::brewing::Brewing::load(&root, &items, overlay);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        let potion = ItemStack::new("minecraft:potion", 1);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewWatcher(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for input in [Input::Pickup, Input::QuickMove] {
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.set_slot(env, 0, Some(potion.clone()));
+            menu.click(env, 0, 0, input).unwrap();
+            // Without a listener the take is only the advancement's.
+            assert!(menu.brewed_potion_takes.is_empty(), "{input:?}");
+            assert_eq!(menu.brewed, std::slice::from_ref(&potion), "{input:?}");
+
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.brewed_potion_hook = true;
+            menu.set_slot(env, 0, Some(potion.clone()));
+            menu.click(env, 0, 0, input).unwrap();
+            assert_eq!(
+                menu.brewed_potion_takes,
+                std::slice::from_ref(&potion),
+                "{input:?}"
+            );
+            for stack in &menu.brewed_potion_takes {
+                dispatch_player_brewed_potion(&mut host, &mods, 7, 41, stack);
+            }
+        }
+        let told = (7, 41, potion);
+        assert_eq!(*seen.lock().unwrap(), [told.clone(), told]);
     }
 }

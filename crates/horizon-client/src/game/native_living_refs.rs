@@ -83,9 +83,57 @@ impl Game<'_> {
         let living = LivingRef::new(entity);
         self.native_living_target(living).map(|_| living)
     }
+    /// The effective value of an attribute on a living entity. None for an
+    /// unknown or absent attribute, an unavailable entity, or on a client.
+    /// Mobs, armor stands and the dragon return None until they have live
+    /// attribute maps. API @API:living_refs@.
+    pub(super) fn native_living_attribute_value(
+        &mut self,
+        living: LivingRef,
+        id: &str,
+    ) -> Option<f64> {
+        self.native_living_attribute(
+            living,
+            id,
+            horizon_world::attribute_map::ValueKind::Computed,
+        )
+    }
+
+    /// The base value of an attribute, before modifiers. Mobs, armor stands
+    /// and the dragon return None until they have live attribute maps.
+    /// API @API:living_refs@.
+    pub(super) fn native_living_attribute_base(
+        &mut self,
+        living: LivingRef,
+        id: &str,
+    ) -> Option<f64> {
+        self.native_living_attribute(living, id, horizon_world::attribute_map::ValueKind::Base)
+    }
+
+    fn native_living_attribute(
+        &mut self,
+        living: LivingRef,
+        name: &str,
+        kind: horizon_world::attribute_map::ValueKind,
+    ) -> Option<f64> {
+        let player = match self.native_living_target(living)? {
+            Target::Player => self.player.as_mut()?,
+            Target::Guest(conn) => self
+                .lan
+                .as_mut()?
+                .hub
+                .guest_mut(conn)?
+                .motion
+                .as_deref_mut()?,
+            _ => return None,
+        };
+        let key = player.attributes.key(name)?;
+        player.attributes.value(Some(key), kind).ok()
+    }
+
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
-    /// None when it is empty, the entity has no such slot (a player has no
-    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    /// None when it is empty, unsupported (player body and saddle storage is
+    /// not yet modeled), or the handle is stale. API @API:living_refs@.
     pub(super) fn native_living_equipment(
         &self,
         living: LivingRef,
@@ -130,7 +178,7 @@ impl Game<'_> {
         self.native_living_equipment(living, slot)
     }
     /// Puts `stack` (None: empties it) in equipment slot `slot`
-    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// (`LivingEntity.setItemSlot`). False
     /// when the entity has no such slot or is a mob. Mob equipment writes
     /// are not supported until full equipment stacks can be stored.
     /// API @API:living_refs@.
