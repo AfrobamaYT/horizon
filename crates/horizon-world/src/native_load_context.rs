@@ -3,6 +3,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 /// The phase that owns this data load, selected before handing work to loaders.
@@ -37,15 +38,21 @@ impl LoadInputs {
 
 /// Origin and borrowed engine inputs for one owning load. This contains no
 /// game, world handles or mutable registry access.
-pub struct LoadContext<'a> {
+pub struct LoadContext {
     origin: DataLoadOrigin,
-    inputs: &'a LoadInputs,
+    inputs: Arc<LoadInputs>,
 }
 
-impl<'a> LoadContext<'a> {
+impl LoadContext {
     /// Called at a load boundary, never by a reader of already-loaded data.
-    pub fn new(origin: DataLoadOrigin, inputs: &'a LoadInputs) -> Self {
+    pub fn new(origin: DataLoadOrigin, inputs: Arc<LoadInputs>) -> Self {
         Self { origin, inputs }
+    }
+
+    /// Start another owning load over this resource generation's metadata.
+    /// Only the boundary chooses the new origin; readers borrow its context.
+    pub fn for_load(&self, origin: DataLoadOrigin) -> Self {
+        Self::new(origin, self.inputs.clone())
     }
 
     pub fn origin(&self) -> DataLoadOrigin {

@@ -75,8 +75,9 @@ pub fn main_with(mods: crate::mod_api::Mods) {
             loot_table_load: |id, table| {
                 crate::mod_api::dispatch_loot_table_load(id, table);
             },
-            modify_default_components: |item, components| {
-                crate::mod_api::dispatch_modify_default_components(item, components);
+            modify_default_components: |context, item, components| {
+                let context = crate::mod_api::DataLoadContext::new(context);
+                crate::mod_api::dispatch_modify_default_components(&context, item, components);
             },
             loot_function: |kind, data, ctx, stack| {
                 crate::mod_api::dispatch_loot_function(kind, data, ctx, stack);

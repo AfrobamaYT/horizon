@@ -8,13 +8,17 @@ use horizon_client_lib::{
 };
 use horizon_world::{
     loot::{LootData, PackOverlay},
+    native_load_context::{DataLoadOrigin, LoadContext, LoadInputs},
     native_load_hooks::{self, NativeLoadHooks},
 };
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 static CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -65,7 +69,10 @@ fn default_components_reader_baseline() -> client::Result<()> {
     assert!(
         native_load_hooks::install(NativeLoadHooks {
             loot_table_load: |_, _| {},
-            modify_default_components: |item, _| {
+            modify_default_components: |context, item, _| {
+                assert_eq!(context.origin(), DataLoadOrigin::ClientPreload);
+                assert_eq!(context.mods(), ["probe"]);
+                assert_eq!(context.registry("minecraft:item").unwrap(), ["probe:token"]);
                 if item == "probe:token" {
                     CALLS.fetch_add(1, Ordering::Relaxed);
                 }
@@ -77,7 +84,16 @@ fn default_components_reader_baseline() -> client::Result<()> {
     );
     horizon_protocol::item::custom::install(0, vec!["probe:marker".into()]).unwrap();
 
-    let defaults = horizon_world::item_defaults::read(&root)?;
+    let context = LoadContext::new(
+        DataLoadOrigin::ClientPreload,
+        Arc::new(LoadInputs::new(
+            BTreeMap::from([("minecraft:item".into(), vec!["probe:token".into()])]),
+            root.join("settings"),
+            vec!["probe".into()],
+        )),
+    );
+    let mut defaults = horizon_world::item_defaults::read(&root)?;
+    defaults.apply_native(&context);
     let items = horizon_items::items::Items::catalog(&root, &PackOverlay::NONE)?;
     assert_eq!(items.get("probe:token").unwrap().max_stack, 16);
     let library = client::model_library::ParsedModels::load(&root).into_item_library();
@@ -86,11 +102,11 @@ fn default_components_reader_baseline() -> client::Result<()> {
     let _banners = client::banner::Banners::load(&root);
     let _loot = LootData::load(&root, &PackOverlay::NONE)?;
     let identity = client::content_identity::identity(&root)?;
-    assert_eq!(CALLS.load(Ordering::Relaxed), 8);
+    assert_eq!(CALLS.load(Ordering::Relaxed), 1);
     assert_eq!(client.models.prototypes, server.models.prototypes);
     assert_eq!(
         client.models.prototypes["probe:token"]["minecraft:max_stack_size"],
-        defaults["probe:token"]["minecraft:max_stack_size"]
+        defaults.entries()["probe:token"]["minecraft:max_stack_size"]
     );
 
     let state = client.resolve(
@@ -119,21 +135,49 @@ fn default_components_reader_baseline() -> client::Result<()> {
         6,
         "parity must compare actual submitted geometry"
     );
-    println!("baseline calls={}", CALLS.load(Ordering::Relaxed));
-    println!(
-        "baseline prototypes_sha256={:x}",
+    let submitted: Vec<_> = quads
+        .iter()
+        .map(|q| {
+            serde_json::json!({
+                "pos": q.pos.map(|p| p.to_array()),
+                "uv": q.uv,
+                "foil_uv": q.foil_uv,
+                "normal": q.normal.to_array(),
+                "color": q.color,
+                "foil": match q.foil {
+                    client::item_render::Foil::None => "none",
+                    client::item_render::Foil::Standard => "standard",
+                    client::item_render::Foil::Special => "special",
+                },
+                "light_emission": q.light_emission,
+                "cull_back": q.cull_back,
+                "translucent": q.translucent,
+                "oit": q.oit,
+            })
+        })
+        .collect();
+    println!("snapshot calls={}", CALLS.load(Ordering::Relaxed));
+    let prototypes = format!(
+        "{:x}",
         Sha256::digest(serde_json::to_vec(&client.models.prototypes)?)
     );
-    println!(
-        "baseline rendered_sha256={:x}",
-        Sha256::digest(format!("{quads:?}"))
+    let rendered = format!("{:x}", Sha256::digest(serde_json::to_vec(&submitted)?));
+    let identity = identity
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    // Captured before replacing per-reader hooks with a shared snapshot.
+    assert_eq!(
+        prototypes,
+        "589cbe331228acea9effa9530430c764ce788be92f1116410004b84eacf80915"
     );
-    println!(
-        "baseline identity={}",
-        identity
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
+    assert_eq!(
+        rendered,
+        "83256455fb1f378382229fb0859d052acac47c54547f1aef4fa14ea086961867"
+    );
+    assert_eq!(
+        identity,
+        "0df20aa03226c10182811a27c1cbcd9ad9ba957e48b1713a5ebc6ee8156af0aa"
     );
     fs::remove_dir_all(&root)?;
     Ok(())

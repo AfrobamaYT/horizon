@@ -77,10 +77,14 @@ impl RegistrationContext<'_> {
 /// }
 /// ```
 pub struct DataLoadContext<'a> {
-    source: &'a horizon_world::native_load_context::LoadContext<'a>,
+    source: &'a horizon_world::native_load_context::LoadContext,
 }
 
-impl DataLoadContext<'_> {
+impl<'a> DataLoadContext<'a> {
+    pub(crate) fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
+        Self { source }
+    }
+
     /// The phase selected at the owning load boundary.
     pub fn origin(&self) -> DataLoadOrigin {
         self.source.origin()
