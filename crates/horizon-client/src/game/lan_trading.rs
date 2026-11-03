@@ -807,7 +807,11 @@ mod tests {
         use horizon_client::mod_api::{self, Hooks, Host, TradeSelectEvent};
         struct Observer(Seen);
         impl Hooks for Observer {
-            fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+            fn trade_select(
+                &self,
+                host: &mut dyn crate::mod_api::ServerHost,
+                event: &mut TradeSelectEvent<'_>,
+            ) {
                 let merchant = event
                     .villager
                     .and_then(|id| host.entity(id))

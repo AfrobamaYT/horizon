@@ -22231,7 +22231,11 @@ mod tests {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
-            fn data_pack_files(&self, _: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+            fn data_pack_files(
+                &self,
+                _: &mut dyn crate::mod_api::ServerHost,
+                event: &mut DataPackFilesEvent<'_>,
+            ) {
                 event.files.push((
                     "tags/test:block/reload".into(),
                     br#"{"values":["minecraft:stone"]}"#.to_vec(),
@@ -22269,7 +22273,7 @@ mod tests {
         impl Hooks for Observer {
             fn right_click_block(
                 &self,
-                _: &mut dyn Host,
+                _: crate::mod_api::HostSide,
                 event: &mut RightClickBlockEvent<'_>,
             ) -> Flow {
                 self.2.fetch_add(1, Ordering::SeqCst);

@@ -485,7 +485,7 @@ mod tests {
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn crate::mod_api::ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.joins.lock().unwrap().push((
@@ -499,7 +499,11 @@ mod tests {
                     Flow::Continue
                 }
             }
-            fn entity_leave_level(&self, _: &mut dyn Host, event: &mut EntityLeaveLevelEvent<'_>) {
+            fn entity_leave_level(
+                &self,
+                _: &mut dyn crate::mod_api::ServerHost,
+                event: &mut EntityLeaveLevelEvent<'_>,
+            ) {
                 self.leaves.lock().unwrap().push(event.entity);
             }
         }

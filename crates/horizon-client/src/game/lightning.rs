@@ -762,7 +762,7 @@ mod tests {
         impl Hooks for Observer {
             fn living_conversion_pre(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn crate::mod_api::ServerHost,
                 _: &mut LivingConversionPreEvent<'_>,
             ) -> Flow {
                 self.pre.fetch_add(1, Ordering::SeqCst);
@@ -770,7 +770,7 @@ mod tests {
             }
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn crate::mod_api::ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 if event.kind == "minecraft:cow" && self.cancel_cow.load(Ordering::SeqCst) {
@@ -781,7 +781,7 @@ mod tests {
             }
             fn living_conversion_post(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn crate::mod_api::ServerHost,
                 event: &mut LivingConversionPostEvent<'_>,
             ) {
                 let old = host

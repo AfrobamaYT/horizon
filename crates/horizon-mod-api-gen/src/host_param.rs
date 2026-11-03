@@ -19,7 +19,7 @@ pub(super) fn host_param(
     mutable.map(|mutable| {
         if !is_level {
             let (ty, call) = match hook.side {
-                HelperSide::Server if hook["host"].as_str() == Some("read") => {
+                HelperSide::Server | HelperSide::Both if hook["host"].as_str() == Some("read") => {
                     ("&dyn Host", "&*self")
                 }
                 HelperSide::Server => ("&mut dyn ServerHost", "self"),

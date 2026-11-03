@@ -290,7 +290,7 @@ mod tests {
         impl Hooks for Award {
             fn experience_orb_merge(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn crate::mod_api::ServerHost,
                 event: &mut ExperienceOrbMergeEvent<'_>,
             ) -> Flow {
                 if event.from == 80 {

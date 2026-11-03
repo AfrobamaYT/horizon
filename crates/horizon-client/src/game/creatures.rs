@@ -8265,7 +8265,11 @@ mod living_drops_tests {
         };
         struct Observer(Arc<Mutex<Vec<String>>>, Arc<AtomicBool>);
         impl Hooks for Observer {
-            fn living_drops(&self, _: &mut dyn Host, event: &mut LivingDropsEvent<'_>) -> Flow {
+            fn living_drops(
+                &self,
+                _: &mut dyn crate::mod_api::ServerHost,
+                event: &mut LivingDropsEvent<'_>,
+            ) -> Flow {
                 let items: Vec<_> = event
                     .drops
                     .iter()

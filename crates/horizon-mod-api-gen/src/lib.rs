@@ -1306,6 +1306,14 @@ mod tests {
             host_param(&game, Some(true), false),
             param("HostSide", "HostSide::of(self)")
         );
+        let read = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
+            side: super::HelperSide::Both,
+        };
+        assert_eq!(
+            host_param(&read, Some(false), false),
+            param("&dyn Host", "&*self")
+        );
     }
 
     #[test]

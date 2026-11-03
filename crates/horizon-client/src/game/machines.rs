@@ -788,6 +788,7 @@ impl Game<'_> {
             return;
         }
         self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
+        let c = self.containers();
         let mut changed = false;
         if !c.is_empty(&view) {
             changed = self.hopper_eject(pos, &view);
@@ -951,7 +952,7 @@ impl Game<'_> {
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
     /// is a capability part: whether a mod canceled the move.
-    fn part_move_canceled(&self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
+    fn part_move_canceled(&mut self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
         let mut cancel = false;
         self.native_inventory_move_item(source, destination, item, &mut cancel);
         cancel
@@ -1198,6 +1199,7 @@ impl Game<'_> {
             Some([above.0, above.1, above.2]),
             None,
         );
+        let c = self.containers();
         if let Kind::Composter(level) = source.kind {
             if level != 8 {
                 return Some(false);

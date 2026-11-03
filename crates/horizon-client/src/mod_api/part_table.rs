@@ -843,6 +843,7 @@ pub(crate) mod tests {
     }
     struct NoHost;
     impl Host for NoHost {}
+    impl crate::mod_api::ServerHost for NoHost {}
 
     #[test]
     fn a_host_without_a_backend_refuses_handle_calls() {
@@ -3243,6 +3244,7 @@ pub(crate) mod tests {
 
     /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
     struct Ordered;
+    impl crate::mod_api::ServerHost for Ordered {}
     impl Backend for Ordered {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()

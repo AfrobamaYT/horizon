@@ -2796,7 +2796,7 @@ impl Game<'_> {
         block: &str,
         container: &mut Option<ModContainer>,
     ) {
-        mod_api::dispatch_block_entity_container(mod_api::HostSide::of(self), block, container);
+        mod_api::dispatch_block_entity_container(self, block, container);
     }
     /// Block `block`'s block entity has fluid tanks: set `fluids` when the
     /// block is yours, in the container's shape — each tank's capacity in
@@ -2839,7 +2839,7 @@ impl Game<'_> {
     /// `minecraft:container`, as a shulker box item keeps them.
     /// API @API:item_container@.
     pub(super) fn native_item_container(&self, item: &str, slots: &mut Option<u32>) {
-        mod_api::dispatch_item_container(mod_api::HostSide::of(self), item, slots);
+        mod_api::dispatch_item_container(self, item, slots);
     }
     /// A server tick of the block entity at `pos`, in vanilla's order among
     /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
@@ -3004,8 +3004,8 @@ impl Game<'_> {
     /// when the block is yours, to lay its screen out (`native_screen_draw`
     /// draws it). The server asks it too: a slot it hides is not in the menu
     /// there either, so shift-clicks never fill it. API 19.
-    pub(super) fn native_screen(&mut self, block: &str, screen: &mut Option<NativeScreen>) {
-        mod_api::dispatch_screen(mod_api::HostSide::of(self), block, screen);
+    pub(super) fn native_screen(&self, block: &str, screen: &mut Option<NativeScreen>) {
+        mod_api::dispatch_screen(self, block, screen);
     }
     /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
     /// over a plain panel with its slots' frames and under the items and
@@ -4586,16 +4586,16 @@ impl Game<'_> {
         mod_api::dispatch_block_dispense_armor(self, dimension, pos, item, target);
     }
     /// A brewing stand at `pos` began brewing `ingredient`, after fuel and the timer were set. Server-side. 200.
-    pub(super) fn native_brewing_start(&self, pos: [i32; 3], ingredient: &str) {
+    pub(super) fn native_brewing_start(&mut self, pos: [i32; 3], ingredient: &str) {
         mod_api::dispatch_brewing_start(self, pos, ingredient);
     }
     /// A brewing stand at `pos` consumed `fuel` and gained brewing fuel. Server-side. 199.
-    pub(super) fn native_brewing_fuel(&self, pos: [i32; 3], fuel: &str) {
+    pub(super) fn native_brewing_fuel(&mut self, pos: [i32; 3], fuel: &str) {
         mod_api::dispatch_brewing_fuel(self, pos, fuel);
     }
     /// A brewing stand finished brewing at `pos`, after its bottle contents
     /// were changed. Server-side. 198.
-    pub(super) fn native_brewing_complete(&self, pos: [i32; 3]) {
+    pub(super) fn native_brewing_complete(&mut self, pos: [i32; 3]) {
         mod_api::dispatch_brewing_complete(self, pos);
     }
     /// A server player took `stack` from a brewing stand bottle slot
@@ -4686,19 +4686,19 @@ impl Game<'_> {
         mod_api::dispatch_enchantment_level_set(self, pos, offer, level);
     }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
-    pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
+    pub(super) fn native_campfire_start(&mut self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_campfire_start(self, pos, item);
     }
     /// A block finished cooking `item` into `result` at `pos`. 188.
-    pub(super) fn native_block_cook(&self, pos: [i32; 3], item: &str, result: &str) {
+    pub(super) fn native_block_cook(&mut self, pos: [i32; 3], item: &str, result: &str) {
         mod_api::dispatch_block_cook(self, pos, item, result);
     }
     /// A compostable item was added to the composter at `pos`. 204.
-    pub(super) fn native_compost_item(&self, pos: [i32; 3], item: &str) {
+    pub(super) fn native_compost_item(&mut self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_compost_item(self, pos, item);
     }
     /// A crafter at `pos` completed recipe `recipe`. 205.
-    pub(super) fn native_crafter_craft(&self, pos: [i32; 3], recipe: &str) {
+    pub(super) fn native_crafter_craft(&mut self, pos: [i32; 3], recipe: &str) {
         mod_api::dispatch_crafter_craft(self, pos, recipe);
     }
     /// A server player is about to open an inventory supplied by a block at
@@ -4816,7 +4816,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_player_break_speed(
-            self,
+            mod_api::HostSide::of(self),
             player,
             pos,
             state,
@@ -5292,7 +5292,13 @@ impl Game<'_> {
         projectile: &mut Option<ItemStack>,
     ) {
         mod_api::dispatch_living_get_projectile(
-            self, player, name, entity, kind, weapon, projectile,
+            mod_api::HostSide::of(self),
+            player,
+            name,
+            entity,
+            kind,
+            weapon,
+            projectile,
         );
     }
 
@@ -5353,18 +5359,18 @@ impl Game<'_> {
     /// A furnace at `pos` began cooking `item` (its cooking timer advanced
     /// from zero). Server-side.
     /// 230.
-    pub(super) fn native_furnace_start_smelt(&self, pos: [i32; 3], item: &str) {
+    pub(super) fn native_furnace_start_smelt(&mut self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_furnace_start_smelt(self, pos, item);
     }
     /// A furnace at `pos` consumed fuel and began or resumed burning it.
     /// `fuel` is the item consumed from its fuel slot. Server-side.
     /// 227.
-    pub(super) fn native_furnace_burn(&self, pos: [i32; 3], fuel: &str) {
+    pub(super) fn native_furnace_burn(&mut self, pos: [i32; 3], fuel: &str) {
         mod_api::dispatch_furnace_burn(self, pos, fuel);
     }
     /// A furnace finished smelting `item` into `result` at `pos`. Server-side.
     /// 229.
-    pub(super) fn native_furnace_smelt(&self, pos: [i32; 3], item: &str, result: &str) {
+    pub(super) fn native_furnace_smelt(&mut self, pos: [i32; 3], item: &str, result: &str) {
         mod_api::dispatch_furnace_smelt(self, pos, item, result);
     }
     /// A server player took an output from a furnace at `pos`; `item` is the
@@ -5650,7 +5656,8 @@ impl Game<'_> {
 
     /// Possible natural spawns at a server position (NeoForge's
     /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
-    /// remove entries, or cancel to make the list empty.
+    /// remove entries, or cancel to make the list empty. Mods can read the world,
+    /// but cannot write it during the spawn pass.
     /// @API:native_potential_spawns@.
     pub(super) fn native_potential_spawns(
         &self,
@@ -5955,7 +5962,7 @@ impl Game<'_> {
     /// A hopper at `pos` began an item transfer attempt. This runs after its
     /// cooldown and enabled checks, before pushing or pulling any items.
     /// Server-side, including the single-player server. 352.
-    pub(super) fn native_prepare_hopper_transfer(&self, pos: [i32; 3]) {
+    pub(super) fn native_prepare_hopper_transfer(&mut self, pos: [i32; 3]) {
         mod_api::dispatch_prepare_hopper_transfer(self, pos);
     }
     /// A hopper is about to move one item between containers, a composter's
@@ -5974,7 +5981,7 @@ impl Game<'_> {
     /// pull. Exactly one of `container` and `entity` identifies the target.
     /// 333.
     pub(super) fn native_hopper_inventory_search(
-        &self,
+        &mut self,
         hopper: [i32; 3],
         container: Option<[i32; 3]>,
         entity: Option<u32>,
@@ -5982,7 +5989,7 @@ impl Game<'_> {
         mod_api::dispatch_hopper_inventory_search(self, hopper, container, entity);
     }
     /// A vault at `pos` is about to eject a loot item. 353.
-    pub(super) fn native_vault_loot(&self, pos: [i32; 3], item: &str) {
+    pub(super) fn native_vault_loot(&mut self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_vault_loot(self, pos, item);
     }
     /// A timed world-border size change finished on the server, after its
@@ -6288,7 +6295,7 @@ impl Game<'_> {
     /// frame the hand draws one in use, on both sides. It has no user, as
     /// it is asked so often: answer from the stack alone. API 90.
     pub(super) fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32) {
-        mod_api::dispatch_use_duration(mod_api::HostSide::of(self), stack, duration);
+        mod_api::dispatch_use_duration(self, stack, duration);
     }
     /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
     /// `animation` arrives with its consumable's (`eat`, `drink`), else
@@ -6306,7 +6313,7 @@ impl Game<'_> {
     /// let a full player eat. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone. API 90.
     pub(super) fn native_can_eat(&self, stack: &ItemStack, can_eat: &mut bool) {
-        mod_api::dispatch_can_eat(mod_api::HostSide::of(self), stack, can_eat);
+        mod_api::dispatch_can_eat(self, stack, can_eat);
     }
     /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
     /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
@@ -6330,7 +6337,12 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_entity_use_item_start(
-            self, stack, entity, hand, duration, canceled,
+            mod_api::HostSide::of(self),
+            stack,
+            entity,
+            hand,
+            duration,
+            canceled,
         );
     }
     /// NeoForge's `LivingEntityUseItemEvent.Finish`: `entity`'s use of
@@ -6382,7 +6394,12 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_entity_use_item_tick(
-            self, stack, entity, hand, duration, canceled,
+            mod_api::HostSide::of(self),
+            stack,
+            entity,
+            hand,
+            duration,
+            canceled,
         );
     }
     /// `Item.onUseTick` of `stack`, used by `entity` with `remaining` ticks
@@ -6420,7 +6437,12 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_entity_use_item_stop(
-            self, stack, entity, hand, duration, canceled,
+            mod_api::HostSide::of(self),
+            stack,
+            entity,
+            hand,
+            duration,
+            canceled,
         );
     }
     /// NeoForge's `ArrowLooseEvent`: the player releases a bow `stack` with
@@ -6563,7 +6585,7 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_right_click_block(
-            self,
+            mod_api::HostSide::of(self),
             click,
             use_block,
             use_item,
@@ -6594,13 +6616,7 @@ impl Game<'_> {
         final_state: &mut Option<BlockStateId>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_block_tool_modification(
-            mod_api::HostSide::of(self),
-            stack,
-            tool,
-            final_state,
-            cancel,
-        );
+        mod_api::dispatch_block_tool_modification(self, stack, tool, final_state, cancel);
     }
 
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
@@ -7284,7 +7300,7 @@ impl Game<'_> {
     /// (a HEAD injection), or the server skips swapping the player in for it,
     /// and with this empty the pickup costs nothing more without mods.
     /// Server-side. 155.
-    pub(super) fn native_experience_orb_pickup_listened(&self, listened: &mut bool) {
+    pub(super) fn native_experience_orb_pickup_listened(&mut self, listened: &mut bool) {
         mod_api::dispatch_experience_orb_pickup_listened(self, listened);
     }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
@@ -9658,7 +9674,7 @@ impl Game<'_> {
     /// The container slots (of `size`) that the mod's screen for the block at
     /// `pos` does not show: the server's menu does not have them either, so a
     /// shift-click never moves an item where the player cannot see it.
-    pub(super) fn native_hidden_slots(&mut self, pos: Pos, size: usize) -> Vec<usize> {
+    pub(super) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
         if self.mod_menu_at(pos).is_none() {
             return Vec::new();
         }

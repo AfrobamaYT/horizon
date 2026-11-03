@@ -100,6 +100,14 @@ pub(super) fn emit(
         let is_level = hook["target"]
             .as_str()
             .is_some_and(|target| target.contains("::GameLevel<"));
+        if let Some(marker) = hook.get("host") {
+            if is_level || hook.side == HelperSide::Client {
+                return Err(format!("{name}: this entry takes no host marker"));
+            }
+            if marker.as_str() != Some("read") {
+                return Err(format!("{name}: invalid host marker"));
+            }
+        }
         let ticks = is_level
             && args.iter().any(|(name, ty)| {
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"

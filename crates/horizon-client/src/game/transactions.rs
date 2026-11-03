@@ -519,7 +519,7 @@ mod tests {
         // Pins the opaque backend: a real game always hands one out, so a None
         // from Host::backend is a bug, never a fallback.
         assert!(crate::mod_api::Host::backend(&game).is_some());
-        assert!(crate::mod_api::Host::backend_mut(&mut game).is_some());
+        assert!(crate::mod_api::ServerHost::backend_mut(&mut game).is_some());
         let level = game.native_level("minecraft:overworld").unwrap();
         let registry = &game.pack.assets.registry;
         let chest = registry.default_state("minecraft:chest").unwrap();
@@ -905,7 +905,9 @@ mod mod_capability_tests {
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
     use horizon_client::mod_api::part_tests::{CHEMICALS, ChemTank, Chemical, game_thread};
-    use horizon_client::mod_api::{BlockSide, Host, ResourceHandler, move_resources};
+    use horizon_client::mod_api::{
+        BlockSide, Host, HostTransaction, ResourceHandler, move_resources,
+    };
     use horizon_world::nbt::{Compound, Tag};
     use std::sync::Arc;
 
