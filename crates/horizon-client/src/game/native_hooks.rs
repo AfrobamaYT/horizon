@@ -4680,7 +4680,7 @@ impl Game<'_> {
     /// keeps its meaning of an item that drops without a player kill; a mod's
     /// choice doesn't change that. `damage_type`, `attacker` and
     /// `recently_hit` are as in `native_living_drops`. Server-side.
-    pub(super) fn native_equipment_drop_chance(
+    pub(super) fn native_get_equipment_drop_chance(
         &mut self,
         entity: u32,
         kind: &str,
@@ -4690,7 +4690,7 @@ impl Game<'_> {
         recently_hit: bool,
         chance: &mut f32,
     ) {
-        mod_api::dispatch_equipment_drop_chance(
+        mod_api::dispatch_get_equipment_drop_chance(
             self,
             mod_api::mods(),
             entity,

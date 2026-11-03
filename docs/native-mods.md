@@ -2417,7 +2417,7 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets. Edit the list or set `cancel`
   for no drops; experience orbs are separate (`native_living_experience_drop`). `native_loot_drops` stays for loot that is not a
   death (blocks, shearing, leads); for a mob's death it is heard first (it edits the stacks a table rolled), and this hook then fires once on the whole collected list, with nothing spawned until it returns.
-- **`native_equipment_drop_chance(entity, kind, slot, damage_type, attacker, recently_hit, chance)`**: NeoForge's
+- **`native_get_equipment_drop_chance(entity, kind, slot, damage_type, attacker, recently_hit, chance)`**: NeoForge's
   `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item in `slot`; the roll is drawn whatever the chance is.
 
 ### A block's items

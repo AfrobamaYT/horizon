@@ -1638,7 +1638,7 @@ impl Game<'_> {
             // GetEquipmentDropChanceEvent, asked before `die` rolls the chances.
             death.equipment_chance = drops::equipment_chances(m, &death, |slot, chance| {
                 let mut chance = chance;
-                self.native_equipment_drop_chance(
+                self.native_get_equipment_drop_chance(
                     m.id,
                     &kind,
                     EquipmentSlot::ALL[slot],
