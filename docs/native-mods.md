@@ -3335,7 +3335,7 @@ The following documented `Game` helpers are not in the trait yet:
   `set_display`, `sidebar`, `experience_orbs`,
   `item_entities`, `player`, `panel_recipes`, `recipes`, `component`,
   `set_component`, `remove_component`, `spawn_falling_block`, `explode`,
-  `fluid_tanks` and `container_slots` use gameplay-private types.
+  `container_slots` uses gameplay-private types.
 - `with_mod_block_entity` and `trigger_criterion` are generic or take
   `impl Trait`, so their signatures cannot be called through `dyn Host`.
 
