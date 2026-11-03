@@ -726,16 +726,8 @@ pub fn mob_to_nbt(
             } else {
                 map.remove(&"Items".into());
             }
+            // Body and saddle are written with the other slots below.
             let mut equipment = Vec::new();
-            if let Some(saddle) = m.saddle_item() {
-                equipment.push(("saddle", crate::save::item_to_nbt(&saddle)));
-            }
-            if let Some(armor) = &m.extra.body {
-                equipment.push((
-                    "body",
-                    Tag::compound([("id", string(armor)), ("count", Tag::Int(1))]),
-                ));
-            }
             // A helmet given to the mount (say by `/item ... armor.head`)
             // keeps its own slot.
             if let Some(helmet) = &m.extra.head {
@@ -780,18 +772,6 @@ pub fn mob_to_nbt(
                     .collect(),
             };
             map.insert("attributes".into(), Tag::List(attributes));
-        }
-        "minecraft:pig" | "minecraft:strider" => {
-            let mut equipment = match map.get(&"equipment".into()) {
-                Some(Tag::Compound(c)) => c.clone(),
-                _ => Compound::new(),
-            };
-            if let Some(saddle) = m.saddle_item() {
-                equipment.insert("saddle".into(), crate::save::item_to_nbt(&saddle));
-            } else {
-                equipment.remove(&"saddle".into());
-            }
-            map.insert("equipment".into(), Tag::Compound(equipment));
         }
         "minecraft:bat" => {
             map.insert("BatFlags".into(), Tag::Byte(i8::from(m.extra.flag)));
@@ -953,14 +933,6 @@ pub fn mob_to_nbt(
                 "LastPoseTick".into(),
                 Tag::Long(crate::mobs::camel::synced_pose_tick(m, 0)),
             );
-            if let Some(saddle) = m.saddle_item() {
-                map.insert(
-                    "equipment".into(),
-                    Tag::compound([("saddle", crate::save::item_to_nbt(&saddle))]),
-                );
-            } else {
-                map.remove(&"equipment".into());
-            }
         }
         "minecraft:nautilus" | "minecraft:zombie_nautilus" => {
             crate::mobs::nautilus::to_nbt(m, map);
@@ -1275,25 +1247,23 @@ pub fn mob_to_nbt(
                 }
             }
         }
-        if let Some(id) = &m.extra.body {
+        let body = m.extra.body.as_ref().map(|id| {
             let mut stack = crate::items::ItemStack::new(id, m.extra.body_count.max(1));
             stack.damage = m.extra.body_damage.max(0) as u32;
             stack.extra = m.extra.body_extra.clone();
-            equipment.insert("body".into(), crate::save::item_to_nbt(&stack));
-        } else {
-            equipment.remove(&"body".into());
-        }
-        if let Some(saddle) = m.saddle_item() {
-            equipment.insert("saddle".into(), crate::save::item_to_nbt(&saddle));
-        } else {
-            equipment.remove(&"saddle".into());
-        }
-        // Vanilla saves `equipment` only when something is equipped.
-        if equipment.is_empty() {
-            map.remove(&"equipment".into());
-        } else {
-            map.insert("equipment".into(), Tag::Compound(equipment));
-        }
+            stack
+        });
+        horizon_items::equipment::put(
+            &mut equipment,
+            horizon_items::equipment::BODY,
+            body.as_ref(),
+        );
+        horizon_items::equipment::put(
+            &mut equipment,
+            horizon_items::equipment::SADDLE,
+            m.saddle_item().as_ref(),
+        );
+        horizon_items::equipment::store(map, equipment);
     }
     tag
 }
@@ -1533,12 +1503,14 @@ pub fn mob_from_nbt(
             .map(Into::into);
         let slot = |key| eq.get(key).and_then(|i| text(i.get("id"))).map(Into::into);
         m.extra.head = slot("head");
-        m.extra.body = slot("body");
-        let body = eq.get("body").and_then(crate::save::item_from_nbt);
-        m.extra.body_count = body.as_ref().map_or(0, |s| s.count);
-        m.extra.body_damage = body.as_ref().map_or(0, |s| s.damage as i32);
-        m.extra.body_extra = body.and_then(|s| s.extra);
-        m.set_saddle(eq.get("saddle").and_then(crate::save::item_from_nbt));
+        // Body and saddle: the one `equipment` codec.
+        let equipment = horizon_items::equipment::Equipment::read(eq);
+        let body = equipment.get(horizon_items::equipment::BODY);
+        m.extra.body = body.map(|s| s.item.clone());
+        m.extra.body_count = body.map_or(0, |s| s.count);
+        m.extra.body_damage = body.map_or(0, |s| s.damage as i32);
+        m.extra.body_extra = body.and_then(|s| s.extra.clone());
+        m.set_saddle(equipment.get(horizon_items::equipment::SADDLE).cloned());
         m.extra.chest = slot("chest");
         m.extra.legs = slot("legs");
         m.extra.feet = slot("feet");
@@ -1680,14 +1652,9 @@ pub fn mob_from_nbt(
         m.species(),
         crate::mobs::Species::Pig | crate::mobs::Species::Strider
     ) {
-        let saddle = tag
-            .get("equipment")
-            .and_then(|e| e.get("saddle"))
-            .and_then(crate::save::item_from_nbt);
-        if saddle.is_some() || flag(tag, "Saddle") {
-            m.set_saddle(Some(saddle.unwrap_or_else(|| {
-                crate::items::ItemStack::new("minecraft:saddle", 1)
-            })));
+        // The old `Saddle` flag, when `equipment` held none.
+        if flag(tag, "Saddle") && m.saddle_item().is_none() {
+            m.set_saddle(Some(crate::items::ItemStack::new("minecraft:saddle", 1)));
         }
     }
     if crate::mobs::equine::is_equine(m.species()) {
@@ -1705,11 +1672,6 @@ pub fn mob_from_nbt(
         if m.extra.chested {
             m.extra.items = crate::save::decode_items(tag.get("Items"), 15);
         }
-        let eq = tag.get("equipment");
-        m.set_saddle(
-            eq.and_then(|e| e.get("saddle"))
-                .and_then(crate::save::item_from_nbt),
-        );
         if let Some(Tag::List(attrs)) = tag.get("attributes") {
             for a in attrs {
                 let (Some(id), Some(Tag::Double(bits))) = (text(a.get("id")), a.get("base")) else {
@@ -6261,3 +6223,6 @@ mod mod_thrown_nbt_tests {
         assert!(orb_to_nbt(&orb, [1; 4]).get("NoGravity").is_none());
     }
 }
+
+#[cfg(test)]
+mod equipment_tests;
