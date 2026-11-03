@@ -243,6 +243,7 @@ mod native_level_items;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
+mod native_living_effects;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;

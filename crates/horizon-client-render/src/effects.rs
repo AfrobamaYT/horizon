@@ -81,7 +81,8 @@ impl EffectInstance {
             self.downgrade();
         }
     }
-    fn tick_down(&mut self) {
+    /// Counts down this instance and its hidden chain without promoting it.
+    pub fn tick_down(&mut self) {
         if let Some(h) = self.hidden.as_mut() {
             h.tick_down();
         }
