@@ -821,10 +821,15 @@ mod death_loot_table_tests {
         let run = |chosen| {
             let mut m = mob();
             let mut sequences = RandomSequences::default();
-            let (out, _) = die(&mut m, &death(chosen), &mut sequences, &mut LegacyRandom::new(7));
-            let stick = out.iter().any(
-                |d| matches!(d, Drop::Item(s) if s.item == "minecraft:stick"),
+            let (out, _) = die(
+                &mut m,
+                &death(chosen),
+                &mut sequences,
+                &mut LegacyRandom::new(7),
             );
+            let stick = out
+                .iter()
+                .any(|d| matches!(d, Drop::Item(s) if s.item == "minecraft:stick"));
             (stick, m.random.next_float())
         };
         let (always, after_always) = run(chosen);
