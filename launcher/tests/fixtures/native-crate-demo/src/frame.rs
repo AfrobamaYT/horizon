@@ -7,7 +7,7 @@ fn crate_demo_frame(game: &mut crate::game::Game<'_>) {
         return;
     }
     // The bundle's data/greeting.txt, compiled in.
-    let greeting = horizon_client::native_data!("crate_demo", "greeting.txt");
+    let greeting = horizon_client::native_data!("crate_demo", "crate_demo/greeting.txt");
     // What the post-build step wrote when the launcher built this game.
     let baked = match game.native_built_data("crate_demo") {
         Some(dir) => std::fs::read_to_string(dir.join("baked.txt"))

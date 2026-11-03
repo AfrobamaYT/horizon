@@ -428,7 +428,7 @@ pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     }
     let mut found = Vec::new();
     walk(root, DEPTH, &mut found)?;
-    found.sort_by(|a, b| a.id.cmp(&b.id));
+    found.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
     Ok(found)
 }
 
@@ -481,7 +481,7 @@ pub fn fetch(found: &Resolved) -> Result<Vec<Packed>, String> {
     }
     let packed: Result<Vec<Packed>, String> = mods
         .iter()
-        .map(|m| checked(&pack(m)?, &dir).map_err(|e| format!("{}: {e}", m.id)))
+        .map(|m| checked(&pack(m)?, &dir).map_err(|e| format!("{}: {e}", m.manifest.id)))
         .collect();
     let _ = fs::remove_dir_all(dir.join("source"));
     packed

@@ -1,6 +1,6 @@
 //! Validated flat packages and launcher-owned horizon-mixins input.
 use super::{Bundle, Injection, InjectionSite, MANIFEST};
-use horizon_mods::{Package, manifest};
+use horizon_mods::{manifest, Package};
 use std::{fs, path::Path};
 
 pub(super) fn read(dir: &Path) -> Result<Option<Bundle>, String> {
@@ -57,8 +57,8 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
     manifest.insert(
         "mod".into(),
         toml::Value::Table(toml::Table::from_iter([
-            ("id".into(), bundle.id.clone().into()),
-            ("version".into(), bundle.version.clone().into()),
+            ("id".into(), bundle.manifest.id.clone().into()),
+            ("version".into(), bundle.manifest.version.clone().into()),
         ])),
     );
     manifest.insert(

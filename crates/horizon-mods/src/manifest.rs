@@ -502,6 +502,8 @@ impl Package {
                             .checked_add(size)
                             .ok_or("native package too large")?;
                     } else if name.starts_with("assets/") || name.starts_with("data/") {
+                        crate::content::check_path(&name)?;
+                        crate::content::check_namespace(&name, &package.manifest)?;
                         if size > crate::content::MAX_FILE {
                             return Err(format!("{name} exceeds the content file size limit"));
                         }

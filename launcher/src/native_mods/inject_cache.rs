@@ -32,7 +32,7 @@ pub(super) fn key(
     }
     for bundle in mods {
         field(&mut hash, b"bundle");
-        field(&mut hash, bundle.id.as_bytes());
+        field(&mut hash, bundle.manifest.id.as_bytes());
         // Trait-only edits do not change the patched source. A raw source helper may
         // include other crate files, so hash that crate conservatively when one is used.
         let reads_source = bundle

@@ -7,8 +7,8 @@ struct Mod;
 #[horizon_client::mod_api::horizon_mod]
 impl horizon_client::mod_api::Hooks for Mod {}
 
-/// The crate's data file, compiled in.
-const SALT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"));
+mod salt;
+use salt::SALT;
 
 /// CRC-32 of the salt then `bytes`.
 pub fn checksum(bytes: &[u8]) -> u32 {

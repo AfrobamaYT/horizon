@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 const SHA2: &str = "fedcba9876543210fedcba9876543210fedcba98";
@@ -233,9 +233,9 @@ fn a_mod_folder_packs_into_a_bundle_the_registry_checks_accept() {
     let root = tree("pack");
     project(&root, "zoom", SHA);
     write(&root.join("src/zoom.rs"), "pub fn f() {}");
-    write(&root.join("data/a.json"), "{}");
+    write(&root.join("data/zoom/a.json"), "{}");
     write(&root.join("README.md"), "# Zoom");
-    write(&root.join("data/table.bin"), "t");
+    write(&root.join("data/zoom/table.bin"), "t");
     write(&root.join("LICENSE"), "MIT");
     write(&root.join("logo.png"), "not shipped");
     let bundle = &find_mods(&root).unwrap()[0];
@@ -250,9 +250,9 @@ fn a_mod_folder_packs_into_a_bundle_the_registry_checks_accept() {
     let read = horizon_mods::index::native::Bundle::read(&packed.file).unwrap();
     for shipped in [
         "src/zoom.rs",
-        "data/a.json",
+        "data/zoom/a.json",
         "README.md",
-        "data/table.bin",
+        "data/zoom/table.bin",
         "LICENSE",
     ] {
         assert!(read.files.contains_key(shipped), "{shipped}");
@@ -373,11 +373,9 @@ fn installing_records_the_origin_and_updates_follow_releases_or_the_head() {
         id: "keys".into(),
         ..packed("keys")
     };
-    assert!(
-        install(&home, &newer, &other)
-            .unwrap_err()
-            .contains("not from GitHub")
-    );
+    assert!(install(&home, &newer, &other)
+        .unwrap_err()
+        .contains("not from GitHub"));
     assert!(remove(&home, "zoom").unwrap());
     assert!(!remove(&home, "zoom").unwrap());
     assert!(!home.join(INSTALLED).join("zoom.hmod").exists());

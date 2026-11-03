@@ -1,5 +1,5 @@
 //! Trait-backed injections, prepared as build-script input alongside the staged game.
-use super::{Bundle, MANIFEST, api};
+use super::{Bundle, MANIFEST};
 use horizon_mod_api_gen::{TraitContract as Contract, TraitInjection as Injection};
 use std::{
     collections::{HashMap, HashSet},
@@ -11,9 +11,10 @@ use std::{
 pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, String> {
     let mut result = Vec::new();
     let mut names = HashSet::new();
-    let owners: HashMap<_, _> = api::with_api(mods)
+    let owners: HashMap<_, _> = mods
+        .iter()
         .enumerate()
-        .map(|(i, b)| (b.id.as_str(), i))
+        .map(|(i, b)| (b.manifest.id.as_str(), i))
         .collect();
     // These are the copied bundles under mods.incoming, never the player's originals.
     for bundle in mods {
@@ -67,7 +68,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                     .ok_or("trait_method must be a Rust identifier")?;
                 let _: syn::Ident =
                     syn::parse_str(method).map_err(|_| "trait_method must be a Rust identifier")?;
-                let name = format!("inject_{}_{}", bundle.id.replace('-', "_"), method);
+                let name = format!("inject_{}_{}", bundle.manifest.id.replace('-', "_"), method);
                 let ident: syn::Ident =
                     syn::parse_str(&name).map_err(|_| "invalid generated trait method")?;
                 if !names.insert(name.clone()) {
@@ -141,8 +142,11 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                         helper_file.display()
                     ));
                 }
-                fs::write(&helper_file, injection.helper(owners[bundle.id.as_str()]))
-                    .map_err(|e| e.to_string())?;
+                fs::write(
+                    &helper_file,
+                    injection.helper(owners[bundle.manifest.id.as_str()]),
+                )
+                .map_err(|e| e.to_string())?;
                 table.insert("helper".into(), helper_path.into());
                 result.push(injection);
             }
@@ -210,12 +214,10 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&compiled.stderr)
         );
-        assert!(
-            std::process::Command::new(binary)
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new(binary)
+            .status()
+            .unwrap()
+            .success());
     }
 
     #[test]
@@ -377,8 +379,8 @@ mod tests {
         let before = key();
         fs::write(root.join("src/lib.rs"), "// one line edit").unwrap();
         assert_eq!(before, key());
-        fs::create_dir_all(root.join("data")).unwrap();
-        fs::write(root.join("data/table.bin"), "mixin input").unwrap();
+        fs::create_dir_all(root.join("data/example")).unwrap();
+        fs::write(root.join("data/example/table.bin"), "mixin input").unwrap();
         assert_ne!(before, key());
         fs::remove_dir_all(root).unwrap();
     }

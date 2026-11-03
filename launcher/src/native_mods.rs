@@ -445,13 +445,6 @@ pub struct Bundle {
     pub injections: Vec<Injection>,
 }
 
-impl std::ops::Deref for Bundle {
-    type Target = horizon_mods::manifest::Manifest;
-    fn deref(&self) -> &Self::Target {
-        &self.manifest
-    }
-}
-
 impl Bundle {
     fn native(&self) -> &horizon_mods::manifest::Native {
         self.manifest
@@ -587,7 +580,10 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
     let mut places: BTreeMap<_, Vec<(&str, &Injection)>> = BTreeMap::new();
     for b in mods {
         for i in &b.injections {
-            places.entry(i.place()).or_default().push((&b.id, i));
+            places
+                .entry(i.place())
+                .or_default()
+                .push((&b.manifest.id, i));
         }
     }
     for (_, list) in places {
@@ -624,7 +620,10 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
     for b in mods {
         for i in &b.injections {
             if i.kind.as_deref() == Some("HEAD") || i.kind.as_deref() == Some("RETURN") {
-                functions.entry(&i.site).or_default().push((&b.id, i));
+                functions
+                    .entry(&i.site)
+                    .or_default()
+                    .push((&b.manifest.id, i));
             }
         }
     }
@@ -665,7 +664,7 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
             {
                 out.push(format!(
                     "{}'s `{}` can cancel at {}: a Break skips the later injections and the function's body.",
-                    b.id,
+                    b.manifest.id,
                     i.id,
                     i.place_as_text()
                 ));
@@ -696,7 +695,7 @@ fn agreed(
 ) -> Result<String, String> {
     let mut pins: Vec<(&String, &str)> = bundles
         .iter()
-        .filter_map(|b| get(b).map(|r| (r, b.id.as_str())))
+        .filter_map(|b| get(b).map(|r| (r, b.manifest.id.as_str())))
         .collect();
     pins.sort();
     let revision = match pins.first() {
@@ -810,7 +809,7 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
         .iter()
         .map(|b| (b, &b.native().horizon))
         .filter(|(_, r)| *r != revision)
-        .map(|(b, r)| format!("{} → {}", b.id, &r[..r.len().min(7)]))
+        .map(|(b, r)| format!("{} → {}", b.manifest.id, &r[..r.len().min(7)]))
         .collect();
     (!list.is_empty()).then(|| {
         format!(
@@ -974,7 +973,7 @@ pub fn version_for(
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
-        hash.update(b.id.as_bytes());
+        hash.update(b.manifest.id.as_bytes());
         hash.update([0]);
         for (name, path) in bundle_files(b)? {
             let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1282,6 +1281,7 @@ fn lock_crates(
     source: &Path,
     stage: &Path,
     mods: &[Bundle],
+    wanted: &[crates::Wanted],
 ) -> Result<(), String> {
     let read = |dir: &Path| {
         let path = dir.join("Cargo.lock");
@@ -1289,18 +1289,8 @@ fn lock_crates(
     };
     let horizon = crates::downloaded(&read(source)?)?;
     let staged = crates::downloaded(&read(stage)?)?;
-    // `wanted` reads native-crates, which API-only stages do not have.
-    let wanted = if crates::any(stage) {
-        crates::wanted(stage)?
-    } else {
-        Vec::new()
-    };
-    let api_ids: Vec<&str> = mods
-        .iter()
-        .filter(|_| true)
-        .map(|m| m.id.as_str())
-        .collect();
-    if let Some(why) = crates::refused(&horizon, Some(&staged), &wanted, &api_ids) {
+    let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
+    if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
         return Err(why);
     }
     // Only this computer's crates: the build needs no others.
@@ -1439,7 +1429,7 @@ fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<Vec<Bundle>, String> {
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
     let mut staged = Vec::new();
     for bundle in mods {
-        let dir = to.join(&bundle.id);
+        let dir = to.join(&bundle.manifest.id);
         copy_bundle(bundle, &dir)?;
         let copied = Bundle {
             dir,
@@ -1457,7 +1447,7 @@ fn stage_trait_data(mods: &[Bundle], stage: &Path) -> Result<(), String> {
     for bundle in mods {
         let data = bundle.dir.join("data");
         if data.is_dir() {
-            let to = stage.join("native-data").join(&bundle.id);
+            let to = stage.join("native-data").join(&bundle.manifest.id);
             backend::copy_dir(&data, &to).map_err(|e| format!("{}: {e}", to.display()))?;
         }
     }
@@ -1511,32 +1501,32 @@ fn pipeline(
     let origin = built_on.as_ref().map_or(base, |a| a.base.as_str());
     let mut ids = std::collections::HashSet::new();
     for b in &found {
-        if !ids.insert(&b.id) {
-            return Err(format!("Duplicate native mod id {:?}.", b.id));
+        if !ids.insert(&b.manifest.id) {
+            return Err(format!("Duplicate native mod id {:?}.", b.manifest.id));
         }
-        copy_bundle(b, &incoming.join(&b.id))?;
+        copy_bundle(b, &incoming.join(&b.manifest.id))?;
     }
     let digests: std::collections::HashMap<String, Option<String>> = found
         .iter()
-        .map(|b| (b.id.clone(), source_digest(b)))
+        .map(|b| (b.manifest.id.clone(), source_digest(b)))
         .collect();
     let mods: Vec<Bundle> = found
         .into_iter()
         .map(|b| Bundle {
-            dir: incoming.join(&b.id),
+            dir: incoming.join(&b.manifest.id),
             ..b
         })
         .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
-        .map(|bundle| dependencies::from_manifest(&bundle.dependencies))
+        .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
         .collect();
     let inputs: Vec<_> = mods
         .iter()
         .zip(&declared)
         .map(|(bundle, deps)| dependencies::Mod {
-            id: &bundle.id,
-            version: &bundle.version,
+            id: &bundle.manifest.id,
+            version: &bundle.manifest.version,
             has_api: true,
             dependencies: deps,
         })
@@ -1552,11 +1542,13 @@ fn pipeline(
         return Err(format!("{MISMATCH}{list}; rebuild against this game."));
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| match &other {
+    let blame = |e: String| {
+        match &other {
         Some(list) => format!(
             "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."
         ),
         None => e,
+    }
     };
     let mixins = newest(
         &mods,
@@ -1572,7 +1564,7 @@ fn pipeline(
         mixins: mixins.clone(),
         mods: mods
             .iter()
-            .map(|m| Ok((m.id.clone(), mod_hash(m)?)))
+            .map(|m| Ok((m.manifest.id.clone(), mod_hash(m)?)))
             .collect::<Result<_, String>>()?,
     };
     let exists = target.directory(&version).join(".installed").is_file();
@@ -1639,6 +1631,21 @@ fn pipeline(
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
         let has_api = api::stage(&fresh, &mods, &declared, &resolution)?;
+        let paths = mods
+            .iter()
+            .map(|bundle| {
+                (
+                    bundle.manifest.id.as_str(),
+                    bundle
+                        .manifest
+                        .dependencies
+                        .keys()
+                        .map(String::as_str)
+                        .collect(),
+                )
+            })
+            .collect();
+        let wanted = crates::wanted(&fresh, &paths)?;
         if has_api {
             // Add path packages to Cargo.lock before the locked dependency check.
             let mut metadata = cargo(&rust, &fresh, "metadata");
@@ -1651,7 +1658,7 @@ fn pipeline(
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage, &mods)?;
+            lock_crates(&rust, &source, &stage, &mods, &wanted)?;
         }
         let target_dir = real.join("target");
         let compiled = profile;
@@ -1718,9 +1725,9 @@ fn pipeline(
             "profile": compiled.name(),
             "target": target.name(),
             "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.id,
-                "version": m.version,
-                "sha256": digests.get(&m.id).cloned().flatten(),
+                "id": m.manifest.id,
+                "version": m.manifest.version,
+                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
             })).collect::<Vec<_>>(),
         });
         install(base, &version, target, &binary, &about, |dir| {
@@ -2383,7 +2390,10 @@ mod tests {
         write_bundle(&one, "hello", "fn hook() {}");
         let found = bundles(&one).unwrap();
         assert_eq!(
-            (found[0].id.as_str(), found[0].version.as_str()),
+            (
+                found[0].manifest.id.as_str(),
+                found[0].manifest.version.as_str()
+            ),
             ("hello", "0.1.0")
         );
         let many = dir("many");
@@ -2421,8 +2431,8 @@ mod tests {
                 project_manifest(id, "1", A, B) + injection,
             )
             .unwrap();
-            fs::create_dir_all(project.join("data")).unwrap();
-            fs::write(project.join("data/table.txt"), id).unwrap();
+            fs::create_dir_all(project.join("data").join(id)).unwrap();
+            fs::write(project.join("data").join(id).join("table.txt"), id).unwrap();
         }
         let mods = bundles(&incoming).unwrap();
         assert!(!mods[1].needs_mixins());
@@ -2432,23 +2442,27 @@ mod tests {
         let injections = inject::prepare(&tool_mods, &root).unwrap();
         assert_eq!(injections.len(), 1);
         assert!(input.join("ordinary").join(MANIFEST).is_file());
-        assert!(
-            input
-                .join("trait_injection/horizon-trait-injection-0.rs")
-                .is_file()
-        );
+        assert!(input
+            .join("trait_injection/horizon-trait-injection-0.rs")
+            .is_file());
         let manifest = fs::read_to_string(input.join("trait_injection").join(MANIFEST)).unwrap();
         assert!(manifest.contains("horizon-trait-injection-0.rs"));
         assert!(!manifest.contains("trait_method"));
-        assert!(
-            mods.iter()
-                .all(|bundle| !bundle.dir.join(MANIFEST).exists())
-        );
+        assert!(mods
+            .iter()
+            .all(|bundle| !bundle.dir.join(MANIFEST).exists()));
         let stage = root.join("stage");
         stage_trait_data(&mods, &stage).unwrap();
         for id in ["plain", "ordinary", "trait_injection"] {
             assert_eq!(
-                fs::read_to_string(stage.join("native-data").join(id).join("table.txt")).unwrap(),
+                fs::read_to_string(
+                    stage
+                        .join("native-data")
+                        .join(id)
+                        .join(id)
+                        .join("table.txt")
+                )
+                .unwrap(),
                 id
             );
         }
@@ -2474,7 +2488,7 @@ mod tests {
         write_bundle(&d.join("local"), "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
         assert_eq!(found.len(), 2);
-        assert_eq!(found[1].id, "veinminer");
+        assert_eq!(found[1].manifest.id, "veinminer");
         assert_eq!(found[1].dir, d.join("veinminer"));
         assert_eq!(found[1].native().horizon, A);
         assert_eq!(found[1].native().mixins, B);
@@ -2485,9 +2499,9 @@ mod tests {
     fn flat_projects_use_manifest_identity_and_reject_old_roots() {
         let root = dir("project-layout");
         write_native(&root, "example", A, B);
-        assert_eq!(bundle_in(&root).unwrap().unwrap().id, "example");
+        assert_eq!(bundle_in(&root).unwrap().unwrap().manifest.id, "example");
         // Cargo's different name/version do not change mod identity.
-        assert_eq!(bundle_in(&root).unwrap().unwrap().version, "0.3.0");
+        assert_eq!(bundle_in(&root).unwrap().unwrap().manifest.version, "0.3.0");
         fs::write(
             root.join(NATIVE_MANIFEST),
             project_manifest("../escape", "1", A, B),
@@ -2546,7 +2560,10 @@ mod tests {
         );
         assert!(!staged.join("veinminer/native").exists());
         assert_eq!(
-            (found[0].id.as_str(), found[0].native().horizon.as_str()),
+            (
+                found[0].manifest.id.as_str(),
+                found[0].native().horizon.as_str()
+            ),
             ("veinminer", A)
         );
         // What a build records of it is what the Mods page compares: up to date, not Needs rebuild.
@@ -2558,9 +2575,9 @@ mod tests {
                 source_digest(&found[0])
             )]
         );
-        pack("veinminer.hmod", Some(("data/table.bin", "data")));
+        pack("veinminer.hmod", Some(("data/veinminer/table.bin", "data")));
         let out = installed_mods(&home).unwrap();
-        let path = out.join("veinminer/data/table.bin");
+        let path = out.join("veinminer/data/veinminer/table.bin");
         assert_eq!(fs::read(&path).unwrap(), b"data");
         let first = version_for(
             A,
@@ -2814,7 +2831,7 @@ mod tests {
         let d = dir("crate-key");
         backend::copy_dir(&fixture, &d).unwrap();
         let found = bundles(&d).unwrap();
-        assert_eq!(found[0].id, "crate_demo");
+        assert_eq!(found[0].manifest.id, "crate_demo");
         let key = || {
             version_for(
                 A,
@@ -2828,9 +2845,9 @@ mod tests {
         let mut seen = vec![key()];
         for file in [
             "src/lib.rs",
-            "data/salt.txt",
+            "src/salt.rs",
             "Cargo.toml",
-            "data/greeting.txt",
+            "data/crate_demo/greeting.txt",
         ] {
             let mut bytes = fs::read(d.join(file)).unwrap();
             bytes.extend_from_slice(b"\n");

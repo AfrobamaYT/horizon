@@ -31,7 +31,6 @@ mod home;
 mod home_tabs;
 mod import_page;
 mod instance_icons;
-mod mod_icons;
 mod instance_mods;
 mod instances_page;
 mod internet;
@@ -41,6 +40,7 @@ mod line_edit;
 mod markdown;
 mod mcp;
 mod microsoft;
+mod mod_icons;
 mod modpacks_page;
 mod mods_page;
 mod mods_project;
@@ -3687,7 +3687,7 @@ impl Launcher {
         let list = match mods {
             Ok(found) => found
                 .iter()
-                .map(|b| format!("{} {}", b.id, b.version))
+                .map(|b| format!("{} {}", b.manifest.id, b.manifest.version))
                 .collect::<Vec<_>>()
                 .join(", "),
             Err(e) => e.clone(),
