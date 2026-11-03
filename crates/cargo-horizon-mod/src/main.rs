@@ -8,7 +8,7 @@
 //! - `run [--game <horizon-client>] [-- <game args>]`: build, then play with
 //!   the mod.
 //! - `check <file> [--json]`: what the registry checks of a submission
-//!   (`.hmod`, `.hnmod`, `.hpack`, resource pack `.zip`, `.hshader`).
+//!   (`.hmod`, `.hpack`, resource pack `.zip`, `.hshader`).
 //! - `registry build|review|check|list`: the registry repository's CI.
 use horizon_mods::{Content, Manifest, Package, manifest::MANIFEST};
 mod check;
@@ -140,7 +140,7 @@ fn new(args: &[String]) -> Result<(), String> {
 
 /// A native trait mod's bundle in `dir` (docs/native-mods.md, "Trait mods"): its
 /// `horizon-mixin.toml` and an `[api]` crate with one hook. It is what the launcher
-/// builds (`native-build <dir>`) and packs as `mixins/<id>/` of a `.hnmod`
+/// builds (`native-build <dir>`) and packs as `mixins/<id>/` of a `.hmod`
 /// (docs/api/mod-files.md). `horizon` pins the Horizon commit it is made for.
 fn new_native(
     dir: &Path,
@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn the_native_template_packs_into_an_hnmod_the_registry_accepts() {
+    fn the_native_template_packs_into_an_hmod_the_registry_accepts() {
         use std::io::Write;
         let dir = std::env::temp_dir().join(format!("horizon-mod-native-{}", std::process::id()));
         let path = dir.join("machine-mod");
@@ -359,8 +359,8 @@ mod tests {
             "schema": 1, "id": "machine_mod", "version": "0.1.0", "game": "26.3",
             "horizon": commit, "mixins": "b".repeat(40),
         });
-        let hnmod = dir.join("machine_mod.hnmod");
-        let mut zip = zip::ZipWriter::new(std::fs::File::create(&hnmod).unwrap());
+        let hmod = dir.join("machine_mod.hmod");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&hmod).unwrap());
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file("horizon-native.json", options).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
@@ -377,7 +377,12 @@ mod tests {
                 .unwrap();
         }
         zip.finish().unwrap();
-        let report = check::check(&hnmod, check::kind_of(&hnmod).unwrap(), None, None).unwrap();
+        assert_eq!(
+            check::kind_of(&hmod),
+            Some(horizon_mods::index::Kind::NativeMod)
+        );
+        assert_eq!(check::kind_of(&dir.join("machine_mod.hnmod")), None);
+        let report = check::check(&hmod, check::kind_of(&hmod).unwrap(), None, None).unwrap();
         assert!(report.text().contains("machine_mod"), "{}", report.text());
         // A pin that is not a commit is refused; with none, the folder builds on the
         // instance's Horizon.
