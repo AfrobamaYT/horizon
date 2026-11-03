@@ -4129,6 +4129,63 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// Armor is about to take durability damage from a hit (NeoForge's
+    /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
+    /// hit, for the pieces that would wear. `entity` is the wearer's entity id,
+    /// `player` its UUID (None for a mob), `kind` its type and `source` the hit's
+    /// damage type (`causing` and `direct` are 0: the hit does not carry them here). Each entry has
+    /// its `slot`, the `stack`, the `damage` vanilla worked out and a
+    /// `new_damage` a mod may change (0 for none; Unbreaking is applied
+    /// after). Canceling means no armor damage. A server player's `feet`,
+    /// `legs`, `chest` and `head`; a mob's `body` (a horse's armor).
+    /// Falling-block helmet hits (`hurtHelmet`) are not ported yet.
+    /// Server-side.
+    pub(super) fn native_armor_hurt(
+        &mut self,
+        player: Option<u128>,
+        entity: u32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        entries: &mut Vec<horizon_client::mod_api::NativeArmorHurt>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_armor_hurt(
+            self,
+            mod_api::mods(),
+            player,
+            entity,
+            kind,
+            source,
+            entries,
+            cancel,
+        );
+    }
+    /// A mob is about to destroy a block (NeoForge's `LivingDestroyBlockEvent`):
+    /// a wither breaking blocks around it, a ravager breaking leaves, the ender
+    /// dragon's wall check, an enderman picking a block up, a silverfish waking
+    /// its friends (the infested blocks break), a zombie breaking a door or a
+    /// turtle egg. `entity` is its entity id, `kind` its type (`minecraft:wither`),
+    /// `pos` the block and `state` its state. Canceling keeps the block (an
+    /// enderman then holds nothing). Asked once per block, only while a mod is
+    /// loaded. Server-side.
+    pub(super) fn native_living_destroy_block(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        pos: [i32; 3],
+        state: BlockStateId,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_destroy_block(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            pos,
+            state,
+            cancel,
+        );
+    }
     /// A server entity is about to be placed by `/spreadplayers` (NeoForge's
     /// `EntityTeleportEvent.SpreadPlayersCommand`, vanilla's
     /// `SpreadPlayersCommand.setPlayerPositions`): once per entity, after the

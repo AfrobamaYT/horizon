@@ -60,6 +60,20 @@ impl ItemResource {
             .get(id.as_str())
             .cloned()
     }
+    /// This item's value of component `id` (`ItemResource.get`): its own, else the item's default
+    /// (`host.item_default_component`), none where it has the component removed or the item
+    /// hasn't one.
+    pub fn value(&self, host: &dyn Host, id: &ComponentId) -> Option<Tag> {
+        if let Some(patch) = crate::item_data::encode_components(&self.0) {
+            if let Some(own) = patch.get(id.as_str()) {
+                return Some(own.clone());
+            }
+            if patch.get(&format!("!{}", id.as_str())).is_some() {
+                return None;
+            }
+        }
+        host.item_default_component(self.item(), id.as_str())
+    }
     /// This item with component `id` set to `value` (`ItemResource.with`, as vanilla's
     /// `PatchedDataComponentMap.set`): a removal of it dropped, and the stack's own value too
     /// where `value` is the item's default (`host.item_default_component`), so the stack is

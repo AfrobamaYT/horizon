@@ -1894,7 +1894,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   <amount:integer>", 3)` for operators of level 3. Kinds: `word`, `text` (the rest of the line, last), `integer`,
   `number`, `boolean`, `player`, `item`, `block_pos`. The usages of one command merge into one tree, which every
   player receives after vanilla's (filtered by their level, as vanilla's is), so their chat box completes and colours
-  it. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+  it. The server also parses player and console invocations against that tree, including each usage's permission and argument types, before calling a mod. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
@@ -3125,12 +3125,37 @@ A stack's components change the same way, where it lives (NeoForge's `ItemResour
 is named by a `ComponentId`, checked once as a namespaced id (`ComponentId::new("minecraft:damage")`, None for
 `Damage` or `!minecraft:food`). `resource.component(&id)` reads the stack's own value in its patch as saved;
 `resource.with_component(host, &id, value)` sets it as vanilla's `PatchedDataComponentMap.set` does, keeping no value
-of the stack's own where `value` is the item's default (`host.item_default_component(item, id)`, numbers compared by
-value), and `resource.without_component(host, &id)` removes the component as `remove` does: the stack's own value
+of the stack's own where `value` is the item's default (`host.item_default_component(item, id)`, compared as the component's codec reads it: a vanilla
+component's numbers by exact value, `custom_data` and the other raw NBT components and a mod's own type for type), and `resource.without_component(host, &id)` removes the component as `remove` does: the stack's own value
 goes, and where the item has the component by default a removal (`"!minecraft:max_damage": {}`) is recorded in the
 patch.
 An exchange of one puts the changed item in place: `place.exchange(host, tx, &place.resource(host)?.with_component(host, &damage,
 Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
+
+#### An entity's items
+
+`entity.capability(host, &ENTITY_ITEMS)` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
+stale handle and an entity outside the level in place. The game answers it for a player with their inventory
+(`PlayerInventoryWrapper`), indices as vanilla's `Inventory` numbers them: 0..36 the main inventory (0..9 the hotbar),
+36..40 the armour from feet to head, 40 the off hand. Each index is the player's `ItemPlace::PlayerSlot` and takes only
+what fits there: an armour slot one of what its `equippable` names it for (`ArmorSlot`: its allowed entities hold the
+player by id or by tag), and bound armour comes off only in creative. `insert_any`, without an index, goes where
+`Inventory.add` puts a stack: onto the same item in the selected slot, the off hand and the main inventory in order,
+then into its empty slots, never the armour. For a chest or hopper minecart, a chest boat and a chested donkey, mule or
+llama the game answers with their container's slots (`ItemPlace::EntitySlot`). A handler kept past its entity's removal
+or its world's close reaches nothing. `r.entity_capability(&ENTITY_ITEMS,
+"mymod:robot", |host, robot| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
+game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
+
+```rust
+// Swap two players' offers, or nothing: an abort puts the first move back.
+let (a, b) = (seller.capability(host, &ENTITY_ITEMS)?, buyer.capability(host, &ENTITY_ITEMS)?);
+host.transaction(|host, tx| {
+    let paid = move_resources(host, &b, &a, |item| item == &emerald, 5, tx);
+    let sold = move_resources(host, &a, &b, |item| item == &sword, 1, tx);
+    if paid == 5 && sold == 1 { Ok(()) } else { Err(()) }
+})
+```
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion

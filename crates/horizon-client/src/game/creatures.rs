@@ -623,6 +623,46 @@ impl Game<'_> {
         let Some(max) = wearable(self, &body, fire, name) else {
             return;
         };
+        // ArmorHurtEvent for a mob's body armor.
+        let mut amount = amount;
+        if !horizon_client::mod_api::mods().is_empty() {
+            let kind = self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map(super::native_hooks::mob_kind)
+                .unwrap_or_default();
+            let mut entries = vec![horizon_client::mod_api::NativeArmorHurt {
+                slot: EquipmentSlot::Body,
+                stack: body.clone(),
+                damage: super::durability_damage(damage),
+                new_damage: super::durability_damage(damage),
+            }];
+            let hit = horizon_client::health::HurtSource {
+                damage_type: name,
+                causing: 0,
+                direct: 0,
+            };
+            let mut cancel = false;
+            self.native_armor_hurt(None, id, &kind, &hit, &mut entries, &mut cancel);
+            if cancel {
+                return;
+            }
+            amount = super::answered_wear(&entries, EquipmentSlot::Body, amount);
+            if amount == 0 {
+                return;
+            }
+            // A mod may have swapped the piece: it is not worn by this hit.
+            if self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .and_then(|m| m.item_by_slot(EquipmentSlot::Body))
+                != Some(body.clone())
+            {
+                return;
+            }
+        }
         let loss = self.durability_loss(&body, amount);
         if loss == 0 {
             return;
@@ -2054,7 +2094,32 @@ impl Game<'_> {
             self.projectile_event("minecraft:projectile_shoot", owner, at);
         }
     }
+    /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
+    /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
+    fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return true;
+        }
+        let Some(kind) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == id)
+            .map(super::native_hooks::mob_kind)
+        else {
+            return true;
+        };
+        self.may_destroy(id, &kind, pos)
+    }
+    /// Asks the mods whether the entity `id` of type `kind` may destroy the block at `pos`.
+    pub(super) fn may_destroy(&mut self, id: u32, kind: &str, pos: [i32; 3]) -> bool {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        let mut cancel = false;
+        self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
+        !cancel
+    }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
+        // The mobs whose `BreakBlock` the game applied in this batch, for `IfBroke`.
+        let mut broke: Vec<u32> = Vec::new();
         for e in events {
             match e {
                 MobEvent::BubbleColumnParticles { pos } => {
@@ -2718,7 +2783,38 @@ impl Game<'_> {
                     self.with_level(|b, level, ticks| b.set_door_open(level, ticks, pos, open));
                     self.process_level_events()?;
                 }
+                MobEvent::TakeBlock { mob, pos, state } => {
+                    // The block must still be the one the enderman picked.
+                    if self.world.block(pos[0], pos[1], pos[2]) == state
+                        && self.mob_may_destroy(mob, pos)
+                    {
+                        let air = self.world.air;
+                        self.level_set(pos, air)?;
+                    } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                        m.extra.carried = None;
+                    }
+                }
+                MobEvent::IfBroke {
+                    mob,
+                    effects,
+                    otherwise,
+                } => {
+                    let follow = if broke.contains(&mob) {
+                        effects
+                    } else {
+                        otherwise
+                    };
+                    self.handle_mob_events(follow)?;
+                }
+                MobEvent::Jump { mob } => {
+                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                        m.ai.jumping = true;
+                    }
+                }
                 MobEvent::BreakDoor { mob, pos } => {
+                    if !self.mob_may_destroy(mob, pos) {
+                        continue;
+                    }
                     // BreakDoorGoal.tick: removeBlock, then level events 1021
                     // and 2001 with the state that is there now.
                     let kind = self
@@ -2817,7 +2913,13 @@ impl Game<'_> {
                         self.mob_poof(mob);
                     }
                 }
-                MobEvent::BreakBlock { pos, drop } => {
+                MobEvent::BreakBlock { pos, drop, by } => {
+                    if let Some(mob) = by {
+                        if !self.mob_may_destroy(mob, pos) {
+                            continue;
+                        }
+                        broke.push(mob);
+                    }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
                     // InfestedBlock.spawnAfterBreak: its silverfish comes out
                     // when blocks drop.
@@ -8218,6 +8320,140 @@ mod living_drops_tests {
             assert_eq!(
                 seen.last().unwrap(),
                 "minecraft:armor_stand [] minecraft:explosion false"
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod armor_destroy_tests {
+    use super::MobEvent;
+    use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
+    use horizon_client::mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
+
+    fn entry(slot: EquipmentSlot, new_damage: f32) -> NativeArmorHurt {
+        NativeArmorHurt {
+            slot,
+            stack: ItemStack::new("minecraft:diamond_helmet", 1),
+            damage: 2.0,
+            new_damage,
+        }
+    }
+
+    /// A mod that clears the entries, or removes one, leaves vanilla's wear (no panic).
+    #[test]
+    fn a_cleared_armor_hurt_entry_keeps_vanilla_wear() {
+        assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
+        let entries = [entry(EquipmentSlot::Head, 5.0)];
+        assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
+        assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
+        assert_eq!(
+            answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
+            0
+        );
+    }
+
+    /// `(int) Math.max(1.0F, damage / 4.0F)`.
+    #[test]
+    fn durability_damage_is_vanillas() {
+        assert_eq!(durability_damage(0.5) as u32, 1);
+        assert_eq!(durability_damage(8.0) as u32, 2);
+        assert_eq!(durability_damage(11.9) as u32, 2);
+    }
+
+    /// Without a canceled break the effects play; with no break applied the
+    /// `otherwise` events do (a canceled break plays no sound and the ravager jumps).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_break_effect_follows_only_an_applied_break() {
+        with_game(|game| {
+            let id = game
+                .spawn_mob("minecraft:ravager", [0.5, 70.0, 0.5], false)
+                .unwrap();
+            let jump = |game: &mut super::Game<'_>| {
+                game.mobs.iter().find(|m| m.id == id).unwrap().ai.jumping
+            };
+            let ifbroke = || MobEvent::IfBroke {
+                mob: id,
+                effects: Vec::new(),
+                otherwise: vec![MobEvent::Jump { mob: id }],
+            };
+            // No break of this mob in the batch: the otherwise events run.
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == id)
+                .unwrap()
+                .ai
+                .jumping = false;
+            game.handle_mob_events(vec![ifbroke()]).unwrap();
+            assert!(jump(game));
+            // An applied break (no mod cancels): the effects run, the jump does not.
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == id)
+                .unwrap()
+                .ai
+                .jumping = false;
+            game.handle_mob_events(vec![
+                MobEvent::BreakBlock {
+                    pos: [0, 200, 0],
+                    drop: false,
+                    by: Some(id),
+                },
+                ifbroke(),
+            ])
+            .unwrap();
+            assert!(!jump(game));
+        });
+    }
+
+    /// An enderman's pick-up is refused when the block is no longer the one decided on.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_enderman_does_not_take_a_changed_block() {
+        with_game(|game| {
+            let id = game
+                .spawn_mob("minecraft:enderman", [0.5, 70.0, 0.5], false)
+                .unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            let dirt = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:dirt")
+                .unwrap();
+            let pos = [0, 64, 0];
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.world.set(0, 64, 0, dirt).unwrap();
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == id)
+                .unwrap()
+                .extra
+                .carried = Some(stone);
+            game.handle_mob_events(vec![MobEvent::TakeBlock {
+                mob: id,
+                pos,
+                state: stone,
+            }])
+            .unwrap();
+            assert_eq!(game.world.block(0, 64, 0), dirt);
+            assert!(
+                game.mobs
+                    .iter()
+                    .find(|m| m.id == id)
+                    .unwrap()
+                    .extra
+                    .carried
+                    .is_none()
             );
         });
     }
