@@ -3489,7 +3489,7 @@ mod item_destroyed_tests {
 }
 
 #[cfg(test)]
-mod experience_tests {
+mod experience_cost_tests {
     use super::Experience;
 
     /// Java's `int` arithmetic wraps; a huge or very negative level must not
