@@ -90,9 +90,11 @@ pub type BlockProvider<T> = dyn Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> +
 /// What answers an item capability for one item: given where the stack lives, its handler, or
 /// none to leave it to the next provider.
 pub type ItemProvider<T> = dyn Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync;
-/// What answers an entity capability for one entity type: given the entity, its handler, or none
-/// to leave it to the next provider.
-pub type EntityProvider<T> = dyn Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync;
+/// What answers an entity capability for one entity type: given the entity and the lookup's
+/// context (its [`EntityCapabilityKey`]'s `C`), its handler, or none to leave it to the next
+/// provider.
+pub type EntityProvider<T, C = ()> =
+    dyn Fn(&mut dyn Host, EntityRef, C) -> Option<Box<T>> + Send + Sync;
 
 /// Which things a capability's providers are registered by.
 #[derive(Clone, Copy)]
@@ -566,15 +568,15 @@ impl Registrar {
     }
     /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
     /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
-    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot| Some(Box::new(Cargo(robot))))`.
+    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot, ()| Some(Box::new(Cargo(robot))))`.
     /// Asked as [`block_entity_capability`](Self::block_entity_capability)'s are.
-    pub fn entity_capability<T: ?Sized + 'static>(
+    pub fn entity_capability<T: ?Sized + 'static, C: 'static>(
         &mut self,
-        key: &EntityCapabilityKey<T>,
+        key: &EntityCapabilityKey<T, C>,
         kind: &str,
-        provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn Host, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        let provider: Arc<EntityProvider<T>> = Arc::new(provider);
+        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
         self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
@@ -585,13 +587,13 @@ impl Registrar {
     }
     /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
     /// as a mod that replaces how a player's inventory is reached.
-    pub fn entity_capability_before_game<T: ?Sized + 'static>(
+    pub fn entity_capability_before_game<T: ?Sized + 'static, C: 'static>(
         &mut self,
-        key: &EntityCapabilityKey<T>,
+        key: &EntityCapabilityKey<T, C>,
         kind: &str,
-        provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn Host, EntityRef, C) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        let provider: Arc<EntityProvider<T>> = Arc::new(provider);
+        let provider: Arc<EntityProvider<T, C>> = Arc::new(provider);
         self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
@@ -854,11 +856,12 @@ pub(crate) mod tests {
             r.block_entity_capability_before_game(&ITEMS, "test:item_overstates", |_, _| {
                 Some(Box::new(ItemOverstates))
             });
-            r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _| Some(Box::new(Cargo)));
-            r.entity_capability(&ENTITY_ENERGY, "minecraft:armor_stand", |_, entity| {
-                Some(Box::new(EntityBattery(entity)))
+            r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _, ()| Some(Box::new(Cargo)));
+            // A battery reached from any side but below, as a mod's sided entity storage.
+            r.entity_capability(&ENTITY_ENERGY, "minecraft:armor_stand", |_, entity, side| {
+                (side != Some(Direction::Down)).then(|| Box::new(EntityBattery(entity)) as _)
             });
-            r.entity_capability(&ENTITY_FLUIDS, "minecraft:armor_stand", |_, entity| {
+            r.entity_capability(&ENTITY_FLUIDS, "minecraft:armor_stand", |_, entity, _| {
                 Some(Box::new(EntityTank(entity)))
             });
             r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
@@ -1519,7 +1522,7 @@ pub(crate) mod tests {
             ..Player::default()
         };
         let host: &mut dyn Host = &mut player;
-        let items = entity(1).capability(host, &ENTITY_ITEMS).unwrap();
+        let items = entity(1).capability(host, &ENTITY_ITEMS, ()).unwrap();
         assert_eq!(items.owner(), "the game");
         assert_eq!(items.size(host), 41);
         let (sticks, helmet_) = (ItemResource::of(&stick()), ItemResource::of(&helmet()));
@@ -1571,10 +1574,10 @@ pub(crate) mod tests {
         let host: &mut dyn Host = &mut player;
         // A pig has no items; a mod's robot has its provider's; a player in a parked level
         // is asked nothing.
-        assert!(entity(2).capability(host, &ENTITY_ITEMS).is_none());
-        let robot = entity(3).capability(host, &ENTITY_ITEMS).unwrap();
+        assert!(entity(2).capability(host, &ENTITY_ITEMS, ()).is_none());
+        let robot = entity(3).capability(host, &ENTITY_ITEMS, ()).unwrap();
         assert_eq!((robot.owner(), robot.size(host)), ("doubler".to_owned(), 3));
-        assert!(entity(4).capability(host, &ENTITY_ITEMS).is_none());
+        assert!(entity(4).capability(host, &ENTITY_ITEMS, ()).is_none());
     }
 
     /// Items counted with what they hold: a pouch's sticks, a bag's pouch and its sticks.

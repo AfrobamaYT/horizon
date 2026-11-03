@@ -205,10 +205,21 @@ mod tests {
                 game.native_entity(15).unwrap(),
             );
             let host: &mut dyn Host = game;
-            assert!(pig.capability(host, &ENTITY_ENERGY).is_none());
-            assert!(pig.capability(host, &ENTITY_FLUIDS).is_none());
+            assert!(pig.capability(host, &ENTITY_ENERGY, None).is_none());
+            assert!(pig.capability(host, &ENTITY_FLUIDS, None).is_none());
             let source = level.capability(host, &ENERGY, pos, None).unwrap();
-            let target = stand.capability(host, &ENTITY_ENERGY).unwrap();
+            // The side reaches the provider: this one answers from every side but below.
+            assert!(
+                stand
+                    .capability(host, &ENTITY_ENERGY, Some(Direction::Down))
+                    .is_none()
+            );
+            assert!(
+                stand
+                    .capability(host, &ENTITY_ENERGY, Some(Direction::Up))
+                    .is_some()
+            );
+            let target = stand.capability(host, &ENTITY_ENERGY, None).unwrap();
             assert_eq!(
                 host.transaction(|host, tx| move_energy(host, &source, &target, 100, tx)),
                 Ok(100)
@@ -221,8 +232,8 @@ mod tests {
             assert!(abort.is_err());
             assert_eq!((source.amount(host), target.amount(host)), (700, 100));
             ROBOT_FLUID.set(host, Holder::Entity(14), 600).unwrap();
-            let tank = stand.capability(host, &ENTITY_FLUIDS).unwrap();
-            let from = other.capability(host, &ENTITY_FLUIDS).unwrap();
+            let tank = stand.capability(host, &ENTITY_FLUIDS, None).unwrap();
+            let from = other.capability(host, &ENTITY_FLUIDS, None).unwrap();
             assert_eq!(
                 host.transaction(|host, tx| move_resources(host, &from, &tank, |_| true, 100, tx)),
                 Ok(100)

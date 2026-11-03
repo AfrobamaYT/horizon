@@ -395,13 +395,13 @@ impl ItemPlace {
                 let (handler, index) = match menu.slot_backing(host, *slot).ok_or(())? {
                     MenuSlotBacking::Player(index) => {
                         let player = menu.player.entity();
-                        (player.capability(host, &ENTITY_ITEMS), index)
+                        (player.capability(host, &ENTITY_ITEMS, ()), index)
                     }
                     MenuSlotBacking::BlockEntity { level, pos, slot } => {
                         (level.capability(host, &ITEMS, pos, None), slot)
                     }
                     MenuSlotBacking::Entity { entity, slot } => {
-                        (entity.capability(host, &ENTITY_ITEMS), slot)
+                        (entity.capability(host, &ENTITY_ITEMS, ()), slot)
                     }
                     MenuSlotBacking::CraftResult => return Ok(0),
                     _ => {
