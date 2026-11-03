@@ -937,8 +937,15 @@ impl Raids {
     /// nothing decodes. Raids that fail to decode are dropped; a raid whose
     /// heroes partly fail keeps the others.
     pub fn from_nbt(tag: &Tag, seed: i64) -> Self {
+        let (mut raids, order) = Self::from_nbt_unseeded(tag);
+        raids.seed_loaded(seed, &order);
+        raids
+    }
+    /// `from_nbt` without seeding the raids' randoms, with each raid's id and
+    /// position in the file for `seed_loaded`.
+    pub fn from_nbt_unseeded(tag: &Tag) -> (Self, Vec<(i32, usize)>) {
         let Some(decoded) = decode_raids(tag) else {
-            return Self::default();
+            return (Self::default(), Vec::new());
         };
         let mut out = Self {
             dirty: false,
@@ -946,14 +953,24 @@ impl Raids {
             tick: decoded.tick,
             ..Self::default()
         };
+        let mut order = Vec::with_capacity(decoded.raids.len());
         for (i, (id, raid)) in decoded.raids.into_iter().enumerate() {
-            let mut raid = raid;
-            raid.random = LegacyRandom::new(seed.wrapping_add(i as i64));
             // Int2ObjectOpenHashMap.put: a repeated id replaces the raid.
             out.map.insert(id, raid);
             out.order.put(id);
+            order.push((id, i));
         }
-        out
+        (out, order)
+    }
+    /// Seeds the raids `from_nbt_unseeded` read as `from_nbt` does: the raid
+    /// at position `i` in the file gets `seed + i` (a repeated id, the last).
+    /// Raids gone since are skipped.
+    pub fn seed_loaded(&mut self, seed: i64, order: &[(i32, usize)]) {
+        for &(id, i) in order {
+            if let Some(raid) = self.map.get_mut(&id) {
+                raid.random = LegacyRandom::new(seed.wrapping_add(i as i64));
+            }
+        }
     }
 }
 /// The id of the closest active raid within 96 blocks (`getNearbyRaid`).
@@ -1509,6 +1526,22 @@ impl IntOpenHashOrder {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raids_read_then_seeded_match_raids_loaded_seeded() {
+        let mut raids = Raids::default();
+        raids.insert(3, Raid::new([0, 64, 0], 2, 1));
+        raids.insert(8, Raid::new([200, 64, 0], 2, 2));
+        let tag = raids.to_nbt();
+        let mut seeded = Raids::from_nbt(&tag, 99);
+        let (mut read, order) = Raids::from_nbt_unseeded(&tag);
+        read.seed_loaded(99, &order);
+        for id in [3, 8] {
+            let a = seeded.map.get_mut(&id).unwrap().random.next_long();
+            let b = read.map.get_mut(&id).unwrap().random.next_long();
+            assert_eq!(a, b);
+        }
+    }
+
     use super::*;
 
     struct Level {

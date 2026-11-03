@@ -31,6 +31,9 @@ pub(super) struct Raiding {
     /// player data on first use.
     omen_position: Option<[i32; 3]>,
     omen_loaded: bool,
+    /// Raids read before their first raid tick, whose randoms that tick seeds
+    /// (their ids and positions in the file).
+    unseeded: Option<Vec<(i32, usize)>>,
     /// The last raider hurt each raid's bar has seen (`Raider.hurtServer`).
     bar_hurts: HashMap<i32, u64>,
     attributes: Option<std::sync::Arc<GameplayAttributes>>,
@@ -56,6 +59,7 @@ impl Raiding {
     pub(super) fn swap_level(&mut self, other: &mut Self) {
         std::mem::swap(&mut self.raids, &mut other.raids);
         std::mem::swap(&mut self.loaded, &mut other.loaded);
+        std::mem::swap(&mut self.unseeded, &mut other.unseeded);
         std::mem::swap(&mut self.bar_hurts, &mut other.bar_hurts);
         std::mem::swap(&mut self.homes, &mut other.homes);
     }
@@ -267,8 +271,19 @@ impl Game<'_> {
         horizon_client::save::dimension_dir(&self.world_root, dim.id())
             .join("data/minecraft/raids.dat")
     }
-    /// The raids of the player's dimension (the previous one saved first).
+    /// The raids of the player's dimension, seeded (the previous dimension's
+    /// saved first).
     fn load_raids(&mut self) {
+        self.read_raids();
+        if let Some(order) = self.raiding.unseeded.take() {
+            let seed = self.world.random.next_long();
+            self.raiding.raids.seed_loaded(seed, &order);
+        }
+    }
+    /// Reads the raids of the player's dimension from its file (the previous
+    /// dimension's saved first). Their randoms are seeded by `load_raids`, so
+    /// a mod reading raids before the first raid tick draws nothing.
+    pub(super) fn read_raids(&mut self) {
         if self.raiding.loaded == Some(self.dim) {
             return;
         }
@@ -278,13 +293,14 @@ impl Game<'_> {
         self.raiding.loaded = Some(self.dim);
         self.raiding.bar_hurts.clear();
         self.raiding.homes.clear();
-        let seed = self.world.random.next_long();
-        self.raiding.raids = match horizon_client::save::read_dat(&self.raids_path(self.dim))
+        let (raids, order) = match horizon_client::save::read_dat(&self.raids_path(self.dim))
             .and_then(|tag| tag.get("data").cloned())
         {
-            Some(data) => Raids::from_nbt(&data, seed),
-            None => Raids::default(),
+            Some(data) => Raids::from_nbt_unseeded(&data),
+            None => (Raids::default(), Vec::new()),
         };
+        self.raiding.raids = raids;
+        self.raiding.unseeded = Some(order);
     }
     /// `Raids` as its dimension's `raids.dat`, when it changed.
     pub(super) fn save_raids(&mut self) {
@@ -440,8 +456,7 @@ impl Game<'_> {
         }
         Some(id)
     }
-    /// The raids of the level in place, once they are loaded (the first
-    /// raid tick loads them).
+    /// The raids of the level in place, once they are read (`read_raids`).
     pub(super) fn raids_in_place(&self) -> Option<&Raids> {
         (self.raiding.loaded == Some(self.dim)).then_some(&self.raiding.raids)
     }
