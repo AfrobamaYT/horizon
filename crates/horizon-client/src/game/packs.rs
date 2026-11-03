@@ -62,12 +62,12 @@ pub fn startup_root(
     selected: &[String],
     server: &[Pack],
     mods_enabled: &BTreeSet<String>,
-    dev_mods: &[PathBuf],
+    mod_sources: &super::mods::ModsState,
 ) -> horizon_client::Result<PathBuf> {
     let all = packs::discover(vanilla, &packs_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
-    let base = super::mods::content_root(vanilla, mods_enabled, dev_mods)?;
+    let base = super::mods::content_root(vanilla, mods_enabled, mod_sources)?;
     Ok(packs::resource_root(&base, &enabled, &cache_dir())?)
 }
 fn info(p: &Pack) -> PackInfo {
@@ -282,11 +282,11 @@ impl Game<'_> {
         if self.ui.vanilla_root.as_os_str().is_empty() {
             self.ui.vanilla_root = vanilla.clone();
         }
-        let (selected, server, mods, dev_mods) = (
+        let (selected, server, mods, mod_sources) = (
             self.settings.resource_packs.clone(),
             self.server_packs.active.clone(),
             self.settings.mods.enabled.clone(),
-            self.options.dev_mods.clone(),
+            self.mods.clone(),
         );
         let (assets, res, context) = (
             self.pack.assets.clone(),
@@ -296,8 +296,17 @@ impl Game<'_> {
         let (unicode, japanese) = (self.settings.force_unicode, self.settings.japanese_glyphs);
         self.pack_reload = Some(PackReload::spawn(kind, move |progress| {
             stage_pack(
-                &vanilla, &selected, &server, &mods, &dev_mods, &assets, &res, &context, unicode,
-                japanese, progress,
+                &vanilla,
+                &selected,
+                &server,
+                &mods,
+                &mod_sources,
+                &assets,
+                &res,
+                &context,
+                unicode,
+                japanese,
+                progress,
             )
             .map_err(|e| e.to_string())
         })?);
@@ -488,7 +497,7 @@ pub(super) fn stage_pack(
     selected: &[String],
     server: &[Pack],
     mods_enabled: &BTreeSet<String>,
-    dev_mods: &[PathBuf],
+    mod_sources: &super::mods::ModsState,
     assets: &Arc<Assets>,
     res: &Resources,
     context: &WorkerContext,
@@ -496,11 +505,11 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let root = startup_root(vanilla_root, selected, server, mods_enabled, dev_mods)?;
+    let root = startup_root(vanilla_root, selected, server, mods_enabled, mod_sources)?;
     progress.set(1);
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
-    let mod_image = crate::game::mods::built_with_native_mods();
+    let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
     // The sound events, the GUI sprites' metadata and the language are read here too, not in
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
@@ -686,13 +695,16 @@ mod tests {
             br#"{"pack":{"description":"test","pack_format":97}}"#,
         )
         .unwrap();
-        let dev = [mod_dir];
+        let sources = super::super::mods::ModsState {
+            dev: vec![mod_dir],
+            ..Default::default()
+        };
         let enabled = BTreeSet::new();
-        let without_pack = startup_root(&vanilla, &[], &[], &enabled, &dev).unwrap();
+        let without_pack = startup_root(&vanilla, &[], &[], &enabled, &sources).unwrap();
         assert_eq!(fs::read(without_pack.join(asset)).unwrap(), b"mod");
         let pack = packs::folder(&dir.join("packs"), packs::RESOURCE_FORMAT);
         assert_eq!(pack.len(), 1);
-        let with_pack = startup_root(&vanilla, &[], &pack, &enabled, &dev).unwrap();
+        let with_pack = startup_root(&vanilla, &[], &pack, &enabled, &sources).unwrap();
         assert_eq!(fs::read(with_pack.join(asset)).unwrap(), b"pack");
         fs::remove_dir_all(dir).unwrap();
     }

@@ -539,8 +539,8 @@ struct Options {
     dedicated: Option<Vec<String>>,
     /// `--benchmark SCENARIO`: run the benchmark, write its report and quit.
     benchmark: Option<String>,
-    /// `--dev-mod PATH` (repeatable): content mods always on.
-    dev_mods: Vec<PathBuf>,
+    /// Content selection and the compiled native runtime shared with resource loaders.
+    mods: mods::ModsState,
     /// What this Game executes; independent of its current server connection.
     execution_role: execution_role::ExecutionRole,
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
@@ -672,7 +672,7 @@ impl Options {
                 .filter(|n| !n.is_empty()),
             dedicated: None,
             benchmark: None,
-            dev_mods: Vec::new(),
+            mods: mods::ModsState::default(),
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
             game_dir: None,
@@ -773,7 +773,7 @@ impl Options {
                             "--home" => {}
                             // ...and this player's own folder (logging::set_player_dir).
                             "--player-dir" => {}
-                            "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),
+                            "--dev-mod" => o.mods.dev.push(std::path::absolute(&value)?),
                             "--benchmark" => {
                                 if horizon_client::benchmark::scenes(&value).is_none() {
                                     return Err(format!(
@@ -2249,7 +2249,7 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let mod_image = crate::game::mods::built_with_native_mods();
+            let mod_image = horizon_client::gfx::native_render::world_drawn_hooked();
             let atlas = startup::time("ui.atlas", || {
                 HudAtlas::build_over_with_image(root, defaults, mod_image)
             });
@@ -19192,6 +19192,7 @@ impl<'a> Game<'a> {
         // A scoped hook on this thread asks this game's parts.
         horizon_client::mod_api::mark_game_thread();
         let root = options.resources.clone();
+        let mod_sources = options.mods.clone();
         let registry = pack.assets.registry;
         // Until a world is opened the streamer is idle.
         let mut streaming = Streaming::new(
@@ -19599,7 +19600,7 @@ impl<'a> Game<'a> {
             pending_uploads: Vec::new(),
             frame_graph: Default::default(),
             extras: Default::default(),
-            mods: Default::default(),
+            mods: mod_sources,
             recipe_tables: Default::default(),
             panel: Default::default(),
             native_shaders: Default::default(),
@@ -21235,7 +21236,6 @@ fn start_game<'a>(
     game.apply_settings();
     // Benchmarks measure the game alone.
     if game.options.benchmark.is_none() {
-        game.mods.dev = game.options.dev_mods.clone();
         game.start_mods();
     }
     // After the mods: their templates are among the ids it lists.
@@ -21902,10 +21902,11 @@ fn run_loading(
 
 pub use launch_api::{UsageError, exit_code};
 
-pub fn run_with() -> Result<()> {
+pub fn run_with(native: horizon_mods::runtime::Runtime) -> Result<()> {
     let Some(mut options) = Options::read()? else {
         return Ok(());
     };
+    options.mods.native = Arc::new(native);
     if options.execution_role == execution_role::ExecutionRole::DedicatedServer
         && !dedicated::preflight(&mut options)?
     {
@@ -22013,16 +22014,12 @@ pub fn run_with() -> Result<()> {
         &early_settings.resource_packs,
         &[],
         &early_settings.mods.enabled,
-        &options.dev_mods,
+        &options.mods,
     )
     .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
-        mods::content_root(
-            &vanilla_root,
-            &early_settings.mods.enabled,
-            &options.dev_mods,
-        )
+        mods::content_root(&vanilla_root, &early_settings.mods.enabled, &options.mods)
     })?;
     let loaded = load_resources(
         options.resources.clone(),

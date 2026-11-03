@@ -8,6 +8,7 @@ pub mod icon;
 pub mod index;
 pub mod manifest;
 pub mod modpack;
+pub mod runtime;
 
 pub use content::Content;
 pub use manifest::{Capability, Manifest, Package, Side, find};

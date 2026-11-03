@@ -1525,6 +1525,11 @@ fn pipeline(
         .collect();
     let resolution = dependencies::resolve(&inputs).map_err(|e| e.to_string())?;
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
+    let projects: Vec<_> = mods
+        .iter()
+        .map(|bundle| api::Project::read(bundle, target))
+        .collect::<Result<_, _>>()
+        .map_err(|error| error.to_string())?;
     let revision = match &built_on {
         Some(about) => about.horizon.clone(),
         None => revision_of(base)?,
@@ -1622,7 +1627,7 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let has_api = api::stage(&fresh, &mods, &declared, &resolution)?;
+        let has_api = api::stage(&fresh, &projects, &declared, &resolution)?;
         let paths = mods
             .iter()
             .map(|bundle| {
@@ -1722,7 +1727,7 @@ fn pipeline(
                 "sha256": digests.get(&m.manifest.id).cloned().flatten(),
             })).collect::<Vec<_>>(),
         });
-        install(base, &version, target, &binary, &about, |dir| {
+        install(base, &version, target, &binary, &about, &ordered, |dir| {
             for (step, program) in &post {
                 progress(Step::PostBuild(step.mod_id.clone()));
                 let cmd = crates::post_build(program, step, dir, &real.join("cache"), &stage)?;
@@ -1920,6 +1925,7 @@ fn install(
     target: Target,
     binary: &Path,
     about: &serde_json::Value,
+    mods: &[Bundle],
     finish: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<(), String> {
     let from = backend::version_dir(base);
@@ -1930,6 +1936,14 @@ fn install(
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
+    for bundle in mods {
+        package::copy(
+            bundle,
+            &partial
+                .join(horizon_mods::runtime::NATIVE_DIR)
+                .join(&bundle.manifest.id),
+        )?;
+    }
     let dir = target.directory(version);
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&partial, &dir).map_err(|e| e.to_string())?;
@@ -1967,10 +1981,15 @@ pub(crate) fn copy_base(from: &Path, to: &Path, target: Target) -> Result<(), St
 /// data behind. A server build is the headless engine: it keeps neither the game's own binary
 /// nor any `horizon-engine` the base shipped, which would run unmodded beside its own.
 fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
-    let mut own: Vec<String> = ["Horizon.app", "native-mods.json", "native-data"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut own: Vec<String> = [
+        "Horizon.app",
+        "native-mods.json",
+        "native-data",
+        horizon_mods::runtime::NATIVE_DIR,
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     own.push(backend::CLIENT.to_string());
     own.push(".installed".to_string());
     if target == Target::Server {
@@ -3064,6 +3083,20 @@ mod tests {
         )
         .unwrap();
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
+        let native_dir = horizon_mods::runtime::NATIVE_DIR;
+        fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
+        let project = dir("server-runtime-project");
+        write_bundle(&project, "exported", "pub fn hook() {}");
+        for (path, bytes) in [
+            ("assets/exported/probe.txt", "asset"),
+            ("data/exported/native/probe.json", "{}"),
+            ("jars/cache.jar", "not a project file"),
+        ] {
+            let path = project.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let bundle = bundle_in(&project).unwrap().unwrap();
         let binary = dir("server-install").join("built");
         fs::write(&binary, b"modded").unwrap();
         install(
@@ -3072,6 +3105,7 @@ mod tests {
             Target::Server,
             &binary,
             &serde_json::json!({"target":"server"}),
+            &[bundle],
             |d| {
                 fs::create_dir_all(d.join("native-data")).unwrap();
                 fs::write(d.join("native-data/test"), b"baked").unwrap();
@@ -3094,6 +3128,28 @@ mod tests {
             b"facts"
         );
         assert!(output.join("native-mods.json").is_file());
+        fs::remove_dir_all(project).unwrap();
+        let package = output.join(native_dir).join("exported");
+        assert_eq!(
+            fs::read(package.join("assets/exported/probe.txt")).unwrap(),
+            b"asset"
+        );
+        assert_eq!(
+            fs::read(package.join("data/exported/native/probe.json")).unwrap(),
+            b"{}"
+        );
+        assert!(!package.join("jars").exists());
+        assert!(!output.join(native_dir).join("stale").exists());
+        let runtime = horizon_mods::runtime::Runtime::load(
+            &output.join(Target::Server.binary()),
+            &[horizon_mods::runtime::BuiltMod {
+                id: "exported",
+                version: "0.1.0",
+                side: horizon_mods::Side::Client,
+            }],
+        )
+        .unwrap();
+        assert_eq!(runtime.packages()[0].path, package);
         let _ = fs::remove_dir_all(source);
     }
 

@@ -23,43 +23,177 @@ fn path_dep(path: &str) -> toml::Value {
 
 const MAIN_TEMPLATE: &str = "crates/horizon-client/src/native_main.rs.template";
 
-fn main_rs(template: &str, ids: &[&str]) -> String {
-    let entries = ids
+fn main_rs(template: &str, mods: &[&horizon_mods::Manifest]) -> String {
+    let entries = mods
         .iter()
         .enumerate()
-        .map(|(i, id)| format!("        {id:?} => mod_{i}::hooks,\n"))
+        .map(|(i, m)| format!("        {:?} => mod_{i}::hooks,\n", m.id))
         .collect::<String>();
-    template.replace("/* MOD_ENTRIES */", &entries)
+    let inventory = mods.iter().map(|m| format!(
+        "    horizon_mods::runtime::BuiltMod {{ id: {:?}, version: {:?}, side: horizon_mods::Side::{:?} }},\n",
+        m.id, m.version, m.side,
+    )).collect::<String>();
+    template
+        .replace("/* MOD_ENTRIES */", &entries)
+        .replace("/* BUILT_MODS */", &inventory)
+}
+
+/// Parsed once from the pipeline's immutable incoming copy, then reused for staging.
+pub(super) struct Project<'a> {
+    bundle: &'a Bundle,
+    cargo: toml::Table,
+    package: String,
+    client_dep: String,
+}
+
+#[derive(Debug)]
+pub(super) struct ClientFeatureRequest {
+    field: &'static str,
+    value: toml::Value,
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+pub(super) enum ProjectError {
+    Cargo {
+        mod_id: String,
+        reason: String,
+    },
+    PackageName {
+        mod_id: String,
+    },
+    ClientDependency {
+        mod_id: String,
+    },
+    ClientFeatures {
+        mod_id: String,
+        requested: Vec<ClientFeatureRequest>,
+    },
+}
+
+impl std::fmt::Display for ProjectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::i18n::trf;
+        let message = match self {
+            Self::Cargo { mod_id, reason } => {
+                trf("{mod}: {error}", &[("mod", mod_id), ("error", reason)])
+            }
+            Self::PackageName { mod_id } => {
+                trf("{mod}: Cargo.toml has no package name.", &[("mod", mod_id)])
+            }
+            Self::ClientDependency { mod_id } => trf(
+                "{mod}: Cargo.toml has no horizon-client dependency.",
+                &[("mod", mod_id)],
+            ),
+            Self::ClientFeatures { mod_id, requested } => {
+                let fields = requested
+                    .iter()
+                    .map(|r| format!("{} = {}", r.field, r.value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                trf("{mod}: horizon-client requests {fields}. Server builds are headless; the launcher owns horizon-client features. Remove features and use default-features = false or omit it.",
+                    &[("mod", mod_id), ("fields", &fields)])
+            }
+        };
+        f.write_str(&message)
+    }
+}
+impl std::error::Error for ProjectError {}
+
+impl<'a> Project<'a> {
+    pub(super) fn read(bundle: &'a Bundle, target: super::Target) -> Result<Self, ProjectError> {
+        let cargo = read(&bundle.dir.join("Cargo.toml")).map_err(|reason| ProjectError::Cargo {
+            mod_id: bundle.manifest.id.clone(),
+            reason,
+        })?;
+        let package = cargo
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| ProjectError::PackageName {
+                mod_id: bundle.manifest.id.clone(),
+            })?
+            .to_owned();
+        let dependencies = cargo
+            .get("dependencies")
+            .and_then(toml::Value::as_table)
+            .ok_or_else(|| ProjectError::ClientDependency {
+                mod_id: bundle.manifest.id.clone(),
+            })?;
+        let clients: Vec<_> = dependencies
+            .iter()
+            .filter(|(key, value)| {
+                *key == "horizon-client"
+                    || value.get("package").and_then(toml::Value::as_str) == Some("horizon-client")
+            })
+            .collect();
+        let client_dep = clients
+            .first()
+            .map(|(key, _)| (*key).clone())
+            .ok_or_else(|| ProjectError::ClientDependency {
+                mod_id: bundle.manifest.id.clone(),
+            })?;
+        if target == super::Target::Server {
+            let mut requested = Vec::new();
+            for (_, dependency) in clients {
+                if let Some(value) = dependency
+                    .get("default-features")
+                    .filter(|value| value.as_bool() != Some(false))
+                {
+                    requested.push(ClientFeatureRequest {
+                        field: "default-features",
+                        value: value.clone(),
+                    });
+                }
+                if let Some(value) = dependency.get("features") {
+                    requested.push(ClientFeatureRequest {
+                        field: "features",
+                        value: value.clone(),
+                    });
+                }
+            }
+            if !requested.is_empty() {
+                return Err(ProjectError::ClientFeatures {
+                    mod_id: bundle.manifest.id.clone(),
+                    requested,
+                });
+            }
+        }
+        Ok(Self {
+            bundle,
+            cargo,
+            package,
+            client_dep,
+        })
+    }
 }
 
 /// Add API packages and the generated executable to the fresh staged workspace.
 pub(super) fn stage(
     stage: &Path,
-    bundles: &[Bundle],
+    projects: &[Project<'_>],
     declared: &[Vec<super::dependencies::Dependency>],
     resolution: &super::dependencies::Resolution,
 ) -> Result<bool, String> {
-    let mods: Vec<_> = resolution.order.iter().map(|&i| (i, &bundles[i])).collect();
+    let mods: Vec<_> = resolution
+        .order
+        .iter()
+        .map(|&i| (i, &projects[i]))
+        .collect();
     if mods.is_empty() {
         return Ok(false);
     }
     let template = fs::read_to_string(stage.join(MAIN_TEMPLATE)).map_err(|e| {
         format!("{}: {e}", crate::i18n::tr("This game source has no readable native entry template. Update Horizon and rebuild the mods against this game."))
     })?;
-    let mut packages = std::collections::HashMap::new();
-    for (_, bundle) in &mods {
-        let path = bundle.dir.join("Cargo.toml");
-        let manifest = read(&path)?;
-        let name = manifest
-            .get("package")
-            .and_then(|p| p.get("name"))
-            .and_then(toml::Value::as_str)
-            .ok_or_else(|| format!("{}: missing package name", path.display()))?;
-        packages.insert(bundle.manifest.id.as_str(), name.to_owned());
-    }
+    let packages: std::collections::HashMap<_, _> = mods
+        .iter()
+        .map(|(_, project)| (project.bundle.manifest.id.as_str(), project.package.clone()))
+        .collect();
     let post_builds: Vec<_> = mods
         .iter()
-        .flat_map(|(_, bundle)| {
+        .flat_map(|(_, project)| {
+            let bundle = project.bundle;
             let package = &packages[bundle.manifest.id.as_str()];
             bundle
                 .native()
@@ -87,25 +221,15 @@ pub(super) fn stage(
         client.insert("default-features".into(), false.into());
     }
     let mut members = Vec::new();
-    for (i, (index, bundle)) in mods.iter().enumerate() {
+    for (i, (index, project)) in mods.iter().enumerate() {
+        let bundle = project.bundle;
         let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
         super::copy_bundle(bundle, &dest)?;
         let path = dest.join("Cargo.toml");
-        let mut manifest = read(&path)?;
-        let package = packages[bundle.manifest.id.as_str()].clone();
-        let dependencies = manifest
-            .get_mut("dependencies")
-            .and_then(toml::Value::as_table_mut)
-            .ok_or_else(|| format!("{}: missing horizon-client dependency", path.display()))?;
-        let dependency = dependencies
-            .iter_mut()
-            .find(|(key, value)| {
-                *key == "horizon-client"
-                    || value.get("package").and_then(toml::Value::as_str) == Some("horizon-client")
-            })
-            .ok_or_else(|| format!("{}: missing horizon-client dependency", path.display()))?
-            .1;
+        let mut manifest = project.cargo.clone();
+        let package = project.package.clone();
+        let dependency = &mut manifest["dependencies"][project.client_dep.as_str()];
         let mut rewritten = path_dep("../../crates/horizon-client");
         if let (Some(old), Some(new)) = (dependency.as_table(), rewritten.as_table_mut()) {
             // A renamed dependency also needs its package name.
@@ -194,11 +318,12 @@ pub(super) fn stage(
         )])),
     );
     write(&game.join("Cargo.toml"), &manifest)?;
-    let ids: Vec<_> = mods
+    let manifests: Vec<_> = mods
         .iter()
-        .map(|(_, bundle)| bundle.manifest.id.as_str())
+        .map(|(_, project)| &project.bundle.manifest)
         .collect();
-    fs::write(game.join("src/main.rs"), main_rs(&template, &ids)).map_err(|e| e.to_string())?;
+    fs::write(game.join("src/main.rs"), main_rs(&template, &manifests))
+        .map_err(|e| e.to_string())?;
     let root = stage.join("Cargo.toml");
     let mut workspace = read(&root)?;
     let list = workspace
@@ -225,6 +350,56 @@ mod tests {
     }
 
     #[test]
+    fn server_projects_refuse_explicit_client_features_by_mod_and_field() {
+        let dir = fixture();
+        for (field, setting) in [
+            ("default-features", "default-features = true"),
+            ("features", "features = ['audio']"),
+            ("features", "features = []"),
+            ("features", "default-features = false\n[dependencies.z_alias]\npackage='horizon-client'\nversion='0.1'\nfeatures=['audio']"),
+        ] {
+            for dependency in ["horizon-client", "client_alias"] {
+                let text = format!("[package]\nname='different_crate'\nversion='9.9.9'\n[dependencies.{dependency}]\npackage='horizon-client'\nversion='0.1'\n{setting}\n");
+                fs::write(dir.join("Cargo.toml"), text).unwrap();
+                let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+                let error = Project::read(&bundle, super::super::Target::Server)
+                    .err()
+                    .unwrap();
+                assert!(
+                    matches!(&error, ProjectError::ClientFeatures { mod_id, requested } if mod_id == "example" && requested.len() == 1 && requested[0].field == field)
+                );
+                let message = error.to_string();
+                for expected in ["example", field, "headless"] {
+                    assert!(message.contains(expected), "{message}");
+                }
+                assert!(Project::read(&bundle, super::super::Target::Client).is_ok());
+            }
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn server_projects_accept_false_or_absent_default_features() {
+        let dir = fixture();
+        for dependency in [
+            "horizon-client = '0.1'",
+            "horizon-client = { version='0.1' }",
+            "horizon-client = { version='0.1', default-features=false }",
+        ] {
+            fs::write(
+                dir.join("Cargo.toml"),
+                format!(
+                    "[package]\nname='example'\nversion='1.0.0'\n[dependencies]\n{dependency}\n"
+                ),
+            )
+            .unwrap();
+            let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+            assert!(Project::read(&bundle, super::super::Target::Server).is_ok());
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn generates_only_tool_contract_tables_without_mutating_package() {
         let dir = fixture();
         let path = dir.join(horizon_mods::manifest::MANIFEST);
@@ -246,9 +421,18 @@ mod tests {
     #[test]
     fn generated_main_keeps_mod_order() {
         let template = include_str!("../../../crates/horizon-client/src/native_main.rs.template");
-        let ids = ["base", "extra"];
+        let dir = fixture();
+        let mut base = horizon_mods::Package::read(&dir).unwrap().manifest;
+        base.id = "base".into();
+        base.version = "1.2.3".into();
+        base.side = horizon_mods::Side::Both;
+        let mut extra = base.clone();
+        extra.id = "extra".into();
+        extra.version = "2.0.0".into();
+        extra.side = horizon_mods::Side::Client;
+        let mods = [&base, &extra];
         for count in 0..=2 {
-            let text = main_rs(template, &ids[..count]);
+            let text = main_rs(template, &mods[..count]);
             let facts: Vec<_> = text
                 .lines()
                 .filter(|line| line.contains(" => mod_"))
@@ -260,7 +444,16 @@ mod tests {
                     "        \"extra\" => mod_1::hooks,",
                 ][..count]
             );
+            let inventory: Vec<_> = text
+                .lines()
+                .filter(|line| line.contains("BuiltMod {"))
+                .collect();
+            assert_eq!(inventory, &[
+                "    horizon_mods::runtime::BuiltMod { id: \"base\", version: \"1.2.3\", side: horizon_mods::Side::Both },",
+                "    horizon_mods::runtime::BuiltMod { id: \"extra\", version: \"2.0.0\", side: horizon_mods::Side::Client },",
+            ][..count]);
         }
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -281,9 +474,10 @@ mod tests {
         )
         .unwrap();
         let resolution = super::super::dependencies::Resolution { order: vec![0] };
+        let project = Project::read(&bundle, super::super::Target::Client).unwrap();
         let err = stage(
             &stage_dir,
-            std::slice::from_ref(&bundle),
+            std::slice::from_ref(&project),
             &[vec![]],
             &resolution,
         )
@@ -295,7 +489,13 @@ mod tests {
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
         )
         .unwrap();
-        assert!(stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap());
+        assert!(stage(
+            &stage_dir,
+            std::slice::from_ref(&project),
+            &[vec![]],
+            &resolution
+        )
+        .unwrap());
         assert_eq!(
             super::super::crates::post_builds(&stage_dir).unwrap(),
             [super::super::crates::PostBuild {
@@ -355,7 +555,8 @@ mod tests {
         assert!(main().contains(r#""example" => mod_0::hooks,"#));
         fs::write(stage_dir.join("crates/horizon-client/Cargo.toml"), "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n").unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-        stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap();
+        let project = Project::read(&bundle, super::super::Target::Client).unwrap();
+        stage(&stage_dir, &[project], &[vec![]], &resolution).unwrap();
         assert!(main().contains(r#""example" => mod_0::hooks,"#));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
         assert_eq!(
@@ -376,7 +577,8 @@ mod tests {
         for text in ["", "pub struct ModEntry { id: &'static str }"] {
             fs::write(source.join("mod_api.rs"), text).unwrap();
             let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-            let error = stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap_err();
+            let project = Project::read(&bundle, super::super::Target::Client).unwrap();
+            let error = stage(&stage_dir, &[project], &[vec![]], &resolution).unwrap_err();
             assert!(error.contains("Update Horizon and rebuild"), "{error}");
             assert!(!stage_dir.join(GAME).exists());
             assert!(!stage_dir.join("native-api").exists());
