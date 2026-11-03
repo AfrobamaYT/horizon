@@ -426,6 +426,21 @@ pub struct ProtoCensus {
     /// `ChunkGenerator::cache_census`.
     pub caches: Vec<(&'static str, usize, Option<usize>)>,
 }
+fn plan_unloads(world: &World, unload: impl Fn(i32, i32) -> bool) -> Vec<(i32, i32)> {
+    world
+        .chunks
+        .keys()
+        .copied()
+        .filter(|&(x, z)| unload(x, z))
+        .collect()
+}
+
+fn commit_unloads(world: &mut World, keys: &[(i32, i32)]) -> Vec<Arc<Chunk>> {
+    keys.iter()
+        .filter_map(|key| world.chunks.remove(key))
+        .collect()
+}
+
 /// An update paused before removing its out-of-range live chunks.
 pub struct StreamingUpdate {
     uploads: Vec<((i32, i32, i32), SectionMesh)>,
@@ -1689,12 +1704,9 @@ impl Streaming {
         }
         self.free(stale);
         let far = if sweep {
-            world
-                .chunks
-                .keys()
-                .copied()
-                .filter(|&(x, z)| !self.remote && self.ranges().unloaded(x, z, self.decorates))
-                .collect()
+            plan_unloads(world, |x, z| {
+                !self.remote && self.ranges().unloaded(x, z, self.decorates)
+            })
         } else {
             Vec::new()
         };
@@ -1726,11 +1738,8 @@ impl Streaming {
             for key in &far {
                 self.decorated.remove(key);
             }
-            removed.reserve(far.len());
+            removed = commit_unloads(world, &far);
             for key in &far {
-                if let Some(chunk) = world.chunks.remove(key) {
-                    removed.push(chunk);
-                }
                 self.lit.remove(key);
                 self.meshed.remove(key);
                 self.lighting.remove(key);
@@ -3050,6 +3059,32 @@ fn forget_pending_sections(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unload_plan_keeps_dirty_chunks_live_until_the_snapshot() {
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        world.chunks.insert((10, 0), Arc::new(Chunk::empty(10, 0)));
+        world.chunks.insert((11, 0), Arc::new(Chunk::empty(11, 0)));
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        world.modified.insert((10, 0));
+        let plan = plan_unloads(&world, |x, _| x > 5);
+        let mut dispatched = Vec::new();
+        for &key in &plan {
+            if world.modified.contains(&key) {
+                let live = world.chunks.get_mut(&key).unwrap();
+                Arc::make_mut(live).set(0, 0, 0, 7);
+                dispatched.push(key);
+            }
+        }
+        assert_eq!(dispatched, [(10, 0)]);
+        let saved = world.chunks.get(&(10, 0)).unwrap().clone();
+        let unloaded = commit_unloads(&mut world, &plan);
+        assert_eq!(saved.get(0, 0, 0), 7);
+        assert_eq!(unloaded.len(), 2);
+        assert!(!world.chunks.contains_key(&(10, 0)));
+        assert!(!world.chunks.contains_key(&(11, 0)));
+        assert!(world.chunks.contains_key(&(0, 0)));
+    }
 
     #[test]
     fn a_resent_column_keeps_its_sections_but_takes_new_biomes() {

@@ -7075,8 +7075,6 @@ impl Game<'_> {
     /// Not told when the world closes, which `native_world_lifecycle` tells.
     /// Server-side. API 57.
     pub(super) fn native_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2]) {
-        #[cfg(test)]
-        super::native_chunk_save::observe_unload(self, chunk);
         mod_api::dispatch_chunk_unload(self, mod_api::mods(), dimension, chunk);
     }
     /// `player` (`name`) joined the game (NeoForge's
