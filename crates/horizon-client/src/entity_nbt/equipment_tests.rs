@@ -54,8 +54,9 @@ fn bytes(tag: &Tag) -> Vec<u8> {
 
 fn path(name: &str) -> std::path::PathBuf {
     // This module is compiled into horizon-client-lib, beside horizon-client.
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../horizon-client/tests/data/mob_equipment/{name}.nbt"))
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../horizon-client/tests/data/mob_equipment/{name}.nbt"
+    ))
 }
 
 #[test]
