@@ -1536,7 +1536,9 @@ pub(super) mod tests {
                     address: ([127, 0, 0, 1], 1).into(),
                 })))
                 .unwrap();
+            use crate::mod_api;
             struct Logout(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+            #[mod_api::__subscriptions]
             impl crate::mod_api::Hooks for Logout {
                 fn player_logged_out(
                     &self,

@@ -7940,15 +7940,16 @@ fn breeding_credit(
 mod mob_subscription_tests {
     #[test]
     #[ignore = "needs prepared resources"]
-    fn empty_mod_stops_deferring_after_each_default_handler() {
+    fn empty_mod_never_defers_taming_or_block_destruction() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
+        #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let world = game.mob_world_base(&[]);
-                assert!(world.asks_animal_tame && world.asks_living_destroy_block);
+                assert!(!world.asks_animal_tame && !world.asks_living_destroy_block);
                 let mut cancel = false;
                 game.native_animal_tame(1, 1, 2, "minecraft:horse", &mut cancel);
                 game.native_living_destroy_block(
@@ -7984,6 +7985,7 @@ mod breeding_tests {
             joins: Arc<Mutex<Vec<(u32, String)>>>,
             cancel: Arc<AtomicBool>,
         }
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn baby_entity_spawn(
                 &self,
@@ -8165,14 +8167,74 @@ mod breeding_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
-    fn empty_mod_stops_deferring_breeding_xp_after_first_event() {
+    fn first_chicken_breed_matches_without_mods_and_with_an_empty_mod() {
+        use crate::mod_api::{self, Hooks};
+        use horizon_client::mobs::{BreedExperience, MobEvent, goals::Breed};
+        use horizon_core::random::LegacyRandom;
+        struct Empty;
+        #[mod_api::__subscriptions]
+        impl Hooks for Empty {}
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:chicken")
+                .unwrap()
+                .clone();
+            let mut mate = Mob::new(2, kind.clone(), Vec3::new(0.5, 64.0, 0.0), 0.0);
+            mate.extra.in_love = 600;
+            let others = [mate.seen(None)];
+            let run = || {
+                let world = MobWorld {
+                    others: &others,
+                    ..game.mob_world_base(&[])
+                };
+                assert!(!world.asks_baby_spawn);
+                let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                parent.random = LegacyRandom::new(123);
+                parent.persistent = true;
+                parent.extra.in_love = 600;
+                parent.extra.egg_time = 10_000;
+                parent.ai.targets.clear();
+                parent.ai.goals.clear();
+                parent.ai.goals.add(2, Breed::new(1.0));
+                let mut events = Vec::new();
+                let mut level_random = LegacyRandom::new(321);
+                for _ in 0..200 {
+                    // The fixture has no floor; keep the pair within breeding range.
+                    parent.position = Vec3::new(0.0, 64.0, 0.0);
+                    parent.tick(&world, &mut level_random, &mut events);
+                    if let Some(xp) = events.iter().find_map(|event| match event {
+                        MobEvent::Breed {
+                            experience: BreedExperience::Drawn(Some(xp)),
+                            ..
+                        } => Some(*xp),
+                        _ => None,
+                    }) {
+                        return (parent.random.state(), xp);
+                    }
+                    events.clear();
+                }
+                panic!("chickens did not breed");
+            };
+            let no_mods = mod_api::testing::with_mods(Vec::new().into(), run);
+            let empty = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
+            let unrelated = mod_api::testing::with_mods(empty, run);
+            assert_eq!(no_mods, unrelated);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn empty_mod_never_defers_breeding_xp() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
+        #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                assert!(game.mob_world_base(&[]).asks_baby_spawn);
+                assert!(!game.mob_world_base(&[]).asks_baby_spawn);
                 let mut cancel = false;
                 game.native_baby_entity_spawn(1, 2, None, None, "minecraft:chicken", &mut cancel);
                 assert!(!cancel);
@@ -8541,10 +8603,12 @@ mod conversion_subscriber_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
-    fn post_only_listener_survives_pre_pruning() {
+    fn post_only_listener_is_subscribed_without_a_pre_listener() {
         struct DefaultMod;
+        #[mod_api::__subscriptions]
         impl Hooks for DefaultMod {}
         struct PostOnly(Arc<Mutex<Vec<(u32, u32)>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for PostOnly {
             fn living_conversion_post(
                 &self,
@@ -8617,12 +8681,13 @@ mod living_drops_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
-        use horizon_client::mod_api::{Flow, Hooks, LivingDropsEvent};
+        use horizon_client::mod_api::{self, Flow, Hooks, LivingDropsEvent};
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, Ordering},
         };
         struct Observer(Arc<Mutex<Vec<String>>>, Arc<AtomicBool>);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn living_drops(
                 &self,
