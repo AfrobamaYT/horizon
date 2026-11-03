@@ -212,10 +212,11 @@ impl Game<'_> {
         })
     }
 
-    /// Gameplay's cached face support in the level in place. Returns None for
-    /// clients, stale or parked levels, dynamic-shape states (including moving
-    /// pistons and shulker boxes), or an exporter error. False means not sturdy.
-    /// Unloaded positions read as air. API @API:level_shapes@.
+    /// Gameplay's cached face support in the current or a parked level. Returns
+    /// None for clients, stale or closed levels, unloaded or out-of-height blocks,
+    /// dynamic-shape states (including moving pistons and shulker boxes), or an
+    /// exporter error. Dynamic support is a follow-up on #29. False means not
+    /// sturdy. API @API:level_shapes@.
     pub(super) fn native_level_block_face_sturdy(
         &self,
         level: LevelRef,
@@ -223,12 +224,7 @@ impl Game<'_> {
         face: NativeBlockFace,
         support: NativeSupportType,
     ) -> Option<bool> {
-        if self.remote.is_some()
-            || self.native_lifecycle.epoch() != Some(level.epoch())
-            || self.dim.id() != level.dimension()
-        {
-            return None;
-        }
+        let state = self.native_level_state(level, pos)?;
         use horizon_core::geometry::Direction;
         let direction = match face {
             NativeBlockFace::Down => Direction::Down,
@@ -239,7 +235,6 @@ impl Game<'_> {
             NativeBlockFace::East => Direction::East,
         };
         let b = self.res.behaviours();
-        let state = self.world.block(pos[0], pos[1], pos[2]);
         if !b.has_cached_support(state) {
             return None;
         }
@@ -415,10 +410,25 @@ mod tests {
                 level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Center),
                 Some(true)
             );
-            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
             assert_eq!(
-                other.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
+                level.block_face_sturdy(game, [16, 64, 0], Face::Down, Support::Full),
                 None
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 10000, 0], Face::Down, Support::Full),
+                None
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Center),
+                Some(true)
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
             );
             let shulker = game
                 .pack
