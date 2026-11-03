@@ -148,6 +148,7 @@ impl Game<'_> {
             _ => DamageKind::Generic,
         }
     }
+    /// `DamageCommand.damage`: apply its source and report an accepted hit.
     pub(super) fn cmd_damage(&mut self, ctx: &Context) -> R<i32> {
         let targets = self.entities(ctx, "target", false)?;
         let Some(target) = targets.first().copied() else {
@@ -225,27 +226,30 @@ impl Game<'_> {
                     attacker,
                     from,
                 };
-                let hurt = self
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == id)
-                    .is_some_and(|m| m.damage(amount, damage));
-                if hurt {
-                    match cause.or(by) {
-                        Some(player @ (Target::Player | Target::Guest(_))) => {
-                            let player = match player {
-                                Target::Guest(conn) => Some(conn),
-                                _ => self.lan_acting,
-                            };
-                            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
-                                mob.ai.last_hurt_by_player = 100;
-                            }
-                            self.last_hurt_by_player.insert(id, player);
+                // DamageSource.getEntity is the causing player, even when
+                // another client issued the command or supplied the direct entity.
+                let guest = match cause.or(by) {
+                    Some(Target::Guest(conn)) if self.lan_acting != Some(conn) => Some(conn),
+                    _ => None,
+                };
+                if let Some(conn) = guest {
+                    if let Some(mut host) = self.lan.take() {
+                        let hurt = self
+                            .as_guest(&mut host, conn, |g| {
+                                g.command_damage_mob(id, amount, damage)
+                            })
+                            .unwrap_or(false);
+                        if hurt {
+                            host.mob_players.insert(id, conn);
                         }
-                        _ => self.resolve_player_responsible(id, damage),
+                        self.lan = Some(host);
+                        hurt
+                    } else {
+                        false
                     }
+                } else {
+                    self.command_damage_mob(id, amount, damage)
                 }
-                hurt
             }
             _ => false,
         };
@@ -261,6 +265,32 @@ impl Game<'_> {
             ],
         ));
         Ok(1)
+    }
+
+    /// Retain the mob hit's causing-player connection after the hit is accepted.
+    fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
+        let hurt = self
+            .mobs
+            .iter_mut()
+            .find(|m| m.id == id)
+            .is_some_and(|m| m.damage(amount, damage));
+        if hurt {
+            self.resolve_player_responsible(id, damage);
+            if damage.attacker == Some(Who::Player) {
+                self.last_hurt_by_player.insert(id, self.lan_acting);
+                if let Some(host) = self.lan.as_mut() {
+                    match self.lan_acting {
+                        Some(conn) => {
+                            host.mob_players.insert(id, conn);
+                        }
+                        None => {
+                            host.mob_players.remove(&id);
+                        }
+                    }
+                }
+            }
+        }
+        hurt
     }
 
     // ---- /rotate and /swing -----------------------------------------------------------
@@ -955,8 +985,16 @@ impl Game<'_> {
                     } else {
                         finalize::value(m, Attr::MaxHealth)
                     }),
-                    "movement_speed" => Some(m.attrs.speed),
-                    "attack_damage" => Some(f64::from(m.attrs.attack_damage)),
+                    "movement_speed" => Some(if id == "attribute.base.get" {
+                        finalize::base_value(m, Attr::MovementSpeed)
+                    } else {
+                        m.attrs.speed
+                    }),
+                    "attack_damage" => Some(if id == "attribute.base.get" {
+                        finalize::base_value(m, Attr::AttackDamage)
+                    } else {
+                        f64::from(m.attrs.attack_damage)
+                    }),
                     _ => None,
                 };
                 let Some(current) = slot else {
@@ -982,8 +1020,10 @@ impl Game<'_> {
                                 // the effective value, and does not change Health.
                                 finalize::set_base(m, Attr::MaxHealth, value_arg);
                             }
-                            "movement_speed" => m.attrs.speed = value_arg,
-                            _ => m.attrs.attack_damage = value_arg as f32,
+                            "movement_speed" => {
+                                finalize::set_base(m, Attr::MovementSpeed, value_arg)
+                            }
+                            _ => finalize::set_base(m, Attr::AttackDamage, value_arg),
                         }
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
@@ -997,13 +1037,19 @@ impl Game<'_> {
                                 let default = f64::from(m.kind.max_health);
                                 finalize::set_base(m, Attr::MaxHealth, default);
                             }
-                            "movement_speed" => m.attrs.speed = m.kind.speed,
-                            _ => m.attrs.attack_damage = m.kind.attack_damage,
+                            "movement_speed" => {
+                                let default = m.kind.speed;
+                                finalize::set_base(m, Attr::MovementSpeed, default);
+                            }
+                            _ => {
+                                let default = f64::from(m.kind.attack_damage);
+                                finalize::set_base(m, Attr::AttackDamage, default);
+                            }
                         }
                         let v = match short.as_str() {
                             "max_health" => finalize::base_value(m, Attr::MaxHealth),
-                            "movement_speed" => m.attrs.speed,
-                            _ => f64::from(m.attrs.attack_damage),
+                            "movement_speed" => finalize::base_value(m, Attr::MovementSpeed),
+                            _ => finalize::base_value(m, Attr::AttackDamage),
                         };
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",
@@ -1033,7 +1079,18 @@ impl Game<'_> {
     pub(in crate::game) fn generic_attributes(
         &mut self,
         t: Target,
+        attribute: &str,
     ) -> Option<&mut horizon_world::attributes::entity::EntityAttributes> {
+        if let Target::Mob(id) = t
+            && matches!(attribute, "minecraft:armor" | "minecraft:armor_toughness")
+        {
+            let mob = self.mobs.iter_mut().find(|m| m.id == id)?;
+            if mob.extra.armor_attributes.is_none() {
+                mob.extra.armor_attributes =
+                    self.motion.attributes.create(&mob.kind.id).map(Box::new);
+            }
+            return mob.extra.armor_attributes.as_deref_mut();
+        }
         if !self.cmds.attributes.contains_key(&t) {
             let ty = self.target_type(t);
             let map = self.motion.attributes.create(&ty)?;
@@ -1069,7 +1126,9 @@ impl Game<'_> {
         };
         let catalog = self.motion.attributes.clone();
         let key = catalog.id(attribute).ok_or_else(no_attribute)?;
-        let map = self.generic_attributes(target).ok_or_else(no_attribute)?;
+        let map = self
+            .generic_attributes(target, attribute)
+            .ok_or_else(no_attribute)?;
         if !map.has(key) {
             return Err(no_attribute());
         }
