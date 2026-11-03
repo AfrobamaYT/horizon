@@ -162,6 +162,9 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn sounds_reach_the_right_connections() {
         with_game(|game| {
+            // Sounds queue only on a server: mark this game as one, as the
+            // held-out tests do.
+            game.options.dedicated = Some(Vec::new());
             let net = NetConfig {
                 listen: false,
                 announce: false,
@@ -306,6 +309,9 @@ mod tests {
         use horizon_core::random::RandomSource;
 
         with_game(|game| {
+            // The queue draws through `native_level_random`, which only a
+            // server has: mark this game as one, as the held-out tests do.
+            game.options.dedicated = Some(Vec::new());
             let net = NetConfig {
                 listen: false,
                 announce: false,

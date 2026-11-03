@@ -53,12 +53,7 @@ impl Game<'_> {
         if !mod_sound_ok(sound, at, source.index(), volume, pitch) {
             return None;
         }
-        let world = if dimension == self.dim.id() {
-            &mut self.world
-        } else {
-            self.levels.parked_world_mut(Dim::from_id(dimension))?
-        };
-        let seed = world.random.next_long();
+        let seed = self.native_level_random(dimension)?.next_long();
         self.creatures.lan_sounds.push(NativeSound {
             dimension,
             sound: sound.to_owned(),
