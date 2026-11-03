@@ -75,20 +75,6 @@ impl Game<'_> {
         let key = (pos[0], pos[1], pos[2]);
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let facts = self.res.facts().get(state);
-        if self.is_logical_server() && !horizon_client::mod_api::mods().is_empty() {
-            let mut replacement = None;
-            self.native_clone_item_stack(
-                self.dim.level(),
-                horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
-                &facts.name,
-                state,
-                include_data,
-                &mut replacement,
-            );
-            if replacement.is_some() {
-                return replacement;
-            }
-        }
         // PistonHeadBlock.getCloneItemStack: the piston the head belongs to.
         let head = self
             .pack

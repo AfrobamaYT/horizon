@@ -2742,7 +2742,22 @@ impl Game<'_> {
                     if d2 >= range * range {
                         return None;
                     }
-                    g.picked_stack(p.pos, g.creative && p.include_data)
+                    let include_data = g.creative && p.include_data;
+                    let stack = g.picked_stack(p.pos, include_data);
+                    if !crate::mod_api::mods().is_empty() {
+                        let state = g.world.block(p.pos[0], p.pos[1], p.pos[2]);
+                        let mut replacement = None;
+                        g.native_clone_item_stack(
+                            g.dim.level(),
+                            horizon_core::position::BlockPos::new(p.pos[0], p.pos[1], p.pos[2]),
+                            &g.res.facts().get(state).name,
+                            state,
+                            include_data,
+                            &mut replacement,
+                        );
+                        return replacement.or(stack);
+                    }
+                    stack
                 });
             }
             // handlePickItemFromEntity.
@@ -5633,6 +5648,7 @@ mod tests {
         impl Hooks for Mod {
             fn register(&self, r: &mut Registrar) {
                 r.block_part("minecraft:stone", Picker(self.0.clone()));
+                r.block_part("minecraft:beehive", Picker(self.0.clone()));
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -5652,20 +5668,6 @@ mod tests {
                 let crop = state("minecraft:wheat");
                 game.world.set(0, 64, 0, stone).unwrap();
                 game.world.set(1, 64, 0, crop).unwrap();
-                assert_eq!(
-                    &*game.picked_stack([0, 64, 0], true).unwrap().item,
-                    "minecraft:diamond"
-                );
-                assert_eq!(
-                    &*game.picked_stack([0, 64, 0], false).unwrap().item,
-                    "minecraft:stone"
-                );
-                assert_eq!(
-                    &*game.picked_stack([1, 64, 0], true).unwrap().item,
-                    "minecraft:wheat_seeds"
-                );
-                assert_eq!(*seen.lock().unwrap(), [true, false]);
-
                 let settings = LanSettings {
                     port: 0,
                     guest_commands: false,
@@ -5726,7 +5728,54 @@ mod tests {
                     &*guest.inventory[guest.selected].as_ref().unwrap().item,
                     "minecraft:diamond"
                 );
-                assert_eq!(*seen.lock().unwrap(), [true, false, true]);
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [0, 64, 0],
+                        include_data: false,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                assert_eq!(
+                    &*guest.inventory[guest.selected].as_ref().unwrap().item,
+                    "minecraft:stone"
+                );
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [1, 64, 0],
+                        include_data: true,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                assert_eq!(
+                    &*guest.inventory[guest.selected].as_ref().unwrap().item,
+                    "minecraft:wheat_seeds"
+                );
+                assert_eq!(*seen.lock().unwrap(), [true, false]);
+
+                let hive = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:beehive")
+                    .unwrap();
+                let hive = game.with_props(hive, &[("honey_level", "1")]).unwrap();
+                game.world.set(2, 64, 0, hive).unwrap();
+                game.world.block_entities.insert(
+                    (2, 64, 0),
+                    horizon_client::containers::BlockEntity::Beehive(Box::default()),
+                );
+                game.creative = true;
+                game.break_block([2, 64, 0]).unwrap();
+                assert!(
+                    game.dropped
+                        .iter()
+                        .any(|item| &*item.stack.item == "minecraft:beehive")
+                );
+                assert_eq!(*seen.lock().unwrap(), [true, false]);
             })
         });
     }
