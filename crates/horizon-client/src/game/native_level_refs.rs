@@ -615,8 +615,8 @@ mod tests {
                 tickets.insert(saved("machines", [9, 64, 9], (8, 8)));
                 save.save_mod_tickets(&tickets).unwrap();
                 let back = game.dim;
-                game.enter_level(None, other).unwrap();
-                game.enter_level(None, back).unwrap();
+                game.enter_level(other).unwrap();
+                game.enter_level(back).unwrap();
                 let parked = game.levels.parked_streaming_of(other.id()).unwrap();
                 assert!(!parked.forced.contains(&(7, 7)));
                 assert!(parked.forced.contains(&(8, 8)));
