@@ -2,7 +2,7 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "level_entities_in",
+      "name": "level_entities_in", "side": "server",
       "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_entities_in",
       "receiver": "level"
     }

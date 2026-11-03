@@ -84,12 +84,13 @@ impl Game<'_> {
     /// ServerRecipeBook.addRecipes/removeRecipes for the player in place: how
     /// many recipe book displays changed (a transmute recipe has one per
     /// material count).
-    fn change_recipes(&mut self, give: bool, recipes: &[String]) -> i32 {
+    pub(in crate::game) fn change_recipes(&mut self, give: bool, recipes: &[String]) -> i32 {
         let index = &world_stations!(self).recipe_index;
         if give {
             let (count, unlocked) = self.level.recipe_book.add_recipes(index, recipes);
-            self.recipe_unlocked(&unlocked);
-            return count as i32;
+            // Displays a mod's `player_recipe_discovered` refused were not added.
+            let refused = self.recipe_unlocked(&unlocked);
+            return count.saturating_sub(refused) as i32;
         }
         let removed = self.level.recipe_book.remove_recipes(index, recipes);
         let count = removed.len() as i32;
@@ -1606,11 +1607,33 @@ impl Game<'_> {
             };
             let p = points[i];
             let y = self.spread_spawn_y(p, max_y);
-            self.teleport_to(
-                t,
-                [p[0].floor() + 0.5, f64::from(y), p[1].floor() + 0.5],
-                None,
-            );
+            let mut to = [p[0].floor() + 0.5, f64::from(y), p[1].floor() + 0.5];
+            let mut skip = false;
+            if !horizon_client::mod_api::mods().is_empty()
+                && let (Some(entity), Some(from)) =
+                    (self.network_entity_id(t), self.target_position(t))
+            {
+                let mut moved = to;
+                let uuid = match t {
+                    Target::Player => self.lan_acting_uuid,
+                    Target::Guest(conn) => self.command_guest(conn).map(|g| g.uuid),
+                    _ => None,
+                };
+                self.native_spread_players_teleport(
+                    self.dim.id(),
+                    entity as u32,
+                    uuid,
+                    from,
+                    &mut moved,
+                    &mut skip,
+                );
+                if moved.iter().all(|v| v.is_finite()) {
+                    to = moved;
+                }
+            }
+            if !skip {
+                self.teleport_to(t, to, None);
+            }
             let closest = points
                 .iter()
                 .enumerate()
