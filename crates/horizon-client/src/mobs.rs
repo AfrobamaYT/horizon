@@ -1296,6 +1296,8 @@ pub struct Mob {
     pub name_visible: bool,
     /// `Entity.DATA_SHARED_FLAGS_ID` bit 0x20: the model is hidden.
     pub invisible: bool,
+    /// Effects changed and need a shared flag update on the next tick.
+    pub effects_dirty: bool,
     pub random: LegacyRandom,
     pub ai: Box<ai::Ai>,
     pub extra: Extra,
@@ -2885,6 +2887,7 @@ impl Mob {
             custom_name_text: None,
             name_visible: false,
             invisible: false,
+            effects_dirty: true,
             anim: anim::AnimState::default(),
             rider: None,
             outbox: Vec::new(),
@@ -3519,10 +3522,21 @@ impl Mob {
     pub fn is_currently_glowing(&self) -> bool {
         self.glowing || self.has_effect("minecraft:glowing")
     }
-    /// `Entity.isInvisible`: the shared flag 0x20 a server sends (`invisible`),
-    /// or the Invisibility effect on a mob this game ticks itself.
+    /// `Entity.isInvisible`: shared flag 5.
     pub fn is_invisible(&self) -> bool {
-        self.invisible || self.has_effect("minecraft:invisibility")
+        self.invisible
+    }
+    /// Removes effects and schedules the effect-status update when needed.
+    pub fn retain_effects(&mut self, keep: impl FnMut(&(&'static str, i32, i32)) -> bool) {
+        let before = self.extra.effects.len();
+        self.extra.effects.retain(keep);
+        self.effects_dirty |= self.extra.effects.len() != before;
+    }
+    /// Loads an effect without applying its attribute modifiers a second time.
+    pub fn load_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
+        self.retain_effects(|e| e.0 != effect);
+        self.extra.effects.push((effect, ticks, amplifier));
+        self.effects_dirty = true;
     }
     /// `LivingEntity.addEffect` of a `MobEffectInstance` with its flags: the effect as
     /// `add_effect` has it, and `MobEffectInstance.update`'s rules for the flags of one already
@@ -3551,6 +3565,7 @@ impl Mob {
             .find(|e| e.0 == effect)
             .map(|e| (e.1, e.2));
         let present_ambient = self.extra.ambient_effects.contains(&effect);
+        let present_hidden = self.extra.hidden_effects.contains(&effect);
         // A new effect takes its flags as they are; one already there by update's rules.
         let take_ambient = match before {
             None => true,
@@ -3566,6 +3581,8 @@ impl Mob {
         if !visible {
             self.extra.hidden_effects.push(effect);
         }
+        self.effects_dirty |= present_ambient != self.extra.ambient_effects.contains(&effect)
+            || present_hidden != self.extra.hidden_effects.contains(&effect);
     }
     /// `LivingEntity.actuallyHurt`: the absorption amount takes the damage first;
     /// what is left reaches the health.
@@ -3656,6 +3673,7 @@ impl Mob {
         {
             self.absorption = self.absorption.max(4.0 * (amplifier + 1) as f32);
         }
+        let before = self.extra.effects.iter().find(|e| e.0 == effect).copied();
         if let Some(e) = self.extra.effects.iter_mut().find(|e| e.0 == effect) {
             // MobEffectInstance.update: a stronger effect replaces with its
             // own duration, an equal one only extends it; a weaker one is
@@ -3669,6 +3687,7 @@ impl Mob {
         } else {
             self.extra.effects.push((effect, ticks, amplifier));
         }
+        self.effects_dirty |= before != self.extra.effects.iter().find(|e| e.0 == effect).copied();
     }
     pub fn speed_bonus(&self) -> f64 {
         ai::speed_bonus(self)

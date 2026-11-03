@@ -4,10 +4,11 @@
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread; that table
 //! also indexes the block parts by state, so the state-keyed hooks look theirs up without the
 //! block's name.
+use super::ticket_controller::{self, ControllerInfo};
 use super::{
     BlockEntityPart, BlockPart, BlockSide, BlockStateId, Capability, CapabilityKey,
     EntityCapabilityKey, EntityRef, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart,
-    ModEntry, PlaceProvider, ServerHost,
+    ModEntry, PlaceProvider, ServerHost, TicketController,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -124,6 +125,15 @@ struct TagParts {
 struct Installed {
     keys: Parts,
     tags: TagParts,
+    /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
+    controllers: Vec<ControllerInfo>,
+}
+
+/// The ticket controllers registered at startup.
+pub(super) fn installed_controllers() -> &'static [ControllerInfo] {
+    INSTALLED
+        .get()
+        .map_or(&[], |installed| installed.controllers.as_slice())
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
@@ -495,6 +505,7 @@ pub struct Registrar {
     registered: usize,
     parts: Parts,
     tags: TagParts,
+    controllers: Vec<ControllerInfo>,
     refused: Vec<String>,
 }
 
@@ -506,8 +517,27 @@ impl Registrar {
             registered: 0,
             parts: Parts::default(),
             tags: TagParts::default(),
+            controllers: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
+    /// does once at startup, and keep the handle for `chunk.set_mod_forced`. `name` is
+    /// `quarry` or `mymod:quarry`; the controller's id is in the calling mod's namespace
+    /// (`mymod:quarry`), and another mod's namespace refuses the mods at startup, as does an id
+    /// registered twice. `validates` is whether it validates its saved tickets: the
+    /// `validate_tickets` hook then runs for it when a level loads them (NeoForge's
+    /// `LoadingValidationCallback`). A world's tickets of a controller no loaded mod registers are
+    /// dropped when it loads.
+    pub fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController {
+        ticket_controller::register(
+            &mut self.controllers,
+            &mut self.refused,
+            self.mod_id,
+            name,
+            validates,
+        )
     }
 
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
@@ -786,25 +816,41 @@ fn namespaced(id: &str) -> bool {
         .is_some_and(|(namespace, path)| !namespace.is_empty() && !path.is_empty())
 }
 
+/// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
+fn register_all(mods: &[ModEntry]) -> Registrar {
+    let mut registrar = Registrar::new(mods[0].id);
+    for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
+        registrar.mod_id = mods[index].id;
+        registrar.mod_index = index;
+        hooks.register(&mut registrar);
+    }
+    registrar
+}
+
+/// The ticket controllers `mods` register, for a test's mods.
+#[cfg(any(test, feature = "testing"))]
+pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
+    if mods.is_empty() {
+        return Vec::new();
+    }
+    register_all(mods).controllers
+}
+
 /// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
 pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
-    let installed = if let Some(first) = mods.first() {
-        let mut registrar = Registrar::new(first.id);
-        for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
-            registrar.mod_id = mods[index].id;
-            registrar.mod_index = index;
-            hooks.register(&mut registrar);
-        }
+    let installed = if mods.is_empty() {
+        Installed::default()
+    } else {
+        let registrar = register_all(mods);
         if !registrar.refused.is_empty() {
             return Err(registrar.refused);
         }
         Installed {
             keys: registrar.parts,
             tags: registrar.tags,
+            controllers: registrar.controllers,
         }
-    } else {
-        Installed::default()
     };
     #[cfg(test)]
     TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
@@ -2031,6 +2077,32 @@ pub(crate) mod tests {
         mods
     }
 
+    /// Install a weak-power part on glass for a real-game query.
+    pub(crate) fn weak_power_game_thread() {
+        struct WeakPower;
+        impl BlockPart for WeakPower {
+            fn should_check_weak_power(
+                &self,
+                _: &dyn LevelHost,
+                event: &mut ShouldCheckWeakPowerEvent,
+            ) {
+                event.check = true;
+            }
+        }
+        struct WeakPowerMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for WeakPowerMod {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:glass", WeakPower);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("weak_power_test", Box::new(WeakPowerMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a redstone connector on glass for real-game tests.
     pub(crate) fn redstone_game_thread() {
         struct RedstoneMod;
@@ -3167,6 +3239,46 @@ pub(crate) mod tests {
             assert!(p.given.is_empty());
             assert!(super::super::super::item_place::warned_about("doubler"));
         }
+    }
+
+    #[test]
+    fn ticket_controllers_get_the_callers_namespace_and_refuse_anothers() {
+        let mut r = Registrar::new("first");
+        r.register_ticket_controller("quarry", true);
+        r.register_ticket_controller("first:drill", false);
+        assert!(r.refused.is_empty(), "{:?}", r.refused);
+        let ids: Vec<_> = r
+            .controllers
+            .iter()
+            .map(|c| (&*c.id, c.validates))
+            .collect();
+        assert_eq!(ids, [("first:quarry", true), ("first:drill", false)]);
+        // Another mod's namespace, and no name at all.
+        r.register_ticket_controller("second:quarry", true);
+        r.register_ticket_controller("first:", true);
+        r.register_ticket_controller("", true);
+        assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
+        assert!(r.refused[0].contains("first registered ticket controller \"second:quarry\""));
+        assert!(r.refused[0].contains("not its own"));
+        assert!(r.refused[1].contains("no name") && r.refused[2].contains("no name"));
+        assert_eq!(r.controllers.len(), 2);
+    }
+
+    #[test]
+    fn a_ticket_controller_registered_twice_refuses_the_mods_naming_mod_and_id() {
+        let mut r = Registrar::new("first");
+        r.register_ticket_controller("quarry", true);
+        r.register_ticket_controller("first:quarry", false);
+        r.mod_id = "second";
+        // The same path under another mod is another id.
+        r.register_ticket_controller("quarry", true);
+        assert_eq!(r.refused.len(), 1, "{:?}", r.refused);
+        assert_eq!(
+            r.refused[0],
+            "first registered ticket controller first:quarry twice"
+        );
+        assert_eq!(r.controllers.len(), 2);
+        assert_eq!(&*r.controllers[1].id, "second:quarry");
     }
 
     #[test]
