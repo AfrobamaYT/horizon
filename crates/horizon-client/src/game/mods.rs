@@ -1,19 +1,14 @@
 //! Mods in the game (`docs/mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
-//! (`native_hooks.rs`); WebAssembly code mods don't run any more.
+//! (`native_hooks.rs`); executable components in content packages are refused.
 use super::Game;
-use horizon_client::{
-    mod_list::{self, Installed},
-    text::Text,
-};
+use horizon_client::mod_list::{self, Installed};
 use std::path::PathBuf;
 
 #[derive(Default)]
 pub(super) struct ModsState {
     /// `--dev-mod PATH`: always on.
     pub(super) dev: Vec<PathBuf>,
-    /// The WebAssembly mods found that no longer run, for the one-time notice.
-    stopped: Vec<String>,
 }
 
 /// Freeze native component IDs before reading content or opening a connection.
@@ -73,7 +68,7 @@ pub(super) fn content_root(
     dev: &[std::path::PathBuf],
 ) -> std::path::PathBuf {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::{Capability, Content, Package};
+    use horizon_mods::{Content, Package};
     let here = std::env::current_dir().unwrap_or_default();
     let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
     paths.extend(horizon_mods::find(&here.join(mod_list::NATIVE_DIR)));
@@ -96,10 +91,7 @@ pub(super) fn content_root(
         let m = &package.manifest;
         let native = horizon_mods::index::native::holds(path);
         let on = content_enabled(&m.id, native, enabled, &built) || dev.contains(path);
-        if !on
-            || !m.capabilities.contains(&Capability::Registries)
-            || mods.iter().any(|c| c.id == m.id)
-        {
+        if !on || mods.iter().any(|c| c.id == m.id) {
             continue;
         }
         // The items this mod's native code declares may be a file item's crafting remainder.
@@ -205,7 +197,6 @@ fn announced_entry(
         sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
-            Side::Server => mod_list::Side::Server,
             Side::Client => mod_list::Side::Client,
         },
     }
@@ -370,16 +361,10 @@ fn not_built(dir: &std::path::Path, built: &str, rows: &[Installed]) -> Vec<Inst
     out
 }
 
-/// A WebAssembly code mod's row on the Mods page.
-const STOPPED: &str = "Doesn't run any more: needs a native port";
-/// The player was told once about the WebAssembly mods that stopped (`horizon-mods/<this>`).
-const NOTICE_SEEN: &str = ".native-notice";
-
 impl Game<'_> {
     /// Lists the installed mods on the Mods page. Content mods load with the resources
-    /// (`content_root`); native ones are built into the game (`native_hooks.rs`). WebAssembly code
-    /// mods don't run any more: their rows say so, and the player hears it once in the chat
-    /// (`tell_native_now`).
+    /// (`content_root`); native ones are built into the game (`native_hooks.rs`). Unsupported
+    /// files get the same unreadable-file row as any other invalid package.
     pub(super) fn start_mods(&mut self) {
         let dir = Self::game_dir().join(mod_list::DIR);
         let mut paths = horizon_mods::find(&dir);
@@ -403,18 +388,17 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let problem = package.wasm.is_some().then(|| STOPPED.to_owned());
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem,
+                    problem: None,
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
             })
             .collect();
-        // A mod with a native version built in says so instead, and isn't news.
+        // A mod with a native version built in says so instead.
         self.list_native_mods();
         let built = std::env::current_exe()
             .ok()
@@ -437,27 +421,6 @@ impl Game<'_> {
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
         let unbuilt = not_built(&native_dir, &built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
-        let installed = &self.settings.mods.installed;
-        self.mods.stopped = installed
-            .iter()
-            .filter(|row| row.problem.as_deref() == Some(STOPPED))
-            .map(|row| row.title.clone())
-            .collect();
-    }
-    /// Once, in the first world after the update: which WebAssembly mods stopped.
-    pub(super) fn tell_native_now(&mut self) {
-        if self.mods.stopped.is_empty() || self.player.is_none() {
-            return;
-        }
-        let names = std::mem::take(&mut self.mods.stopped).join(", ");
-        let seen = Self::game_dir().join(mod_list::DIR).join(NOTICE_SEEN);
-        if seen.exists() {
-            return;
-        }
-        self.system_message(Text::literal(format!(
-            "Horizon mods are native now: {names} stopped running until they have a native version. The launcher's Mods page has the native ones."
-        )));
-        let _ = std::fs::write(&seen, "");
     }
 }
 

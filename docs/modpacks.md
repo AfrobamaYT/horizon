@@ -222,7 +222,7 @@ A block may define `shapes` to replace both its selection outline and collision
 shape. It selects a list of boxes by one template state property:
 
 ```json
-"shapes": { "property": "axis", "values": {
+"shapes": { "properties": ["axis"], "values": {
   "x": [[0, 0.25, 0.25, 1, 0.75, 0.75]],
   "y": [[0.25, 0, 0.25, 0.75, 1, 0.75]],
   "z": [[0.25, 0.25, 0, 0.75, 0.75, 1]]

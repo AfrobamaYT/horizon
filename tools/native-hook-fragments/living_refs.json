@@ -2,31 +2,31 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "living",
+      "name": "living", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living"
     },
     {
-      "name": "living_attribute_value",
+      "name": "living_attribute_value", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_attribute_value",
       "receiver": "living"
     },
     {
-      "name": "living_attribute_base",
+      "name": "living_attribute_base", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_attribute_base",
       "receiver": "living"
     },
     {
-      "name": "living_equipment",
+      "name": "living_equipment", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_equipment",
       "receiver": "living"
     },
     {
-      "name": "living_hand_item",
+      "name": "living_hand_item", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_hand_item",
       "receiver": "living"
     },
     {
-      "name": "living_set_equipment",
+      "name": "living_set_equipment", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_equipment",
       "receiver": "living"
     }

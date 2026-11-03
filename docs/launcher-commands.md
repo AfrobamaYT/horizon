@@ -53,6 +53,10 @@ Install a game program you have, such as a horizon-client built on your fork's A
 - `PATH`: The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
 - `--trust-unsigned`: You picked this build yourself and trust it with full access to this computer
 
+The program must match this computer's executable format and carry the exact `horizon-game-executable;`
+identity signature embedded by ordinary and launcher-generated games. It carries no mod API level or build id,
+and is not a signature of authenticity. Unmarked programs and retired WIT API-level markers are refused.
+
 MCP: none: the player's switch.
 
 ## `horizon-launcher prepare`

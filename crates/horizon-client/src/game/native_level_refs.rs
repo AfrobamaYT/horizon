@@ -16,12 +16,7 @@ impl Game<'_> {
         if level.dimension() == self.dim.id() {
             return Some(&self.world);
         }
-        let dim = self
-            .levels
-            .parked_dims()
-            .into_iter()
-            .find(|d| d.id() == level.dimension())?;
-        self.levels.parked_world(dim)
+        self.levels.parked_world_of(level.dimension())
     }
     /// Find a loaded chunk in an open server level. API @API:chunk_refs@.
     pub(super) fn native_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
@@ -49,7 +44,7 @@ impl Game<'_> {
     ) -> Option<horizon_world::registry::BlockStateId> {
         let world = self.native_level_world(level)?;
         let [x, y, z] = pos;
-        let inside = (world.bottom_y()..world.top_y()).contains(&y);
+        let inside = world.shape.contains_y(y);
         (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
     }
     /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
@@ -88,13 +83,23 @@ impl Game<'_> {
             .get(key)
             .cloned()
     }
+    /// Whether this is the level in place: the one the server ticks now, whose block entities
+    /// the game's own capabilities read and write and whose capabilities
+    /// `LevelRef::capability` looks up. False for a level parked while the server ticks
+    /// another (its blocks can still be read), for a handle of an earlier open, and on a
+    /// client. API @API:level_reads@.
+    pub(super) fn native_level_in_place(&self, level: LevelRef) -> bool {
+        self.remote.is_none()
+            && (self.serving.is_some() || self.options.dedicated.is_some())
+            && self.native_lifecycle.epoch() == Some(level.epoch())
+            && self.dim.id() == level.dimension()
+    }
     /// Whether `pos` is inside the world's height and its chunk is loaded
     /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
     /// read or write there finds the world. API @API:level_reads@.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_world(level).is_some_and(|w| {
-            (w.bottom_y()..w.top_y()).contains(&pos[1])
-                && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
+            w.shape.contains_y(pos[1]) && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
         })
     }
     /// The lowest block `y` and the height of the level

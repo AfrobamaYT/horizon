@@ -535,23 +535,16 @@ impl Game<'_> {
                         self.debug_key(key, KeyAction::Release);
                     }
                 }
-                // Native mods see the key as the keyboard hook does.
                 let action = arg(2)?;
                 // ScreenEvent.KeyPressed.Pre: the open screen hears of the
-                // press before it acts on it, as the window's key event hands
-                // it over. A cancelled press goes no further — not to the
-                // screens, not to `native_key` — and its release still comes.
+                // press before it acts on it. A cancelled press goes no further.
                 if action != "up" && self.screen_key_pressed(physical, action == "repeat") {
                     if action == "tap" {
                         self.physical_keys.remove(&physical);
-                        self.native_key_event(physical, false, false);
                     }
                     return ok();
                 }
-                self.native_key_event(physical, action != "up", action == "repeat");
-                if action == "tap" {
-                    self.native_key_event(physical, false, false);
-                }
+                self.native_panel_key_event(physical, action != "up", action == "repeat");
                 // The merchant's focused offer and the recipe book's last
                 // recipe take Enter and Space, as the window's.
                 if action != "up"

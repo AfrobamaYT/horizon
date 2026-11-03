@@ -50,6 +50,9 @@ pub struct EntityMemory {
     /// increasing order), type, and whether the last leave sweep saw it.
     /// Only filled while a mod is loaded.
     pub(super) live: Vec<(u32, String, bool)>,
+    /// Entities a native mod removed (`native_entity_discard`), taken out at
+    /// the next sweep of departed entities. Mobs go at once and never wait here.
+    pub(super) removals: Vec<super::commands::Target>,
 }
 
 /// The key that marks a compound queued with the chunk loads as a fresh add
@@ -556,6 +559,7 @@ impl Game<'_> {
             self.remember_uuid(self.next_entity, uuid, &tag);
             let uuid = self.uuid_for(self.next_entity);
             self.falling.push(FallingBlock {
+                join: Default::default(),
                 id: self.next_entity,
                 state,
                 // DATA_START_POS is not persisted by vanilla.
@@ -626,6 +630,7 @@ impl Game<'_> {
                 _ => 80,
             };
             self.tnts.push(super::tnt::PrimedTnt {
+                join: Default::default(),
                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
                 id,
                 position,
@@ -1170,10 +1175,7 @@ impl Game<'_> {
         if cart.items.is_empty() || cart.items.iter().any(Option::is_some) {
             return;
         }
-        let loot = horizon_client::structure_blocks::loot_data(
-            &self.options.resources,
-            &self.pack_files(),
-        );
+        let loot = self.server_loot.get();
         let p = cart.position;
         let pos = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         let biome = self.biome_name_at(p).unwrap_or_default();

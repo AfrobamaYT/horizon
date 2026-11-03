@@ -338,6 +338,7 @@ pub fn mob_to_nbt(
     raw: Option<&Tag>,
     registry: Option<&BlockRegistry>,
 ) -> Tag {
+    use crate::mobs::Species as S;
     let base = Base {
         id: &m.kind.id,
         uuid,
@@ -367,6 +368,18 @@ pub fn mob_to_nbt(
         ("PersistenceRequired", Tag::Byte(i8::from(m.persistent))),
     ] {
         put(&mut tag, key, value);
+    }
+    // AbstractFish/Axolotl.addAdditionalSaveData always write the flag.
+    // Tadpole.fromBucket is always true, and its setter ignores loaded input.
+    let from_bucket = match m.species() {
+        S::Tadpole => Some(true),
+        S::Cod | S::Salmon | S::Pufferfish | S::TropicalFish | S::Axolotl => {
+            Some(m.extra.from_bucket)
+        }
+        _ => None,
+    };
+    if let Some(value) = from_bucket {
+        put(&mut tag, "FromBucket", Tag::Byte(i8::from(value)));
     }
     // Mob.addAdditionalSaveData: the death loot table, and its seed when set.
     if let Some(table) = &m.extra.death_loot_table {
@@ -721,6 +734,14 @@ pub fn mob_to_nbt(
                 equipment.push((
                     "body",
                     Tag::compound([("id", string(armor)), ("count", Tag::Int(1))]),
+                ));
+            }
+            // A helmet given to the mount (say by `/item ... armor.head`)
+            // keeps its own slot.
+            if let Some(helmet) = &m.extra.head {
+                equipment.push((
+                    "head",
+                    Tag::compound([("id", string(helmet)), ("count", Tag::Int(1))]),
                 ));
             }
             if equipment.is_empty() {
@@ -2174,6 +2195,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
     Some(ItemEntity {
+        join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
         health: number(tag.get("Health")).unwrap_or(5) as i32,
         fire_ticks: number(tag.get("Fire")).unwrap_or(0) as i32,
@@ -2277,6 +2299,7 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
     };
     let count = number(tag.get("Count")).unwrap_or(1).max(1) as u32;
     let orb = ExperienceOrb {
+        join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
         id: 0,
         position,
@@ -3466,6 +3489,99 @@ mod tests {
     use super::*;
     use crate::items::ItemStack;
 
+    /// A mount keeps its body armour and a helmet (say
+    /// `/item replace entity <horse> armor.head with minecraft:iron_helmet`)
+    /// in their own slots through a save: vanilla holds both (`equipment.body`
+    /// and `equipment.head`), one in each.
+    #[test]
+    fn a_horses_save_keeps_a_helmet_and_its_body_armour_apart() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:horse".into();
+        ty.species = crate::mobs::Species::Horse;
+        let types = [("minecraft:horse".into(), kind)].into();
+        let raw = Tag::compound([
+            ("id", string("minecraft:horse")),
+            ("Pos", doubles(&[4.5, 220.0, 4.5])),
+            ("Tame", Tag::Byte(1)),
+            (
+                "equipment",
+                Tag::compound([
+                    (
+                        "body",
+                        Tag::compound([
+                            ("id", string("minecraft:diamond_horse_armor")),
+                            ("count", Tag::Int(1)),
+                        ]),
+                    ),
+                    (
+                        "head",
+                        Tag::compound([
+                            ("id", string("minecraft:iron_helmet")),
+                            ("count", Tag::Int(1)),
+                        ]),
+                    ),
+                ]),
+            ),
+        ]);
+        let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
+        assert_eq!(
+            m.extra.body.as_deref(),
+            Some("minecraft:diamond_horse_armor")
+        );
+        assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        let saved = mob_to_nbt(&m, [0; 4], Some(&raw), None);
+        let eq = saved.get("equipment").unwrap();
+        let id = |key: &str| {
+            eq.get(key)
+                .and_then(|i| text(i.get("id")))
+                .unwrap_or_default()
+        };
+        assert_eq!(id("body"), "minecraft:diamond_horse_armor");
+        assert_eq!(id("head"), "minecraft:iron_helmet");
+    }
+
+    /// A wolf loads its armor (`equipment.body`) into the body slot with the
+    /// durability it lost, and a helmet next to it into the head slot.
+    #[test]
+    fn a_wolfs_save_keeps_its_armour_and_a_helmet_apart() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:wolf".into();
+        ty.species = crate::mobs::Species::Wolf;
+        let types = [("minecraft:wolf".into(), kind)].into();
+        let armor = Tag::compound([
+            ("id", string("minecraft:wolf_armor")),
+            ("count", Tag::Int(1)),
+            (
+                "components",
+                Tag::compound([("minecraft:damage", Tag::Int(9))]),
+            ),
+        ]);
+        let raw = Tag::compound([
+            ("id", string("minecraft:wolf")),
+            ("Pos", doubles(&[4.5, 220.0, 4.5])),
+            ("Owner", Tag::IntArray([0; 4].to_vec())),
+            (
+                "equipment",
+                Tag::compound([
+                    ("body", armor),
+                    (
+                        "head",
+                        Tag::compound([
+                            ("id", string("minecraft:iron_helmet")),
+                            ("count", Tag::Int(1)),
+                        ]),
+                    ),
+                ]),
+            ),
+        ]);
+        let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
+        assert_eq!(m.extra.body.as_deref(), Some("minecraft:wolf_armor"));
+        assert_eq!(m.extra.body_damage, 9);
+        assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+    }
+
     fn fused_creeper(fuse: Option<i16>) -> (Mob, Tag) {
         let mut kind = crate::mobs::sensor_scan_tests::kind();
         let ty = Arc::make_mut(&mut kind);
@@ -3886,6 +4002,7 @@ mod tests {
     #[test]
     fn item_entities_round_trip() {
         let e = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             health: 2,
             fire_ticks: 73,
@@ -3991,6 +4108,7 @@ mod tests {
     #[test]
     fn orbs_keep_their_count() {
         let o = ExperienceOrb {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: Vec3::new(1.0, 2.0, 3.0),
@@ -4049,11 +4167,18 @@ fn write_axolotl_memories(m: &Mob, map: &mut Compound) {
         }
     }
 }
-/// The variant tags `Axolotl`, `Rabbit`, `Parrot`, `Salmon` and
-/// `TropicalFish` read; a missing tag is the default variant (a medium
-/// salmon, otherwise index 0).
+/// Saved variants and fish/axolotl bucket flags. Missing variants use a
+/// medium salmon or index 0; a missing bucket flag is false.
 fn read_variant(m: &mut Mob, tag: &Tag) {
     use crate::mobs::Species as S;
+    // AbstractFish/Axolotl.readAdditionalSaveData: false when absent.
+    // Tadpole.setFromBucket ignores the input.
+    if matches!(
+        m.species(),
+        S::Cod | S::Salmon | S::Pufferfish | S::TropicalFish | S::Axolotl
+    ) {
+        m.extra.from_bucket = flag(tag, "FromBucket");
+    }
     let int = |key| number(tag.get(key)).unwrap_or(0) as i32;
     match m.species() {
         S::Axolotl | S::Parrot => m.extra.variant = int("Variant").clamp(0, 4) as u8,
@@ -4346,6 +4471,57 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
 #[cfg(test)]
 mod axolotl_nbt_tests {
     use super::*;
+    #[test]
+    fn aquatic_from_bucket_saves_defaults_and_tadpole_constant() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let types: HashMap<_, _> = crate::mobs::MobTypes::load(&root)
+            .unwrap()
+            .types
+            .into_iter()
+            .map(|(id, kind)| (id, Arc::new(kind)))
+            .collect();
+        for kind in [
+            "cod",
+            "salmon",
+            "pufferfish",
+            "tropical_fish",
+            "axolotl",
+            "tadpole",
+        ] {
+            for value in [None, Some(false), Some(true)] {
+                let mut input = Tag::compound([
+                    ("id", string(&format!("minecraft:{kind}"))),
+                    ("Pos", doubles(&[10.5, 220.0, 10.5])),
+                ]);
+                if let (Some(value), Tag::Compound(map)) = (value, &mut input) {
+                    map.insert("FromBucket".into(), Tag::Byte(i8::from(value)));
+                }
+                let m = mob_from_nbt(&input, &types, 1, None).unwrap();
+                let expected = kind == "tadpole" || value.unwrap_or(false);
+                for raw in [None, Some(&input)] {
+                    let saved = mob_to_nbt(&m, [1; 4], raw, None);
+                    assert_eq!(
+                        saved.get("FromBucket"),
+                        Some(&Tag::Byte(i8::from(expected))),
+                        "{kind}, input={value:?}, raw={}",
+                        raw.is_some()
+                    );
+                }
+            }
+        }
+        let pig = Mob::new(1, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
+        assert!(
+            mob_to_nbt(&pig, [1; 4], None, None)
+                .get("FromBucket")
+                .is_none()
+        );
+    }
+
     #[test]
     fn bucket_cooldown_and_brain_memories_survive_and_expired_cooldown_is_removed() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
