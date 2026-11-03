@@ -7,6 +7,8 @@ pub(super) struct HookSources {
     pub render_dispatch: String,
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
+    pub hook_ids: String,
+    pub hook_count: usize,
 }
 
 pub(super) fn emit(
@@ -14,6 +16,8 @@ pub(super) fn emit(
     hooks: &[CatalogHook],
     methods: &[syn::ItemFn],
 ) -> Result<HookSources, String> {
+    let mut hook_ids = String::new();
+    let mut hook_count = 0;
     let mut traits = String::new();
     let mut dispatch = String::new();
     let mut render_traits = String::new();
@@ -195,6 +199,11 @@ pub(super) fn emit(
                 .map(|word| word[..1].to_uppercase() + &word[1..])
                 .collect::<String>()
         );
+        let hook_id = event_type.strip_suffix("Event").unwrap();
+        if !is_render {
+            hook_ids.push_str(&format!("{hook_id},\n"));
+            hook_count += 1;
+        }
         let mut trait_params = vec!["&self".to_owned()];
         let mut dispatch_params = Vec::new();
         let mut call_args = Vec::new();
@@ -296,16 +305,25 @@ pub(super) fn emit(
             )),
             _ => {}
         }
-        method_source.push_str(&format!(
-            "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
-        ));
-        traits.push_str(&method_source);
         if let Some((part_trait, _)) = &scoped {
             part_traits
                 .entry(*part_trait)
                 .or_default()
-                .push_str(&method_source);
+                .push_str(&format!(
+                    "{method_source}fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
+                ));
         }
+        let report = if is_render {
+            String::new()
+        } else {
+            format!(
+                "horizon_client_core::subscribers::default_called(HookId::{hook_id} as usize, self);"
+            )
+        };
+        method_source.push_str(&format!(
+            "fn {name}({trait_params}){result} {{ {report} {unused} {default} }}\n"
+        ));
+        traits.push_str(&method_source);
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
@@ -314,7 +332,7 @@ pub(super) fn emit(
         let each = if is_render {
             mod_list.clone()
         } else {
-            format!("super::entered(super::mods(), \"{name}\")")
+            format!("super::entered(HookId::{hook_id}, \"{name}\")")
         };
         // One callee's call: a mod's, then a scoped hook's parts' after the mods.
         let call = |callee: &str, exit: &str| match contract {
@@ -366,8 +384,13 @@ pub(super) fn emit(
             ),
             _ => format!("{lookup} {build} {calls} {write_back}"),
         };
+        let early_return = if is_render || scoped.is_some() {
+            String::new()
+        } else {
+            format!("if !super::listened(HookId::{hook_id}) {{ return; }}")
+        };
         dispatch.push_str(&format!(
-            "pub fn dispatch_{name}({dispatch_params}) {{ {body} }}\n"
+            "pub fn dispatch_{name}({dispatch_params}) {{ {early_return} {body} }}\n"
         ));
     }
     Ok(HookSources {
@@ -377,5 +400,7 @@ pub(super) fn emit(
         render_dispatch,
         part_traits,
         fills,
+        hook_ids,
+        hook_count,
     })
 }

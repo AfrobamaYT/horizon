@@ -1199,25 +1199,50 @@ pub struct ToolUse {
 /// The ordered list of mods shared by the client and server.
 pub type Mods = Arc<[Box<dyn Hooks>]>;
 
-static MODS: OnceLock<Mods> = OnceLock::new();
+pub(crate) struct Installed {
+    mods: Mods,
+    subscribers: horizon_client_core::subscribers::Subscribers,
+    types: Box<[std::any::TypeId]>,
+}
+
+static MODS: OnceLock<Installed> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
-    static TEST_MODS: std::cell::Cell<Option<&'static Mods>> = const { std::cell::Cell::new(None) };
+    static TEST_MODS: std::cell::Cell<Option<&'static Installed>> = const { std::cell::Cell::new(None) };
+}
+
+fn installed() -> Option<&'static Installed> {
+    #[cfg(test)]
+    if let Some(installed) = TEST_MODS.get() {
+        return Some(installed);
+    }
+    MODS.get()
 }
 
 /// Install the process-wide ordered list of mods.
-pub(crate) fn install(mods: Mods) -> &'static Mods {
+pub(crate) fn install(mods: Mods) -> &'static Installed {
+    let types = mods
+        .iter()
+        .map(|m| (&**m as &dyn std::any::Any).type_id())
+        .collect();
+    let subscribers =
+        horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
+    let installed = Installed {
+        mods,
+        subscribers,
+        types,
+    };
     #[cfg(test)]
     {
         // Tests can replace the list; mods() keeps its static slice lifetime.
-        let mods = Box::leak(Box::new(mods));
-        TEST_MODS.set(Some(mods));
-        mods
+        let installed = Box::leak(Box::new(installed));
+        TEST_MODS.set(Some(installed));
+        installed
     }
     #[cfg(not(test))]
     {
-        if MODS.set(mods).is_err() {
+        if MODS.set(installed).is_err() {
             log::warn!("Trait mods already installed; ignoring the second list");
         }
         MODS.get().unwrap()
@@ -1226,11 +1251,11 @@ pub(crate) fn install(mods: Mods) -> &'static Mods {
 
 /// The process-wide list in dispatch order, or an empty list before installation.
 pub fn mods() -> &'static [Box<dyn Hooks>] {
-    #[cfg(test)]
-    if let Some(mods) = TEST_MODS.get() {
-        return mods;
-    }
-    MODS.get().map_or(&[], |mods| mods.as_ref())
+    installed().map_or(&[], |installed| &installed.mods)
+}
+
+fn listened(hook: generated::HookId) -> bool {
+    installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
 /// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
@@ -1246,12 +1271,48 @@ pub fn name_mods(ids: &'static [&'static str]) {
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
-fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
+fn entered_registration<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     Entered {
         mods: mods.iter().enumerate(),
         hook,
         guard: None,
     }
+}
+
+fn entered(
+    hook_id: generated::HookId,
+    hook: &'static str,
+) -> impl Iterator<Item = &'static Box<dyn Hooks>> {
+    installed().into_iter().flat_map(move |installed| {
+        let mut crash_guard = None;
+        let mut subscriber_guard = None;
+        installed
+            .subscribers
+            .indices(hook_id as usize)
+            .map(move |index| {
+                drop(subscriber_guard.take());
+                drop(crash_guard.take());
+                let hooks = &installed.mods[index];
+                subscriber_guard = Some(horizon_client_core::subscribers::enter(
+                    &installed.subscribers,
+                    hook_id as usize,
+                    index,
+                    (&**hooks as *const dyn Hooks).cast(),
+                    installed.types[index],
+                ));
+                crash_guard = Some(mark_mod(index, hook));
+                hooks
+            })
+    })
+}
+
+fn mark_mod(index: usize, hook: &'static str) -> crate::crash::NativeModGuard {
+    crate::crash::enter_native_mod(crate::crash::NativeModCall {
+        id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
+        index,
+        hook,
+        part: None,
+    })
 }
 
 /// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
@@ -1300,14 +1361,7 @@ impl<'a> Iterator for Entered<'a> {
         // The last mod's mark goes first, so the next one's puts back what was there before.
         drop(self.guard.take());
         let (index, hooks) = self.mods.next()?;
-        self.guard = Some(crate::crash::enter_native_mod(
-            crate::crash::NativeModCall {
-                id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
-                index,
-                hook: self.hook,
-                part: None,
-            },
-        ));
+        self.guard = Some(mark_mod(index, self.hook));
         Some(hooks)
     }
 }
