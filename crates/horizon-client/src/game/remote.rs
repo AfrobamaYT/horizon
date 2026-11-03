@@ -10753,6 +10753,9 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 }
 
 #[cfg(test)]
+mod interaction_event_tests;
+
+#[cfg(test)]
 mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
