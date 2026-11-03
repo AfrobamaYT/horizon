@@ -435,6 +435,22 @@ fn filter_of(meta: &serde_json::Value) -> Vec<Filter> {
         .collect()
 }
 impl Pack {
+    /// A mod's asset layer, which has no resource-pack metadata.
+    pub fn mod_layer(id: String, source: Source) -> Self {
+        Self {
+            title: Text::literal(&id),
+            id,
+            source,
+            description: Text::empty(),
+            raw_description: Text::empty(),
+            description_style: Style::default(),
+            compatible: true,
+            compatibility: crate::pack_screen::Compat::Compatible,
+            overlays: Vec::new(),
+            filter: Vec::new(),
+        }
+    }
+
     /// The pack's `pack.png` (`PackResources.getRootResource`), for its icon.
     pub fn icon_png(&self) -> Option<Vec<u8>> {
         match &self.source {
@@ -909,7 +925,21 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
             Value::Object(events)
         }
         Merge::Font => list("providers", &mut parsed.iter().rev()),
-        Merge::Atlas => list("sources", &mut parsed.iter()),
+        // SpriteSourceList: the bottom file whole, each layer's sources
+        // appended to its own, from the bottom up. A layer whose sources
+        // are not a list is skipped, as vanilla logs and skips the file.
+        Merge::Atlas => {
+            let mut layers = parsed
+                .into_iter()
+                .filter(|l| l.get("sources").is_none_or(Value::is_array));
+            let mut doc = layers.next()?;
+            let added = layers
+                .filter_map(|l| l.get("sources").and_then(Value::as_array).cloned())
+                .flatten()
+                .collect();
+            atlas_append(&mut doc, added)?;
+            Value::Object(doc)
+        }
         // One definition is the file as it is.
         Merge::BlockStates if parsed.len() < 2 => Value::Object(parsed.pop()?),
         Merge::BlockStates => Value::Object(Map::from_iter([(
@@ -918,6 +948,34 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
         )])),
     };
     serde_json::to_vec(&out).ok()
+}
+/// `SpriteSourceList.load` on one document: it keeps its own fields, and
+/// `sources` gains `added` after its own entries. None when `sources` is
+/// not a list.
+fn atlas_append(
+    doc: &mut serde_json::Map<String, serde_json::Value>,
+    added: Vec<serde_json::Value>,
+) -> Option<()> {
+    let sources = doc
+        .entry("sources".to_owned())
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    sources.as_array_mut()?.extend(added);
+    Some(())
+}
+/// The atlas file `base` (vanilla's own) plus `added` sources make, as a
+/// stack of them loads: the base document whole with the added sources
+/// after its own. `what` names the file in errors.
+pub fn append_atlas_sources(
+    base: Option<&str>,
+    added: &[serde_json::Value],
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    let mut doc: serde_json::Map<String, serde_json::Value> = match base {
+        Some(text) => serde_json::from_str(text).map_err(|e| format!("{what}: {e}"))?,
+        None => serde_json::Map::new(),
+    };
+    atlas_append(&mut doc, added.to_vec()).ok_or_else(|| format!("{what}: no sources"))?;
+    serde_json::to_vec(&doc).map_err(|e| format!("{what}: {e}"))
 }
 /// `DownloadedPackSource.loadRequestedPacks`: a server's downloaded pack,
 /// "World Specific Resources"; None when its `pack.mcmeta` can't be read. Its
@@ -1413,12 +1471,19 @@ mod tests {
             parse(font.unwrap()),
             serde_json::json!({"providers":[3,1,2]})
         );
-        // SpriteSourceList: sources from the bottom pack up.
+        // SpriteSourceList: sources from the bottom pack up, and the bottom
+        // file keeps the fields a merge must not drop.
         let atlas = merge(
             Merge::Atlas,
-            &[json(r#"{"sources":[1]}"#), json(r#"{"sources":[2]}"#)],
+            &[
+                json(r#"{"sources":[1],"unseen":true}"#),
+                json(r#"{"sources":[2]}"#),
+            ],
         );
-        assert_eq!(parse(atlas.unwrap()), serde_json::json!({"sources":[1,2]}));
+        assert_eq!(
+            parse(atlas.unwrap()),
+            serde_json::json!({"sources":[1,2],"unseen":true})
+        );
         // BlockStateModelLoader: every definition kept, bottom first, for the
         // catalog to bind one by one; one that does not parse is skipped.
         let gate = merge(
@@ -1468,6 +1533,54 @@ mod tests {
         );
         assert_eq!(merge_kind("assets/minecraft/models/block/stone.json"), None);
     }
+    #[test]
+    fn metadata_free_mod_and_jar_layers_keep_pack_order() {
+        use std::io::Write;
+        let base = std::env::temp_dir().join(format!("horizon-mod-layers-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let vanilla = base.join("vanilla");
+        let path = "assets/shared/textures/block/test.png";
+        fs::create_dir_all(vanilla.join(path).parent().unwrap()).unwrap();
+        fs::write(vanilla.join(path), b"vanilla").unwrap();
+        let jar = |name: &str, content: &[u8]| {
+            let path = base.join(name);
+            let mut zip = zip::ZipWriter::new(fs::File::create(&path).unwrap());
+            for (entry, bytes) in [
+                ("assets/shared/textures/block/test.png", content),
+                ("data/shared/recipe/test.json", b"{}".as_slice()),
+                ("Example.class", b"dummy".as_slice()),
+            ] {
+                zip.start_file(entry, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+            zip.finish().unwrap();
+            path
+        };
+        let jar_a = jar("a.jar", b"jar-a");
+        let jar_b = jar("b.jar", b"jar-b");
+        let mod_a = base.join("mod-a");
+        let mod_b = base.join("mod-b");
+        for (root, bytes) in [(&mod_a, b"mod-a".as_slice()), (&mod_b, b"mod-b".as_slice())] {
+            fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            fs::write(root.join(path), bytes).unwrap();
+        }
+        let layers = [
+            Pack::mod_layer("jar-a".into(), Source::Zip(jar_a)),
+            Pack::mod_layer("mod-a".into(), Source::Dir(mod_a)),
+            Pack::mod_layer("jar-b".into(), Source::Zip(jar_b)),
+            Pack::mod_layer("mod-b".into(), Source::Dir(mod_b)),
+        ];
+        let out = base.join("overlay");
+        build_overlay(&vanilla, &layers[..3], &out).unwrap();
+        assert_eq!(fs::read(out.join(path)).unwrap(), b"jar-b");
+        build_overlay(&vanilla, &layers, &out).unwrap();
+        assert_eq!(fs::read(out.join(path)).unwrap(), b"mod-b");
+        assert!(!out.join("data/shared/recipe/test.json").exists());
+        assert!(!out.join("Example.class").exists());
+        fs::remove_dir_all(base).unwrap();
+    }
+
     #[test]
     fn overlay_layers_packs_over_vanilla() {
         // `&` would split an unquoted `cmd /C mklink` line.
