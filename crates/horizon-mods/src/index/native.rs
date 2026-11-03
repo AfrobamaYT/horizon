@@ -2,7 +2,7 @@
 use super::Facts;
 use std::{collections::BTreeMap, io::Read, path::Path};
 
-pub const MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
+pub const MIXINS_REV: &str = "e8cd0aa38cffef49cb2e088ef716baa107148c02";
 
 /// Whether `path` names a mod package.
 pub fn is_file(path: &Path) -> bool {
