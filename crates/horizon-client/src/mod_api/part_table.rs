@@ -910,12 +910,15 @@ mod tests {
     }
 
     /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
-    /// drains.
+    /// drains. A `halving` tank takes half of each offer, and a `short` one gives one less than
+    /// asked, truthfully: their simulations answer as their real calls.
     struct GameTank {
         held: Option<FluidStack>,
         capacity: u32,
         fills: bool,
         drains: bool,
+        halving: bool,
+        short: bool,
     }
     /// Game tanks by position, and the mod block entity types standing at some.
     #[derive(Default)]
@@ -932,12 +935,17 @@ mod tests {
                 capacity: 1000,
                 fills,
                 drains: true,
+                halving: false,
+                short: false,
             };
             self.tanks.insert(pos, tank);
             self
         }
         fn held(&self, pos: [i32; 3]) -> Option<FluidStack> {
             self.tanks[&pos].held.clone()
+        }
+        fn amount(&self, pos: [i32; 3]) -> u32 {
+            self.tanks[&pos].held.as_ref().map_or(0, |held| held.amount)
         }
     }
     impl Host for TankWorld {
@@ -981,7 +989,12 @@ mod tests {
             {
                 return Some(fluid);
             }
-            let add = fluid.amount.min(tank.capacity - held);
+            let offered = if tank.halving {
+                fluid.amount / 2
+            } else {
+                fluid.amount
+            };
+            let add = offered.min(tank.capacity - held);
             if !simulate && add > 0 {
                 tank.held = Some(fluid.with_amount(held + add));
             }
@@ -997,7 +1010,15 @@ mod tests {
         ) -> Option<FluidStack> {
             let tank = self.tanks.get_mut(&pos).filter(|tank| tank.drains)?;
             let held = tank.held.clone()?;
-            let take = held.amount.min(max);
+            let asked = if tank.short {
+                max.saturating_sub(1)
+            } else {
+                max
+            };
+            let take = held.amount.min(asked);
+            if take == 0 {
+                return None;
+            }
             if !simulate {
                 tank.held = (take < held.amount).then(|| held.with_amount(held.amount - take));
             }
@@ -1060,6 +1081,62 @@ mod tests {
                 .is_none()
         );
         assert_eq!(world.held(SOURCE), Some(water));
+    }
+
+    #[test]
+    fn truthful_tanks_that_take_half_or_give_one_less_lose_nothing_and_are_not_warned() {
+        game_thread();
+        let water = |amount| FluidStack::new("minecraft:water", amount);
+        // Each offer to the target is half taken: it is filled in passes, and the one millibucket
+        // no pass takes goes back into the source.
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water(1000)), true);
+        world
+            .tank(TANK, None, true)
+            .tanks
+            .get_mut(&TANK)
+            .unwrap()
+            .halving = true;
+        let host: &mut dyn Host = &mut world;
+        // The source is asked for what one pass takes, 500: the passes take 499 of it.
+        assert_eq!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 1000),
+            Some(water(499))
+        );
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (501, 499));
+        // A source that gives one less than asked: its real extract is asked what its
+        // simulation was, so it gives what it said it would.
+        let mut world = TankWorld::default();
+        world
+            .tank(SOURCE, Some(water(1000)), true)
+            .tanks
+            .get_mut(&SOURCE)
+            .unwrap()
+            .short = true;
+        world.tank(TANK, None, true);
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 1000),
+            Some(water(998))
+        );
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (2, 998));
+        assert!(!super::super::fluid_capability::warned_about("the game"));
+    }
+
+    #[test]
+    fn the_api_55_move_leaves_a_fluid_with_components_where_it_is() {
+        game_thread();
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(potion(500, "minecraft:healing")), true);
+        world.tank(TANK, None, true);
+        let host: &mut dyn Host = &mut world;
+        let plain = |fluid: &FluidStack| !fluid.has_components();
+        assert!(
+            host.transfer_fluids_where(SOURCE, None, TANK, None, 1000, &plain)
+                .is_none()
+        );
+        assert_eq!(world.held(SOURCE), Some(potion(500, "minecraft:healing")));
+        assert_eq!(world.held(TANK), None);
     }
 
     #[test]

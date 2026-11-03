@@ -198,9 +198,9 @@ struct End {
 }
 
 impl End {
-    /// How `fluid` would go into the tanks, simulated tank by tank: how much into which.
-    fn plan_fill(&self, host: &mut dyn Host, fluid: &FluidStack) -> Vec<(usize, u32)> {
-        let mut plan = Vec::new();
+    /// One pass of `fluid` over the tanks, each offered what is left: how much went in. With
+    /// `simulate`, how much such a pass would take.
+    fn pass(&self, host: &mut dyn Host, fluid: &FluidStack, simulate: bool) -> u32 {
         let mut left = fluid.amount;
         for tank in 0..self.handler.tanks(host, self.at, self.side) {
             if left == 0 {
@@ -209,46 +209,58 @@ impl End {
             let some = fluid.with_amount(left);
             let rest = self
                 .handler
-                .insert(host, self.at, self.side, tank, some, true);
-            let rest = rest.map_or(0, |rest| rest.amount.min(left));
-            if rest < left {
-                plan.push((tank, left - rest));
-                left = rest;
-            }
+                .insert(host, self.at, self.side, tank, some, simulate);
+            left = rest.map_or(0, |rest| rest.amount.min(left));
         }
-        plan
+        fluid.amount - left
     }
-    /// Fills the tanks as `plan` says; how much went in.
-    fn fill(&self, host: &mut dyn Host, fluid: &FluidStack, plan: Vec<(usize, u32)>) -> u32 {
-        let mut went = 0;
-        for (tank, amount) in plan {
-            let some = fluid.with_amount(amount);
+    /// Fills the tanks with `fluid` in passes until one takes nothing, as `Inventory.add` and
+    /// NeoForge's insert loops do: the first pass makes exactly the offers a simulated `pass`
+    /// of `fluid` makes. How much the first pass took, and how much went in.
+    fn fill(&self, host: &mut dyn Host, fluid: &FluidStack) -> (u32, u32) {
+        let first = self.pass(host, fluid, false);
+        let mut went = first;
+        while went < fluid.amount {
+            let more = self.pass(host, &fluid.with_amount(fluid.amount - went), false);
+            if more == 0 {
+                break;
+            }
+            went += more;
+        }
+        (first, went)
+    }
+    /// `fill` into tank `tank` alone, in passes; what is left.
+    fn fill_tank(&self, host: &mut dyn Host, tank: usize, fluid: FluidStack) -> Option<FluidStack> {
+        let mut left = fluid;
+        loop {
+            let amount = left.amount;
             let rest = self
                 .handler
-                .insert(host, self.at, self.side, tank, some, false);
-            went += amount - rest.map_or(0, |rest| rest.amount.min(amount));
+                .insert(host, self.at, self.side, tank, left.clone(), false);
+            match rest.filter(|rest| rest.amount > 0) {
+                Some(rest) if rest.amount < amount => left = rest,
+                Some(_) => return Some(left),
+                None => return None,
+            }
         }
-        went
     }
-}
-
-/// How much a plan puts in.
-fn planned(plan: &[(usize, u32)]) -> u32 {
-    plan.iter().map(|&(_, amount)| amount).sum()
 }
 
 impl dyn Host + '_ {
     /// Moves up to `max` millibuckets of one fluid from the block at `from`, through its side
     /// `from_side`, into the one at `to`, through `to_side`, by their [`FLUIDS`] handlers, as
     /// NeoForge's `ResourceHandlerUtil.move`. Each source tank in turn is planned with
-    /// `simulate` at both ends (what the source gives, what the target takes of it, and what
-    /// the source gives of that, since a cauldron gives only whole thirds), then moved. What
-    /// moved; none when nothing did.
+    /// `simulate` at both ends (what the source gives, what the target takes of it in one
+    /// pass, and what the source gives of that, since a cauldron gives only whole thirds),
+    /// then moved with the same requests: the source's real extract asks what its simulation
+    /// asked, and the target is filled in passes until one takes nothing, its first pass
+    /// making the simulated offers. What the target doesn't take goes back into the source.
+    /// What moved; none when nothing did.
     ///
     /// A handler whose real call disagrees with its simulation is a mod bug, warned once naming
-    /// its mod. What it leaves over goes back into the source tank, else into the target. Fluid
-    /// has no item form to drop at the block, so what neither end takes is lost, with a warning
-    /// naming the mod: the one thing a broken handler can void.
+    /// its mod. What is left over goes back into the source tank, else the source, else the
+    /// target. Fluid has no item form to drop at the block, so what none of them takes is
+    /// lost, with a warning: the one thing a broken handler can void.
     pub fn transfer_fluids(
         &mut self,
         from: [i32; 3],
@@ -256,6 +268,20 @@ impl dyn Host + '_ {
         to: [i32; 3],
         to_side: Option<Direction>,
         max: u32,
+    ) -> Option<FluidStack> {
+        self.transfer_fluids_where(from, from_side, to, to_side, max, &|_| true)
+    }
+
+    /// `transfer_fluids` of the fluids `keep` accepts: the API 55 move, which names a fluid by
+    /// its id, keeps those with components where they are.
+    pub(crate) fn transfer_fluids_where(
+        &mut self,
+        from: [i32; 3],
+        from_side: Option<Direction>,
+        to: [i32; 3],
+        to_side: Option<Direction>,
+        max: u32,
+        keep: &dyn Fn(&FluidStack) -> bool,
     ) -> Option<FluidStack> {
         if from == to {
             return None;
@@ -282,7 +308,7 @@ impl dyn Host + '_ {
                     .extract(host, from, from_side, tank, max, simulate)
                     .filter(|out| out.amount > 0)
             };
-            let Some(offer) = extract(self, left, true) else {
+            let Some(offer) = extract(self, left, true).filter(|offer| keep(offer)) else {
                 continue;
             };
             if moved
@@ -291,47 +317,54 @@ impl dyn Host + '_ {
             {
                 continue;
             }
-            let takes = planned(&target.plan_fill(self, &offer));
-            let Some(give) = (takes > 0).then(|| extract(self, takes, true)).flatten() else {
+            let ask = target.pass(self, &offer, true);
+            let Some(give) = (ask > 0).then(|| extract(self, ask, true)).flatten() else {
                 continue;
             };
-            let plan = target.plan_fill(self, &give);
-            if planned(&plan) != give.amount {
+            let takes = target.pass(self, &give, true);
+            if takes == 0 {
                 continue;
             }
-            // Commit what was planned.
-            let Some(out) = extract(self, give.amount, false) else {
+            // Commit, with the requests that were simulated.
+            let Some(out) = extract(self, ask, false) else {
                 broken(&source.handler, from, "gave");
                 continue;
             };
             let as_planned = out == give;
-            let mut liar = (!as_planned).then_some(&source.handler);
-            let plan = if as_planned {
-                plan
-            } else {
+            let mut liar = None;
+            if !as_planned {
                 broken(&source.handler, from, "gave");
-                target.plan_fill(self, &out)
-            };
-            let went = target.fill(self, &out, plan);
-            if went < out.amount && as_planned {
+                liar = Some(&source.handler);
+            }
+            let (first, went) = target.fill(self, &out);
+            if as_planned && first < takes {
                 broken(&target.handler, to, "took");
                 liar = Some(&target.handler);
             }
             if went < out.amount {
                 let rest = out.with_amount(out.amount - went);
-                let back = source
-                    .handler
-                    .insert(self, from, from_side, tank, rest, false);
-                let lost = back.filter(|back| back.amount > 0).and_then(|back| {
-                    let plan = target.plan_fill(self, &back);
-                    let into = target.fill(self, &back, plan);
-                    (into < back.amount).then(|| back.with_amount(back.amount - into))
-                });
+                let lost = source
+                    .fill_tank(self, tank, rest)
+                    .and_then(|rest| {
+                        let (_, back) = source.fill(self, &rest);
+                        (back < rest.amount).then(|| rest.with_amount(rest.amount - back))
+                    })
+                    .and_then(|rest| {
+                        let (_, into) = target.fill(self, &rest);
+                        (into < rest.amount).then(|| rest.with_amount(rest.amount - into))
+                    });
                 if let Some(lost) = lost {
-                    let owner = liar.map_or_else(|| "the game".to_owned(), owner);
+                    let why = liar.map_or_else(
+                        || "neither end took it back".to_owned(),
+                        |liar| {
+                            format!(
+                                "{}'s fluid handler moved other than its simulation said",
+                                owner(liar)
+                            )
+                        },
+                    );
                     log::warn!(
-                        "Horizon: a fluid move from {from:?} to {to:?} lost {} mB of {}: \
-                         {owner}'s fluid handler moved other than its simulation said",
+                        "Horizon: a fluid move from {from:?} to {to:?} lost {} mB of {}: {why}",
                         lost.amount,
                         lost.fluid
                     );
