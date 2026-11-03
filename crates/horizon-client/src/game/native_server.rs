@@ -379,7 +379,7 @@ impl Game<'_> {
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
             host.hub.guests.iter().find(|guest| {
-                guest.placed && guest.uuid == uuid && !self.lan_guest_swaps.contains(&guest.conn)
+                guest.placed && guest.participates_online() && guest.uuid == uuid && !self.lan_guest_swaps.contains(&guest.conn)
             })
         }) {
             return Some((PlayerRead::Guest(guest), guest.entity_id as u32));
@@ -406,8 +406,19 @@ impl Game<'_> {
 
     fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
         (self.native_lifecycle.epoch()? == player.entity.epoch()).then_some(())?;
-        let (read, id) = self.player_lookup(player.uuid)?;
-        (id == player.entity.id()).then_some(read)
+        if let Some((read, id)) = self.player_lookup(player.uuid)
+            && id == player.entity.id()
+        {
+            return Some(read);
+        }
+        let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
+            guest.placed
+                && !guest.participates_online()
+                && guest.uuid == player.uuid
+                && guest.entity_id as u32 == player.entity.id()
+                && !self.lan_guest_swaps.contains(&guest.conn)
+        })?;
+        Some(PlayerRead::Guest(guest))
     }
 
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
