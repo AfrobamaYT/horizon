@@ -14904,6 +14904,7 @@ impl Game<'_> {
             p.velocity = Vec3::ZERO;
             p.pitch = 0.0;
             p.teleported = true;
+            p.teleported_delta = [false; 3];
         }
         self.pitch = 0.0;
         if self.lan_acting.is_none() {
