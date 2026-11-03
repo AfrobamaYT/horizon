@@ -363,7 +363,10 @@ mod tests {
         stack: ItemStack,
         tx: &Transaction,
     ) -> Option<ItemStack> {
-        let handler = at.level.capability(host, &ITEMS, at.pos, at.side)?;
+        let handler = at
+            .level
+            .capability(host, &ITEMS, at.pos, at.side)
+            .expect("item capability");
         let inserted = handler.insert(host, tx, slot, &ItemResource::of(&stack), stack.count);
         (inserted < stack.count).then(|| ItemStack {
             count: stack.count - inserted,
@@ -378,7 +381,10 @@ mod tests {
         amount: u32,
         tx: &Transaction,
     ) -> Option<ItemStack> {
-        let handler = at.level.capability(host, &ITEMS, at.pos, at.side)?;
+        let handler = at
+            .level
+            .capability(host, &ITEMS, at.pos, at.side)
+            .expect("item capability");
         let resource = handler.resource(host, slot)?;
         let taken = handler.extract(host, tx, slot, &resource, amount);
         (taken > 0).then(|| resource.to_stack(taken))
@@ -391,7 +397,10 @@ mod tests {
         amount: u32,
         simulate: bool,
     ) -> Option<FluidStack> {
-        let handler = at.level.capability(host, &FLUIDS, at.pos, at.side)?;
+        let handler = at
+            .level
+            .capability(host, &FLUIDS, at.pos, at.side)
+            .expect("fluid capability");
         handler.extract(host, at.pos, at.side, tank, amount, simulate)
     }
 
