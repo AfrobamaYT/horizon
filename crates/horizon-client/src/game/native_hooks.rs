@@ -429,7 +429,8 @@
 //!
 //! API 143 adds data map types a native mod registers (`native_data_map_types`), merged from the data packs' and mods' files each time the server's tables are built, read with `native_data_map` and `native_data_map_entries` (`native_data_maps.rs`).
 //!
-//! API 142 adds an energy buffer on a mod block's block entity (`native_block_entity_energy`), and the energy helpers in `machines/native_energy.rs`: `native_energy`, `native_energy_insert`, `native_energy_extract`, `native_move_energy`.
+//! API 142 adds an energy buffer on a mod block's block entity (`native_block_entity_energy`), which the game's
+//! own energy capability (`Capabilities.Energy.BLOCK`, `machines/native_energy.rs`) answers.
 //!
 //! API 141 adds a player starting and stopping tracking an entity (`native_player_start_tracking`, `native_player_stop_tracking`).
 //!
@@ -7956,7 +7957,7 @@ pub(super) fn mod_particles_ok(
         && options.scale.is_finite()
 }
 
-fn sound_id(id: &str) -> bool {
+pub(super) fn sound_id(id: &str) -> bool {
     let Some((namespace, path)) = id.split_once(':') else {
         return false;
     };
@@ -8034,6 +8035,7 @@ impl GameLevel<'_> {
             volume,
             pitch,
             except: None,
+            entity: None,
         });
         true
     }
