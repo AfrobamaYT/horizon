@@ -910,15 +910,19 @@ mod tests {
     }
 
     /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
-    /// drains. A `halving` tank takes half of each offer, and a `short` one gives one less than
-    /// asked, truthfully: their simulations answer as their real calls.
+    /// drains. Truthfully, their simulations answering as their real calls: a `halving` tank
+    /// takes half of each offer, a `half_room` one at most half its room, a `short` one gives
+    /// one less than asked, and a `quarters` one gives and takes only whole quarter buckets, as
+    /// a cauldron its thirds.
     struct GameTank {
         held: Option<FluidStack>,
         capacity: u32,
         fills: bool,
         drains: bool,
         halving: bool,
+        half_room: bool,
         short: bool,
+        quarters: bool,
     }
     /// Game tanks by position, and the mod block entity types standing at some.
     #[derive(Default)]
@@ -936,7 +940,9 @@ mod tests {
                 fills,
                 drains: true,
                 halving: false,
+                half_room: false,
                 short: false,
+                quarters: false,
             };
             self.tanks.insert(pos, tank);
             self
@@ -994,7 +1000,15 @@ mod tests {
             } else {
                 fluid.amount
             };
-            let add = offered.min(tank.capacity - held);
+            let room = if tank.half_room {
+                (tank.capacity - held) / 2
+            } else {
+                tank.capacity - held
+            };
+            let mut add = offered.min(room);
+            if tank.quarters {
+                add -= add % 250;
+            }
             if !simulate && add > 0 {
                 tank.held = Some(fluid.with_amount(held + add));
             }
@@ -1015,7 +1029,10 @@ mod tests {
             } else {
                 max
             };
-            let take = held.amount.min(asked);
+            let mut take = held.amount.min(asked);
+            if tank.quarters {
+                take -= take % 250;
+            }
             if take == 0 {
                 return None;
             }
@@ -1084,42 +1101,52 @@ mod tests {
     }
 
     #[test]
-    fn truthful_tanks_that_take_half_or_give_one_less_lose_nothing_and_are_not_warned() {
+    fn truthful_tanks_lose_nothing_and_are_not_warned_whatever_they_take_or_give() {
         game_thread();
         let water = |amount| FluidStack::new("minecraft:water", amount);
-        // Each offer to the target is half taken: it is filled in passes, and the one millibucket
-        // no pass takes goes back into the source.
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(water(1000)), true);
-        world
-            .tank(TANK, None, true)
-            .tanks
-            .get_mut(&TANK)
-            .unwrap()
-            .halving = true;
-        let host: &mut dyn Host = &mut world;
-        // The source is asked for what one pass takes, 500: the passes take 499 of it.
-        assert_eq!(
-            host.transfer_fluids(SOURCE, None, TANK, None, 1000),
-            Some(water(499))
-        );
-        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (501, 499));
-        // A source that gives one less than asked: its real extract is asked what its
-        // simulation was, so it gives what it said it would.
-        let mut world = TankWorld::default();
-        world
-            .tank(SOURCE, Some(water(1000)), true)
-            .tanks
-            .get_mut(&SOURCE)
-            .unwrap()
-            .short = true;
-        world.tank(TANK, None, true);
-        let host: &mut dyn Host = &mut world;
-        assert_eq!(
-            host.transfer_fluids(SOURCE, None, TANK, None, 1000),
-            Some(water(998))
-        );
-        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (2, 998));
+        type Setup = fn(&mut GameTank, &mut GameTank);
+        let cases: [(&str, Setup, u32); 6] = [
+            // Half of each offer: no request is ever taken whole, so nothing moves.
+            ("half of each offer", |_, t| t.halving = true, 0),
+            (
+                "half of each offer, from quarters",
+                |s, t| (s.quarters, t.halving) = (true, true),
+                0,
+            ),
+            (
+                "half of each offer, from a drain-only tank",
+                |s, t| (s.fills, t.halving) = (false, true),
+                0,
+            ),
+            // Half its room: rounds of 500, 250, then 125, which quarters can't give.
+            (
+                "half its room, from quarters",
+                |s, t| (s.quarters, t.half_room) = (true, true),
+                750,
+            ),
+            (
+                "half its room, from a drain-only tank",
+                |s, t| (s.fills, t.half_room) = (false, true),
+                999,
+            ),
+            // One less than asked: the real extract is asked what its simulation was.
+            ("a source giving one less", |s, _| s.short = true, 998),
+        ];
+        for (case, setup, moves) in cases {
+            let mut world = TankWorld::default();
+            world.tank(SOURCE, Some(water(1000)), true);
+            world.tank(TANK, None, true);
+            let [source, target] = world.tanks.get_disjoint_mut([&SOURCE, &TANK]);
+            setup(source.unwrap(), target.unwrap());
+            let host: &mut dyn Host = &mut world;
+            let moved = host.transfer_fluids(SOURCE, None, TANK, None, 1000);
+            assert_eq!(moved, (moves > 0).then(|| water(moves)), "{case}");
+            assert_eq!(
+                (world.amount(SOURCE), world.amount(TANK)),
+                (1000 - moves, moves),
+                "{case}"
+            );
+        }
         assert!(!super::super::fluid_capability::warned_about("the game"));
     }
 

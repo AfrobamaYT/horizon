@@ -3013,8 +3013,10 @@ of 1000 mB that holds water in thirds and lava only whole; a cauldron has no blo
 position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
 discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
 components are dropped. A mod block's saved tanks take no fluid with components. `host.transfer_fluids(from, from_side, to, to_side, max)` moves
-one fluid between two handlers: each source tank is planned with `simulate` at both ends, then moved with the
-same requests, the target filled in passes until one takes nothing; what it doesn't take goes back to the source.
+one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, until a round moves
+nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
+whole, then the source really gives with that request and the target is filled with exactly what came out. A
+handler whose real calls answer as its simulations never loses fluid and is never warned.
 `native_fluid_insert`, `native_fluid_extract`, `native_fluid_tanks` and `native_move_fluids` use a mod's handler
 where one is registered; they name a fluid by its id, so they leave fluids with components alone.
 
