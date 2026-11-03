@@ -459,13 +459,15 @@ mod tests {
         at: BlockSide,
         tank: usize,
         amount: u32,
-        simulate: bool,
+        tx: &Transaction,
     ) -> Option<FluidStack> {
         let handler = at
             .level
             .capability(host, &FLUIDS, at.pos, at.side)
             .expect("fluid capability");
-        handler.extract(host, at.pos, at.side, tank, amount, simulate)
+        let resource = handler.resource(host, tank)?;
+        let taken = handler.extract(host, tx, tank, &resource, amount);
+        (taken > 0).then(|| resource.to_stack(taken))
     }
 
     fn chest_items(game: &Game<'_>) -> Vec<(usize, u32)> {
@@ -548,7 +550,7 @@ mod tests {
                 insert(host, on([0, 64, 0], None), 1, sticks(3), tx);
                 Err::<(), ()>(())
             });
-            let water = extract_fluid(host, on([2, 64, 0], None), 0, 1000, false);
+            let water = extract_fluid(host, on([2, 64, 0], None), 0, 1000, tx);
             assert_eq!(water.map(|w| w.amount), Some(1000));
             Err(())
         });
@@ -569,7 +571,7 @@ mod tests {
                 insert(host, on([0, 64, 0], None), 1, sticks(3), tx);
                 Err::<(), ()>(())
             });
-            extract_fluid(host, on([2, 64, 0], None), 0, 1000, false);
+            extract_fluid(host, on([2, 64, 0], None), 0, 1000, tx);
             Ok(())
         });
         assert_eq!(done, Ok(()));
@@ -624,8 +626,8 @@ mod tests {
         };
         let before = queues(&game);
         let host: &mut dyn Host = &mut game;
-        let _ = host.transaction(|host, _| {
-            extract_fluid(host, on([2, 64, 0], None), 0, 1000, false);
+        let _ = host.transaction(|host, tx| {
+            extract_fluid(host, on([2, 64, 0], None), 0, 1000, tx);
             Err::<(), ()>(())
         });
         assert_eq!(game.world.block(2, 64, 0), full);
