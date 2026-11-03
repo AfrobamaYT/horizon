@@ -638,7 +638,7 @@ impl std::ops::BitOr for NativeBlockUpdateFlags {
     }
 }
 
-/// One open attempt of one world; it rejects a previous open's commands.
+/// One server world open or client level; it rejects a previous world's handles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeWorldEpoch(u64);
 
@@ -656,10 +656,13 @@ impl NativeWorldEpoch {
 
 /// An entity of the open world, for the `Host` methods that read or change one
 /// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
-/// are shared by every level and never reused while the world is open, and an
-/// entity that changes dimension gets a new one, as in vanilla. A handle from an
-/// earlier open, of an entity that is gone, or used on a client reads as `None`
-/// and changes nothing. `Host::entity` makes one from an event's entity id.
+/// are shared by every server level and never reused while the server world is
+/// open, and an entity that changes dimension gets a new one, as in vanilla.
+/// On a client the epoch identifies one client level and changes when that level
+/// is replaced. Server reads and writes reject a handle from an earlier epoch,
+/// of an entity that is gone, or used on a client. `Host::entity` makes a server
+/// handle from an event's entity id; `ClientHost::crosshair_target` supplies a
+/// client handle for an entity hit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct EntityRef {
     epoch: NativeWorldEpoch,
@@ -1370,8 +1373,8 @@ pub struct NativeClipHit {
 }
 
 /// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
-/// current interaction ranges. Entity ids identify this world's network
-/// entities, including dragon parts; they are not persistent handles.
+/// current interaction ranges. Entity handles belong to the current client
+/// level's epoch, including dragon parts; a replacement level invalidates them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum NativeCrosshairTarget {
@@ -1381,7 +1384,7 @@ pub enum NativeCrosshairTarget {
         hit: BlockHit,
     },
     Entity {
-        id: i32,
+        entity: EntityRef,
         point: [f64; 3],
     },
 }

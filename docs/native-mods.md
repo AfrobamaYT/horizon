@@ -3483,11 +3483,13 @@ The `native_camera()` helper returns the most recently extracted world frame's c
 
 `ClientHost::crosshair_target()` returns the ordinary interaction-range target as
 `NativeCrosshairTarget::Block { pos, state, hit }` or
-`NativeCrosshairTarget::Entity { id, point }`. The block hit contains its world-space
+`NativeCrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
 It uses the game's current targeting ray and block/entity reach, respects blocks
 occluding entities, and returns `None` on a miss or without a client world.
-It can be read with a screen open. The entity id is a network id in the current
-world, including dragon-part ids, not a persistent handle; use the planned client
-handles for entity data. Unlike `view_hit` and `raycast`, this does not find blocks
+It can be read with a screen open. `entity` is an `EntityRef` carrying the current
+client level's epoch and network entity ID, including dragon parts. It becomes stale
+when the client level is replaced or the client disconnects; a same-level respawn
+keeps its epoch. This supplies identity, not client entity reads: the server-only
+entity data methods still reject client handles. Unlike `view_hit` and `raycast`, this does not find blocks
 in distant terrain or return a block behind a targeted entity.

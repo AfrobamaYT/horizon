@@ -10623,7 +10623,12 @@ mod tests {
             execution_role::ExecutionRole, native_entity_refs::tests::with_game,
             native_lifecycle::NativeLifecycle,
         };
-        use horizon_client::{level_loading::Reason, mobs::Mob, mod_api::EntityRef};
+        use horizon_client::{
+            level_loading::Reason,
+            mobs::Mob,
+            mod_api::{EntityRef, NativeCrosshairTarget},
+            motion::PlayerMotion,
+        };
         use horizon_core::geometry::Vec3;
         use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
 
@@ -10660,7 +10665,16 @@ mod tests {
             assert_ne!(replaced, joined);
             let current = EntityRef::new(replaced, 12);
             let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
-            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            game.mobs
+                .push(Mob::new(12, kind, Vec3::new(0.0, 1.0, 2.0), 0.0));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.yaw = 0.0;
+            game.pitch = 0.0;
+            let Some(NativeCrosshairTarget::Entity { entity, .. }) = game.native_crosshair_target()
+            else {
+                panic!("the crosshair hits the pig in front of the player");
+            };
+            assert_eq!(entity, current);
             assert!(
                 game.native_entity_target(current).is_none(),
                 "still server-only"
@@ -10673,6 +10687,7 @@ mod tests {
 
             game.client_logging_out();
             assert!(game.native_lifecycle.epoch().is_none());
+            assert!(game.native_crosshair_target().is_none());
             game.client_logging_out();
             assert!(game.native_lifecycle.epoch().is_none());
             let (client, _server) = Pipe::pair();
