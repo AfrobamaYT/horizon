@@ -7297,10 +7297,10 @@ impl Game<'_> {
     }
     /// Chunk `chunk` of `dimension` left the world (NeoForge's
     /// `ChunkEvent.Unload`), with a level that closes for being empty too. Don't
-    /// read its blocks. Its block entities are still there for this call, so
-    /// `native_with_mod_block_entity` can change one and it's saved with the
-    /// chunk. Not told when the world closes, which `native_world_lifecycle`
-    /// tells. Server-side. API 57.
+    /// read its blocks. Its block entities are still there, but changes made in
+    /// this hook aren't saved: as in vanilla, the chunk is saved before it unloads.
+    /// Not told when the world closes, which `native_world_lifecycle` tells.
+    /// Server-side. API 57.
     pub(super) fn native_chunk_unload(&mut self, dimension: &str, chunk: [i32; 2]) {
         mod_api::dispatch_chunk_unload(self, mod_api::mods(), dimension, chunk);
     }
@@ -9920,11 +9920,8 @@ impl Game<'_> {
         self.native_item_picked_up(player, &stack.item, stack.count, &mut canceled);
         canceled
     }
-    /// Tells the mods of the chunks that came and went in this level.
-    pub(super) fn native_chunks_changed(
-        &mut self,
-        unloaded: &[std::sync::Arc<horizon_client::chunk::Chunk>],
-    ) {
+    /// Tells the mods of the chunks that came into this level.
+    pub(super) fn native_chunks_loaded(&mut self) {
         let loaded = std::mem::take(&mut self.world.loaded_chunks);
         if self.remote.is_some() {
             return;
@@ -9933,6 +9930,16 @@ impl Game<'_> {
         for (x, z, new) in loaded {
             self.native_chunk_load(dimension, [x, z], new);
         }
+    }
+    /// Tells the mods of the chunks leaving this level, after their last save.
+    pub(super) fn native_chunks_unloaded(
+        &mut self,
+        unloaded: &[std::sync::Arc<horizon_client::chunk::Chunk>],
+    ) {
+        if self.remote.is_some() {
+            return;
+        }
+        let dimension = self.dim.id();
         for chunk in unloaded {
             self.native_chunk_unload(dimension, [chunk.x, chunk.z]);
         }
@@ -11227,7 +11234,13 @@ mod tests {
     #[test]
     fn hook_points_stay_hookable() {
         let source = include_str!("native_hooks.rs");
-        let code = source.split("#[cfg(test)]").next().unwrap_or_default();
+        let code = source
+            .split("\nmod tests {")
+            .next()
+            .unwrap()
+            .trim_end()
+            .strip_suffix("#[cfg(test)]")
+            .expect("the tests module has its cfg");
         assert!(code.contains("\npub(crate) const NATIVE_HOOKS_API: u32 = "));
         let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
         for line in lines {
