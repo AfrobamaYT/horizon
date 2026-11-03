@@ -1101,6 +1101,11 @@ pub struct ChunkRef {
 }
 
 impl ChunkRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(level: LevelRef, pos: [i32; 2]) -> Self {
+        Self { level, pos }
+    }
     /// The chunk coordinates, `[x, z]`.
     pub fn pos(self) -> [i32; 2] {
         self.pos
