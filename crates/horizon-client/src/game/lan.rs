@@ -2475,7 +2475,7 @@ impl Game<'_> {
         }
     }
 
-    fn lan_guest_joined(
+    pub(super) fn lan_guest_joined(
         &mut self,
         host: &mut LanHost,
         conn: u32,
@@ -2506,6 +2506,8 @@ impl Game<'_> {
         playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
+            // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
+            g.abilities.update_for_mode(default_mode);
         }
         if !known {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
@@ -2737,7 +2739,7 @@ impl Game<'_> {
         }
     }
     /// Send the tick's level events, sounds and mob animations.
-    fn lan_flush_effects(&mut self, host: &mut LanHost) {
+    pub(super) fn lan_flush_effects(&mut self, host: &mut LanHost) {
         let critical_hits = std::mem::take(&mut self.lan_critical_hits);
         let kinetic_hits = std::mem::take(&mut self.lan_kinetic_hits);
         for (state, at) in std::mem::take(&mut self.lan_cushion_breaks) {
@@ -2848,7 +2850,8 @@ impl Game<'_> {
                 && !dead
                 && old.and_then(|o| o.2).is_none_or(|before| time < before)
             {
-                host.hub.swing(m.id as i32, 0, at, None);
+                host.hub
+                    .swing(m.id as i32, i32::from(m.swing_is_off_hand()), at, None);
             }
             seen.insert(m.id, (m.hurt_time, dead, swing));
         }

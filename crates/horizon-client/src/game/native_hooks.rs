@@ -515,8 +515,7 @@
 //!
 //! API 106 adds data pack files for the tables a native mod contributes (`native_data_pack_files`), on a world's first open and on every `/reload`.
 //!
-//! API 105 adds a push for the local player and a player's flying speed (`native_push_player`,
-//! `native_set_flying_speed`).
+//! API 105 adds a push for the local player (`native_push_player`).
 //!
 //! API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`, the
 //! `ScreenEvent.KeyPressed.Pre` point, with the screen, vanilla's key name, whether it is an
@@ -832,11 +831,8 @@
 //! `native_known_recipes`, `native_place_recipe`, `native_give`): what a
 //! recipe viewer needs.
 //!
-//! Names, parameters and call sites are kept from release to release, and
-//! hook points are only ever added: each addition raises [`NATIVE_HOOKS_API`].
-//! A bundle that hooks only these names the API it needs (`hooks`), and the
-//! launcher builds it on any Horizon whose API is at least that one. A change
-//! that would break such a bundle is not made.
+//! Native hook contracts belong to the game source. Names, parameters and call
+//! sites may change; rebuild native mods after game updates.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;

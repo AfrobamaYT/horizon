@@ -233,6 +233,7 @@ mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
+mod native_living_writes;
 mod native_menu_refs;
 mod native_menus;
 mod native_mob_draw;
@@ -3221,6 +3222,9 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// The abilities of the server player whose turn it is (`as_guest`): their record's
+    /// copy, which the turn reads and writes and `leave_guest` stores. None outside a turn.
+    acting_abilities: Option<horizon_client::lan::abilities::PlayerAbilities>,
     /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
     /// when their own state is back in their record.
     save_after_guest_turn: bool,
@@ -14904,6 +14908,7 @@ impl Game<'_> {
             p.velocity = Vec3::ZERO;
             p.pitch = 0.0;
             p.teleported = true;
+            p.teleported_delta = [false; 3];
         }
         self.pitch = 0.0;
         if self.lan_acting.is_none() {
@@ -19501,6 +19506,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            acting_abilities: None,
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
