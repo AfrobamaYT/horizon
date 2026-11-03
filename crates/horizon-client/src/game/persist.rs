@@ -1921,7 +1921,7 @@ mod tests {
         game.spawn_loaded_entities();
         let saved = game.entity_chunks(&HashSet::from([(0, 0)]), false);
         let saved: Vec<&Tag> = saved.iter().flat_map(|(_, tags)| tags).collect();
-        for (kind, uuid, n) in uuids {
+        for &(kind, uuid, n) in &uuids {
             let id = game
                 .persist
                 .uuids
@@ -1940,6 +1940,21 @@ mod tests {
                 "{kind}: attachments not saved back"
             );
             println!("{kind}: id {id}, UUID kept, attachments loaded and saved back");
+        }
+        // Pruning drops the attachments of an entity that left the level and keeps every
+        // live one's, whatever list it lives in.
+        let (_, zombie, _) = uuids[0];
+        let zombie_id = game
+            .persist
+            .uuids
+            .iter()
+            .find(|(_, u)| **u == zombie)
+            .map(|(id, _)| *id);
+        game.mobs.retain(|mob| Some(mob.id) != zombie_id);
+        game.prune_entity_attachments();
+        for (kind, uuid, _) in uuids {
+            let kept = game.entity_attachments.contains_key(&uuid);
+            assert_eq!(kept, uuid != zombie, "{kind}: pruned wrongly");
         }
     }
 
