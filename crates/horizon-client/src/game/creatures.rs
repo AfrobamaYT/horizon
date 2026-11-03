@@ -3081,7 +3081,7 @@ impl Game<'_> {
     /// `mob_drops` game rule is on.
     fn spawn_breeding_orb(&mut self, at: [f64; 3], amount: u32) {
         if self.ui.rules.bool("mob_drops") {
-            self.spawn_orbs(at, amount);
+            self.add_orb(at, amount);
         }
     }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
@@ -3319,7 +3319,7 @@ impl Game<'_> {
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == parent)
                 {
                     let xp = 1 + m.random.next_int_bound(7).unwrap_or(0) as u32;
-                    self.spawn_orbs([p.position.x, p.position.y, p.position.z], xp);
+                    self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
                 }
                 return;
             }
