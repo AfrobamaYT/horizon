@@ -8145,12 +8145,6 @@ impl Game<'_> {
         let mods = Self::game_dir().join(mod_list::DIR);
         mods.join(".horizon-mod-data").join(mod_id)
     }
-    /// The folder mod `mod_id`'s post-build step wrote into when the launcher built the game
-    /// (`native-data/<id>/` in the build's version folder); None when the game's own path is
-    /// unknown.
-    pub(super) fn native_built_data(&self, mod_id: &str) -> Option<PathBuf> {
-        horizon_client::native_data::built(mod_id)
-    }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
         let path = self.native_data_dir(mod_id).join(key);
