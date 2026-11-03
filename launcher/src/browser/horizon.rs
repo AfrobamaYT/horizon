@@ -327,7 +327,7 @@ fn version_of(
         blocked: index
             .revoked(&p.id, &v.file.sha256)
             .map(|r| format!("taken down: {}", r.reason))
-            .or_else(|| needs_port(v).then(|| NEEDS_PORT.to_string()))
+            .or_else(|| needs_port(&p.kind, v).then(|| NEEDS_PORT.to_string()))
             .or_else(|| needs_newer(v, level).then(|| NEEDS_NEWER.to_string())),
     }
 }
@@ -370,7 +370,12 @@ fn search(index: &Index, query: &Query) -> Vec<Project> {
         .filter(|p| kind_of(&p.kind) == Some(query.kind) && matches(p, &query.text))
         .filter(|p| query.everything || p.versions.iter().any(|v| v.game == GAME))
         // A WebAssembly mod stays in the index for the modpacks that need it, not in the browser.
-        .filter(|p| !p.versions.iter().filter(|v| v.game == GAME).all(needs_port))
+        .filter(|p| {
+            !p.versions
+                .iter()
+                .filter(|v| v.game == GAME)
+                .all(|v| needs_port(&p.kind, v))
+        })
         .collect();
     let day = |p: &index::Project, newest: bool| {
         let days = p.versions.iter().map(|v| v.published.as_str());
@@ -587,7 +592,7 @@ fn install_from(
         .project(&project.id)
         .ok_or_else(|| format!("{} isn't in Horizon's registry.", project.title))?;
     let v = newest(index, p, level)?;
-    if needs_port(v) {
+    if needs_port(&p.kind, v) {
         return Err(format!("{} {NEEDS_PORT}.", p.name));
     }
     install_version(index, local, p, v, home, progress).map(|e| vec![e])
@@ -623,8 +628,8 @@ const NEEDS_PORT: &str = "needs a native port: Horizon doesn't run WebAssembly m
 /// Whether version `v` is a WebAssembly mod with code: a `.hmod` that may do more than add
 /// content. The registry keeps it for the modpacks that need it; a modpack installs it with its
 /// code left out (the game doesn't run it), and the browser neither lists nor installs it.
-pub fn needs_port(v: &index::Version) -> bool {
-    v.file.name.ends_with(".hmod")
+pub fn needs_port(kind: &index::Kind, v: &index::Version) -> bool {
+    *kind == index::Kind::Mod
         && v.capabilities
             .iter()
             .any(|c| *c != horizon_mods::Capability::Registries)
@@ -733,7 +738,7 @@ fn install_version(
         page: project.page.clone(),
         dependency: false,
         verdict: Some(trust_label(trust).into()),
-        skipped: match needs_port(v) {
+        skipped: match needs_port(&p.kind, v) {
             true => vec![format!("its code ({NEEDS_PORT})")],
             false => Vec::new(),
         },
