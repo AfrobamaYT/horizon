@@ -76,6 +76,11 @@ pub(super) enum Target {
     /// A simulated lingering, creeper or dragon area-effect cloud.
     Cloud(u32),
 }
+/// `Entity.setXRot`: wrap before clamping the pitch.
+pub(super) fn entity_pitch(pitch: f32) -> f32 {
+    (pitch % 360.0).clamp(-90.0, 90.0)
+}
+
 /// An entity of a type Horizon does not simulate: its compound lives in the
 /// entity memory (`persist.raw`), its position and rotation here.
 #[derive(Clone, Debug)]
@@ -1502,7 +1507,7 @@ impl Game<'_> {
                 self.previous_position = v;
                 if let Some([yaw, pitch]) = rotation {
                     self.yaw = yaw;
-                    self.pitch = pitch.clamp(-90.0, 90.0);
+                    self.pitch = entity_pitch(pitch);
                 }
                 // A server player's teleport is told to the mods once their
                 // move is in the hub (`leave_guest`).
@@ -1533,7 +1538,7 @@ impl Game<'_> {
                         m.yaw = yaw;
                         m.body_yaw = yaw;
                         m.head_yaw = yaw;
-                        m.head_pitch = pitch.clamp(-90.0, 90.0);
+                        m.head_pitch = entity_pitch(pitch);
                         m.previous_yaw = m.yaw;
                         m.previous_head_pitch = m.head_pitch;
                     }
@@ -1589,7 +1594,7 @@ impl Game<'_> {
                     o.position = v;
                     if let Some([yaw, pitch]) = rotation {
                         o.yaw = yaw;
-                        o.pitch = pitch;
+                        o.pitch = entity_pitch(pitch);
                     }
                 }
             }
