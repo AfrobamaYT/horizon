@@ -5375,6 +5375,27 @@ mod tests {
     use super::eye_columns;
     use horizon_client::pose::Pose;
 
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn fake_body_does_not_count_toward_sleep() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.lan_acting_fake = false;
+            let real = game.sleep_counts();
+            assert_eq!(real.0, 1);
+            game.lan_acting_fake = true;
+            assert_eq!(game.sleep_counts(), (0, 0, 0));
+            game.lan_acting_fake = false;
+            assert_eq!(game.sleep_counts(), real);
+        });
+    }
+
     /// #4124: a STOP is measured from the START that named its block (`destroyPos`) — an abort, or
     /// a STOP from out of reach, ends the dig the guest's button held but leaves that clock — and
     /// breaks the block at 70 % of the dig, or the server finishes it alone from the same START.

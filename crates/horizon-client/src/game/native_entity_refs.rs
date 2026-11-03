@@ -884,6 +884,15 @@ pub(super) mod tests {
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(&mut host, fake_id, |game| {
                 assert!(game.lan_acting_fake);
+                assert!(game.player_view().is_none());
+                let mut visited = 0;
+                game.for_each_player(|_| visited += 1);
+                assert_eq!(visited, 0);
+                let before = game.stats.get("custom", "minecraft:jump");
+                game.award_stat("custom", "minecraft:jump", 1);
+                assert_eq!(game.stats.get("custom", "minecraft:jump"), before);
+                game.trigger("minecraft:tick", |_, _| panic!("fake criterion evaluated"));
+                assert_eq!(game.recipe_unlocked(&["minecraft:test".into()]), 0);
                 let source = horizon_client::command::args::Selector {
                     kind: 's',
                     limit: 1,
@@ -954,6 +963,9 @@ pub(super) mod tests {
                 .push(("fake_outer".into(), [0.0; 3], 1.0, 1.0));
             game.as_guest(&mut host, real_id, |game| {
                 assert!(!game.lan_acting_fake);
+                let before = game.stats.get("custom", "minecraft:jump");
+                game.award_stat("custom", "minecraft:jump", 1);
+                assert_eq!(game.stats.get("custom", "minecraft:jump"), before + 1);
                 game.guest_cooldowns
                     .push(("minecraft:real_inner".into(), 9));
             })
