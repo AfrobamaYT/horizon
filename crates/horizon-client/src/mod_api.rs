@@ -7,13 +7,19 @@ use std::sync::{Arc, OnceLock};
 
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
+mod client_reload;
+pub(crate) mod reload;
 mod reload_order;
 pub(crate) mod server_reload;
+pub use client_reload::{
+    ClientReloadContext, ClientReloadListener, ClientReloadListeners, VanillaClientListeners,
+};
 pub use horizon_world::identifier::Identifier;
+pub use reload::{ReloadApply, ReloadResourceError};
 pub use reload_order::ReloadOrderError;
 pub use server_reload::{
-    ListenerKey, ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
-    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
+    ListenerKey, ServerReloadContext, ServerReloadListener, ServerReloadListeners,
+    ServerReloadResources, VanillaServerListeners,
 };
 
 pub use crate::biome::{BiomeColors, SpawnEntry};

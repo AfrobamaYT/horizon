@@ -273,6 +273,7 @@ the catalog, not a global API number, source comments or documentation histories
   `native_item_dropped` (a throw; not the items scattered when a player dies) and `native_item_picked_up` (`canceled` leaves the stack on the ground). They name a player by UUID.
 
 - [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
+- [Client asset reload listeners](#client-asset-reload-listeners) read a mod's pack resources with resource-pack overrides, once per reload.
 
 - The item entities near a block, for machines that pick up items as a hopper does:
   `native_item_entities(dimension, min, max)` lists those whose box meets `min`..`max` (vanilla's
@@ -591,8 +592,9 @@ winning bytes from selected datapacks and the mod's own `data/`. Parse once in p
 apply, not on the tick. The original pack trees remain separate from the launcher's code-only
 horizon-mixins input.
 
-Client-side asset reads in mod code come with client reload PR b; server listeners cannot read
-`assets/`. Packaged assets still participate in the game's normal resource packs.
+Client-side asset reads use [client asset reload listeners](#client-asset-reload-listeners); server
+listeners cannot read `assets/`. Packaged assets also participate in the game's normal resource
+packs.
 
 Code-only bytes belong inside the crate: use Cargo's ordinary `build.rs` to generate a table in
 `OUT_DIR`, then compile it with `include_bytes!(concat!(env!("OUT_DIR"), "/table.bin"))`.
@@ -965,7 +967,7 @@ trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
-changing live state and returns `ServerReloadApply::new(move || { /* publish parsed state */ })`.
+changing live state and returns `ReloadApply::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
@@ -1001,21 +1003,21 @@ for a key whose id or type does not match a registration, `listener` gives `None
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
     self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
-    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
+    ReloadApply, ServerReloadContext, ReloadResourceError, ServerReloadListener,
 };
 
 #[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
-    fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
         let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
-                .map_err(|error| ServerReloadError::new(id, error))?,
+                .map_err(|error| ReloadResourceError::new(id, error))?,
             None => serde_json::Value::Null,
         };
         let live = self.0.clone();
-        Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
+        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
     }
 }
 #[derive(Default)]
@@ -1038,6 +1040,74 @@ The existing post-success server-data notice below is a different moment, not a 
 reload registration path.
 
 - `native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it.
+
+### Client asset reload listeners
+
+Trait mods implement `Hooks::add_client_reload_listeners` (client only), the counterpart of
+NeoForge 26.3's `AddClientReloadListenersEvent`. Registration runs when a resource reload is
+assembled — the player changed resource packs, pressed F3+T, or a server sent its packs —
+after the selection is known and before the reload's assets are staged. The `&dyn ClientHost`
+beside the event is the client read host. Register an `Arc<impl ClientReloadListener>` with a
+unique `Identifier` and the same converters as the server side
+(`FileToIdConverter::json("ui")`). The listener's `ClientReloadContext` lists converted IDs and
+reads their bytes from `assets/*/ui/` with resource-pack overrides already resolved: a selected
+pack's file wins over the mod's packaged one, and a pack added later wins over both. A file
+`assets/my_mod/ui/theme.json` becomes `my_mod:theme`. It cannot read data files, other
+directories, or filesystem paths.
+
+Prepare and apply semantics, error handling, crash attribution, dependency ordering and the
+read-only registry views are the [server listener's](#server-data-reload-listeners):
+`ClientReloadListener::prepare` parses without changing live state and returns a `ReloadApply`;
+all prepares finish before any apply, a prepare, registration or ordering error aborts the
+reload and keeps every listener's previous assets, and a panic names the listener and its
+registering mod in the crash report. `VanillaClientListeners::model_manager()` names vanilla's
+model manager, the anchor of the 26.3 `Minecraft` registration order; `first()` and `last()`
+are the ordering boundaries. Mod applies run on the main thread after the staged pack is
+published, before `client_resources_reloaded`. Listeners are registered fresh for every
+reload. The game's initial resource load assembles its own tables and fires no reload hooks;
+read such assets where they are first drawn instead. NeoForge's client event offers no
+retained listeners, and Horizon has none: the `Arc` the mod registers with is the listener's
+own live state.
+
+```rust,ignore
+use std::sync::{Arc, RwLock};
+use horizon_client::mod_api::{
+    self, AddClientReloadListenersEvent, ClientHost, ClientReloadContext, ClientReloadListener,
+    FileToIdConverter, Hooks, Identifier, ReloadApply, ReloadResourceError,
+};
+
+#[derive(Default)]
+struct Theme(Arc<RwLock<serde_json::Value>>);
+impl ClientReloadListener for Theme {
+    fn prepare(&self, context: &ClientReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+        let id = Identifier::parse("my_mod:theme").unwrap();
+        let next = match context.read(&id) {
+            Some(bytes) => serde_json::from_slice(bytes)
+                .map_err(|error| ReloadResourceError::new(id, error))?,
+            None => serde_json::Value::Null,
+        };
+        let live = self.0.clone();
+        Ok(ReloadApply::new(move || *live.write().unwrap() = next))
+    }
+}
+#[derive(Default)]
+struct MyMod(Arc<Theme>);
+#[mod_api::horizon_mod]
+impl Hooks for MyMod {
+    fn add_client_reload_listeners(&self, _host: &dyn ClientHost, event: &mut AddClientReloadListenersEvent<'_>) {
+        event.listeners.add_listener(
+            Identifier::parse("my_mod:theme").unwrap(),
+            FileToIdConverter::json("ui").unwrap(),
+            self.0.clone(),
+        ).unwrap();
+    }
+}
+```
+
+Reload work only: graph ordering, listing selected files, reading the winning bytes and one
+boxed apply closure per listener. No new work or filesystem reads run on the tick path. The
+existing post-success client-resources notice is a different moment, not a second reload
+registration path.
 
 - `native_compute_fov(partial, camera, degrees)` receives the computed world FOV after settings, ordinary FOV effects and zoom, before projection/Nausea. `camera` is its world position and `partial` the interpolation fraction. Mods can narrow or widen the angle; only finite values in 1..=179 degrees are accepted, otherwise the original computed angle is used. It runs for world rendering and near-plane overlays, not just once per frame. Hand/HUD FOV and the title panorama keep their existing paths.
 

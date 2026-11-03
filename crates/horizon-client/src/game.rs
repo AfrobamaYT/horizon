@@ -85,6 +85,7 @@ mod chat;
 mod chat_filter;
 mod chiseled_bookshelf;
 mod client_ambient;
+mod client_reload;
 mod clipboard;
 mod code_of_conduct;
 mod combat;

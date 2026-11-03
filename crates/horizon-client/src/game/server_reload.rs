@@ -7,9 +7,9 @@ use super::{Game, functions::PackStack};
 use horizon_client::{
     datapack::DataStore,
     mod_api::{
-        FileToIdConverter, Identifier, ReloadOrderError, ServerReloadApply, ServerReloadContext,
-        ServerReloadError, ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
-        server_reload::ReloadMark,
+        FileToIdConverter, Identifier, ReloadApply, ReloadOrderError, ReloadResourceError,
+        ServerReloadContext, ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
+        reload::ReloadMark,
     },
 };
 
@@ -18,7 +18,7 @@ pub(super) enum ServerDataReloadError {
     Order(ReloadOrderError),
     Listener {
         listener: Identifier,
-        source: ServerReloadError,
+        source: ReloadResourceError,
     },
 }
 impl std::fmt::Display for ServerDataReloadError {
@@ -43,7 +43,7 @@ impl std::error::Error for ServerDataReloadError {
 pub(super) enum PreparedReload {
     Functions(Box<DataStore>),
     Mod {
-        apply: ServerReloadApply,
+        apply: ReloadApply,
         owner: Option<&'static str>,
         id: Identifier,
     },

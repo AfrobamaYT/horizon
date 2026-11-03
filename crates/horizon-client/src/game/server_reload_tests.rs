@@ -16,10 +16,7 @@ struct DataListener {
     reject: Arc<AtomicBool>,
 }
 impl ServerReloadListener for DataListener {
-    fn prepare(
-        &self,
-        context: &ServerReloadContext,
-    ) -> Result<ServerReloadApply, ServerReloadError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
         let id = Identifier::parse("reload_test:value").unwrap();
         assert!(context.list().any(|entry| entry == &id));
         // Arbitrary IDs only perform map lookups, never filesystem reads.
@@ -31,24 +28,22 @@ impl ServerReloadListener for DataListener {
         let mut value = 0;
         for id in context.list() {
             value += serde_json::from_slice::<u64>(context.read(id).unwrap())
-                .map_err(|error| ServerReloadError::new(id.clone(), error))?;
+                .map_err(|error| ReloadResourceError::new(id.clone(), error))?;
         }
         let live = self.live.clone();
-        Ok(ServerReloadApply::new(move || {
-            *live.lock().unwrap() = value
-        }))
+        Ok(ReloadApply::new(move || *live.lock().unwrap() = value))
     }
 }
 struct CheckListener(Arc<AtomicBool>);
 impl ServerReloadListener for CheckListener {
-    fn prepare(&self, _: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+    fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
         if self.0.load(Ordering::Relaxed) {
-            return Err(ServerReloadError::new(
+            return Err(ReloadResourceError::new(
                 Identifier::parse("reload_test:value").unwrap(),
                 std::io::Error::other("rejected new machine data"),
             ));
         }
-        Ok(ServerReloadApply::new(|| {}))
+        Ok(ReloadApply::new(|| {}))
     }
 }
 #[mod_api::__subscriptions]
@@ -242,7 +237,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
         fn prepare(
             &self,
             context: &ServerReloadContext,
-        ) -> Result<ServerReloadApply, ServerReloadError> {
+        ) -> Result<ReloadApply, ReloadResourceError> {
             let mut parsed = Vec::new();
             for id in context.list() {
                 match serde_json::from_slice::<String>(context.read(id).unwrap()) {
@@ -251,9 +246,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
                 }
             }
             let live = self.0.clone();
-            Ok(ServerReloadApply::new(move || {
-                *live.lock().unwrap() = parsed
-            }))
+            Ok(ReloadApply::new(move || *live.lock().unwrap() = parsed))
         }
     }
     struct SkipHooks(Arc<Mutex<Vec<(String, String)>>>);
@@ -422,25 +415,20 @@ struct RetainedData {
     reject: Arc<AtomicBool>,
 }
 impl ServerReloadListener for RetainedData {
-    fn prepare(
-        &self,
-        context: &ServerReloadContext,
-    ) -> Result<ServerReloadApply, ServerReloadError> {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
         let mut value = 0;
         for id in context.list() {
             value += serde_json::from_slice::<u64>(context.read(id).unwrap())
-                .map_err(|error| ServerReloadError::new(id.clone(), error))?;
+                .map_err(|error| ReloadResourceError::new(id.clone(), error))?;
         }
         if self.reject.load(Ordering::Relaxed) {
-            return Err(ServerReloadError::new(
+            return Err(ReloadResourceError::new(
                 Identifier::parse("reload_test:value").unwrap(),
                 std::io::Error::other("rejected new machine data"),
             ));
         }
         let live = self.live.clone();
-        Ok(ServerReloadApply::new(move || {
-            *live.lock().unwrap() = value
-        }))
+        Ok(ReloadApply::new(move || *live.lock().unwrap() = value))
     }
 }
 #[mod_api::__subscriptions]

@@ -97,8 +97,8 @@ fn duplicate_objects_cannot_make_the_reverse_lookup_ambiguous() {
 fn retained_listeners_read_back_typed_from_the_resources() {
     struct OtherListener;
     impl ServerReloadListener for OtherListener {
-        fn prepare(&self, _: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
-            Ok(ServerReloadApply::new(|| {}))
+        fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+            Ok(ReloadApply::new(|| {}))
         }
     }
     let mut listeners = ServerReloadListeners::new();
@@ -172,8 +172,8 @@ fn retained_registration_follows_the_same_rules_as_plain_listeners() {
 fn add_listener_attributes_its_calls_to_the_registering_mod() {
     struct Noop;
     impl ServerReloadListener for Noop {
-        fn prepare(&self, _: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
-            Ok(ServerReloadApply::new(|| {}))
+        fn prepare(&self, _: &ServerReloadContext) -> Result<ReloadApply, ReloadResourceError> {
+            Ok(ReloadApply::new(|| {}))
         }
     }
     let guard = crate::crash::enter_native_mod(crate::crash::NativeModCall {
