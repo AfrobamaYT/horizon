@@ -104,7 +104,7 @@ fn cache_hits_are_offline_and_corrupt_files_are_not_silently_replaced() {
     fs::write(&path, bytes).unwrap();
     prepare_with(
         &home.0,
-        &[jar.clone()],
+        std::slice::from_ref(&jar),
         Permission::Refuse,
         |_| panic!("cache hit must not use the network"),
         |_, _, _| panic!("download"),
@@ -187,7 +187,7 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
     let ask = |_: &[&JarRef]| false;
     let error = prepare_with(
         &home.0,
-        &[jar.clone()],
+        std::slice::from_ref(&jar),
         Permission::Ask(&ask),
         |_| Ok(Some("exact.jar".into())),
         |_, _, _| panic!("declined"),
@@ -203,7 +203,7 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
         };
         let error = prepare_with(
             &home.0,
-            &[jar.clone()],
+            std::slice::from_ref(&jar),
             Permission::Ask(&ask),
             |_| result.clone(),
             |_, _, _| panic!("lookup failed"),
@@ -242,7 +242,7 @@ fn final_launch_combines_only_enabled_content_dev_and_adjacent_native_candidates
     )
     .unwrap();
     fs::write(
-        bin.join(horizon_mods::selection::BUILD_INFO),
+        bin.join("native-mods.json"),
         r#"{"mods":[{"id":"next_build"}]}"#,
     )
     .unwrap();
