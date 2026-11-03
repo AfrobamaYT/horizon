@@ -397,6 +397,15 @@ pub struct Menu {
     /// Stacks taken from brewing stand bottle slots, for
     /// `PlayerBrewedPotionEvent`.
     pub brewed_potion_takes: Vec<ItemStack>,
+    /// Set by a server caller when a mod listens: every
+    /// `FurnaceResultSlot.checkTakeAchievements` then goes to `item_smelted`.
+    pub item_smelted_hook: bool,
+    /// What each `checkTakeAchievements` of a furnace's result slot passed,
+    /// for `ItemSmeltedEvent`: the stack (`None` for vanilla's empty one)
+    /// and `removeCount`.
+    pub item_smelted: Vec<(Option<ItemStack>, u32)>,
+    /// `FurnaceResultSlot.removeCount`.
+    output_removed: u32,
     /// `LivingEntity.onEquipItem` calls that change the item: the
     /// `EquipmentSlot` name and the new stack, in order, for the caller.
     pub equipped: Vec<(&'static str, Option<ItemStack>)>,
@@ -858,6 +867,9 @@ impl Menu {
             brewed: Vec::new(),
             brewed_potion_hook: false,
             brewed_potion_takes: Vec::new(),
+            item_smelted_hook: false,
+            item_smelted: Vec::new(),
+            output_removed: 0,
             equipped: Vec::new(),
             merchant: None,
             stone: Stonecutter::default(),
@@ -1693,6 +1705,10 @@ impl Menu {
             .filter(|c| c.count > 0)
             .map(|c| split(c, amount));
         tidy(cell);
+        // FurnaceResultSlot.remove counts what it gave.
+        if slot.role == Role::Output {
+            self.output_removed += out.as_ref().map_or(0, |o| o.count);
+        }
         // LecternBlockEntity: an emptied book slot is onBookItemRemove (page 0).
         if self.kind == Kind::Lectern && slot.container == MAIN && cell.is_none() {
             self.data[0] = 0;
@@ -1787,8 +1803,23 @@ impl Menu {
         self.containers[RESULT][0] = result;
     }
 
+    /// `FurnaceResultSlot.checkTakeAchievements`: what `carried` and
+    /// `removeCount` were, kept for `ItemSmeltedEvent` when a server caller
+    /// listens; the count starts again.
+    fn furnace_take(&mut self, env: &Env, carried: &ItemStack) {
+        let removed = std::mem::take(&mut self.output_removed);
+        if self.item_smelted_hook && env.side == LogicalSide::Server {
+            let carried = (carried.count > 0).then(|| carried.clone());
+            self.item_smelted.push((carried, removed));
+        }
+    }
+
     /// `ResultSlot.onTake` and the other `Slot.onTake` overrides.
     fn on_take(&mut self, env: &Env, s: usize, taken: &ItemStack) {
+        if self.slots[s].role == Role::Output {
+            self.furnace_take(env, taken);
+            return;
+        }
         if self.slots[s].role == Role::Potion {
             if self.brewed_potion_hook && env.side == LogicalSide::Server {
                 self.brewed_potion_takes.push(taken.clone());
@@ -2589,6 +2620,13 @@ impl Menu {
                     if !self.move_to(env, &mut stack, 3, 39, true) {
                         return None;
                     }
+                    // Slot.onQuickCraft -> FurnaceResultSlot.onQuickCraft:
+                    // the moved count, with the stack as it was.
+                    let moved = clicked.count - stack.count;
+                    if moved > 0 {
+                        self.output_removed += moved;
+                        self.furnace_take(env, &clicked);
+                    }
                 } else if index != 1 && index != 0 {
                     let smelts = env
                         .recipes
@@ -2686,7 +2724,13 @@ impl Menu {
             return None;
         }
         if after_take || matches!(self.kind, Kind::Inventory | Kind::Crafting) {
-            self.on_take(env, index, &clicked);
+            // AbstractFurnaceMenu passes what stayed in the slot.
+            let taken = if matches!(self.kind, Kind::Furnace(_)) {
+                &stack
+            } else {
+                &clicked
+            };
+            self.on_take(env, index, taken);
         }
         // What the result slot's move left over is dropped.
         if (index == 0 && matches!(self.kind, Kind::Inventory | Kind::Crafting))
@@ -3455,6 +3499,63 @@ pub(crate) mod tests {
             // Out of the fuel slot: moveItemStackTo(3, 39, false).
             assert_eq!(landing("coal", 5, 1), [3]);
         });
+    }
+
+    /// `FurnaceResultSlot.checkTakeAchievements` as `ItemSmeltedEvent` sees
+    /// it: a pickup passes the taken stack and its count; a shift-click with
+    /// room for 2 of 64 passes the 64 with 2 removed (`onQuickCraft`), then
+    /// the 62 left with 0 (`onTake`); nothing is kept without a listener.
+    #[test]
+    fn a_furnace_take_keeps_what_check_take_achievements_passes() {
+        let root = std::env::temp_dir().join(format!("horizon-smelted-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = Items::for_tests(Default::default());
+        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        let furnace = |hook: bool| {
+            let mut menu = Menu::new(Kind::Furnace("smelting"));
+            menu.item_smelted_hook = hook;
+            menu.set_slot(env, 2, stack("iron_ingot", 64));
+            menu
+        };
+
+        let mut menu = furnace(true);
+        menu.click(env, 2, 0, Input::Pickup).unwrap();
+        assert_eq!(menu.item_smelted, [(stack("iron_ingot", 64), 64)]);
+
+        // The inventory full of dirt but for one stack with room for 2.
+        let mut menu = furnace(true);
+        for s in 3..39 {
+            menu.set_slot(env, s, stack("dirt", 64));
+        }
+        menu.set_slot(env, 3, stack("iron_ingot", 62));
+        menu.click(env, 2, 0, Input::QuickMove).unwrap();
+        assert_eq!(menu.slot(2), stack("iron_ingot", 62).as_ref());
+        assert_eq!(
+            menu.item_smelted,
+            [(stack("iron_ingot", 64), 2), (stack("iron_ingot", 62), 0),]
+        );
+
+        let mut menu = furnace(false);
+        menu.click(env, 2, 0, Input::Pickup).unwrap();
+        assert!(menu.item_smelted.is_empty());
     }
 
     #[test]
