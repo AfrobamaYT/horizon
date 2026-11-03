@@ -2301,6 +2301,7 @@ impl Game<'_> {
                     cart.lerp_steps.clear();
                 }
             }
+            self.persist.forced_meta.clear();
             // ServerEntity.sendChanges clears needsSync once it has looked.
             for m in &mut self.mobs {
                 m.needs_sync = false;

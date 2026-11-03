@@ -310,6 +310,24 @@ impl Game<'_> {
                     slot.previous = slot.position;
                 }
             }
+            Target::Other(id) => {
+                let slot = self
+                    .others
+                    .iter_mut()
+                    .find(|o| o.id == id)
+                    .ok_or_else(stale)?;
+                let new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
+                let is_display = matches!(
+                    slot.kind.as_str(),
+                    "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
+                );
+                *slot = new;
+                // `EntityDataAccessor.setData` keeps the entity's UUID.
+                set_key(&mut tag, "UUID", Tag::IntArray(self.uuid_for(id).to_vec()));
+                if is_display {
+                    self.persist.force_meta(id, 8);
+                }
+            }
             Target::Item(id) => {
                 let new = entity_nbt::item_entity_from_nbt(&tag, id, 0.0).ok_or_else(stale)?;
                 if let Some(slot) = self.dropped.iter_mut().find(|e| e.id == id) {
@@ -346,7 +364,8 @@ impl Game<'_> {
         | Target::Item(id)
         | Target::Stand(id)
         | Target::Frame(id)
-        | Target::Fangs(id) = t
+        | Target::Fangs(id)
+        | Target::Other(id) = t
         {
             self.persist.raw.insert(id, tag);
         }
@@ -975,5 +994,56 @@ impl Game<'_> {
             return Err(err("commands.summon.failed.uuid", &[]));
         }
         Ok(target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_core::geometry::Vec3;
+
+    /// `EntityDataAccessor.setData` keeps the entity's id and UUID: a
+    /// `/data merge` that carries a different UUID does not take, and a
+    /// display's load marks its start delay forced
+    /// (`Display.setTransformationInterpolationDelay`).
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn merging_display_nbt_keeps_the_uuid_and_forces_the_start_delay() {
+        with_game(|game| {
+            let mut raw = Compound::new();
+            raw.insert(
+                "Pos".into(),
+                Tag::List(
+                    [0.5f64, 64.0, 0.5]
+                        .map(|v| Tag::Double(v.to_bits()))
+                        .to_vec(),
+                ),
+            );
+            game.persist.raw.insert(12, Tag::Compound(raw));
+            game.persist.uuids.insert(12, [1, 2, 3, 4]);
+            game.others.push(super::super::OtherEntity {
+                id: 12,
+                kind: "minecraft:block_display".into(),
+                position: Vec3::new(0.5, 64.0, 0.5),
+                yaw: 0.0,
+                pitch: 0.0,
+            });
+            let mut merge = Compound::new();
+            merge.insert(
+                "Pos".into(),
+                Tag::List(
+                    [0.5f64, 64.0, 0.5]
+                        .map(|v| Tag::Double(v.to_bits()))
+                        .to_vec(),
+                ),
+            );
+            merge.insert("UUID".into(), Tag::IntArray(vec![9, 9, 9, 9]));
+            merge.insert("start_interpolation".into(), Tag::Int(0));
+            game.apply_entity_nbt(Target::Other(12), Tag::Compound(merge))
+                .unwrap();
+            assert_eq!(game.uuid_for(12), [1, 2, 3, 4]);
+            assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+        });
     }
 }
