@@ -8,7 +8,8 @@ impl dyn Host + '_ {
     /// `open`): `Ok` commits it (`commit`), into the transaction around it or, at the
     /// outermost, for good, with the world told of each change once; `Err` aborts it
     /// (`close` without `commit`), putting every storage it wrote back as it was. A panic
-    /// inside aborts every open transaction before the game's next tick.
+    /// unwinding out of `f` aborts this transaction as it passes, so whoever catches it sees
+    /// nothing `f` changed, and the transaction around it stays open.
     ///
     /// Covered: block entities (item slots, saved compound and attachments) and cauldrons.
     /// What an item entity's or a player's inventory does inside one is final at once.
@@ -16,9 +17,24 @@ impl dyn Host + '_ {
         &mut self,
         f: impl FnOnce(&mut dyn Host) -> Result<T, E>,
     ) -> Result<T, E> {
+        /// Closes its transaction when dropped: committed when `f` gave `Ok`, else aborted,
+        /// as on a panic unwinding past it.
+        struct Open<'a, 'h> {
+            host: &'a mut (dyn Host + 'h),
+            commit: bool,
+        }
+        impl Drop for Open<'_, '_> {
+            fn drop(&mut self) {
+                self.host.transaction_close(self.commit);
+            }
+        }
         self.transaction_open();
-        let result = f(self);
-        self.transaction_close(result.is_ok());
+        let mut open = Open {
+            host: self,
+            commit: false,
+        };
+        let result = f(&mut *open.host);
+        open.commit = result.is_ok();
         result
     }
 }
@@ -54,6 +70,30 @@ mod tests {
         });
         assert_eq!(outer, Ok(7));
         assert_eq!(journal.closed, [(2, false), (2, true), (1, true)]);
+        assert_eq!(journal.depth, 0);
+    }
+
+    #[test]
+    fn a_panic_aborts_exactly_the_transaction_it_leaves() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut journal = Journal::default();
+        let host: &mut dyn Host = &mut journal;
+        // A child's panic caught inside the root: the child aborts, the root still commits.
+        let root = host.transaction(|host| {
+            let child = catch_unwind(AssertUnwindSafe(|| {
+                host.transaction(|_| -> Result<(), ()> { panic!("a broken handler") })
+            }));
+            assert!(child.is_err());
+            Ok::<_, ()>(())
+        });
+        assert_eq!(root, Ok(()));
+        // A root's panic caught outside it: the root aborts before the catch sees anything.
+        let host: &mut dyn Host = &mut journal;
+        let caught = catch_unwind(AssertUnwindSafe(|| {
+            host.transaction(|_| -> Result<(), ()> { panic!("a broken handler") })
+        }));
+        assert!(caught.is_err());
+        assert_eq!(journal.closed, [(2, false), (1, true), (1, false)]);
         assert_eq!(journal.depth, 0);
     }
 }
