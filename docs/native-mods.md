@@ -2609,6 +2609,9 @@ the server entity and level reads available on a client.
   `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
   `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
   server-only as in vanilla.
+- `living.drop(host, stack, throw_randomly, include_thrower_name)` throws a stack the mod holds from the eyes
+  (`LivingEntity.drop`) and gives the item entity; it never touches a slot. `is_tamed(host)` and `owner(host)` read a
+  tamable mob or a horse (`TamableAnimal.isTame`, its owner's UUID).
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.

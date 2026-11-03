@@ -290,7 +290,9 @@ impl Game<'_> {
     pub(super) fn drop_after_commit(&mut self, uuid: u128, stack: ItemStack) {
         match self.transactions.last_mut() {
             Some(level) => level.after.push(After::PlayerDrop(uuid, stack)),
-            None => self.drop_plain(stack),
+            None => {
+                self.drop_plain(stack);
+            }
         }
     }
     /// Sets the block at `pos` to `state`. In a transaction, stored only, keeping the old
@@ -324,7 +326,9 @@ impl Game<'_> {
             }
             After::PlayerDrop(uuid, stack) => {
                 // A player who left meanwhile drops nothing; their inventory had changed for good.
-                self.native_as_player(uuid, |g| g.drop_plain(stack));
+                self.native_as_player(uuid, |g| {
+                    g.drop_plain(stack);
+                });
             }
             After::Spawn(at, stack) => self.spawn_item(stack, at, [0.0; 3], 10),
             After::Emptied(id) => {

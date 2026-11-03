@@ -708,6 +708,12 @@ impl Mob {
                 | Species::ZombieNautilus
         )
     }
+    /// A `TamableAnimal` or an `AbstractHorse` (camels and llamas too): the
+    /// mobs `isTame` (`isTamed`) and an owner belong to. An allay's liked
+    /// player is kept as an owner but is not one.
+    pub fn is_tamable(&self) -> bool {
+        self.is_tamable_animal() || super::equine::is_equine(self.species())
+    }
     /// `IronGolem.isPlayerCreated`: a golem a player built, which
     /// `IronGolem.canAttack` never lets attack a player.
     pub fn built_by_player(&self) -> bool {
@@ -3175,6 +3181,21 @@ mod built_by_player_tests {
         let mut zombie = mob(Species::Zombie);
         zombie.extra.player_created = true;
         assert!(!zombie.built_by_player());
+    }
+
+    #[test]
+    fn pets_and_horses_are_tamable_but_an_allay_is_not() {
+        for s in [
+            Species::Wolf,
+            Species::Parrot,
+            Species::Horse,
+            Species::Camel,
+        ] {
+            assert!(mob(s).is_tamable(), "{s:?}");
+        }
+        for s in [Species::Allay, Species::Fox, Species::Zombie] {
+            assert!(!mob(s).is_tamable(), "{s:?}");
+        }
     }
 }
 
