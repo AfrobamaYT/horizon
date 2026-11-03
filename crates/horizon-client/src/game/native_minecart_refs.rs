@@ -19,9 +19,7 @@ impl Game<'_> {
     }
 
     /// Edits a cart, of one kind if `kind` is given. False for another kind
-    /// or a handle that no longer resolves. A cart taken out for its own tick:
-    /// a write during that tick (e.g. from a Part callback) is lost when the
-    /// tick stores its copy.
+    /// or a handle that no longer resolves, including while held out of storage.
     fn native_minecart_edit(
         &mut self,
         cart: MinecartRef,
@@ -39,7 +37,7 @@ impl Game<'_> {
     }
 
     /// Narrows an entity to a minecart of any kind, or None for another kind of
-    /// entity, a stale handle, a client, or a cart taken out for ticking.
+    /// entity, a stale handle, a client, or an entity held out of storage.
     pub(super) fn native_minecart_ref(&self, entity: EntityRef) -> Option<MinecartRef> {
         let cart = MinecartRef::new(entity);
         self.native_minecart_index(cart).map(|_| cart)
@@ -77,8 +75,6 @@ impl Game<'_> {
     }
 
     /// `AbstractMinecart.setFlipped`; saved as `FlippedRotation`, not synced.
-    /// A cart taken out for its own tick: a write during that tick (e.g. from
-    /// a Part callback) is lost when the tick stores its copy.
     pub(super) fn native_minecart_set_flipped(&mut self, cart: MinecartRef, flipped: bool) -> bool {
         self.native_minecart_edit(cart, None, |c| c.flipped = flipped)
     }
@@ -90,8 +86,6 @@ impl Game<'_> {
 
     /// `VehicleEntity.setDamage`: synced to clients. The tick counts it down
     /// only while positive.
-    /// A cart taken out for its own tick: a write during that tick (e.g. from
-    /// a Part callback) is lost when the tick stores its copy.
     pub(super) fn native_minecart_set_damage(&mut self, cart: MinecartRef, damage: f32) -> bool {
         self.native_minecart_edit(cart, None, |c| c.damage = damage)
     }
@@ -102,8 +96,6 @@ impl Game<'_> {
     }
 
     /// `VehicleEntity.setHurtTime`: synced to clients.
-    /// A cart taken out for its own tick: a write during that tick (e.g. from
-    /// a Part callback) is lost when the tick stores its copy.
     pub(super) fn native_minecart_set_hurt_time(&mut self, cart: MinecartRef, ticks: i32) -> bool {
         self.native_minecart_edit(cart, None, |c| c.hurt_time = ticks)
     }
@@ -117,8 +109,6 @@ impl Game<'_> {
     /// Sets a furnace minecart's fuel ticks, any int as vanilla's field holds
     /// it (saved as a short, the low 16 bits). False for another kind of cart.
     /// The lit flag (`DATA_ID_FUEL`) follows with fuel above zero.
-    /// A cart taken out for its own tick: a write during that tick (e.g. from
-    /// a Part callback) is lost when the tick stores its copy.
     pub(super) fn native_minecart_set_fuel(&mut self, cart: MinecartRef, fuel: i32) -> bool {
         self.native_minecart_edit(cart, Some(CartKind::Furnace), |c| c.fuel = fuel)
     }
@@ -133,8 +123,6 @@ impl Game<'_> {
     /// `MinecartTNT.primeFuse(null)`: an 80 tick fuse, the primed sound and
     /// entity event 70 for clients. False for another kind of cart, or with
     /// the `tnt_explodes` rule off.
-    /// A cart taken out for its own tick: a write during that tick (e.g. from
-    /// a Part callback) is lost when the tick stores its copy.
     pub(super) fn native_minecart_prime_fuse(&mut self, cart: MinecartRef) -> bool {
         let Some(index) = self.native_minecart_index(cart) else {
             return false;
@@ -154,8 +142,6 @@ impl Game<'_> {
     }
 
     /// `MinecartHopper.setEnabled`: saved as `Enabled`, not synced.
-    /// A cart taken out for its own tick: a write during that tick (e.g. from
-    /// a Part callback) is lost when the tick stores its copy.
     pub(super) fn native_minecart_set_hopper_enabled(
         &mut self,
         cart: MinecartRef,
