@@ -725,7 +725,7 @@ mod tests {
         // neither does an unsaddled nautilus.
         assert!(!on_player_jump(&mut m, 50));
         m.extra.anim_ticks = 0;
-        m.extra.saddled = false;
+        m.extra.set_saddled(false);
         assert!(!on_player_jump(&mut m, 50));
         assert_eq!(m.rider.expect("the rider stays on").jump, 0.0);
     }
