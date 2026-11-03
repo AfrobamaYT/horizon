@@ -1166,12 +1166,12 @@ pub(super) mod tests {
                 8
             );
             assert_ne!(overworld_actor, nether_actor);
-            game.transaction_open();
+            crate::mod_api::Host::transaction_open(game);
             game.attachment_map_quiet(holder)
                 .unwrap()
                 .set(&attachment, 99)
                 .unwrap();
-            game.transaction_close(false);
+            crate::mod_api::Host::transaction_close(game, false);
             assert_eq!(
                 game.attachment_map_quiet(holder)
                     .unwrap()
