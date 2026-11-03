@@ -559,19 +559,19 @@ impl Package {
     }
     /// Select and validate a flat project's source and resource files deterministically.
     pub fn directory_files(
+        &self,
         root: &Path,
     ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
-        let package = Self::read(root)?;
-        let content = crate::Content::read(root, &package.manifest)?;
+        let content = crate::Content::read(root, &self.manifest)?;
         let mut files = std::collections::BTreeMap::new();
         let mut reader = content.reader()?;
         for name in &content.files {
             files.insert(name.clone(), reader.read(name)?);
         }
-        if let Some(icon) = package.icon {
+        if let Some(icon) = &self.icon {
             files.insert("icon.png".to_string(), icon.bytes().to_vec());
         }
-        if package.manifest.native.is_some() {
+        if self.manifest.native.is_some() {
             fn walk(
                 root: &Path,
                 dir: &Path,
@@ -625,7 +625,8 @@ impl Package {
 
     /// Pack a flat project, selecting its source and resource files deterministically.
     pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
-        let mut files = Self::directory_files(root)?;
+        let package = Self::read(root)?;
+        let mut files = package.directory_files(root)?;
         let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
             .map_err(|e| e.to_string())?;
         let files: Vec<_> = files

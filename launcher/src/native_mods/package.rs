@@ -36,14 +36,13 @@ pub(super) fn read(dir: &Path) -> Result<Option<Bundle>, String> {
                 site,
                 kind: Some(kind.as_str().expect("kind is a string").to_owned()),
                 selector: entry.selector.clone(),
-                ordinal: entry.ordinal.map(|v| v as i64),
-                priority: i64::from(entry.priority.unwrap_or_default()),
+                ordinal: entry.ordinal,
+                priority: entry.priority.unwrap_or_default(),
                 cancellable: entry.cancellable,
             }
         })
         .collect();
-    // This selects the same files packaging and hashing use, rejecting links before copying.
-    Package::directory_files(dir)?;
+    package.directory_files(dir)?;
     Ok(Some(Bundle {
         manifest: package.manifest,
         dir: dir.to_owned(),
@@ -82,7 +81,8 @@ pub(super) fn tool_manifest(bundle: &Bundle) -> Result<(), String> {
 }
 
 pub(super) fn files(bundle: &Bundle) -> Result<Vec<(String, std::path::PathBuf)>, String> {
-    Ok(Package::directory_files(&bundle.dir)?
+    Ok(Package::read(&bundle.dir)?
+        .directory_files(&bundle.dir)?
         .into_keys()
         .map(|name| {
             let path = bundle.dir.join(&name);
@@ -92,7 +92,7 @@ pub(super) fn files(bundle: &Bundle) -> Result<Vec<(String, std::path::PathBuf)>
 }
 
 pub(super) fn copy(bundle: &Bundle, to: &Path) -> Result<(), String> {
-    for (name, bytes) in Package::directory_files(&bundle.dir)? {
+    for (name, bytes) in Package::read(&bundle.dir)?.directory_files(&bundle.dir)? {
         let path = to.join(name);
         fs::create_dir_all(path.parent().ok_or("invalid destination")?)
             .map_err(|e| e.to_string())?;

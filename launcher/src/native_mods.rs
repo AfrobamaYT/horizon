@@ -469,10 +469,9 @@ pub struct Injection {
     /// Its `selector` and `ordinal`, which with the kind tell two interior
     /// sites of one function apart.
     pub selector: Option<String>,
-    pub ordinal: Option<i64>,
-    /// The `[mod]` `priority` unless the entry overrides it. horizon-mixins
-    /// defaults it to 0 (`#[serde(default)] priority: i32`).
-    pub priority: i64,
+    pub ordinal: Option<usize>,
+    /// The injection priority, defaulting to horizon-mixins' 0.
+    pub priority: i32,
     /// `cancellable = true` (a `HEAD`, `BEFORE_CALL`, `AFTER_CALL` or
     /// `AFTER_ASSIGN` may carry it): a `Break` skips the later injections
     /// at the site.
@@ -503,7 +502,7 @@ impl Injection {
     /// node, call site, constant site, then priority descending, mod id
     /// ascending, injection id ascending): same manifest place, and its
     /// tie-break tail is the run order.
-    fn place(&self) -> (&InjectionSite, Option<&str>, Option<&str>, Option<i64>) {
+    fn place(&self) -> (&InjectionSite, Option<&str>, Option<&str>, Option<usize>) {
         (
             &self.site,
             self.kind.as_deref(),
