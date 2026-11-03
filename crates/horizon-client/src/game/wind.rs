@@ -607,9 +607,13 @@ impl Game<'_> {
             b.use_without_item(
                 level,
                 ticks,
-                BlockPos::new(pos[0], pos[1], pos[2]),
-                Direction::Up,
-                at,
+                state,
+                horizon_core::geometry::BlockHit {
+                    block: BlockPos::new(pos[0], pos[1], pos[2]),
+                    direction: Direction::Up,
+                    location: at,
+                    inside: false,
+                },
                 player,
             )
         });

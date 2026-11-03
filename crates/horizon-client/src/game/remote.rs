@@ -7899,9 +7899,18 @@ impl Game<'_> {
             let result = b.use_item_on(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),
-                horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                face,
-                horizon_core::geometry::Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+                horizon_core::geometry::BlockHit {
+                    block: horizon_core::position::BlockPos::new(
+                        hit.pos[0], hit.pos[1], hit.pos[2],
+                    ),
+                    direction: face,
+                    location: horizon_core::geometry::Vec3::new(
+                        hit.point[0],
+                        hit.point[1],
+                        hit.point[2],
+                    ),
+                    inside: hit.inside,
+                },
                 player,
                 held.map(|s| &*s.item),
             );

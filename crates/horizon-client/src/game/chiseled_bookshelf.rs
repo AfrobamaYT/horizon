@@ -15,23 +15,32 @@ use horizon_world::level::{flags, hit_slot};
 const BLOCK: &str = "minecraft:chiseled_bookshelf";
 
 impl Game<'_> {
-    /// `useItemOn` with `held` in the acting hand, then `useWithoutItem` on
-    /// the main hand's turn: None when the block passes the click, else
-    /// whether the use succeeded and the arm swings (a click on an empty slot
-    /// without a book only consumes it).
+    /// The bookshelf's item or empty-hand method, on the captured block state.
     pub(super) fn use_chiseled_bookshelf(
         &mut self,
         hit: &Hit,
+        state: horizon_world::registry::BlockStateId,
         held: Option<&ItemStack>,
-    ) -> Option<bool> {
+        branch: horizon_world::level::UseBranch,
+    ) -> Option<horizon_client::mod_api::NativeInteractionResult> {
+        use horizon_client::mod_api::NativeInteractionResult as Answer;
         let pos = hit.pos;
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        let info = self
-            .pack
-            .assets
-            .registry
-            .state(state)
-            .filter(|s| s.name == BLOCK)?;
+        let registry = self.pack.assets.registry;
+        let info = registry.state(state).filter(|s| s.name == BLOCK)?;
+        let item_phase = matches!(branch, horizon_world::level::UseBranch::ItemOn);
+        if self.bookshelf_items(pos).is_none() {
+            return Some(Answer::Pass);
+        }
+        let book = held.filter(|s| {
+            self.res
+                .items()
+                .item_tags
+                .get("minecraft:bookshelf_books")
+                .is_some_and(|m| m.contains(&*s.item))
+        });
+        if item_phase && book.is_none() {
+            return Some(Answer::TryWithEmptyHand);
+        }
         let facing = info
             .properties
             .get("facing")
@@ -40,32 +49,27 @@ impl Game<'_> {
             .into_iter()
             .find(|d| d.normal() == hit.face)?;
         let at = Vec3::new(hit.point[0], hit.point[1], hit.point[2]);
-        let slot = hit_slot(
+        let Some(slot) = hit_slot(
             facing,
             face,
             BlockPos::new(pos[0], pos[1], pos[2]),
             at,
             2,
             3,
-        )?;
+        ) else {
+            return Some(Answer::Pass);
+        };
         let occupied = info
             .properties
             .get(&format!("slot_{slot}_occupied"))
             .map(String::as_str)
             == Some("true");
-        let book = held.filter(|s| {
-            self.res
-                .items()
-                .item_tags
-                .get("minecraft:bookshelf_books")
-                .is_some_and(|m| m.contains(&*s.item))
-        });
         let centre = pos.map(|v| f64::from(v) + 0.5);
-        if let Some(book) = book
-            && !occupied
-        {
-            // addBook: one book goes in (a creative player keeps theirs).
-            let book = book.clone();
+        if item_phase {
+            if occupied {
+                return Some(Answer::TryWithEmptyHand);
+            }
+            let book = book.unwrap().clone();
             self.award_stat("used", &book.item, 1);
             let sound = if &*book.item == "minecraft:enchanted_book" {
                 "minecraft:block.chiseled_bookshelf.insert.enchanted"
@@ -79,37 +83,40 @@ impl Game<'_> {
             self.consume_held();
             self.chiseled_bookshelf_update_state(pos, slot);
             self.audio.play(sound, Some(centre), 1.0, 1.0);
-            self.trigger_block("minecraft:item_used_on_block", pos, &book);
-            return Some(true);
-        }
-        // TRY_WITH_EMPTY_HAND: only the main hand goes on to useWithoutItem.
-        if self.hand != horizon_client::first_person::Hand::Main {
-            return None;
+            return Some(Answer::Success);
         }
         if !occupied {
-            // useWithoutItem's CONSUME on an empty slot still consumes the
-            // click (ServerPlayerGameMode.useItemOn's DEFAULT_BLOCK_USE).
-            self.trigger_default_block_use(pos);
-            return Some(false);
+            return Some(Answer::Consume);
         }
-        // removeBook: the book goes to the inventory, or is dropped.
-        let retrieved = self.bookshelf_items(pos)?[slot].take()?;
+        let retrieved = self.bookshelf_items(pos)?[slot].take();
         self.chiseled_bookshelf_update_state(pos, slot);
-        let sound = if &*retrieved.item == "minecraft:enchanted_book" {
+        let sound = if retrieved
+            .as_ref()
+            .is_some_and(|s| &*s.item == "minecraft:enchanted_book")
+        {
             "minecraft:block.chiseled_bookshelf.pickup.enchanted"
         } else {
             "minecraft:block.chiseled_bookshelf.pickup"
         };
         self.audio.play(sound, Some(centre), 1.0, 1.0);
-        self.give_or_drop(retrieved);
+        if let Some(retrieved) = retrieved {
+            self.give_or_drop(retrieved);
+        }
         self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
-        // ServerPlayerGameMode.useItemOn: useWithoutItem consumed the click.
-        self.trigger_default_block_use(pos);
-        Some(true)
+        Some(Answer::Success)
     }
 
     /// The bookshelf's six slots (made if the block has no block entity yet).
     fn bookshelf_items(&mut self, pos: [i32; 3]) -> Option<&mut [Option<ItemStack>; 6]> {
+        if &*self
+            .res
+            .facts()
+            .get(self.world.block(pos[0], pos[1], pos[2]))
+            .name
+            != BLOCK
+        {
+            return None;
+        }
         let entity = self
             .world
             .block_entities
