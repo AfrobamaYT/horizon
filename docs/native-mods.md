@@ -2460,6 +2460,14 @@ a dimension.
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
   `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
+- `entity.play_sound(host, sound, volume, pitch)` (`Entity.playSound`: at the entity, under its `sound_source`, for the
+  players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
+  (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
+  `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players near it, for
+  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `NativeSoundSource`) and
+  `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
+  place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
+  client only.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
