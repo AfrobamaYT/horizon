@@ -46,8 +46,6 @@
 //!
 //! API 340 adds A guest's server handled arm swing (`native_player_arm_swing`).
 //!
-//! API 339 adds A server player earned an advancement criterion (`native_player_advancement_criterion_grant`).
-//!
 //! API 338 adds a boat or minecart about to be destroyed (`native_vehicle_destroy`).
 //!
 //! API 337 adds a vehicle taking damage (`native_vehicle_damage`).
@@ -201,8 +199,6 @@
 //! API 262 adds An item cooldown about to start for a server player, cancellable (`native_player_item_cooldown`).
 //!
 //! API 261 adds XP orb pickup cooldown changed for a server player (`native_player_exp_cooldown_change`).
-//!
-//! API 260 adds A server player's orb-pickup experience points before they are added (`native_player_exp_change`).
 //!
 //! API 259 adds A server player used a firework rocket to boost while gliding (`native_player_elytra_boost`).
 //!
@@ -877,7 +873,8 @@ use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
     self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
     NativeHandRender, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
-    NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
+    NativeProgressType, NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse,
+    WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
@@ -2582,13 +2579,9 @@ impl Game<'_> {
     pub(super) fn native_mouse_button_post(&mut self, button: i32, pressed: bool, modifiers: u32) {
         mod_api::dispatch_mouse_button_post(self, mod_api::mods(), button, pressed, modifiers);
     }
-    /// Wheel steps while playing: set `claimed` to keep them from the hotbar.
-    pub(super) fn native_wheel(&mut self, steps: f32, claimed: &mut bool) {
-        mod_api::dispatch_wheel(self, mod_api::mods(), steps, claimed);
-    }
-    /// Gameplay scrolling after whole steps accumulate, before hotbar/spectator handling.
+    /// Gameplay scrolling after accumulation, before hotbar/spectator handling.
     /// `scroll` is scaled x/y, `accumulated` whole x/y steps, `buttons` left/middle/right,
-    /// and `cursor` the GUI position. Cancel skips gameplay scrolling; synthetic input skips it.
+    /// and `cursor` the GUI position. Cancel skips gameplay scrolling.
     pub(super) fn native_mouse_scrolling(
         &mut self,
         scroll: [f64; 2],
@@ -4539,26 +4532,29 @@ impl Game<'_> {
     /// A criterion of a server player's advancement was granted or revoked,
     /// after its progress changed and before any completion rewards, except
     /// the `minecraft:tick` criteria granted on a network player's first tick
-    /// or a reload, which are heard after that tick's rewards and packets. A
-    /// grant or revoke that changes nothing is not heard. `granted` is false for a
-    /// revoke. Helpers looking up the guest through `self.lan` may find
-    /// nothing during its packet. 320.
+    /// or a reload, which are heard after that tick's rewards and packets
+    /// (tracked on #29). A grant or revoke that changes nothing is not heard.
+    /// The full advancement progress is not yet exposed (tracked on #29). Helpers
+    /// looking up the guest through `self.lan` may find nothing during its
+    /// packet. 320.
     pub(super) fn native_player_advancement_progress(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         advancement: &str,
         criterion: &str,
-        granted: bool,
+        progress_type: NativeProgressType,
     ) {
         mod_api::dispatch_player_advancement_progress(
             self,
             mod_api::mods(),
             player,
+            player_entity_id,
             name,
             advancement,
             criterion,
-            granted,
+            progress_type,
         );
     }
     /// A statistic is about to be awarded to a server player, before its count
@@ -4586,14 +4582,6 @@ impl Game<'_> {
             value,
             cancel,
         );
-    }
-    /// A server player's experience points are about to increase from an orb pickup,
-    /// after mending has taken its share. Change `amount` to change the points
-    /// added. The player's state is not swapped in, so helpers that look them up
-    /// through `self.lan` may find nothing while a guest packet is handled.
-    /// Server-side. 260.
-    pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
-        mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
     }
     /// A server player's level is about to change through
     /// `Player.giveExperienceLevels`: once per level gained or lost by points,
@@ -4647,19 +4635,26 @@ impl Game<'_> {
     /// A server player's experience points are about to change through
     /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
     /// orb pickup after mending, an advancement reward, or `/xp add ... points`.
-    /// Change `amount` (in points) or set `cancel` to give nothing. An orb or
-    /// an advancement reward gives nothing for a negative amount. Experience
-    /// bottles and furnaces make orbs, so they come through the orb path.
-    /// `native_player_exp_change` is separate and still fires first for an orb
-    /// pickup. Server-side. API @API:player_xp_change@.
+    /// Change the signed `amount` (in points) or set `cancel` to give nothing.
+    /// Experience bottles and furnaces make orbs, so they come through the orb
+    /// path. Server-side. API @API:player_xp_change@.
     pub(super) fn native_player_xp_change(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         amount: &mut i32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_player_xp_change(self, mod_api::mods(), player, name, amount, cancel);
+        mod_api::dispatch_player_xp_change(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            amount,
+            cancel,
+        );
     }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
@@ -6450,24 +6445,6 @@ impl Game<'_> {
             book,
             open,
             filtering,
-        );
-    }
-    /// A server player earned one criterion of an advancement, after the
-    /// progress was recorded. 339.
-    pub(super) fn native_player_advancement_criterion_grant(
-        &mut self,
-        player: u128,
-        name: &str,
-        advancement: &str,
-        criterion: &str,
-    ) {
-        mod_api::dispatch_player_advancement_criterion_grant(
-            self,
-            mod_api::mods(),
-            player,
-            name,
-            advancement,
-            criterion,
         );
     }
     /// A server player released a drawn bow with `arrow` selected. The guest's
@@ -10667,12 +10644,6 @@ impl Game<'_> {
     pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
         let name = keybinds::mouse_name(button);
         self.native_key(&name, pressed);
-    }
-    /// Wheel steps while playing: whether a native mod took them.
-    pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {
-        let mut claimed = false;
-        self.native_wheel(steps, &mut claimed);
-        claimed
     }
     /// A native mod's command.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {

@@ -3489,7 +3489,7 @@ mod item_destroyed_tests {
 }
 
 #[cfg(test)]
-mod experience_tests {
+mod experience_cost_tests {
     use super::Experience;
 
     /// Java's `int` arithmetic wraps; a huge or very negative level must not
@@ -3499,7 +3499,13 @@ mod experience_tests {
         assert_eq!(Experience::needed(0), 7);
         assert_eq!(Experience::needed(15), 37);
         assert_eq!(Experience::needed(30), 112);
-        assert_eq!(Experience::needed(i32::MAX), (i32::MAX - 30).wrapping_mul(9).wrapping_add(112));
-        assert_eq!(Experience::needed(i32::MIN), i32::MIN.wrapping_mul(2).wrapping_add(7));
+        assert_eq!(
+            Experience::needed(i32::MAX),
+            (i32::MAX - 30).wrapping_mul(9).wrapping_add(112)
+        );
+        assert_eq!(
+            Experience::needed(i32::MIN),
+            i32::MIN.wrapping_mul(2).wrapping_add(7)
+        );
     }
 }

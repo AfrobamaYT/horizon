@@ -211,6 +211,7 @@ mod native_criteria;
 mod native_data_maps;
 mod native_entities;
 mod native_entity_data;
+mod native_entity_invulnerable;
 mod native_entity_motion;
 mod native_entity_moves;
 mod native_entity_refs;
@@ -7670,7 +7671,6 @@ impl Game<'_> {
         self.update_totem_ready();
         self.tick_command_extras();
         self.native_tick();
-        self.tell_native_now();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the
@@ -13909,7 +13909,7 @@ impl Game<'_> {
             self.add_pickup(pickups::Taken::Orb(Box::new(o)), pickups::Collector::Player);
         }
         if gained > 0 {
-            self.give_experience_points(gained as i32, false);
+            self.give_experience_points(gained as i32);
         }
     }
     /// `FurnaceResultSlot.checkTakeAchievements`: the player took from the output of the
@@ -13935,14 +13935,9 @@ impl Game<'_> {
     }
     /// `Player.giveExperiencePoints`: `add_experience_levels` runs once for each
     /// level gained or lost, and the mods hear of the level change once.
-    pub(super) fn give_experience_points(&mut self, points: i32, allow_negative: bool) {
+    pub(super) fn give_experience_points(&mut self, points: i32) {
         let Some(points) = self.xp_change(points) else {
             return;
-        };
-        let points = if allow_negative {
-            points
-        } else {
-            points.max(0)
         };
         let old_level = self.experience.level;
         self.experience.add_points(points);
@@ -17879,29 +17874,31 @@ impl Game<'_> {
                         && !self.screen_over_playing()
                         && self.sleeping.is_none()
                         && self.player.is_some()
-                        && !self.native_wheel_event(d)
-                        && let Some((wheel, (horizontal_steps, vertical_steps))) = self
-                            .mouse
-                            .on_scroll(raw_x, raw_y, discrete, wheel_sensitivity)
                     {
-                        if !self.pad_synthetic_input() {
-                            let mut canceled = false;
-                            self.native_mouse_scrolling(
-                                [scaled(raw_x), scaled(raw_y)],
-                                [horizontal_steps, vertical_steps],
-                                [
-                                    self.physical_buttons.contains(&MouseButton::Left),
-                                    self.physical_buttons.contains(&MouseButton::Middle),
-                                    self.physical_buttons.contains(&MouseButton::Right),
-                                ],
-                                [self.cursor.0, self.cursor.1],
-                                glfw_modifiers(self.modifiers),
-                                &mut canceled,
-                            );
-                            if canceled {
-                                return Ok(());
-                            }
+                        let scroll =
+                            self.mouse
+                                .on_scroll(raw_x, raw_y, discrete, wheel_sensitivity);
+                        let (horizontal_steps, vertical_steps) =
+                            scroll.map_or((0, 0), |(_, steps)| steps);
+                        let mut canceled = false;
+                        self.native_mouse_scrolling(
+                            [scaled(raw_x), scaled(raw_y)],
+                            [horizontal_steps, vertical_steps],
+                            [
+                                self.physical_buttons.contains(&MouseButton::Left),
+                                self.physical_buttons.contains(&MouseButton::Middle),
+                                self.physical_buttons.contains(&MouseButton::Right),
+                            ],
+                            [self.cursor.0, self.cursor.1],
+                            glfw_modifiers(self.modifiers),
+                            &mut canceled,
+                        );
+                        if canceled {
+                            return Ok(());
                         }
+                        let Some((wheel, _)) = scroll else {
+                            return Ok(());
+                        };
                         if self.spectator() && self.spectator_gui.is_menu_active() {
                             self.spectator_scroll(-wheel);
                         } else if self.spectator() {

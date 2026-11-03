@@ -609,15 +609,6 @@
       }
     },
     {
-      "name": "wheel",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_wheel",
-      "mod_api": {
-        "contract": "cancel",
-        "out": "claimed"
-      }
-    },
-    {
       "name": "command",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_command",
@@ -3512,16 +3503,6 @@
       }
     },
     {
-      "name": "player_advancement_criterion_grant",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_criterion_grant",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerAdvancementCriterionGrant)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "player_advancement_done",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
@@ -3664,17 +3645,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_elytra_boost",
       "neoforge": "none (NeoForge has no such event)",
       "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "player_exp_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_change",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerExpChangeEvent)",
-      "side": "server",
-      "cancellable": false,
       "mod_api": {
         "contract": "listen"
       }

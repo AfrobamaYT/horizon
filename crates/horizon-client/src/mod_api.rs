@@ -938,6 +938,49 @@ impl From<PlayerRef> for EntityRef {
     }
 }
 
+/// A player's game mode (vanilla's `GameType`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GameMode {
+    Survival,
+    Creative,
+    Adventure,
+    Spectator,
+}
+
+impl GameMode {
+    /// Every mode, in id order.
+    pub const ALL: [Self; 4] = [
+        Self::Survival,
+        Self::Creative,
+        Self::Adventure,
+        Self::Spectator,
+    ];
+    /// `GameType.getId`: 0 survival, 1 creative, 2 adventure, 3 spectator.
+    pub fn id(self) -> i32 {
+        match self {
+            Self::Survival => 0,
+            Self::Creative => 1,
+            Self::Adventure => 2,
+            Self::Spectator => 3,
+        }
+    }
+    /// The mode with `GameType` id `id`, or None for an id vanilla doesn't
+    /// have.
+    pub fn from_id(id: i32) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+    /// `GameType.getName`: `survival`, `creative`, `adventure`, `spectator`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Survival => "survival",
+            Self::Creative => "creative",
+            Self::Adventure => "adventure",
+            Self::Spectator => "spectator",
+        }
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
@@ -1113,6 +1156,13 @@ pub enum ToolAbility {
     ShovelFlatten,
     ShovelDouse,
     HoeTill,
+}
+
+/// How a criterion's advancement progress changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeProgressType {
+    Grant,
+    Revoke,
 }
 
 /// Read-only context for a tool modification.
@@ -1373,6 +1423,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    #[test]
+    fn game_modes_round_trip_through_their_ids() {
+        for mode in GameMode::ALL {
+            assert_eq!(GameMode::from_id(mode.id()), Some(mode));
+        }
+        assert_eq!(GameMode::from_id(-1), None);
+        assert_eq!(GameMode::from_id(4), None);
+        assert_eq!(GameMode::Adventure.name(), "adventure");
+    }
+
     struct Quiet;
     impl Hooks for Quiet {}
 
@@ -1480,6 +1540,35 @@ mod tests {
             } else {
                 Flow::Continue
             }
+        }
+    }
+
+    #[test]
+    fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
+        struct XpHook(bool);
+        impl Hooks for XpHook {
+            fn player_xp_change(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerXpChangeEvent<'_>,
+            ) -> Flow {
+                assert_eq!(
+                    (event.player, event.player_entity_id, event.name),
+                    (7, 42, "Probe")
+                );
+                event.amount = -5;
+                if self.0 { Flow::Cancel } else { Flow::Continue }
+            }
+        }
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for cancelled in [false, true] {
+            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let (mut amount, mut cancel) = (10, false);
+            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            assert_eq!((amount, cancel), (-5, cancelled));
         }
     }
 
