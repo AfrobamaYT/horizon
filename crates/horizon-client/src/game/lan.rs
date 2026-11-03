@@ -1862,6 +1862,9 @@ impl Game<'_> {
                     }
                     self.lan_player_chatted(&mut host, sender, &raw);
                 }
+                HostEvent::ChatSessionStarted(update) => {
+                    host.hub.broadcast(&C::PlayerInfoUpdate(*update));
+                }
                 HostEvent::Joined(conn) => {
                     // The mods may refuse the login before the player is placed.
                     if let Some((uuid, name)) =
