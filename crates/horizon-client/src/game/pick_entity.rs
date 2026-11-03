@@ -59,14 +59,7 @@ impl Game<'_> {
         if hits.iter().all(Option::is_none) {
             return None;
         }
-        let block_distance = self.pick_unfiltered().map(|hit| {
-            let eye = self.aim().map(|(eye, _)| eye).unwrap_or_default();
-            (0..3)
-                .map(|axis| (hit.point[axis] - eye[axis]).powi(2))
-                .sum::<f64>()
-                .sqrt()
-        });
-        nearest_entity(hits, block_distance)
+        nearest_entity(hits, self.block_distance())
     }
 
     /// The ordinary block-or-entity pick (Minecraft.hitResult), using the
