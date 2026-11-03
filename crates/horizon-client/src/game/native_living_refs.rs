@@ -129,7 +129,7 @@ impl Game<'_> {
     /// The entity's health (`LivingEntity.getHealth`; Paper's
     /// `Damageable#getHealth`). During a player's turn only that player
     /// resolves: the hub is out for their action, and other players'
-    /// handles read `None` until it is back. API @API:living_health@.
+    /// handles read `None` until it is back.
     pub(super) fn native_living_health(&self, living: LivingRef) -> Option<f32> {
         match self.native_living_target(living)? {
             Target::Player => Some(self.player.as_ref()?.health.health()),
@@ -158,7 +158,7 @@ impl Game<'_> {
     /// `Damageable#getMaxHealth`). Players and guests read their attribute
     /// map; a mob, an armor stand and the dragon their own fields (the
     /// armor stand the fixed 20 the game seeds it with, the dragon its
-    /// 200) until live attribute maps cover them. API @API:living_health@.
+    /// 200) until live attribute maps cover them.
     pub(super) fn native_living_max_health(&mut self, living: LivingRef) -> Option<f32> {
         match self.native_living_target(living)? {
             Target::Player | Target::Guest(_) => self
@@ -180,7 +180,7 @@ impl Game<'_> {
     }
     /// Whether the entity is alive (`LivingEntity.isAlive`; Paper's
     /// `Entity#isDead` is its inverse). A dying mob, mid death
-    /// animation, is not. API @API:living_health@.
+    /// animation, is not.
     pub(super) fn native_living_alive(&self, living: LivingRef) -> Option<bool> {
         self.native_living_health(living).map(alive_at)
     }
