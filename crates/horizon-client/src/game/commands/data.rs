@@ -1077,6 +1077,29 @@ mod tests {
                 .unwrap();
             assert_eq!(game.uuid_for(12), [1, 2, 3, 4]);
             assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+            game.spend_forced_meta();
+            let ctx = horizon_command::Context {
+                root: 0,
+                nodes: vec![],
+                args: vec![horizon_command::ParsedArg {
+                    name: "nbt".into(),
+                    value: horizon_command::Arg::Str("{start_interpolation:0}".into()),
+                    range: (0, 23),
+                }],
+                command: None,
+                range: (0, 23),
+                child: None,
+                literals: vec![],
+            };
+            for _ in 0..2 {
+                assert_eq!(
+                    game.cmd_data_in("data.merge", &ctx, DataRef::Entity(Target::Other(12)))
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+                game.spend_forced_meta();
+            }
         });
     }
 }

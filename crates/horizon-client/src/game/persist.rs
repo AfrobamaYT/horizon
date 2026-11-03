@@ -926,6 +926,13 @@ impl Game<'_> {
             .cloned()
             .unwrap_or_else(|| Tag::Compound(Default::default()));
         if let Tag::Compound(c) = &mut tag {
+            // Display.addAdditionalSaveData omits the transient start delay.
+            if matches!(
+                o.kind.as_str(),
+                "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
+            ) {
+                c.remove(&"start_interpolation".into());
+            }
             c.insert("id".into(), Tag::String(o.kind.as_str().into()));
             c.insert(
                 "Pos".into(),
