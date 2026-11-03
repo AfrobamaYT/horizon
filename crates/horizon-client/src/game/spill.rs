@@ -889,7 +889,10 @@ mod tests {
             };
             game.world.block_entities.insert(
                 key,
-                BlockEntity::Mod(Box::new(ModBlockEntity::new("doubler:hoard".into(), fields))),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    "doubler:hoard".into(),
+                    fields,
+                ))),
             );
             let holder = Holder::BlockEntity([pos.x, pos.y, pos.z]);
             let host: &mut dyn horizon_client::mod_api::Host = game;

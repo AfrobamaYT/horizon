@@ -142,21 +142,18 @@ pub(super) fn content_root(
         types,
     } = native_declared();
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
-        if known.is_none() {
-            match mod_content::known_components(root) {
-                Ok(types) => known = Some(types),
-                Err(e) => log::warn!("Horizon: native mods' blocks and items not loaded: {e}"),
-            }
+        let known = match &mut known {
+            Some(types) => types,
+            None => known.insert(mod_content::known_components(root)?),
+        };
+        let errors = mod_content::accept_declared(&mut mods, blocks, items, types, known);
+        if !errors.is_empty() {
+            return Err(errors.join("\n").into());
         }
-        if let Some(known) = &known {
-            for e in mod_content::accept_declared(&mut mods, blocks, items, types, known) {
-                log::warn!("Horizon: {e}");
-            }
-            // A file item's remainder named a code-declared item that was refused: that mod
-            // alone is left out, not every content mod through the overlay's check.
-            for e in mod_content::drop_dangling_remainders(&mut mods) {
-                log::warn!("Horizon: {e}");
-            }
+        // A file item's remainder named a code-declared item that was refused: that mod
+        // alone is left out, not every content mod through the overlay's check.
+        for e in mod_content::drop_dangling_remainders(&mut mods) {
+            log::warn!("Horizon: {e}");
         }
     }
     let out = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;

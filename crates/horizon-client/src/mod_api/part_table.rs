@@ -888,6 +888,7 @@ pub(crate) mod tests {
     #[test]
     fn invalid_block_entity_type_paths_refuse_registration() {
         struct Invalid;
+        #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
             fn register(&self, r: &mut Registrar) {
                 for path in ["", "other:press", "Uppercase", "has space"] {

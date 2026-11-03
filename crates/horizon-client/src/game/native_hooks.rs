@@ -9347,17 +9347,18 @@ mod tests {
 
         const CHILD: &str = "HORIZON_DECLARED_BE_GAME_CHILD";
         if std::env::var_os(CHILD).is_none() {
-            let scratch = std::env::temp_dir().join(format!(
-                "horizon-declared-be-game-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir(&scratch).unwrap();
-            let mut command = Command::new(std::env::current_exe().unwrap());
-            command
+            for case in ["valid", "unknown_block"] {
+                let scratch = std::env::temp_dir().join(format!(
+                    "horizon-declared-be-game-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                std::fs::create_dir(&scratch).unwrap();
+                let mut command = Command::new(std::env::current_exe().unwrap());
+                command
                 .args([
                     "--ignored",
                     "--exact",
@@ -9366,20 +9367,21 @@ mod tests {
                     "--test-threads=4",
                 ])
                 .current_dir(&scratch)
-                .env(CHILD, "1")
+                .env(CHILD, case)
                 .env("HORIZON_NO_AUDIO", "1")
                 .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1");
-            for key in [
-                "HORIZON_HOME",
-                "HORIZON_LAUNCHER_HOME",
-                "XDG_DATA_HOME",
-                "XDG_CONFIG_HOME",
-            ] {
-                command.env(key, scratch.join(key));
+                for key in [
+                    "HORIZON_HOME",
+                    "HORIZON_LAUNCHER_HOME",
+                    "XDG_DATA_HOME",
+                    "XDG_CONFIG_HOME",
+                ] {
+                    command.env(key, scratch.join(key));
+                }
+                let status = command.status().unwrap();
+                std::fs::remove_dir_all(scratch).unwrap();
+                assert!(status.success(), "{case}");
             }
-            let status = command.status().unwrap();
-            std::fs::remove_dir_all(scratch).unwrap();
-            assert!(status.success());
             return;
         }
 
@@ -9408,12 +9410,19 @@ mod tests {
                 *energy += 1;
             }
         }
-        struct TestMod;
+        struct TestMod {
+            invalid: bool,
+        }
+        #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn register(&self, registrar: &mut Registrar) {
                 let kind = registrar
                     .block_entity_type("shared")
-                    .blocks(&[FIRST, SECOND])
+                    .blocks(if self.invalid {
+                        &["be_test:missing"]
+                    } else {
+                        &[FIRST, SECOND]
+                    })
                     .build();
                 registrar.block_entity_part(&kind, Press);
                 registrar
@@ -9431,12 +9440,20 @@ mod tests {
                 }));
             }
         }
-        let mods: Mods = Arc::from([ModEntry::new("be_test", Box::new(TestMod))]);
+        let invalid = std::env::var(CHILD).unwrap() == "unknown_block";
+        let mods: Mods = Arc::from([ModEntry::new("be_test", Box::new(TestMod { invalid }))]);
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]).unwrap();
-        with_game_at(root, |game| {
+        let root = super::super::mods::content_root(&base, &Default::default(), &[]);
+        if invalid {
+            let error = root.unwrap_err().to_string();
+            assert!(error.contains("be_test:shared"), "{error}");
+            assert!(error.contains("be_test:missing"), "{error}");
+            assert!(!std::path::Path::new(".horizon-cache").exists());
+            return;
+        }
+        with_game_at(root.unwrap(), |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
