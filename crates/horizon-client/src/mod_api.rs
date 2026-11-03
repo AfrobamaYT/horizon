@@ -1315,6 +1315,15 @@ impl BlockHit {
     }
 }
 
+/// Access to the game-only handle backend is reserved for this API.
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::{BackendToken, Host};
+/// fn access(host: &dyn Host) { let _ = host.backend(BackendToken(())); }
+/// ```
+#[doc(hidden)]
+pub struct BackendToken(());
+
 /// A player's right click on a block, for `right_click_block`
 /// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
 /// `useItemOn` starts, on the clicking client and on the server.
@@ -1387,6 +1396,8 @@ mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
 pub use generated_host::Host;
+#[doc(hidden)]
+pub use generated_host::{Backend, BackendMut};
 
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
@@ -1528,13 +1539,19 @@ mod tests {
         lines: Vec<Text>,
     }
 
+    impl Backend for Reader {
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
+        }
+    }
+
     impl Host for Reader {
+        fn backend(&self, _: BackendToken) -> &dyn Backend {
+            self
+        }
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
                 .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
-        }
-        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
-            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {

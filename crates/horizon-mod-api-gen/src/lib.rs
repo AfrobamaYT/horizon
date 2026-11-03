@@ -417,6 +417,8 @@ fn handle_method<'a>(
     sig.ident =
         syn::parse_str(short).map_err(|_| format!("{name}: {short} is not a method name"))?;
     let mut inputs = sig.inputs.iter();
+    let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
+    let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
             syn::parse_quote!(host: &mut dyn Host)
@@ -449,10 +451,11 @@ fn handle_method<'a>(
     }
     sig.inputs = rest.into_iter().collect();
     let docs = doc_comments(&method.attrs, name, true)?;
+    let backend = if mutable { "backend_mut" } else { "backend" };
     Ok((
         handle,
         format!(
-            "{docs}pub {} {{ host.{name}(self{args}) }}\n",
+            "{docs}pub {} {{ host.{backend}(BackendToken(())).{name}(self{args}) }}\n",
             sig.to_token_stream()
         ),
     ))
@@ -1424,7 +1427,7 @@ mod tests {
             let (handle, code) =
                 super::handle_method(&method, &name, receiver, &types.handles).unwrap();
             assert_eq!(handle, ty);
-            assert!(code.contains(&format!("host.{name}(self)")));
+            assert!(code.contains(&format!("host.backend(BackendToken(())).{name}(self)")));
         }
         let method = syn::parse_quote! { fn native_hidden_kind(&self, value: HiddenRef) {} };
         for receiver in [
@@ -1462,7 +1465,7 @@ mod tests {
         assert_eq!(handle, "EntityRef");
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
-        assert!(code.contains("host.entity_position(self, scale)"));
+        assert!(code.contains("host.backend(BackendToken(())).entity_position(self, scale)"));
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_level_set(&mut self, level: LevelRef) {}
         };
@@ -1470,6 +1473,7 @@ mod tests {
             super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
         assert_eq!(handle, "LevelRef");
         assert!(code.contains("host : & mut dyn Host"));
+        assert!(code.contains("host.backend_mut(BackendToken(())).level_set(self)"));
         for (method, name, receiver, error) in [
             (
                 syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
