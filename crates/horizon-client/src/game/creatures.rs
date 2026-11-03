@@ -7137,9 +7137,7 @@ impl Game<'_> {
                 }
                 continue;
             }
-            if mob.species() == Species::SulfurCube
-                && !horizon_client::mobs::trader::is_invisible(mob)
-            {
+            if mob.species() == Species::SulfurCube && !mob.is_invisible() {
                 self.sulfur_cube_body_geometry(
                     mob,
                     alpha as f32,

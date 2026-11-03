@@ -272,7 +272,7 @@ impl Game<'_> {
             ),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id)?;
-                Some(m.invisible || m.has_effect("minecraft:invisibility"))
+                Some(m.is_invisible())
             }
             Target::Stand(id) => Some(self.armor_stands.iter().find(|s| s.id == id)?.invisible),
             _ => None,
@@ -351,8 +351,6 @@ impl Game<'_> {
         })
     }
     /// Sets the entity's shared invisibility flag (`Entity.setInvisible`). Returns false for players and guests.
-    /// With an invisibility effect active, the read stays true because Horizon derives invisibility
-    /// from the flag and the effect, unlike vanilla's single flag.
     pub(super) fn native_entity_set_invisible(
         &mut self,
         entity: EntityRef,
@@ -438,7 +436,7 @@ mod tests {
             assert!(game.mobs[0].invisible);
             game.mobs[0].add_effect("minecraft:invisibility", 100, 0);
             assert!(entity.set_invisible(game, false));
-            assert_eq!(entity.is_invisible(game), Some(true));
+            assert_eq!(entity.is_invisible(game), Some(false));
             assert!(entity.set_glowing(game, true));
             assert!(game.mobs[0].glowing);
             assert!(entity.set_no_gravity(game, true));

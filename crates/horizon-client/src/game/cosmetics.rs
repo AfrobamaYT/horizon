@@ -260,7 +260,7 @@ impl Game<'_> {
     ) -> Option<(glam::Vec3, glam::Vec3)> {
         use horizon_client::mobs::{anim, render};
         let worn = self.worn(m, own)?;
-        if horizon_client::mobs::trader::is_invisible(m) {
+        if m.is_invisible() {
             return None;
         }
         // The avatar's body, posed as it is drawn.
