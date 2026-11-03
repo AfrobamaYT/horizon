@@ -2,7 +2,7 @@
 //! `ServerGamePacketListenerImpl.handlePickItemFromEntity`): the client aims,
 //! the server answers with `Entity.getPickResult`.
 use super::Game;
-use horizon_client::mod_api::{BlockPos, NativeCrosshairTarget};
+use horizon_client::mod_api::{BlockPos, EntityRef, NativeCrosshairTarget};
 use horizon_client::{items::ItemStack, save::uuid_text};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,7 +64,8 @@ impl Game<'_> {
 
     /// The ordinary block-or-entity pick (Minecraft.hitResult), using the
     /// game's targeting ray, reach and occlusion. None without a client world
-    /// or on a miss. Unlike native_view_hit, this never traces distant terrain.
+    /// or on a miss. Entity hits carry this client level's epoch. Unlike
+    /// native_view_hit, this never traces distant terrain.
     pub(super) fn native_crosshair_target(&self) -> Option<NativeCrosshairTarget> {
         if !self.native_window() || self.title.is_some() {
             return None;
@@ -73,7 +74,7 @@ impl Game<'_> {
         if let Some(hit) = self.crosshair_entity_hit() {
             let (eye, direction) = self.aim()?;
             return Some(NativeCrosshairTarget::Entity {
-                id: hit.id,
+                entity: EntityRef::new(self.native_lifecycle.epoch()?, hit.id as u32),
                 point: std::array::from_fn(|axis| eye[axis] + direction[axis] * hit.distance),
             });
         }
