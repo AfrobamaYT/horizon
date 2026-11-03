@@ -2454,6 +2454,9 @@ a dimension.
   maximum, with no hook; a health that isn't finite or above 0 is refused, so a write never kills.
   `living.heal(host, amount)` is `LivingEntity.heal`, through the `living_heal` hook. Both write players, guests
   (in their own turn) and mobs, and answer false for armor stands and the dragon.
+  `living.last_attacker(host)` is `LivingEntity.getLastHurtByMob`: who last hurt the entity, within a hundred
+  ticks of the hurt, as an `EntityRef` of the current open; `None` once the window has passed or the attacker
+  is gone, and for armor stands, the dragon and clients.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.

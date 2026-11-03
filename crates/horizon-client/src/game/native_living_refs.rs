@@ -4,6 +4,7 @@
 //! a stale handle or on a client.
 use super::Game;
 use super::commands::{Target, items::Owner};
+use crate::mobs::Who;
 use horizon_client::first_person::Hand;
 use horizon_client::items::ItemStack;
 use horizon_client::mod_api::{EntityRef, EquipmentSlot, LivingRef};
@@ -238,6 +239,50 @@ impl Game<'_> {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// `LivingEntity.getLastHurtByMob`: the entity that last hurt this one,
+    /// within a hundred ticks of the hurt (the window of
+    /// `CombatTracker.getKiller`'s credit and a mob's hurt-by memory, as
+    /// `armadillo.rs` reads it). None for a stale handle, a window that has
+    /// passed, an attacker that is gone, an armor stand, the dragon or a
+    /// client. API @API:living_health_writes@.
+    pub(super) fn native_living_last_attacker(&mut self, living: LivingRef) -> Option<EntityRef> {
+        match self.native_living_target(living)? {
+            t @ (Target::Player | Target::Guest(_)) => self
+                .for_player(t, |g| g.combat.kill_credit(g.world.game_time))
+                .flatten()
+                .and_then(|id| self.native_entity(id)),
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                let who =
+                    m.ai.last_hurt_by
+                        .filter(|_| m.age as i32 - m.ai.last_hurt_by_time <= 100)?;
+                let attacker = match who {
+                    Who::Mob(id) => Some(id),
+                    // A player's hurt carries no id in `Who`: the hit's
+                    // record names the player (`last_hurt_by_player`), the
+                    // hub the guest's entity. The acting guest is resolved
+                    // without the hub, which their turn takes out.
+                    Who::Player => {
+                        let conn = *self.last_hurt_by_player.get(&id)?;
+                        Some(match conn {
+                            None => self.player.as_ref()?.entity_id as u32,
+                            Some(conn) if self.lan_acting == Some(conn) => self.lan_acting_entity?,
+                            Some(conn) => {
+                                self.lan
+                                    .iter()
+                                    .flat_map(|h| h.hub.guests.iter())
+                                    .find(|g| g.conn == conn)?
+                                    .entity_id as u32
+                            }
+                        })
+                    }
+                }?;
+                self.native_entity(attacker)
+            }
+            _ => None,
         }
     }
 

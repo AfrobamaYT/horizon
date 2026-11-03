@@ -846,6 +846,25 @@ mod noted_tests {
     }
 }
 #[cfg(test)]
+mod kill_credit_tests {
+    use super::CombatTracker;
+    use horizon_client::text::Text;
+
+    /// `CombatTracker.getKiller`'s window: a hundred ticks after the hurt
+    /// still counts (`getLastHurtByMob` answers), the next tick no longer
+    /// does — the same `<= 100` a mob's hurt-by memory reads.
+    #[test]
+    fn the_hundredth_tick_after_the_hurt_still_counts_and_the_next_does_not() {
+        let hurt_at = |at: i64| CombatTracker {
+            last_hurt_by: Some(((7, Text::literal("zombie")), at)),
+            ..CombatTracker::default()
+        };
+        assert_eq!(hurt_at(1_000).kill_credit(1_099), Some(7));
+        assert_eq!(hurt_at(1_000).kill_credit(1_100), Some(7));
+        assert_eq!(hurt_at(1_000).kill_credit(1_101), None);
+    }
+}
+#[cfg(test)]
 mod stuck_tests {
     use super::Stuck;
 
