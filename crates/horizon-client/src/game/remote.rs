@@ -3076,6 +3076,9 @@ impl Game<'_> {
                 self.selected = 0;
                 self.potions.effects.clear();
                 self.riding = None;
+                if let Some(player) = self.player.as_mut() {
+                    player.entity_id = p.player_id;
+                }
                 if let Some(r) = self.remote.as_mut() {
                     r.carried = Some(0);
                     r.own_invisible = false;
@@ -5605,6 +5608,8 @@ impl Game<'_> {
             }
             None => {
                 let mut player = PlayerMotion::new(self.motion, position)?;
+                // The id the server gave, for the hooks the motion fires.
+                player.entity_id = self.own_entity_id();
                 // Player.tick derives noPhysics from the current game mode.
                 player.spectator = self.spectator();
                 player.velocity = delta;
