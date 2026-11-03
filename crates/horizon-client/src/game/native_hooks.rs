@@ -29,8 +29,8 @@ use horizon_client::mod_api::{
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeItemClick,
-    NativeTriState, Suggestion, UsePhase,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
+    NativeItemClick, NativeTriState, Suggestion, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,

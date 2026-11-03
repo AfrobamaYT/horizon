@@ -10,7 +10,9 @@ use crate::mod_api::{
     UseItemOnEvent, UseOnEvent, UsePhase,
 };
 use horizon_client::{
-    chunk::Chunk, first_person::Hand, items::ItemStack,
+    chunk::Chunk,
+    first_person::Hand,
+    items::ItemStack,
     lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
     motion::PlayerMotion,
 };
