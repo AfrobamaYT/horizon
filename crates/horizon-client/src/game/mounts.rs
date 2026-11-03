@@ -650,7 +650,6 @@ impl Game<'_> {
                 } else {
                     self.tame_mount(mob);
                 }
-            }                }
             }
             MobEvent::Buck { mob } => {
                 if self.riding == Some(mob) {
