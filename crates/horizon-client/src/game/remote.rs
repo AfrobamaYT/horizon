@@ -522,7 +522,7 @@ pub(super) struct Remote {
     /// only replace the remembered state; then the block takes it.
     predictions: HashMap<[i32; 3], (i32, i32)>,
     /// Open container: (window id, menu name).
-    pub(super) menu: Option<(i32, String)>,
+    pub(super) menu: ClientMenu,
     /// The crafting result slot of the open menu as the server last set it
     /// (`CraftingMenu.slotChangedCraftingGrid`): the client never computes it.
     pub(super) craft_result: Option<ItemStack>,
@@ -1035,7 +1035,7 @@ impl Game<'_> {
             level_load: horizon_client::level_loading::LevelLoadTracker::new(0),
             sent_info: info,
             predictions: HashMap::new(),
-            menu: None,
+            menu: ClientMenu::default(),
             craft_result: None,
             menu_title: None,
             state_id: 0,
@@ -1132,6 +1132,8 @@ impl Game<'_> {
             .as_ref()
             .map(|_| (remote.entity_id, remote.profile));
         self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
+        self.native_lifecycle.begin_close();
+        self.native_lifecycle_world_closed();
     }
 
     /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
@@ -1908,6 +1910,8 @@ impl Game<'_> {
                     if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
                         self.native_client_level_unload(&old);
                     }
+                    self.native_lifecycle.begin_close();
+                    self.native_lifecycle_world_closed();
                     let ticks = self.ticks;
                     if let Some(r) = self.remote.as_mut() {
                         r.reconfiguring = Some(ticks);
@@ -2179,6 +2183,10 @@ impl Game<'_> {
                 self.world.weather,
             );
             self.world = World::new(self.res.facts().air, spawn.seed);
+            // Entity IDs belong to this ClientLevel, not the connection. A
+            // same-level respawn keeps it; a replacement invalidates handles.
+            self.native_lifecycle_open_started();
+            self.native_lifecycle_world_ready();
             self.world.shape = shape;
             self.world.game_time = time;
             self.world.day_time = day;
@@ -2246,8 +2254,13 @@ impl Game<'_> {
         let range = distance.max(2) + 3;
         (x - center.0).abs() <= range && (z - center.1).abs() <= range
     }
-    /// The columns a moved or resized storage no longer holds.
-    fn drop_remote_chunks_out_of_range(&mut self, center: (i32, i32), distance: i32) {
+    /// The columns a moved or resized storage no longer holds. Returns the
+    /// positions it freed (`forget_remote_columns`).
+    fn drop_remote_chunks_out_of_range(
+        &mut self,
+        center: (i32, i32),
+        distance: i32,
+    ) -> Vec<(i32, i32)> {
         let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
             .world
             .chunks
@@ -2255,23 +2268,37 @@ impl Game<'_> {
             .copied()
             .filter(|&(x, z)| !Self::chunk_inside_remote_range(center, distance, x, z))
             .collect();
-        self.forget_remote_columns(&mut gone, true);
+        self.forget_remote_columns(&mut gone, true)
     }
-    fn forget_all_remote_columns(&mut self) {
+    /// Every column goes with the client level. Returns the positions it
+    /// freed (`forget_remote_columns`).
+    fn forget_all_remote_columns(&mut self) -> Vec<(i32, i32)> {
         let mut gone = self.world.chunks.keys().copied().collect();
-        self.forget_remote_columns(&mut gone, false);
+        self.forget_remote_columns(&mut gone, false)
     }
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
     /// entities, each store once for all of them. When the level stays open,
-    /// far terrain keeps their last state (`server_terrain`).
+    /// far terrain keeps their last state (`server_terrain`). Returns the
+    /// positions it freed, in `gone`'s order: only those still resident,
+    /// so a later forget of the same positions frees nothing.
     fn forget_remote_columns(
         &mut self,
         gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
         keep_terrain: bool,
-    ) {
+    ) -> Vec<(i32, i32)> {
         if gone.is_empty() {
-            return;
+            return Vec::new();
+        }
+        // The client chunk seam: one unload per column still resident, with
+        // its data still there, before `take_remote_columns` frees it.
+        let freed_at: Vec<(i32, i32)> = gone
+            .iter()
+            .filter(|&&(x, z)| self.world.chunks.contains_key(&(x, z)))
+            .copied()
+            .collect();
+        for &(x, z) in &freed_at {
+            self.client_chunk_unload(x, z);
         }
         let freed =
             horizon_client::streaming::Streaming::take_remote_columns(&mut self.world, gone);
@@ -2296,6 +2323,7 @@ impl Game<'_> {
             });
         }
         gone.clear();
+        freed_at
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
     /// packet's type, loads the tag (`loadWithComponents`); an empty tag
@@ -4041,7 +4069,7 @@ impl Game<'_> {
                 if p.event == 55
                     && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
-                    std::mem::swap(&mut m.extra.main_hand, &mut m.extra.off_hand);
+                    m.extra.swap_hands();
                 }
                 // LivingEntity.handleEntityEvent 47 to 52, 65 and 68: an
                 // equipped item broke (onEquippedItemBroken).
@@ -6565,23 +6593,23 @@ impl Game<'_> {
                 // AvatarRenderer.getArmPose: the used item's BLOCK animation
                 // (an item with `blocks_attacks`) raises the arm.
                 let used = if m.extra.using_off_hand {
-                    &m.extra.off_hand
+                    m.extra.off_hand_id()
                 } else {
-                    &m.extra.main_hand
+                    m.extra.main_hand_id()
                 };
                 m.extra.blocking = m.extra.using_item > 0
                     && used
-                        .as_ref()
                         .and_then(|i| world_items!(self).get(i))
                         .is_some_and(|i| i.blocks_attacks.is_some());
             }
             if m.extra.using_item > 0 {
                 if player {
                     let item = if m.extra.using_off_hand {
-                        m.extra.off_hand.clone()
+                        m.extra.slot_stack(horizon_items::equipment::OFFHAND)
                     } else {
-                        m.extra.main_hand.clone()
-                    };
+                        m.extra.slot_stack(horizon_items::equipment::MAINHAND)
+                    }
+                    .map(|s| s.item.clone());
                     if let Some(item) = item {
                         let eye = m.eye_height();
                         let at = [m.position.x, m.position.y, m.position.z];
@@ -6773,6 +6801,13 @@ impl Game<'_> {
                     }));
                 }
             }
+            // The yaw of a boat eases toward the server's over the same steps
+            // as its position, read before `step` counts one off.
+            let turns: HashMap<i32, (f32, u32)> = lerps
+                .iter()
+                .filter(|(_, l)| l.steps > 0)
+                .filter_map(|(id, l)| l.rotation.map(|r| (*id, (r.0, l.steps))))
+                .collect();
             // Boats, minecarts, projectiles and the rest ease toward the
             // server's position over three ticks (`lerps`).
             let mut step = |id: u32, at: Vec3| match lerps.get_mut(&(id as i32)) {
@@ -6787,11 +6822,19 @@ impl Game<'_> {
                 }
                 _ => at,
             };
-            self.tick_remote_objects(&mut step, |c| {
-                cart_lerps
-                    .get_mut(&(c.id as i32))
-                    .is_some_and(|l| l.tick(c))
-            });
+            self.tick_remote_objects(
+                &mut step,
+                |id, yaw| {
+                    turns.get(&(id as i32)).map_or(yaw, |&(target, steps)| {
+                        super::remote_objects::lerp_yaw_step(yaw, target, steps)
+                    })
+                },
+                |c| {
+                    cart_lerps
+                        .get_mut(&(c.id as i32))
+                        .is_some_and(|l| l.tick(c))
+                },
+            );
             self.tick_remote_projectiles(&mut step);
             // LightningBolt.tick on a client, and the sky flash fading.
             self.flash = self.flash.saturating_sub(1);
@@ -6946,7 +6989,7 @@ impl Game<'_> {
             // A server's open menu takes clicks, which it applies itself: what
             // this client predicts for them isn't an edit to send (it would
             // overwrite the server's stacks whenever the prediction is wrong).
-            let in_menu = r.menu.is_some();
+            let in_menu = r.menu.as_ref().is_some();
             let stacks = creative_sync_stacks(&self.inventory, &self.offhand, &self.armor);
             for (i, stack) in stacks.into_iter().enumerate() {
                 if stack != r.synced[i] {
@@ -9173,7 +9216,7 @@ impl Game<'_> {
     /// The server's open menu: its window id and menu type (0, "inventory"
     /// when none is open).
     pub(super) fn remote_menu(&self) -> (i32, String) {
-        match self.remote.as_ref().and_then(|r| r.menu.clone()) {
+        match self.remote.as_ref().and_then(|r| r.menu.as_ref().cloned()) {
             Some((id, name)) => (id, name),
             None => (0, "inventory".to_owned()),
         }
@@ -9371,7 +9414,7 @@ impl Game<'_> {
         self.pad_clear_focus();
         self.recipe_ui.reset_screen();
         if let Some(r) = self.remote.as_mut() {
-            r.menu = None;
+            r.menu.set(None);
             r.menu_title = None;
             r.craft_result = None;
         }
@@ -9401,7 +9444,8 @@ impl Game<'_> {
         text: horizon_client::text::Text,
     ) {
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((container, "minecraft:merchant".to_owned()));
+            r.menu
+                .set(Some((container, "minecraft:merchant".to_owned())));
             r.menu_title = Some(text);
         }
         let session = horizon_client::merchant::Session::new(Vec::new(), true);
@@ -9472,7 +9516,7 @@ impl Game<'_> {
         if menu == "minecraft:lectern" {
             // LecternScreen: the book and page come in the menu's content and data.
             if let Some(r) = self.remote.as_mut() {
-                r.menu = Some((p.container, menu));
+                r.menu.set(Some((p.container, menu)));
             }
             self.remote_open_lectern(target.unwrap_or_default());
             return;
@@ -9536,11 +9580,13 @@ impl Game<'_> {
             // A content mod's menu type: its container's slots, which its
             // mod's screen places.
             _ if mod_type.is_some() => Some(BlockEntity::Mod(Box::new(
-                horizon_client::containers::ModBlockEntityFields {
-                    items: vec![None; mod_type.map_or(0, |t| t.slots)],
-                    ..Default::default()
-                }
-                .into(),
+                horizon_client::containers::ModBlockEntity::new(
+                    String::new(),
+                    horizon_client::containers::ModBlockEntityFields {
+                        items: vec![None; mod_type.map_or(0, |t| t.slots)],
+                        ..Default::default()
+                    },
+                ),
             ))),
             _ => {
                 // Unsupported menu: tell the server we closed it.
@@ -9558,7 +9604,7 @@ impl Game<'_> {
         };
         let title = menu_title(&p.title);
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((p.container, menu.clone()));
+            r.menu.set(Some((p.container, menu.clone())));
             r.menu_title = Some(title);
         }
         self.craft_size = if menu == "minecraft:crafting" { 3 } else { 2 };
@@ -9583,7 +9629,7 @@ impl Game<'_> {
                 self.world.block_entities.remove(&key);
                 self.container = None;
                 if let Some(r) = self.remote.as_mut() {
-                    r.menu = None;
+                    r.menu.set(None);
                     r.menu_title = None;
                 }
                 self.send(S::ContainerClose(play::ContainerClose {
@@ -9606,7 +9652,8 @@ impl Game<'_> {
             return;
         }
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((p.container, format!("{MOUNT_MENU}{columns}")));
+            r.menu
+                .set(Some((p.container, format!("{MOUNT_MENU}{columns}"))));
             r.menu_title = None;
         }
     }
@@ -9908,14 +9955,14 @@ impl Game<'_> {
                 .filter(|m| r.level_players.contains_key(&(m.id as i32)))
                 .map(|m| {
                     let e = &m.extra;
-                    let armor = [&e.head, &e.chest, &e.legs, &e.feet].map(|s| s.as_deref());
+                    let armor = horizon_items::equipment::ARMOR.map(|slot| e.slot_id(slot));
                     serde_json::json!({
                         "id": m.id,
                         "swinging": m.ai.swinging,
                         "using": m.extra.using_item,
                         "armor": armor,
-                        "main_hand": e.main_hand.as_deref(),
-                        "off_hand": e.off_hand.as_deref(),
+                        "main_hand": e.main_hand_id(),
+                        "off_hand": e.off_hand_id(),
                     })
                 })
                 .collect::<Vec<_>>(),
@@ -10442,6 +10489,26 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
     }
 }
 
+#[derive(Default)]
+pub(super) struct ClientMenu {
+    current: Option<(i32, String)>,
+    pub(super) generation: u64,
+}
+
+impl ClientMenu {
+    pub(super) fn set(&mut self, current: Option<(i32, String)>) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("menu generation exhausted");
+        self.current = current;
+    }
+
+    pub(super) fn as_ref(&self) -> Option<&(i32, String)> {
+        self.current.as_ref()
+    }
+}
+
 impl Remote {
     /// `PlayerInfo.getMessageValidator().updateAndValidate(message)` for `message.sender`.
     fn validate_chat(
@@ -10608,6 +10675,152 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    /// `LivingEntity.handleEntityEvent(55)` is `swapHandItems`: the whole
+    /// stacks trade hands, not just their ids.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_hand_swap_event_keeps_whole_stacks() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        use horizon_items::equipment::{MAINHAND, OFFHAND};
+        use horizon_protocol::packets::play::{Clientbound as C, EntityEvent};
+
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.damage = 40;
+            sword.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Biter".into()));
+            let mut shield = ItemStack::new("minecraft:shield", 1);
+            shield.damage = 12;
+            let mut mob = Mob::new(31, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            mob.extra.set_slot_stack(MAINHAND, Some(sword.clone()));
+            mob.extra.set_slot_stack(OFFHAND, Some(shield.clone()));
+            game.mobs.push(mob);
+            let swap = |game: &mut super::super::Game| {
+                game.handle_packet(C::EntityEvent(EntityEvent { id: 31, event: 55 }))
+                    .unwrap();
+            };
+            swap(game);
+            let m = game.mobs.iter().find(|m| m.id == 31).unwrap();
+            assert_eq!(m.extra.slot_stack(MAINHAND), Some(&shield));
+            assert_eq!(m.extra.slot_stack(OFFHAND), Some(&sword));
+            swap(game);
+            let m = game.mobs.iter().find(|m| m.id == 31).unwrap();
+            assert_eq!(m.extra.slot_stack(MAINHAND), Some(&sword));
+            assert_eq!(m.extra.slot_stack(OFFHAND), Some(&shield));
+        });
+    }
+
+    #[test]
+    fn client_menu_generation_changes_on_reused_window_ids() {
+        let mut menu = super::ClientMenu::default();
+        let inventory = menu.generation;
+        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
+        let first = menu.generation;
+        assert_ne!(inventory, first);
+        menu.set(None);
+        let closed = menu.generation;
+        assert_ne!(first, closed);
+        assert!(menu.as_ref().is_none());
+        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
+        assert_ne!(closed, menu.generation);
+        assert_ne!(first, menu.generation);
+        assert_eq!(menu.as_ref().map(|entry| entry.0), Some(7));
+        let before_replacement = menu.generation;
+        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
+        assert_ne!(before_replacement, menu.generation);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_epochs_follow_level_replacement_and_logout() {
+        use super::super::{
+            execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+            native_lifecycle::NativeLifecycle,
+        };
+        use horizon_client::{
+            level_loading::Reason,
+            mobs::Mob,
+            mod_api::{EntityRef, NativeCrosshairTarget},
+            motion::PlayerMotion,
+        };
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.native_lifecycle = NativeLifecycle::default();
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EpochTest").unwrap();
+            // A transport alone has no ClientLevel yet.
+            assert!(game.native_lifecycle.epoch().is_none());
+            let mut spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let joined = game.native_lifecycle.epoch().unwrap();
+            let old = EntityRef::new(joined, 12);
+            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+
+            // A different level key replaces the world even with the same
+            // dimension type; IDs can be reused but old handles cannot.
+            spawn.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            let replaced = game.native_lifecycle.epoch().unwrap();
+            assert_ne!(replaced, joined);
+            let current = EntityRef::new(replaced, 12);
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs
+                .push(Mob::new(12, kind, Vec3::new(0.0, 1.0, 2.0), 0.0));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.yaw = 0.0;
+            game.pitch = 0.0;
+            let Some(NativeCrosshairTarget::Entity { entity, .. }) = game.native_crosshair_target()
+            else {
+                panic!("the crosshair hits the pig in front of the player");
+            };
+            assert_eq!(entity, current);
+            assert!(
+                game.native_entity_target(current).is_none(),
+                "still server-only"
+            );
+            // Isolate the existing epoch check from the logical-server guard.
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert!(game.native_entity_target(current).is_some());
+            assert!(game.native_entity_target(old).is_none());
+            game.options.execution_role = ExecutionRole::Client;
+
+            game.client_logging_out();
+            assert!(game.native_lifecycle.epoch().is_none());
+            assert!(game.native_crosshair_target().is_none());
+            game.client_logging_out();
+            assert!(game.native_lifecycle.epoch().is_none());
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EpochTest").unwrap();
+            assert!(game.native_lifecycle.epoch().is_none());
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            assert_ne!(game.native_lifecycle.epoch(), Some(replaced));
+            game.client_logging_out();
+            assert!(game.native_lifecycle.epoch().is_none());
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forgetting_and_closing_remote_columns_clear_their_data() {
@@ -10657,6 +10870,68 @@ mod tests {
             game.forget_all_remote_columns();
             assert!(game.world.chunks.is_empty());
             assert!(game.world.block_entities.is_empty());
+        });
+    }
+
+    /// The client chunk seam (game/remote_chunks.rs) across every free
+    /// route, as the freed set each route returns: a forget packet, the
+    /// eager centre-move drop (a cache-centre packet), the radius-shrink
+    /// drop (a cache-radius packet) and the client level going. One freed
+    /// entry per column, in the order the routes free them, and a repeat
+    /// forget for an already-freed column frees nothing: adopting a column
+    /// is a chunk packet's doing (`remote_chunk`), not the streaming
+    /// level's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn every_free_route_returns_the_columns_it_freed_once() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+
+        with_game(|game| {
+            for x in [0, 1] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+            }
+            // A forget packet frees its column once; the same forget again,
+            // for a column already freed, frees nothing.
+            let mut gone = [(0, 0)].into_iter().collect();
+            assert_eq!(game.forget_remote_columns(&mut gone, true), [(0, 0)]);
+            let mut gone = [(0, 0)].into_iter().collect();
+            assert!(game.forget_remote_columns(&mut gone, true).is_empty());
+            for x in [7, 13] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+            }
+            // The centre move to (15, 0) at radius 10 frees (1, 0) only.
+            assert_eq!(game.drop_remote_chunks_out_of_range((15, 0), 10), [(1, 0)]);
+            // Shrinking the radius to 2 frees (7, 0) only.
+            assert_eq!(game.drop_remote_chunks_out_of_range((15, 0), 2), [(7, 0)]);
+            // The client level going frees what is left.
+            assert_eq!(game.forget_all_remote_columns(), [(13, 0)]);
+            assert!(game.world.chunks.is_empty());
+            assert!(game.world.block_entities.is_empty());
+        });
+    }
+
+    /// The seam sits at the packet level: streaming adopting, replacing or
+    /// re-sending a column keeps it resident — a re-sent position loads
+    /// again (`remote_chunk`), never an unload and a load — so a forget
+    /// returns exactly it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn streaming_adoption_and_resend_stay_resident_until_the_forget() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+
+        with_game(|game| {
+            game.streaming
+                .insert_remote(&mut game.world, Chunk::empty(0, 0));
+            // A re-send of a resident, lit column takes replace_remote.
+            game.streaming
+                .replace_remote(&mut game.world, Chunk::empty(0, 0));
+            assert!(game.world.chunks.contains_key(&(0, 0)));
+            let mut gone = [(0, 0)].into_iter().collect();
+            assert_eq!(game.forget_remote_columns(&mut gone, true), [(0, 0)]);
         });
     }
 

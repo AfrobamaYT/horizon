@@ -8,8 +8,10 @@ pub(super) struct HookSources {
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
     pub hook_ids: String,
+    pub hook_constants: String,
     pub hook_count: usize,
     pub render_hook_ids: String,
+    pub render_hook_constants: String,
     pub render_hook_count: usize,
 }
 
@@ -19,8 +21,10 @@ pub(super) fn emit(
     methods: &[syn::ItemFn],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
+    let mut hook_constants = String::new();
     let mut hook_count = 0;
     let mut render_hook_ids = String::new();
+    let mut render_hook_constants = String::new();
     let mut render_hook_count = 0;
     let mut traits = String::new();
     let mut dispatch = String::new();
@@ -104,6 +108,7 @@ pub(super) fn emit(
             && args.iter().any(|(name, ty)| {
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
             });
+        host_param::validate(hook, name, is_level, receiver_mut, ticks)?;
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
@@ -174,40 +179,46 @@ pub(super) fn emit(
                     .iter()
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
-                let mut table = table;
-                let id = match ty.to_token_stream().to_string().as_str() {
+                let lookup = match ty.to_token_stream().to_string().as_str() {
+                    "BlockStateId" if table == "block" => format!("block_state({key})"),
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
                         };
-                        format!("{level}.state_block({key})")
+                        if hook.side == HelperSide::Both {
+                            format!(
+                                "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
+                            )
+                        } else {
+                            format!("{table}(|| {level}.state_block({key}))")
+                        }
                     }
-                    "& ItemStack" => format!("Some(&*{key}.item)"),
-                    "& str" => format!("Some({key})"),
+                    "& ItemStack" => format!("{table}(|| Some(&*{key}.item))"),
+                    "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
-                        table = "block_entity_kind";
-                        format!("Some(&*{key}.id)")
+                        format!("block_entity_kind(|| Some({key}.id()))")
                     }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
-                Some((part_trait, format!("{table}(|| {id})")))
+                Some((part_trait, lookup))
             }
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
         let event = fresh_name("event", &mut used);
-        let event_type = format!(
-            "{}Event",
-            name.split('_')
-                .map(|word| word[..1].to_uppercase() + &word[1..])
-                .collect::<String>()
-        );
+        let event_type = format!("{}Event", hook_id(name));
         let hook_id = event_type.strip_suffix("Event").unwrap();
         if is_render {
             render_hook_ids.push_str(&format!("{hook_id},\n"));
+            render_hook_constants.push_str(&format!(
+                "pub const {name}: Option<super::RenderHookId> = Some(super::RenderHookId::{hook_id});\n"
+            ));
             render_hook_count += 1;
         } else {
             hook_ids.push_str(&format!("{hook_id},\n"));
+            hook_constants.push_str(&format!(
+                "pub const {name}: Option<super::HookId> = Some(super::HookId::{hook_id});\n"
+            ));
             hook_count += 1;
         }
         let mut trait_params = vec!["&self".to_owned()];
@@ -215,8 +226,19 @@ pub(super) fn emit(
         let mut call_args = Vec::new();
         if let Some((name, param)) = &host {
             trait_params.push(format!("{name}: {}", param.ty));
-            dispatch_params.push(format!("{name}: {}", param.ty));
-            call_args.push(name.clone());
+            let by_side = param.ty == "HostSide" || param.ty == "LevelSide";
+            dispatch_params.push(format!(
+                "{}{name}: {}",
+                if by_side { "mut " } else { "" },
+                param.ty
+            ));
+            call_args.push(if by_side {
+                format!("{name}.reborrow()")
+            } else if param.ty.starts_with("&mut ") {
+                format!("&mut *{name}")
+            } else {
+                name.clone()
+            });
         }
 
         let mut lifetimes = EventLifetimes::default();
@@ -226,7 +248,13 @@ pub(super) fn emit(
         let collected = output.as_ref().filter(|_| contract == "collect");
         for (name, ty) in args.iter().chain(collected) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
-            let (field, scalar) = lifetimes.field(ty);
+            let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
+            let field_ty = if mutable_entity {
+                syn::parse_quote!(ModBlockEntityView<'_>)
+            } else {
+                (**ty).clone()
+            };
+            let (field, scalar) = lifetimes.field(&field_ty);
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
                 "pub(super)"
             } else {
@@ -239,6 +267,8 @@ pub(super) fn emit(
             if scalar {
                 inits.push(format!("{name}: *{name}"));
                 write_back.push_str(&format!("*{name} = {event}.{name};"));
+            } else if mutable_entity {
+                inits.push(format!("{name}: ModBlockEntityView::new({name})"));
             } else {
                 inits.push(name.clone());
             }
@@ -317,16 +347,8 @@ pub(super) fn emit(
                     "{method_source}fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
                 ));
         }
-        let (domain, id_enum) = if is_render {
-            ("Render", "RenderHookId")
-        } else {
-            ("Gameplay", "HookId")
-        };
-        let report = format!(
-            "horizon_client_core::subscribers::default_called(horizon_client_core::subscribers::Domain::{domain}, {id_enum}::{hook_id} as usize, self);"
-        );
         method_source.push_str(&format!(
-            "fn {name}({trait_params}){result} {{ {report} {unused} {default} }}\n"
+            "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
         ));
         traits.push_str(&method_source);
         dispatch.push_str(&format!(
@@ -368,7 +390,7 @@ pub(super) fn emit(
                 );
                 (
                     format!(
-                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup};"
+                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup}; if {part_list}.is_empty() && !super::listened(HookId::{hook_id}) {{ return; }}"
                     ),
                     if matches!(contract, "cancel" | "replace") {
                         format!("'hook: {{ {calls} }}")
@@ -408,8 +430,10 @@ pub(super) fn emit(
         part_traits,
         fills,
         hook_ids,
+        hook_constants,
         hook_count,
         render_hook_ids,
+        render_hook_constants,
         render_hook_count,
     })
 }

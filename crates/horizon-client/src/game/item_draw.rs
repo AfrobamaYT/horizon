@@ -656,24 +656,31 @@ fn item_hdr_light(state: &ItemRenderState, light: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ClientHost;
     use serde_json::json;
 
-    /// A mod that leaves `item_model_property` at its default is asked once, then the
-    /// resolver skips the hook; a mod that answers it is asked on every resolve.
+    /// The resolver skips a mod that leaves `item_model_property` at its default;
+    /// a mod that implements it is asked on every resolve.
     #[test]
     #[ignore = "needs prepared resources"]
     fn item_model_property_is_asked_only_while_a_mod_answers() {
-        use crate::mod_api::{self, HookId, Hooks, Host, ItemModelPropertyEvent, ModEntry};
+        use crate::mod_api::{self, HookId, Hooks, ItemModelPropertyEvent, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
         };
 
         struct Quiet;
+        #[mod_api::__subscriptions]
         impl Hooks for Quiet {}
         struct Charged(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Charged {
-            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+            fn item_model_property(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ItemModelPropertyEvent<'_>,
+            ) {
                 self.0.fetch_add(1, Ordering::Relaxed);
                 event.value = event.property == "example:charged";
             }
@@ -684,7 +691,7 @@ mod tests {
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let env = Env { game };
-                assert!(mod_api::listened(HookId::ItemModelProperty));
+                assert!(!mod_api::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
                 assert!(!mod_api::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));

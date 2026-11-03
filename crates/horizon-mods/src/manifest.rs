@@ -81,16 +81,6 @@ pub struct Native {
     pub mixins: String,
     #[serde(default)]
     pub injection: Vec<Injection>,
-    #[serde(default)]
-    pub post_build: Vec<PostBuild>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct PostBuild {
-    pub bin: String,
-    #[serde(default)]
-    pub args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -273,16 +263,6 @@ impl Manifest {
                     }
                 }
             }
-            for step in &native.post_build {
-                if step.bin.is_empty()
-                    || !step
-                        .bin
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-                {
-                    return Err(format!("{MANIFEST}: invalid post-build binary name"));
-                }
-            }
             if m.version.is_empty()
                 || native.game.is_empty()
                 || !revision(&native.horizon)
@@ -333,7 +313,7 @@ impl Manifest {
 }
 
 /// A source file that belongs to the flat Cargo project, not its resource packs.
-fn source_file(name: &str) -> bool {
+pub fn source_file(name: &str) -> bool {
     if name
         .split('/')
         .any(|part| matches!(part, ".git" | "target"))
@@ -412,7 +392,16 @@ impl Package {
             for (name, _) in crate::content::folder_files(path)? {
                 check_folder_file(path, &name)?;
             }
-            std::fs::read_to_string(path.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?
+            let mut text = String::new();
+            std::fs::File::open(path.join(MANIFEST))
+                .map_err(|e| format!("{MANIFEST}: {e}"))?
+                .take(MAX_MANIFEST + 1)
+                .read_to_string(&mut text)
+                .map_err(|e| format!("{MANIFEST}: {e}"))?;
+            if text.len() as u64 > MAX_MANIFEST {
+                return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
+            }
+            text
         } else {
             if !metadata.is_file() {
                 return Err(format!(
@@ -508,6 +497,8 @@ impl Package {
                             .checked_add(size)
                             .ok_or("native package too large")?;
                     } else if name.starts_with("assets/") || name.starts_with("data/") {
+                        crate::content::check_path(&name)?;
+                        crate::content::check_namespace(&name, &package.manifest)?;
                         if size > crate::content::MAX_FILE {
                             return Err(format!("{name} exceeds the content file size limit"));
                         }
@@ -554,19 +545,19 @@ impl Package {
     }
     /// Select and validate a flat project's source and resource files deterministically.
     pub fn directory_files(
+        &self,
         root: &Path,
     ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
-        let package = Self::read(root)?;
-        let content = crate::Content::read(root, &package.manifest)?;
+        let content = crate::Content::read(root, &self.manifest)?;
         let mut files = std::collections::BTreeMap::new();
         let mut reader = content.reader()?;
         for name in &content.files {
             files.insert(name.clone(), reader.read(name)?);
         }
-        if let Some(icon) = package.icon {
+        if let Some(icon) = &self.icon {
             files.insert("icon.png".to_string(), icon.bytes().to_vec());
         }
-        if package.manifest.native.is_some() {
+        if self.manifest.native.is_some() {
             fn walk(
                 root: &Path,
                 dir: &Path,
@@ -620,7 +611,8 @@ impl Package {
 
     /// Pack a flat project, selecting its source and resource files deterministically.
     pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
-        let mut files = Self::directory_files(root)?;
+        let package = Self::read(root)?;
+        let mut files = package.directory_files(root)?;
         let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
             .map_err(|e| e.to_string())?;
         let files: Vec<_> = files
@@ -823,12 +815,11 @@ capabilities = ["registries"]
     #[test]
     fn native_manifest_requires_exact_pins_and_known_fields() {
         let native = format!(
-            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n[[native.post_build]]\nbin = 'bake'\nargs = ['one']\n",
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
             "a".repeat(40),
             "b".repeat(40)
         );
-        let manifest = Manifest::parse(&format!("{EXAMPLE}{native}")).unwrap();
-        assert_eq!(manifest.native.unwrap().post_build[0].bin, "bake");
+        Manifest::parse(&format!("{EXAMPLE}{native}")).unwrap();
         assert!(
             Manifest::parse(&format!(
                 "{EXAMPLE}{}",
@@ -836,7 +827,9 @@ capabilities = ["registries"]
             ))
             .is_err()
         );
-        assert!(Manifest::parse(&format!("{EXAMPLE}{native}unexpected = true\n")).is_err());
+        for unsupported in ["unexpected = true", "[[native.post_build]]\nbin = 'bake'"] {
+            assert!(Manifest::parse(&format!("{EXAMPLE}{native}{unsupported}\n")).is_err());
+        }
     }
 
     #[test]

@@ -386,18 +386,16 @@ mod tests {
         );
         assert_eq!(manifest["features"]["extra"][0].as_str(), Some("dep:extra"));
         let mut absent = toml::Table::new();
-        assert!(
-            rewrite(
-                "user",
-                &mut absent,
-                &[Package {
-                    dependency: &deps[1],
-                    package: None
-                }]
-            )
-            .unwrap()
-            .is_empty()
-        );
+        assert!(rewrite(
+            "user",
+            &mut absent,
+            &[Package {
+                dependency: &deps[1],
+                package: None
+            }]
+        )
+        .unwrap()
+        .is_empty());
         assert!(absent["features"]["extra"].as_array().unwrap().is_empty());
         assert!(absent["dependencies"].get("extra").is_none());
     }
@@ -411,17 +409,15 @@ mod tests {
         ] {
             let mut manifest: toml::Table = text.parse().unwrap();
             let original = manifest.clone();
-            assert!(
-                rewrite(
-                    "user",
-                    &mut manifest,
-                    &[Package {
-                        dependency: &deps[0],
-                        package: Some("extra-package")
-                    }]
-                )
-                .is_err()
-            );
+            assert!(rewrite(
+                "user",
+                &mut manifest,
+                &[Package {
+                    dependency: &deps[0],
+                    package: Some("extra-package")
+                }]
+            )
+            .is_err());
             assert_eq!(manifest, original);
         }
     }

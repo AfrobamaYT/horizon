@@ -30,7 +30,7 @@ fn main() -> ExitCode {
         Some("build") => build().map(|p| {
             println!("Built {}", p.display());
         }),
-        Some("run") => run(&args[1..]),
+        Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),
         _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list".into()),
@@ -232,8 +232,37 @@ fn check(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn run(args: &[String]) -> Result<(), String> {
-    let path = build()?;
+#[derive(Debug)]
+enum RunError {
+    CodeMod,
+    Build(String),
+    Launch { game: String, error: std::io::Error },
+    Exit(std::process::ExitStatus),
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CodeMod => f.write_str(
+                "code mods run through the launcher's native build: horizon-launcher native-build . --trust-native-code (docs/native-mods.md)",
+            ),
+            Self::Build(error) => f.write_str(error),
+            Self::Launch { game, error } => write!(
+                f,
+                "{game}: {error} (pass --game <path to horizon-client> or set HORIZON_CLIENT)"
+            ),
+            Self::Exit(status) => write!(f, "the game exited with {status}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+fn run(args: &[String]) -> Result<(), RunError> {
+    if Path::new("Cargo.toml").is_file() {
+        return Err(RunError::CodeMod);
+    }
+    let path = build().map_err(RunError::Build)?;
     let game = flag(args, "--game")
         .map(str::to_string)
         .or_else(|| std::env::var("HORIZON_CLIENT").ok())
@@ -245,13 +274,8 @@ fn run(args: &[String]) -> Result<(), String> {
         .arg(&path)
         .args(extra)
         .status()
-        .map_err(|e| {
-            format!("{game}: {e} (pass --game <path to horizon-client> or set HORIZON_CLIENT)")
-        })?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("the game exited with {status}"))
+        .map_err(|error| RunError::Launch { game, error })?;
+    status.success().then_some(()).ok_or(RunError::Exit(status))
 }
 
 #[cfg(test)]

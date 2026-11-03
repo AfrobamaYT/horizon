@@ -3083,17 +3083,19 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn anvil_subscriber_probe_and_answer_cache() {
-        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, Host, ModEntry};
+        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, HostSide, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
         };
 
         struct DefaultMod;
+        #[mod_api::__subscriptions]
         impl Hooks for DefaultMod {}
         struct Listener(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn anvil_update(&self, _: &mut dyn Host, _: &mut AnvilUpdateEvent<'_>) -> Flow {
+            fn anvil_update(&self, _: HostSide<'_>, _: &mut AnvilUpdateEvent<'_>) -> Flow {
                 self.0.fetch_add(1, Ordering::Relaxed);
                 Flow::Continue
             }
@@ -3103,12 +3105,11 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let mut station = super::Station::new(super::Kind::Anvil, [0; 3]);
                 station.inputs[0] = Some(super::ItemStack::new("minecraft:iron_sword", 1));
-                assert!(mod_api::listened(HookId::AnvilUpdate));
-                game.update_anvil_answer(&mut station, "first".into());
                 assert!(!mod_api::listened(HookId::AnvilUpdate));
-                assert_eq!(station.anvil_answer.as_ref().unwrap().1, "first");
+                game.update_anvil_answer(&mut station, "first".into());
+                assert!(station.anvil_answer.is_none());
                 game.update_anvil_answer(&mut station, "second".into());
-                assert_eq!(station.anvil_answer.as_ref().unwrap().1, "first");
+                assert!(station.anvil_answer.is_none());
             });
         });
         let calls = Arc::new(AtomicUsize::new(0));

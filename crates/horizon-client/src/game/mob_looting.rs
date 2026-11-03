@@ -84,7 +84,7 @@ impl Game<'_> {
         // empty main hand.
         if slot.is_armor() && !replace {
             slot = Slot::MainHand;
-            replace = self.mobs[index].extra.main_hand.is_none();
+            replace = self.mobs[index].extra.main_hand_id().is_none();
         }
         if !replace {
             return None;

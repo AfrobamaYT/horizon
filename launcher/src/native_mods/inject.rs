@@ -1,5 +1,5 @@
 //! Trait-backed injections, prepared as build-script input alongside the staged game.
-use super::{Bundle, MANIFEST, api};
+use super::{Bundle, MANIFEST};
 use horizon_mod_api_gen::{TraitContract as Contract, TraitInjection as Injection};
 use std::{
     collections::{HashMap, HashSet},
@@ -8,12 +8,17 @@ use std::{
 };
 
 /// Replace trait injections with ordinary mixin helpers, leaving ordinary injections unchanged.
-pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, String> {
+pub(super) fn prepare(
+    mods: &[Bundle],
+    source: &Path,
+    dispatch_order: &[Bundle],
+) -> Result<Vec<Injection>, String> {
     let mut result = Vec::new();
     let mut names = HashSet::new();
-    let owners: HashMap<_, _> = api::with_api(mods)
+    let owners: HashMap<_, _> = dispatch_order
+        .iter()
         .enumerate()
-        .map(|(i, b)| (b.id.as_str(), i))
+        .map(|(i, b)| (b.manifest.id.as_str(), i))
         .collect();
     // These are the copied bundles under mods.incoming, never the player's originals.
     for bundle in mods {
@@ -67,7 +72,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                     .ok_or("trait_method must be a Rust identifier")?;
                 let _: syn::Ident =
                     syn::parse_str(method).map_err(|_| "trait_method must be a Rust identifier")?;
-                let name = format!("inject_{}_{}", bundle.id.replace('-', "_"), method);
+                let name = format!("inject_{}_{}", bundle.manifest.id.replace('-', "_"), method);
                 let ident: syn::Ident =
                     syn::parse_str(&name).map_err(|_| "invalid generated trait method")?;
                 if !names.insert(name.clone()) {
@@ -141,8 +146,11 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                         helper_file.display()
                     ));
                 }
-                fs::write(&helper_file, injection.helper(owners[bundle.id.as_str()]))
-                    .map_err(|e| e.to_string())?;
+                fs::write(
+                    &helper_file,
+                    injection.helper(owners[bundle.manifest.id.as_str()]),
+                )
+                .map_err(|e| e.to_string())?;
                 table.insert("helper".into(), helper_path.into());
                 result.push(injection);
             }
@@ -176,23 +184,21 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str, injection: &str) -> (std::path::PathBuf, Bundle) {
-        let root =
-            std::env::temp_dir().join(format!("horizon-inject-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("rust/src")).unwrap();
-        fs::write(
-            root.join("rust/Cargo.toml"),
-            "[package]\nname = 'mod-example'\nversion = '1.0.0'\n",
-        )
-        .unwrap();
-        fs::write(root.join("rust/src/lib.rs"), "").unwrap();
-        fs::write(
-            root.join(MANIFEST),
-            format!("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n{injection}"),
-        )
-        .unwrap();
-        let bundle = super::super::bundle(&root, None).unwrap();
+        let root = super::super::tests::dir(&format!("inject-{name}"));
+        super::super::tests::write_bundle(&root, "example", "");
+        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let text = fs::read_to_string(&path).unwrap()
+            + &injection.replace("[[injection]]", "[[native.injection]]");
+        fs::write(path, text).unwrap();
+        let bundle = super::super::bundle_in(&root).unwrap().unwrap();
         (root, bundle)
+    }
+
+    fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, String> {
+        for bundle in mods {
+            super::super::package::tool_manifest(bundle)?;
+        }
+        super::prepare(mods, source, mods)
     }
 
     fn compile_and_run(root: &Path, program: &str) {
@@ -212,23 +218,40 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&compiled.stderr)
         );
-        assert!(
-            std::process::Command::new(binary)
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new(binary)
+            .status()
+            .unwrap()
+            .success());
     }
 
     #[test]
-    fn owner_dispatch_and_cancel_are_generated_from_bindings() {
+    fn owner_dispatch_and_cancel_use_full_order_after_tool_filtering() {
         let (root, bundle) = fixture(
             "cancel",
             "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\ncancellable = true\nbindings = [{ name = 'amount', ty = '&mut i32', value = '&mut *amount' }]\n",
         );
-        let injections = prepare(&[bundle], &root).unwrap();
-        let helper = fs::read_to_string(root.join("horizon-trait-injection-0.rs")).unwrap();
-        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        let original = fs::read(root.join(horizon_mods::manifest::MANIFEST)).unwrap();
+        let plain_root = super::super::tests::dir("inject-cancel-plain");
+        super::super::tests::write_bundle(&plain_root, "plain", "");
+        let plain = super::super::bundle_in(&plain_root).unwrap().unwrap();
+        let dispatch_order = [plain, bundle];
+        let mixin_input = root.with_extension("mixins");
+        let tool_mods = super::super::stage_mixins(&dispatch_order, &mixin_input).unwrap();
+        assert_eq!(tool_mods.len(), 1);
+        assert_eq!(tool_mods[0].manifest.id, "example");
+        assert!(!mixin_input.join("plain").exists());
+        let injections = super::prepare(&tool_mods, &root, &dispatch_order).unwrap();
+        let helper =
+            fs::read_to_string(tool_mods[0].dir.join("horizon-trait-injection-0.rs")).unwrap();
+        let manifest = fs::read_to_string(tool_mods[0].dir.join(MANIFEST)).unwrap();
+        assert_eq!(
+            fs::read(root.join(horizon_mods::manifest::MANIFEST)).unwrap(),
+            original
+        );
+        assert!(dispatch_order.iter().all(|bundle| {
+            !bundle.dir.join(MANIFEST).exists()
+                && !bundle.dir.join("horizon-trait-injection-0.rs").exists()
+        }));
         assert!(!manifest.contains("trait_method"));
         assert!(!manifest.contains("[api]"));
         let stage_dir = root.join("stage");
@@ -236,7 +259,7 @@ mod tests {
         stage(&stage_dir, &injections).unwrap();
         assert!(!stage_dir.join("crates").exists());
         let output = horizon_mod_api_gen::inject(
-            "pub trait Hooks: Send + Sync {\n}\n",
+            "#[derive(Clone, Copy)] pub enum HookId {} pub(crate) const HOOK_COUNT: usize = 0; pub mod hook_ids {} pub trait Hooks: Send + Sync {\n}\n",
             &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
         )
         .unwrap();
@@ -247,6 +270,8 @@ mod tests {
                 use std::sync::OnceLock;
                 #[derive(PartialEq)] pub enum Flow {{ Continue, Cancel }}
                 {output}
+                pub static SUBSCRIBED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                pub fn subscribed_by(_: usize, _: Option<HookId>) -> bool {{ SUBSCRIBED.load(std::sync::atomic::Ordering::Relaxed) }}
                 struct Owner;
                 impl Hooks for Owner {{
                     fn inject_example_tick(&self, event: &mut InjectExampleTickEvent) -> Flow {{
@@ -261,18 +286,23 @@ mod tests {
                 pub struct ModEntry {{ pub id: &'static str, pub hooks: Box<dyn Hooks> }}
                 pub fn mods() -> &'static [ModEntry] {{
                     static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
-                    MODS.get_or_init(|| vec![ModEntry {{ id: "owner", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
+                    MODS.get_or_init(|| vec![ModEntry {{ id: "plain", hooks: Box::new(Other) }}, ModEntry {{ id: "example", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
             }}
             {helper}
             fn main() {{
                 let mut value = 1;
+                assert!(matches!(horizon_trait_dispatch(&mut value), core::ops::ControlFlow::Continue(())));
+                assert_eq!(value, 1);
+                mod_api::SUBSCRIBED.store(true, std::sync::atomic::Ordering::Relaxed);
                 assert!(matches!(horizon_trait_dispatch(&mut value), core::ops::ControlFlow::Break(())));
                 assert_eq!(value, 42);
             }}
         "#
         );
         compile_and_run(&root, &program);
+        fs::remove_dir_all(mixin_input).unwrap();
+        fs::remove_dir_all(plain_root).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -288,7 +318,7 @@ mod tests {
         fs::create_dir_all(&stage_dir).unwrap();
         stage(&stage_dir, &injections).unwrap();
         let output = horizon_mod_api_gen::inject(
-            "pub trait Hooks: Send + Sync {\n}\n",
+            "#[derive(Clone, Copy)] pub enum HookId {} pub(crate) const HOOK_COUNT: usize = 0; pub mod hook_ids {} pub trait Hooks: Send + Sync {\n}\n",
             &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
         )
         .unwrap();
@@ -298,6 +328,7 @@ mod tests {
                 use std::sync::atomic::{{AtomicBool, Ordering}};
                 use std::sync::OnceLock;
                 {output}
+                pub fn subscribed_by(_: usize, _: Option<HookId>) -> bool {{ true }}
                 struct Owner;
                 impl Hooks for Owner {{
                     fn inject_example_total(&self, event: &mut InjectExampleTotalEvent) {{
@@ -377,9 +408,10 @@ mod tests {
             .unwrap()
         };
         let before = key();
-        fs::write(root.join("rust/src/lib.rs"), "// one line edit").unwrap();
+        fs::write(root.join("src/lib.rs"), "// one line edit").unwrap();
         assert_eq!(before, key());
-        fs::write(root.join("other.rs"), "// mixin input").unwrap();
+        fs::create_dir_all(root.join("data/example")).unwrap();
+        fs::write(root.join("data/example/table.bin"), "mixin input").unwrap();
         assert_ne!(before, key());
         fs::remove_dir_all(root).unwrap();
     }
@@ -388,7 +420,7 @@ mod tests {
     fn mixin_inputs_inside_api_are_not_excluded_from_cache() {
         let (root, bundle) = fixture(
             "api-helper",
-            "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'rust/src/lib.rs'\n",
+            "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'src/lib.rs'\n",
         );
         let key = || {
             super::super::inject_cache::key(
@@ -400,19 +432,18 @@ mod tests {
             .unwrap()
         };
         let before = key();
-        fs::write(root.join("rust/src/lib.rs"), "fn changed() {}\n").unwrap();
+        fs::write(root.join("src/lib.rs"), "fn changed() {}\n").unwrap();
         assert_ne!(before, key());
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn rejects_two_routes_for_the_same_source_folder() {
-        let (root, _) = fixture("dual-route", "");
-        let path = root.join(MANIFEST);
+    fn rejects_manual_tool_crate_declarations() {
+        let (root, _) = fixture("tool-route", "");
+        let path = root.join(horizon_mods::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap();
-        fs::write(path, text + "[[crate]]\nid = 'code'\npath = 'rust'\n").unwrap();
-        let error = super::super::bundle(&root, None).unwrap_err();
-        assert!(error.contains("both [api] and [[crate]]"), "{error}");
+        fs::write(path, text + "[[crate]]\nid='code'\npath='src'\n").unwrap();
+        assert!(super::super::bundle_in(&root).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -420,7 +451,7 @@ mod tests {
     fn installed_build_key_tracks_dispatch_order() {
         let (root, first) = fixture("order", "");
         let mut second = first.clone();
-        second.id = "second".into();
+        second.manifest.id = "second".into();
         let a = super::super::version_for(
             "0123456789012345678901234567890123456789",
             "mixins",

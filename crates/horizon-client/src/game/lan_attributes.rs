@@ -38,17 +38,18 @@ impl Game<'_> {
     /// the modifiers of the items it wears or holds in matching slots.
     pub(super) fn mob_knockback_resistance(&self, m: &Mob) -> f64 {
         let e = &m.extra;
+        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
         let slots = [
-            ("mainhand", &e.main_hand),
-            ("offhand", &e.off_hand),
-            ("feet", &e.feet),
-            ("legs", &e.legs),
-            ("chest", &e.chest),
-            ("head", &e.head),
+            ("mainhand", e.slot_id(MAINHAND)),
+            ("offhand", e.slot_id(OFFHAND)),
+            ("feet", e.slot_id(FEET)),
+            ("legs", e.slot_id(LEGS)),
+            ("chest", e.slot_id(CHEST)),
+            ("head", e.slot_id(HEAD)),
         ];
         let mut extra = Vec::new();
         for (slot, item) in slots {
-            let Some(info) = item.as_ref().and_then(|i| self.items().get(i)) else {
+            let Some(info) = item.and_then(|i| self.items().get(i)) else {
                 continue;
             };
             for (attribute, _, amount, op, group) in &info.modifiers {
@@ -74,17 +75,9 @@ impl Game<'_> {
             .iter()
             .map(|m| {
                 let e = &m.extra;
-                [
-                    &e.main_hand,
-                    &e.off_hand,
-                    &e.feet,
-                    &e.legs,
-                    &e.chest,
-                    &e.head,
-                ]
-                .iter()
-                .any(|s| s.is_some())
-                .then(|| self.mob_knockback_resistance(m))
+                (horizon_items::equipment::MAINHAND..=horizon_items::equipment::HEAD)
+                    .any(|slot| e.slot_stack(slot).is_some())
+                    .then(|| self.mob_knockback_resistance(m))
             })
             .collect();
         for (m, value) in self.mobs.iter_mut().zip(values) {
@@ -174,7 +167,7 @@ impl Game<'_> {
                         a,
                         finalize::base_value(m, x.attr),
                         AttributeModifier {
-                            id: x.id.to_owned(),
+                            id: x.id.to_string(),
                             amount: x.amount,
                             operation: match x.op {
                                 Op::AddValue => 0,
@@ -260,17 +253,19 @@ impl Game<'_> {
                 },
             );
         }
+        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
         let e = &m.extra;
+        let item = |slot| e.slot_stack(slot).map(|s| &s.item);
         self.equipment_attributes(
             kind,
             base,
             [
-                ("mainhand", e.main_hand.as_ref()),
-                ("offhand", e.off_hand.as_ref()),
-                ("feet", e.feet.as_ref()),
-                ("legs", e.legs.as_ref()),
-                ("chest", e.chest.as_ref()),
-                ("head", e.head.as_ref()),
+                ("mainhand", item(MAINHAND)),
+                ("offhand", item(OFFHAND)),
+                ("feet", item(FEET)),
+                ("legs", item(LEGS)),
+                ("chest", item(CHEST)),
+                ("head", item(HEAD)),
             ],
             out,
         );

@@ -4,11 +4,6 @@ use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const MIXINS_REV: &str = "e8cd0aa38cffef49cb2e088ef716baa107148c02";
 
-/// Whether `path` names a mod package.
-pub fn is_file(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e == "hmod")
-}
-
 /// Whether an archive contains a root Cargo project, irrespective of install folder.
 pub fn holds(path: &Path) -> bool {
     std::fs::File::open(path)
