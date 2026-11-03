@@ -111,7 +111,10 @@ impl Game<'_> {
             }
         });
         for guest in self.lan.iter().flat_map(|h| &h.hub.guests) {
-            if !guest.participates_in_player_simulation() || !guest.placed || guest.dimension != level.dimension() {
+            if !guest.participates_in_player_simulation()
+                || !guest.placed
+                || guest.dimension != level.dimension()
+            {
                 continue;
             }
             let body = if self.lan_acting == Some(guest.conn)
@@ -796,6 +799,7 @@ pub(super) mod tests {
             let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
             assert!(fake.placed && fake.motion.is_some());
+            assert!(fake.loaded && fake.client_loaded());
             assert!(!fake.participates_online() && !fake.participates_in_player_simulation());
             assert_eq!((fake.game_mode, fake.permission, fake.input), (0, 0, 0));
             assert!(fake.vehicle.is_none() && fake.bed.is_none() && fake.menu.is_none());
@@ -864,6 +868,13 @@ pub(super) mod tests {
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
+            // A fake record in the Nether does not keep that level ticking.
+            game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
+            let ticking = game.levels_to_tick();
+            assert!(!ticking.contains(&super::super::Dim::Nether));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            assert!(game.levels_to_tick().contains(&super::super::Dim::Nether));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:overworld".into();
             game.lan_acting = Some(real_id);
             let selector = horizon_client::command::args::Selector {
                 kind: 'a',
@@ -884,6 +895,7 @@ pub(super) mod tests {
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(&mut host, fake_id, |game| {
                 assert!(game.lan_acting_fake);
+                assert!(game.player.as_ref().is_some_and(|p| p.client_loaded));
                 assert!(game.player_view().is_none());
                 let mut visited = 0;
                 game.for_each_player(|_| visited += 1);
