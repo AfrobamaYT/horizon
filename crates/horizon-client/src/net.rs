@@ -941,9 +941,7 @@ fn configure(
             {
                 reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                     channel: horizon_protocol::mod_list::CHANNEL.into(),
-                    data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::shared(
-                        &horizon_protocol::mod_list::local(),
-                    )),
+                    data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::local()),
                 }))?;
             }
             cfg::Clientbound::CustomPayload(p) => {

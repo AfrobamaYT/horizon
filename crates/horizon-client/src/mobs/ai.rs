@@ -1174,11 +1174,11 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    [
-        m.extra.head.as_deref(),
-        m.extra.chest.as_deref(),
-        m.extra.legs.as_deref(),
-        m.extra.feet.as_deref(),
+    ![
+        m.extra.head_id(),
+        m.extra.slot_id(horizon_items::equipment::CHEST),
+        m.extra.slot_id(horizon_items::equipment::LEGS),
+        m.extra.slot_id(horizon_items::equipment::FEET),
         m.extra.body_id(),
     ]
     .into_iter()
@@ -1256,7 +1256,7 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         // WanderingTrader.getAmbientSound: only the trade branch, it never sleeps.
         Species::WanderingTrader if m.extra.flag2 => "entity.wandering_trader.trade",
         Species::Bat if m.extra.flag && m.random.next_int_bound(4).unwrap_or(1) != 0 => return,
-        Species::Allay if m.extra.main_hand.is_some() => "entity.allay.ambient_with_item",
+        Species::Allay if m.extra.main_hand_id().is_some() => "entity.allay.ambient_with_item",
         // Strider.getAmbientSound: quiet while panicking or tempted.
         Species::Strider if m.ai.panicking || m.ai.goals.is_running("Tempt") => return,
         // HappyGhast: its own voice, never pitched up.
@@ -1485,15 +1485,7 @@ impl Mob {
 }
 /// LivingEntity.onClimbable for the pusher (Spider.onClimbable: climbing a wall).
 fn on_climbable(m: &Mob, w: &MobWorld) -> bool {
-    if m.kind.flags.climber {
-        return m.climbing;
-    }
-    let (x, y, z) = (
-        m.position.x.floor() as i32,
-        m.position.y.floor() as i32,
-        m.position.z.floor() as i32,
-    );
-    w.has_tag("minecraft:climbable", w.block_name(x, y, z))
+    m.on_climbable(w)
 }
 /// `Entity.getRootVehicle` of the mob `id` riding `vehicle`: the bottom of
 /// its stack of vehicles (itself when it rides nothing).
@@ -2429,7 +2421,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         }
         // Husk.doHurtTarget: hunger for 140 ticks per whole point of the
         // local difficulty, only with an empty main hand.
-        Species::Husk if m.extra.main_hand.is_none() => {
+        Species::Husk if m.extra.main_hand_id().is_none() => {
             let ticks = 140 * cx.w.difficulty.effective as i32;
             if ticks > 0 {
                 cx.events.push(MobEvent::EffectPlayer {
@@ -2543,10 +2535,18 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             .push(MobEvent::Sound("entity.panda.bite", at, 1.0, 1.0));
     }
     // Axolotl.playAttackSound: playSound(AXOLOTL_ATTACK, 1.0, 1.0).
-    if m.species() == Species::Axolotl {
+    if m.species() == Species::Axolotl && !m.silent {
         let at = [m.position.x, m.position.y, m.position.z];
         cx.events
             .push(MobEvent::Sound("entity.axolotl.attack", at, 1.0, 1.0));
+    }
+    // Dolphin.playAttackSound: playSound(DOLPHIN_ATTACK, 1.0, 1.0), once
+    // the blow landed. A dolphin that is hurt takes its attacker as a target
+    // and strikes with the melee goal, so its bite is heard as it lands.
+    if m.species() == Species::Dolphin && !m.silent {
+        let at = [m.position.x, m.position.y, m.position.z];
+        cx.events
+            .push(MobEvent::Sound("entity.dolphin.attack", at, 1.0, 1.0));
     }
     let _ = Fluid::None;
 }
@@ -2665,7 +2665,7 @@ fn flower_contact_effects(m: &mut Mob, w: &MobWorld) {
 
 /// MobEffect ticking for the effects mobs receive (poison, wither,
 /// regeneration), and a content mod's on a server.
-fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
+pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
     // LivingEntity.tickEffects ticks each active effect with the mob's list
     // still in place: the damage a Poison or Wither tick deals reads the
     // list it finds (Resistance softens the hit, Infested spawns silverfish,
@@ -2727,26 +2727,57 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             }
             _ => {}
         }
-        if !infinite && m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
-            let ticks = &mut m.extra.effects[i].1;
-            *ticks = if expired { 0 } else { *ticks - 1 };
+        if m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
+            if !expired {
+                if let Some(hidden) = m.extra.effect_chains.iter_mut().find(|e| e.id == effect) {
+                    hidden.tick_down();
+                }
+                if !infinite {
+                    m.extra.effects[i].1 -= 1;
+                }
+            } else {
+                m.extra.effects[i].1 = 0;
+            }
+            if !expired
+                && m.extra.effects[i].1 == 0
+                && let Some(chain) = m.extra.effect_chains.iter().position(|e| e.id == effect)
+            {
+                let mut hidden = m.extra.effect_chains.remove(chain);
+                if effect == "minecraft:absorption" {
+                    m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
+                }
+                m.extra.effects[i] = (effect, hidden.duration, hidden.amplifier);
+                m.extra.ambient_effects.retain(|e| *e != effect);
+                if hidden.ambient {
+                    m.extra.ambient_effects.push(effect);
+                }
+                m.extra.hidden_effects.retain(|e| *e != effect);
+                if !hidden.visible {
+                    m.extra.hidden_effects.push(effect);
+                }
+                if let Some(next) = hidden.hidden.take() {
+                    m.extra.effect_chains.push(*next);
+                }
+                m.effects_dirty = true;
+            }
+        }
+        // LivingEntity.tickEffects refreshes a surviving effect every 600 ticks.
+        if m.extra
+            .effects
+            .get(i)
+            .is_some_and(|e| e.0 == effect && e.1 > 0 && e.1 % 600 == 0)
+        {
+            m.effects_dirty = true;
         }
         i += 1;
     }
-    // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
-    for i in 0..m.extra.effects.len() {
-        let e = m.extra.effects[i];
-        if e.0 == "minecraft:absorption" && e.1 <= 0 && e.1 != -1 {
-            m.absorption = (m.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
-        }
+    m.retain_effects(|e| e.1 > 0 || e.1 == -1);
+    if m.effects_dirty {
+        let invisible = m.has_effect("minecraft:invisibility");
+        m.needs_sync |= m.invisible != invisible;
+        m.invisible = invisible;
+        m.effects_dirty = false;
     }
-    m.extra.effects.retain(|e| e.1 > 0 || e.1 == -1);
-    m.extra
-        .hidden_effects
-        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
-    m.extra
-        .ambient_effects
-        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
 }
 
 /// `Entity.getMovementEmission` is not NONE (silverfish, endermites,
@@ -3081,6 +3112,53 @@ mod poison_effect_tests {
         assert_eq!(pig.effective_gravity(), full);
     }
 
+    #[test]
+    fn invisibility_flag_updates_only_when_effects_change() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("invisibility", 4, 0);
+        tick_effects(&mut pig, None);
+        assert!(pig.is_invisible());
+        pig.invisible = false;
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.add_effect("speed", 10, 0);
+        tick_effects(&mut pig, None);
+        assert!(pig.is_invisible());
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+    }
+
+    #[test]
+    fn effect_refresh_every_600_ticks_resets_manual_visibility() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("speed", 602, 0);
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.invisible = true;
+        tick_effects(&mut pig, None);
+        assert_eq!(pig.extra.effects[0].1, 600);
+        assert!(
+            !pig.is_invisible(),
+            "LivingEntity's periodic effect update clears the manual flag at duration 600"
+        );
+    }
+
     /// `LivingEntity.tickEffects` ticks each effect with the mob's list in
     /// place: a Poison hit reads Resistance there (0.8 of 1.0 at level I).
     #[test]
@@ -3286,6 +3364,72 @@ mod hit_effect_tests {
 }
 
 #[cfg(test)]
+mod attack_sound_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// The sounds `do_hurt_target` raises for `kind` on a blow that landed,
+    /// with `silent` set on the attacker; `None` without the extracted data.
+    fn attack_sounds(kind: &str, silent: bool) -> Option<Vec<(&'static str, f32, f32)>> {
+        let mut heard = Vec::new();
+        let ran = with_test_world(&[], |w, types| {
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types[kind].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            m.silent = silent;
+            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let mut cx = Cx {
+                w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+            heard = events
+                .iter()
+                .filter_map(|e| match e {
+                    MobEvent::Sound(s, _, volume, pitch) => Some((*s, *volume, *pitch)),
+                    _ => None,
+                })
+                .collect();
+        });
+        if !ran {
+            return None;
+        }
+        Some(heard)
+    }
+
+    /// `Mob.doHurtTarget` ends with `playAttackSound`, which `Dolphin`,
+    /// `Axolotl` and `Panda` override with their own bite at volume 1 and
+    /// pitch 1. Without the dolphin arm its bite is silent (no sound event at
+    /// all); the axolotl and the panda sit next to it as the control.
+    #[test]
+    fn a_dolphins_blow_plays_its_attack_sound() {
+        let Some(dolphin) = attack_sounds("minecraft:dolphin", false) else {
+            return;
+        };
+        assert_eq!(dolphin, vec![("entity.dolphin.attack", 1.0, 1.0)]);
+        for (kind, sound) in [
+            ("minecraft:axolotl", "entity.axolotl.attack"),
+            ("minecraft:panda", "entity.panda.bite"),
+        ] {
+            assert_eq!(
+                attack_sounds(kind, false),
+                Some(vec![(sound, 1.0, 1.0)]),
+                "{kind}"
+            );
+        }
+        // Entity.playSound skips a silent entity, so neither attack sound plays.
+        for kind in ["minecraft:dolphin", "minecraft:axolotl", "minecraft:panda"] {
+            assert_eq!(attack_sounds(kind, true), Some(vec![]), "{kind}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod same_vehicle_push_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
@@ -3302,7 +3446,10 @@ mod same_vehicle_push_tests {
                 Vec3::ZERO,
                 0.0,
             );
-            horse.extra.head = Some("minecraft:iron_helmet".into());
+            horse.extra.set_slot_id(
+                horizon_items::equipment::HEAD,
+                Some("minecraft:iron_helmet".into()),
+            );
             let mut events = Vec::new();
             for _ in 0..1000 {
                 burn_undead(&mut horse, &world, &mut events);
@@ -3366,7 +3513,10 @@ mod same_vehicle_push_tests {
             zombie
                 .extra
                 .set_main_hand(Some(std::sync::Arc::from("minecraft:iron_sword")));
-            zombie.extra.feet = Some(std::sync::Arc::from("minecraft:iron_boots"));
+            zombie.extra.set_slot_id(
+                horizon_items::equipment::FEET,
+                Some(std::sync::Arc::from("minecraft:iron_boots")),
+            );
             let worn = zombie.equipment_stacks();
             assert_eq!(
                 worn[0].as_ref().unwrap().item.as_ref(),

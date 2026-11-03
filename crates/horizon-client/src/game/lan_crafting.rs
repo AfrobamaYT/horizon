@@ -113,6 +113,14 @@ fn place_back(menu: &mut Menu, env: &Env, stacks: Vec<ItemStack>) {
 }
 
 impl Game<'_> {
+    /// `LocalPlayer.doLimitedCrafting`: whether limited crafting is active.
+    pub fn limited_crafting(&self) -> bool {
+        self.remote.as_ref().map_or_else(
+            || self.ui.rules.bool("limited_crafting"),
+            |r| r.do_limited_crafting,
+        )
+    }
+
     pub(super) fn menu_env(&self) -> Env<'_> {
         Env {
             player: self
@@ -134,6 +142,8 @@ impl Game<'_> {
             names: &self.pack.names,
             trade: None,
             maps: None,
+            limited_crafting: self.limited_crafting(),
+            known_recipes: Some(&self.level.recipe_book),
         }
     }
 
@@ -164,6 +174,8 @@ impl Game<'_> {
             player_entity_id: Some(host.hub.guests[gi].entity_id),
             side: horizon_client::menu::LogicalSide::Server,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
+            limited_crafting: host.hub.limited_crafting,
+            known_recipes: Some(&host.hub.guests[gi].recipe_book),
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
@@ -230,15 +242,15 @@ impl Game<'_> {
     /// (a mod's menu slot write, at the root commit): the result made again from the grid, with
     /// `native_prepare_item_craft` as a click has it, kept by the guest and their menu. The
     /// client hears it with the tick's inventory sync.
-    pub(super) fn guest_craft_result(&mut self, uuid: u128) {
+    pub(super) fn guest_craft_result(&mut self, conn: u32) {
         let Some(g) = self
             .lan
             .as_ref()
-            .and_then(|host| host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid))
+            .and_then(|host| host.hub.guest(conn).filter(|g| g.placed))
         else {
             return;
         };
-        let conn = g.conn;
+        let uuid = g.uuid;
         let mut result = self
             .recipes()
             .find(&g.craft_grid, 2)

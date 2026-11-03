@@ -95,7 +95,7 @@ fn overlaps(a: Aabb, b: Aabb) -> bool {
 }
 /// `ItemStack.shrink(1)`; the slot is empty at zero.
 fn shrink(mut stack: ItemStack) -> Option<ItemStack> {
-    stack.count -= 1;
+    stack.count = stack.count.saturating_sub(1);
     (stack.count > 0).then_some(stack)
 }
 /// A dispenser's answer: the slot's new content and the level event played.
@@ -238,12 +238,9 @@ pub(super) fn body_equipment_species(s: Species) -> bool {
 pub(super) fn mob_slot_item(m: &Mob, slot: Slot) -> Option<Arc<str>> {
     let x = &m.extra;
     match slot {
-        Slot::MainHand => x.main_hand.clone(),
-        Slot::OffHand => x.off_hand.clone(),
-        Slot::Feet => x.feet.clone(),
-        Slot::Legs => x.legs.clone(),
-        Slot::Chest => x.chest.clone(),
-        Slot::Head => x.head.clone(),
+        Slot::MainHand | Slot::OffHand | Slot::Feet | Slot::Legs | Slot::Chest | Slot::Head => {
+            horizon_client::mobs::finalize::item(m, slot as usize)
+        }
         Slot::Body => x.body_stack().map(|s| s.item.clone()),
         Slot::Saddle => m.saddle_item().map(|s| s.item),
     }
@@ -1448,12 +1445,13 @@ impl Game<'_> {
         &mut self,
         pos: Pos,
         facing: Direction,
-        stack: ItemStack,
+        mut stack: ItemStack,
     ) -> Result<Dispensed> {
         let target = offset(pos, facing);
         let target_pos = Self::pos_of(target);
+        let crop = self.bonemeal(target_pos, false, &mut stack);
         let grown = self.with_level(|b, level, ticks| {
-            b.grow_crop(level, ticks, target_pos)
+            crop.unwrap_or_else(|| b.grow_crop(level, ticks, target_pos))
                 || b.grow_water_plant(level, ticks, target_pos, None)
         });
         if grown {
@@ -1465,11 +1463,13 @@ impl Game<'_> {
                 });
         }
         self.process_level_events()?;
-        if grown {
-            Ok((shrink(stack), CLICK))
+        // A canceled `BonemealEvent` that succeeded uses none of the meal.
+        let left = if grown && crop != Some(true) {
+            shrink(stack)
         } else {
-            Ok((Some(stack), FAIL))
-        }
+            (stack.count > 0).then_some(stack)
+        };
+        Ok((left, if grown { CLICK } else { FAIL }))
     }
     fn dispense_tnt(&mut self, pos: Pos, facing: Direction, stack: ItemStack) -> Dispensed {
         if !self.ui.rules.bool("tnt_explodes") {

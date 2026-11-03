@@ -1,5 +1,4 @@
 {
-  "Building {name}'s post-build step": "Membangun langkah pasca-bangun {name}",
   "In use": "Digunakan",
   "Prepare": "Siapkan",
   "Developer options": "Opsi pengembang",
@@ -519,7 +518,6 @@
   "{size} on disk": "{size} pada disk",
   "Data collection": "Pengumpulan data",
   "{name} is a data pack: drop it on a world on Home, or install it into one from there.": "{name} adalah data pack: letakkan ke dunia di Beranda, atau instal ke salah satu dunia dari sana.",
-  "Running {name}'s post-build step": "Menjalankan langkah pasca-bangun {name}",
   "Shared: {url}": "Dibagikan: {url}",
   "Friends on the same Wi-Fi: Multiplayer, Add Server, then paste this address.": "Teman dalam Wi-Fi yang sama: Multiplayer -> Tambah Server, lalu tempel alamat ini.",
   "None yet: drop a .hshader or a shader pack .zip here.": "Belum ada: letakkan .hshader atau file .zip paket shader di sini.",
@@ -1022,5 +1020,14 @@
   "Use": "Pakai",
   "installed": "terpasang",
   "played by {names}": "dimainkan oleh {names}",
-  "{day}, {time} UTC": "{day}, {time} UTC"
+  "{day}, {time} UTC": "{day}, {time} UTC",
+  "Microsoft account · online servers too": "Akun Microsoft · server online juga",
+  "Offline · single player and LAN worlds": "Offline · pemain tunggal dan dunia LAN",
+  "Offline names": "Nama offline",
+  "Add a name": "Tambah nama",
+  "3 to 16 letters, numbers or underscores. Switch names from the top bar too. Online servers don't take offline names.": "3 sampai 16 huruf, angka, atau garis bawah. Ganti nama juga dari bilah atas. Server online tidak menerima nama offline.",
+  "Play online with your Microsoft account": "Main online dengan akun Microsoft-mu",
+  "Sign in with the account that owns Minecraft: Java Edition. Your name and skin come along to online servers, like in other launchers.": "Masuk dengan akun yang memiliki Minecraft: Java Edition. Nama dan skin-mu ikut ke server online, seperti di launcher lain.",
+  "Microsoft's own page opens in your browser. Horizon never sees your password.": "Halaman Microsoft sendiri terbuka di browser-mu. Horizon tidak pernah melihat kata sandimu.",
+  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Mewarnai tombol, sakelar, dan langit. Pilih satu, atau ketik warna hex apa pun."
 }

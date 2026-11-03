@@ -79,7 +79,9 @@
 //! // Player actions:
 //! behaviours.place_block(&mut level, &mut ticks, &PlaceContext { clicked_pos, face, hit, inside: false,
 //!     yaw, pitch, sneaking, item: "minecraft:oak_stairs".into(), can_use_game_master_blocks: false });
-//! behaviours.use_without_item(&mut level, &mut ticks, pos, face, hit, player_context);
+//! let state = level.block_state(pos);
+//! let block_hit = horizon_core::geometry::BlockHit { block: pos, direction: face, location: hit, inside: false };
+//! behaviours.use_without_item(&mut level, &mut ticks, state, block_hit, player_context);
 //! behaviours.player_destroy_block(&mut level, &mut ticks, pos, creative, correct_tool);
 //! // Falling-block entity landed:
 //! behaviours.falling_block_landed(&mut level, &mut ticks, landing_pos, carried_state, false);
@@ -692,6 +694,37 @@ pub trait LevelAccess {
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// Whether a signal query needs the weak-power block hook.
+    fn has_weak_power_hook(&self) -> bool {
+        false
+    }
+    /// Override `SignalGetter.getSignal`'s conductor check for a block.
+    fn adjust_should_check_weak_power(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
+    /// Whether redstone wire connection queries need the level hook.
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        false
+    }
+    /// `BlockBehaviour.shouldRedstoneWireConnectTo` once the library answered
+    /// `vanilla` for the block `state` at `pos`, `direction` pointing from the
+    /// wire toward its neighbour (None for a block above or below):
+    /// whether redstone wire connects. The default keeps it.
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// `BlockState.hasAnalogOutputSignal` once the library answered `vanilla`:
     /// whether comparators read the block. The default keeps it.
     fn adjust_has_analog_output(&self, _state: BlockStateId, vanilla: bool) -> bool {
@@ -1171,6 +1204,16 @@ impl Behaviours {
         pos: BlockPos,
     ) {
         self.sim(level, ticks).entity_inside(pos);
+    }
+    /// Whether [`Self::entity_inside`] may do anything at a block of `state`:
+    /// the entity-sensing blocks' classes it looks for. At any other block it
+    /// only reads the state.
+    pub fn senses_entities(&self, state: BlockStateId) -> bool {
+        let data = self.data(state);
+        data.is(classes::Class::BasePressurePlate)
+            || data.is(classes::Class::DetectorRail)
+            || data.is(classes::Class::Button)
+            || data.is(classes::Class::TripWire)
     }
     /// `LilyPadBlock.entityInside` for a boat whose box is inside `pos`.
     pub fn boat_inside<L: LevelAccess + ?Sized>(

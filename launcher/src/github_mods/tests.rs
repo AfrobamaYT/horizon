@@ -192,149 +192,109 @@ fn write(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
 }
 
-fn mixin(id: &str, pin: bool) -> String {
-    let compat = match pin {
-        true => format!("[compatibility]\nhorizon_revision = \"{SHA}\"\n"),
-        false => String::new(),
-    };
-    format!("[mod]\nid = \"{id}\"\nversion = \"0.1.0\"\n{compat}")
+fn project(root: &Path, id: &str, horizon: &str) {
+    write(
+        &root.join("horizon-mod.toml"),
+        &format!(
+            "id='{id}'\nname='{id}'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{horizon}'\nmixins='{SHA2}'\n"
+        ),
+    );
+    write(
+        &root.join("Cargo.toml"),
+        "[package]\nname='cargo-name'\nversion='9.0.0'\n",
+    );
+    write(&root.join("src/lib.rs"), "pub fn hooks() {}");
 }
 
 #[test]
 fn mod_folders_are_found_wherever_they_are_and_not_searched_inside() {
     let root = tree("find");
+    project(&root.join("zoom"), "zoom", SHA);
+    project(&root.join("keys"), "keys", SHA);
+    project(&root.join("target/debug"), "built", SHA);
+    project(&root.join(".git/x"), "hidden", SHA);
+    // Stop at the mod root, not arbitrary nested crates inside its source.
     write(
-        &root.join("zoom/native/horizon-mixin.toml"),
-        &mixin("zoom", true),
-    );
-    write(
-        &root.join("zoom/native/src/horizon-mixin.toml"),
-        &mixin("inner", true),
-    );
-    write(
-        &root.join("keys/native/horizon-mixin.toml"),
-        &mixin("keys", true),
-    );
-    write(
-        &root.join("target/debug/horizon-mixin.toml"),
-        &mixin("built", true),
-    );
-    write(
-        &root.join(".git/x/horizon-mixin.toml"),
-        &mixin("hidden", true),
+        &root.join("zoom/src/nested/horizon-mod.toml"),
+        "not a package",
     );
     let ids: Vec<String> = find_mods(&root)
         .unwrap()
         .into_iter()
-        .map(|b| b.id)
+        .map(|b| b.manifest.id)
         .collect();
     assert_eq!(ids, ["keys", "zoom"]);
     assert!(find_mods(&tree("empty")).unwrap().is_empty());
-    let _ = fs::remove_dir_all(root);
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn a_mod_folder_packs_into_a_bundle_the_registry_checks_accept() {
     let root = tree("pack");
-    write(
-        &root.join("native/horizon-mixin.toml"),
-        &mixin("zoom", true),
-    );
-    write(&root.join("native/rust/src/zoom.rs"), "pub fn f() {}");
-    write(&root.join("native/data/a.json"), "{}");
-    write(&root.join("native/README.md"), "# Zoom");
-    // A crate of the mod keeps its own data and the text files it may include.
-    write(&root.join("native/rust/data/table.bin"), "t");
-    write(&root.join("native/rust/LICENSE"), "MIT");
-    write(&root.join("native/rust/logo.png"), "not shipped");
+    project(&root, "zoom", SHA);
+    write(&root.join("src/zoom.rs"), "pub fn f() {}");
+    write(&root.join("data/zoom/a.json"), "{}");
+    write(&root.join("README.md"), "# Zoom");
+    write(&root.join("data/zoom/table.bin"), "t");
+    write(&root.join("LICENSE"), "MIT");
+    write(&root.join("logo.png"), "not shipped");
     let bundle = &find_mods(&root).unwrap()[0];
     let bytes = pack(bundle).unwrap();
     assert_eq!(bytes, pack(bundle).unwrap(), "the same files pack the same");
-    let packed = checked(&bytes, &root.join("out")).unwrap();
+    let packed = checked(&bytes, &tree("pack-output")).unwrap();
     assert_eq!(
         (packed.id.as_str(), packed.version.as_str()),
         ("zoom", "0.1.0")
     );
     assert_eq!(packed.sha256, sha256(&bytes));
-    let read = format::Bundle::read(&packed.file).unwrap();
-    assert!(read.files.contains_key("native/rust/src/zoom.rs"));
-    assert!(read.files.contains_key("native/data/a.json"));
-    for shipped in ["README.md", "rust/data/table.bin", "rust/LICENSE"] {
-        assert!(
-            read.files.contains_key(&format!("native/{shipped}")),
-            "{shipped}"
-        );
+    let read = horizon_mods::index::native::Bundle::read(&packed.file).unwrap();
+    for shipped in [
+        "src/zoom.rs",
+        "data/zoom/a.json",
+        "README.md",
+        "data/zoom/table.bin",
+        "LICENSE",
+    ] {
+        assert!(read.files.contains_key(shipped), "{shipped}");
     }
     assert!(!read.files.keys().any(|n| n.contains("logo")));
-    let _ = fs::remove_dir_all(root);
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
-fn a_mod_with_no_pinned_horizon_commit_is_refused_with_the_fix() {
+fn a_mod_with_no_exact_horizon_commit_is_refused_at_read_boundary() {
     let root = tree("unpinned");
-    write(
-        &root.join("native/horizon-mixin.toml"),
-        &mixin("zoom", false),
-    );
-    let err = pack(&find_mods(&root).unwrap()[0]).unwrap_err();
-    assert!(err.contains("horizon_revision"), "{err}");
-    let _ = fs::remove_dir_all(root);
+    project(&root, "zoom", "main");
+    let err = find_mods(&root).unwrap_err();
+    assert!(err.contains("exact revisions"), "{err}");
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
-fn an_unpacked_hmod_keeps_its_pins_and_ships_only_sources() {
+fn a_flat_hmod_keeps_its_pins_and_ships_only_selected_files() {
     let root = tree("unpacked");
-    let manifest = json!({
-        "schema": 1, "id": "zoom", "version": "0.1.0", "game": "26.3",
-        "horizon": SHA, "mixins": SHA2,
-    });
-    write(&root.join("horizon-native.json"), &manifest.to_string());
-    write(
-        &root.join("horizon-mod.toml"),
-        "id = \"zoom\"\nname = \"Zoom\"\nversion = \"0.1.0\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n",
-    );
+    project(&root, "zoom", SHA);
     write(&root.join("assets/zoom/lang/en_us.json"), "{}");
-    write(
-        &root.join("native/horizon-mixin.toml"),
-        &mixin("zoom", true),
-    );
     let bundle = &find_mods(&root).unwrap()[0];
-    assert_eq!(bundle.mixins.as_deref(), Some(SHA2));
-    let packed = checked(&pack(bundle).unwrap(), &root.join("out")).unwrap();
-    let read = format::Bundle::read(&packed.file).unwrap();
+    assert_eq!(bundle.manifest.native.as_ref().unwrap().mixins, SHA2);
+    let packed = checked(&pack(bundle).unwrap(), &tree("unpacked-out")).unwrap();
+    let read = horizon_mods::index::native::Bundle::read(&packed.file).unwrap();
+    assert_eq!(read.manifest.id, "zoom");
+    assert!(read.files.contains_key("assets/zoom/lang/en_us.json"));
+    let native = read.manifest.native.unwrap();
     assert_eq!(
-        horizon_mods::Package::read(&packed.file)
-            .unwrap()
-            .manifest
-            .id,
-        "zoom"
+        (native.horizon.as_str(), native.mixins.as_str()),
+        (SHA, SHA2)
     );
-    let mut archive = zip::ZipArchive::new(fs::File::open(&packed.file).unwrap()).unwrap();
-    assert!(archive.by_name("assets/zoom/lang/en_us.json").is_ok());
     write(&root.join("assets/minecraft/lang/en_us.json"), "{}");
     assert!(pack(bundle).is_err());
     fs::remove_dir_all(root.join("assets/minecraft")).unwrap();
-    assert_eq!(
-        (
-            read.manifest.horizon.as_str(),
-            read.manifest.mixins.as_str()
-        ),
-        (SHA, SHA2)
-    );
-    // Only sources and data ship: a binary beside them stays behind.
-    write(&root.join("native/evil.exe"), "MZ");
-    let again = checked(&pack(bundle).unwrap(), &root.join("out2")).unwrap();
+    write(&root.join("evil.exe"), "MZ");
+    let again = checked(&pack(bundle).unwrap(), &tree("unpacked-out2")).unwrap();
     assert_eq!(again.sha256, packed.sha256);
-    // A manifest and a mixin file that pin different commits are refused when found.
-    write(
-        &root.join("native/horizon-mixin.toml"),
-        &format!(
-            "{}[compatibility]\nhorizon_revision = \"{SHA2}\"\n",
-            mixin("zoom", false)
-        ),
-    );
-    assert!(find_mods(&root).unwrap_err().contains("pins Horizon"));
-    let _ = fs::remove_dir_all(root);
+    write(&root.join("horizon-mixin.toml"), "[mod]\nid='zoom'\n");
+    assert!(find_mods(&root).is_err());
+    fs::remove_dir_all(root).unwrap();
 }
 
 fn packed(id: &str) -> Packed {
@@ -361,10 +321,7 @@ fn several_mods_list_and_ask_which() {
 fn installing_records_the_origin_and_updates_follow_releases_or_the_head() {
     let home = tree("install");
     let source = tree("install-src");
-    write(
-        &source.join("native/horizon-mixin.toml"),
-        &mixin("zoom", true),
-    );
+    project(&source, "zoom", SHA);
     let bytes = pack(&find_mods(&source).unwrap()[0]).unwrap();
     let ready = checked(&bytes, &source.join("out")).unwrap();
     let found = Resolved {

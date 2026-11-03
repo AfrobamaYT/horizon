@@ -18,9 +18,27 @@ use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
+    /// Keep a held-out entity inaccessible until its copy has been stored back.
+    pub(super) fn with_entity_held_out<R>(
+        &mut self,
+        id: u32,
+        action: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        if horizon_client::mod_api::mods().is_empty() {
+            return action(self);
+        }
+        self.held_out.push(id);
+        let result = action(self);
+        self.held_out.pop();
+        result
+    }
+
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+        if self.held_out.contains(&entity.id())
+            || !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(entity.epoch())
+        {
             return None;
         }
         let id = i32::try_from(entity.id()).ok()?;
@@ -359,13 +377,76 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 
 #[cfg(test)]
 pub(super) mod tests {
+    /// Isolate declarations and frozen registries without changing another test's resources.
+    pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
+        if std::env::var_os(flag).is_some() {
+            return false;
+        }
+        let resources =
+            std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
+                .canonicalize()
+                .unwrap();
+        let target = std::env::current_dir().unwrap().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        for case in cases {
+            let scratch = target.join(format!(
+                "be-types-fixture-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&scratch).unwrap();
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--ignored",
+                    "--exact",
+                    name,
+                    "--nocapture",
+                    "--test-threads=4",
+                ])
+                .current_dir(&scratch)
+                .env(flag, case)
+                .env("HORIZON_TEST_RESOURCES", &resources)
+                .env("HORIZON_NO_AUDIO", "1")
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1");
+            for key in [
+                "HORIZON_HOME",
+                "HORIZON_LAUNCHER_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_RUNTIME_DIR",
+                "HORIZON_LAUNCHER_TRASH",
+                "HORIZON_LAUNCHER_CLIPBOARD",
+                "HORIZON_LAUNCHER_DESKTOP",
+            ] {
+                let home = scratch.join(key);
+                std::fs::create_dir(&home).unwrap();
+                command.env(key, home);
+            }
+            let status = command.status().unwrap();
+            std::fs::remove_dir_all(scratch).unwrap();
+            assert!(status.success(), "{name}: {case}");
+        }
+        true
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        with_game_at(root, test);
+    }
+
+    pub(in crate::game) fn with_game_at(
+        root: std::path::PathBuf,
+        test: impl FnOnce(&mut super::Game<'_>),
+    ) {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
         use horizon_client::mod_api::NativeAuthority;
 
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
             root.clone(),
@@ -397,7 +478,89 @@ pub(super) mod tests {
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
         game.resolve_parts().unwrap();
+        // The title's save folder is under the working directory: give each test its own, so a
+        // test that saves leaves the checkout clean and parallel tests don't share files.
+        let saves = std::env::temp_dir().join(format!(
+            "horizon-with-game-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+            saves.clone(),
+            horizon_client::save::LevelShape::OVERWORLD,
+        ));
         test(&mut game);
+        let _ = std::fs::remove_dir_all(saves);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_allows_weak_power_in_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::position::BlockPos;
+        use std::sync::Arc;
+
+        horizon_client::mod_api::part_tests::weak_power_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let source = registry
+                .resolve(&horizon_world::chunk::BlockState {
+                    name: "minecraft:lever".into(),
+                    properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                        .into_iter()
+                        .map(|(key, value)| (key.into(), value.into()))
+                        .collect(),
+                })
+                .unwrap();
+            let pos = BlockPos::new(5, 64, 5);
+            game.world.set(5, 64, 5, glass).unwrap();
+            game.world.set(6, 64, 5, source).unwrap();
+            let signal = game.with_level(|b, level, ticks| {
+                b.best_neighbor_signal(level, ticks, BlockPos::new(pos.x - 1, pos.y, pos.z))
+            });
+            assert_eq!(signal, 15);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_connects_wire_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::{geometry::Direction, position::BlockPos};
+        use std::sync::Arc;
+
+        horizon_client::mod_api::part_tests::redstone_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let wire = registry.default_state("minecraft:redstone_wire").unwrap();
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let pos = BlockPos::new(5, 64, 5);
+            let neighbour = BlockPos::new(6, 64, 5);
+            game.world.set(5, 63, 5, stone).unwrap();
+            game.world.set(6, 64, 5, glass).unwrap();
+            let connected = game.with_level(|b, level, ticks| {
+                b.update_shape(level, ticks, wire, pos, Direction::East, neighbour, glass)
+            });
+            assert_eq!(
+                registry.state(connected).unwrap().properties["east"],
+                "side"
+            );
+            game.world.set(6, 64, 5, stone).unwrap();
+            let vanilla = game.with_level(|b, level, ticks| {
+                b.update_shape(level, ticks, wire, pos, Direction::East, neighbour, stone)
+            });
+            assert_eq!(registry.state(vanilla).unwrap().properties["east"], "none");
+        });
     }
 
     #[test]
@@ -703,7 +866,25 @@ pub(super) mod tests {
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
+            let motion = horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
+            )
+            .unwrap();
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
+            let guest_living = game.native_living(player.entity).unwrap();
+            let host: &dyn horizon_client::mod_api::Host = game;
+            assert_eq!(
+                guest_living.attribute_base(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(
+                guest_living.attribute_value(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(guest_living.max_health(host), Some(20.0));
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
             // Body and saddle are stored on a guest like on a mob.
             let living = game.native_living(player.entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
@@ -901,6 +1082,29 @@ pub(super) mod tests {
             };
             assert_eq!(joined(game, false), (1, true, true, true));
             assert_eq!(joined(game, true), (0, false, false, true));
+            // A remote guest can mount through the same handle path as the acting player.
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                21,
+                kind,
+                horizon_core::geometry::Vec3::ZERO,
+                0.0,
+            ));
+            let guest = game.native_entity(12).unwrap();
+            let vehicle = game.native_entity(21).unwrap();
+            assert!(game.native_entity_start_riding(guest, vehicle, true));
+            assert_eq!(game.command_guest(12).unwrap().vehicle, Some(21));
+            assert!(game.native_entity_stop_riding(guest));
+            assert_eq!(game.command_guest(12).unwrap().vehicle, None);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest_mut(12)
+                .unwrap()
+                .dimension = "minecraft:the_nether".into();
+            assert!(!game.native_entity_start_riding(guest, vehicle, true));
+            assert!(!game.native_entity_start_riding(vehicle, guest, true));
             let _ = std::fs::remove_dir_all(root);
         });
     }
@@ -955,6 +1159,7 @@ pub(super) mod tests {
                 guest::Guest,
                 hub::{Hub, HubConfig},
             },
+            mod_api::HostTransaction,
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
@@ -1062,6 +1267,201 @@ pub(super) mod tests {
                     .iter()
                     .any(|(chunk, _)| *chunk == (100, 0))
             );
+            game.next_entity = 100;
+            game.lan.as_ref().unwrap().hub.lan.shared.next_id();
+            game.lan.as_ref().unwrap().hub.lan.shared.next_id();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let role = game.options.execution_role;
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            assert!(game.native_fake_player(level, 1234, "machine").is_none());
+            game.options.execution_role = role;
+            let made = game.native_fake_player(level, 1234, "machine").unwrap();
+            assert_eq!(game.native_fake_player(level, 1234, "machine"), Some(made));
+            assert!(game.native_fake_player(level, 1234, "other").is_none());
+            assert!(game.native_fake_player(level, 1, "real").is_none());
+            assert_eq!(game.native_player_is_fake(made), Some(true));
+            assert!(game.native_player_ref(1234).is_none());
+            let mut abilities = game.native_player_abilities(made).unwrap();
+            abilities.may_fly = true;
+            assert!(game.native_player_set_abilities(made, abilities));
+            assert!(game.native_player_abilities(made).unwrap().may_fly);
+            assert!(game.native_player_set_food_level(made, 10));
+            assert!(game.native_player_feed(made, 3, 0.0));
+            assert_eq!(game.native_player_food(made).unwrap().level, 13);
+            assert!(game.native_player_set_experience_levels(made, 7));
+            assert_eq!(game.native_player_experience(made).unwrap().level, 7);
+            assert!(game.native_player_set_item_cooldown(made, "minecraft:stone", 20));
+            assert_eq!(
+                game.native_player_has_item_cooldown(made, "minecraft:stone"),
+                Some(true)
+            );
+            assert!(game.native_player_remove_fake(made));
+            assert!(!game.native_player_remove_fake(made));
+            assert_eq!(game.native_player_is_fake(made), None);
+            let replacement = game.native_fake_player(level, 1234, "machine").unwrap();
+            assert_ne!(made, replacement);
+            let saved_root = game.world_root.clone();
+            let scratch = std::env::current_dir()
+                .unwrap()
+                .join("target/fake-player-save-test");
+            let _ = std::fs::remove_dir_all(&scratch);
+            game.world_root = scratch.clone();
+            let host = game.lan.as_mut().unwrap();
+            let i = host.hub.guests.iter().position(|g| g.uuid == 1234).unwrap();
+            let mut actor = host.hub.guests.remove(i);
+            game.save_guest(&mut actor);
+            game.lan.as_mut().unwrap().hub.guests.insert(i, actor);
+            assert!(!scratch.exists());
+            game.world_root = saved_root;
+            let conn = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.uuid == 1234)
+                .unwrap()
+                .conn;
+            game.as_guest(conn, |game| {
+                assert_eq!(game.native_player_permission_level(replacement), Some(0));
+                assert!(!game.native_player_remove_fake(replacement));
+                assert!(game.native_fake_player(level, 4321, "other").is_none());
+            })
+            .unwrap();
+            assert!(game.native_player_remove_fake(replacement));
+            let overworld_actor = game.native_fake_player(level, 2345, "parked").unwrap();
+            let attachment = horizon_world::attachments::AttachmentType {
+                namespace: "test",
+                name: "identity",
+                default: || 0i32,
+                codec: None,
+                copy_on_death: false,
+                sync: false,
+            };
+            let holder = horizon_world::attachments::Holder::Player(2345);
+            game.options.dedicated = Some(Vec::new());
+            let real_holder = horizon_world::attachments::Holder::Player(1);
+            game.attachment_map_quiet(real_holder)
+                .unwrap()
+                .set(&attachment, 17)
+                .unwrap();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 3)
+                .unwrap();
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            assert!(game.native_fake_player(level, 3456, "other").is_none());
+            let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 8)
+                .unwrap();
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
+            assert_ne!(overworld_actor, nether_actor);
+            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let aborted: Result<(), ()> = host.transaction(|host, _| {
+                attachment.set(host, holder, 99).unwrap();
+                Err(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
+            let place = crate::mod_api::ItemPlace::PlayerSlot {
+                player: 2345,
+                slot: 0,
+            };
+            let sticks = crate::mod_api::ItemResource::of(&horizon_client::items::ItemStack::new(
+                "minecraft:stick",
+                1,
+            ));
+            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let rolled_back: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(place.insert(host, tx, &sticks, 1), 1);
+                Err(())
+            });
+            assert!(rolled_back.is_err());
+            assert!(place.stack(game).is_none());
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|g| g.entity_id as u32 == overworld_actor.entity().id())
+                    .unwrap()
+                    .inventory[0],
+                None
+            );
+            let host: &mut dyn crate::mod_api::ServerHost = game;
+            assert_eq!(
+                host.transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &sticks, 1))),
+                Ok(1)
+            );
+            assert_eq!(place.stack(game).unwrap().count, 1);
+            assert_eq!(
+                game.native_fake_player(nether, 2345, "parked"),
+                Some(nether_actor)
+            );
+            assert!(game.native_player_set_experience_levels(nether_actor, 8));
+            assert!(game.native_player_set_experience_levels(overworld_actor, 3));
+            assert_eq!(
+                game.native_player_experience(nether_actor).unwrap().level,
+                8
+            );
+            assert_eq!(
+                game.native_player_experience(overworld_actor)
+                    .unwrap()
+                    .level,
+                3
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                3
+            );
+            assert!(game.native_player_remove_fake(overworld_actor));
+            assert_eq!(
+                game.attachment_map_quiet(real_holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                17
+            );
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
+            assert!(game.native_player_remove_fake(nether_actor));
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            game.options.dedicated = None;
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
@@ -1281,6 +1681,113 @@ pub(super) mod tests {
                 assert_eq!(cooldown.group, expected);
                 assert!(receiver.try_recv().is_err());
             }
+            let fake = game.native_fake_player(level, 5678, "joiner").unwrap();
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            let other_fake = game.native_fake_player(nether, 5678, "joiner").unwrap();
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            let saved_root = game.world_root.clone();
+            let scratch = std::env::current_dir()
+                .unwrap()
+                .join("target/fake-login-save-test");
+            let _ = std::fs::remove_dir_all(&scratch);
+            game.world_root = scratch.clone();
+            let shared = &game.lan.as_ref().unwrap().hub.lan.shared;
+            let conn = shared.next_id().unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            shared
+                .events
+                .send(horizon_client::lan::NetEvent::Joined(Box::new(Joined {
+                    conn,
+                    uuid: 5678,
+                    name: "joiner".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::default(),
+                    address: ([127, 0, 0, 1], 1).into(),
+                })))
+                .unwrap();
+            use crate::mod_api;
+            struct Logout(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+            #[mod_api::__subscriptions]
+            impl crate::mod_api::Hooks for Logout {
+                fn player_logged_out(
+                    &self,
+                    _: &mut dyn crate::mod_api::ServerHost,
+                    _: &mut crate::mod_api::PlayerLoggedOutEvent<'_>,
+                ) {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            let logouts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+                "logout-test",
+                Box::new(Logout(logouts.clone())),
+            )]
+            .into();
+            crate::mod_api::testing::with_mods(mods, || {
+                game.native_player_logged_out(0, "control");
+                assert_eq!(logouts.swap(0, std::sync::atomic::Ordering::Relaxed), 1);
+                game.tick_lan_packets();
+                assert_eq!(logouts.load(std::sync::atomic::Ordering::Relaxed), 0);
+            });
+            assert_eq!(game.native_player_is_fake(fake), None);
+            assert_eq!(game.native_player_is_fake(other_fake), None);
+            assert!(
+                !horizon_client::lan::playerdata::path(&scratch, 5678).exists(),
+                "fake login replacement saved player data"
+            );
+            game.world_root = saved_root;
+            let matching: Vec<_> = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.uuid == 5678)
+                .collect();
+            assert_eq!(matching.len(), 1);
+            assert!(matching[0].participates_online());
+            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+                "logout-shutdown-test",
+                Box::new(Logout(logouts.clone())),
+            )]
+            .into();
+            let real_count = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.placed && g.participates_online())
+                .count();
+            crate::mod_api::testing::with_mods(mods, || game.native_players_leaving());
+            assert_eq!(logouts.load(Ordering::Relaxed), real_count);
+            game.lan.as_mut().unwrap().play.entry(fake_id).or_default();
+            game.award_leave_game_to_all();
+            let host = game.lan.as_mut().unwrap();
+            assert!(!host.play.get(&fake_id).unwrap().left_game);
+            assert!(host.play.get(&real_id).unwrap().left_game);
+            host.hub.ticks = 2401;
+            assert_eq!(game.ban_ip_target("fake"), None);
+            assert_eq!(game.ban_ip_target("real").as_deref(), Some("127.0.0.1"));
+            game.kick_idle(1);
+            let host = game.lan.as_ref().unwrap();
+            assert!(host.hub.guest(fake_id).unwrap().left_reason.is_empty());
+            assert!(!host.hub.guest(real_id).unwrap().left_reason.is_empty());
+            let old = game.native_fake_player(level, 6789, "reopen").unwrap();
+            game.native_lifecycle_world_closed();
+            game.native_lifecycle_open_started();
+            let reopened = game.native_level(game.dim.id()).unwrap();
+            assert_ne!(level.epoch(), reopened.epoch());
+            assert_eq!(game.native_player_is_fake(old), None);
+            let fresh = game.native_fake_player(reopened, 6789, "reopen").unwrap();
+            assert_ne!(fresh, old);
         });
     }
 

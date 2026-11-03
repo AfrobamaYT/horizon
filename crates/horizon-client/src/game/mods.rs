@@ -32,22 +32,31 @@ pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Res
     Ok(())
 }
 
-/// The blocks and items native mods declare in code (`native_blocks`,
-/// `native_items`): asked once, so every content root of this run, a pack
-/// reload's included, has the same ones.
-fn native_declared() -> &'static (
-    Vec<horizon_mods::content::Block>,
-    Vec<horizon_mods::content::Item>,
-) {
-    static DECLARED: std::sync::OnceLock<(
-        Vec<horizon_mods::content::Block>,
-        Vec<horizon_mods::content::Item>,
-    )> = std::sync::OnceLock::new();
+struct NativeDeclared {
+    blocks: Vec<horizon_mods::content::Block>,
+    items: Vec<horizon_mods::content::Item>,
+    types: Vec<horizon_mods::content::BlockEntityType>,
+}
+
+/// The same native declarations serve startup and every pack reload.
+fn native_declared() -> &'static NativeDeclared {
+    static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         Game::native_blocks(&mut blocks);
         Game::native_items(&mut items);
-        (blocks, items)
+        let types = crate::mod_api::block_entity_types()
+            .iter()
+            .map(|kind| horizon_mods::content::BlockEntityType {
+                id: kind.id().to_owned(),
+                blocks: kind.blocks().to_vec(),
+            })
+            .collect();
+        NativeDeclared {
+            blocks,
+            items,
+            types,
+        }
     })
 }
 /// The native mods' standalone models (`native_standalone_models`), set once
@@ -66,14 +75,10 @@ pub(super) fn content_root(
     root: &std::path::Path,
     enabled: &std::collections::BTreeSet<String>,
     dev: &[std::path::PathBuf],
-) -> std::path::PathBuf {
+) -> horizon_client::Result<std::path::PathBuf> {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::{Content, Package};
+    use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
-    let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
-    paths.extend(horizon_mods::find(&here.join(mod_list::NATIVE_DIR)));
-    paths.retain(|path| !dev.contains(path));
-    paths.extend(dev.iter().cloned());
     let built = std::env::current_exe()
         .ok()
         .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
@@ -81,22 +86,17 @@ pub(super) fn content_root(
         .unwrap_or_default();
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
-    // The first load's list stays (`set_local`): a reload does not hash the files again.
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
-    for path in &paths {
-        let Ok(package) = Package::read(path) else {
-            continue;
-        };
-        let m = &package.manifest;
-        let native = horizon_mods::index::native::holds(path);
-        let on = content_enabled(&m.id, native, enabled, &built) || dev.contains(path);
-        if !on || mods.iter().any(|c| c.id == m.id) {
+    for selected in horizon_mods::selection::packages(&here, enabled, &built, dev) {
+        let path = &selected.path;
+        let m = &selected.package.manifest;
+        if mods.iter().any(|c| c.id == m.id) {
             continue;
         }
         // The items this mod's native code declares may be a file item's crafting remainder.
         let declared: Vec<String> = native_declared()
-            .1
+            .items
             .iter()
             .filter(|i| i.id.split_once(':').is_some_and(|(ns, _)| ns == m.id))
             .map(|i| i.id.clone())
@@ -114,8 +114,7 @@ pub(super) fn content_root(
                 Ok(types) => known.insert(types),
                 Err(e) => {
                     log::warn!("Horizon: content mods not loaded: {e}");
-                    register_mob_effects(&[]);
-                    return root.to_owned();
+                    return Err(e);
                 }
             },
         };
@@ -124,77 +123,82 @@ pub(super) fn content_root(
             content,
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) if announce => announced.push(announced_entry(m, path)),
+            Ok(_) if announce => announced.push(announced_entry(m)),
             Ok(_) => {}
             Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
         }
     }
-    let (blocks, items) = native_declared();
-    if !blocks.is_empty() || !items.is_empty() {
-        if known.is_none() {
-            match mod_content::known_components(root) {
-                Ok(types) => known = Some(types),
-                Err(e) => log::warn!("Horizon: native mods' blocks and items not loaded: {e}"),
-            }
+    let NativeDeclared {
+        blocks,
+        items,
+        types,
+    } = native_declared();
+    if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
+        let known = match &mut known {
+            Some(types) => types,
+            None => known.insert(mod_content::known_components(root)?),
+        };
+        let errors = mod_content::accept_declared(&mut mods, blocks, items, types, known);
+        if !errors.is_empty() {
+            return Err(errors.join("\n").into());
         }
-        if let Some(known) = &known {
-            for e in mod_content::accept_declared(&mut mods, blocks, items, known) {
-                log::warn!("Horizon: {e}");
-            }
-            // A file item's remainder named a code-declared item that was refused: that mod
-            // alone is left out, not every content mod through the overlay's check.
-            for e in mod_content::drop_dangling_remainders(&mut mods) {
-                log::warn!("Horizon: {e}");
-            }
-        }
-    }
-    match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
-        Ok(out) => {
-            if announce {
-                horizon_protocol::mod_list::set_local(announced);
-            }
-            if out != root {
-                log::info!(
-                    "Horizon: content from {} mod(s) in {}",
-                    mods.len(),
-                    out.display()
-                );
-            }
-            register_mob_effects(&mods);
-            register_entity_types(&mods);
-            register_menu_types(&mods);
-            out
-        }
-        Err(e) => {
-            log::warn!("Horizon: content mods not loaded: {e}");
-            register_mob_effects(&[]);
-            register_entity_types(&[]);
-            register_menu_types(&[]);
-            root.to_owned()
+        // A file item's remainder named a code-declared item that was refused: that mod
+        // alone is left out, not every content mod through the overlay's check.
+        for e in mod_content::drop_dangling_remainders(&mut mods) {
+            log::warn!("Horizon: {e}");
         }
     }
+    let out = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;
+    register_block_entity_types(&out, &mods)?;
+    if announce {
+        horizon_protocol::mod_list::set_local(announced);
+    }
+    if out != root {
+        log::info!(
+            "Horizon: content from {} mod(s) in {}",
+            mods.len(),
+            out.display()
+        );
+    }
+    register_mob_effects(&mods);
+    register_entity_types(&mods);
+    register_menu_types(&mods);
+    horizon_client::mod_content::set_fluid_looks(&mods);
+    Ok(out)
 }
 
-/// A loaded mod as a server tells joining clients (`horizon_protocol::mod_list`): its manifest's
-/// id, version and side, and the SHA-256 of its `.hmod` (none for a folder).
-fn announced_entry(
-    m: &horizon_mods::Manifest,
-    path: &std::path::Path,
-) -> horizon_protocol::mod_list::Entry {
+fn register_block_entity_types(
+    root: &std::path::Path,
+    mods: &[horizon_client::mod_content::ContentMod],
+) -> horizon_client::Result<()> {
+    use horizon_client::containers::block_entity_types::{self, BlockEntityTypes};
+    use horizon_protocol::registry::Builtin;
+    let path = Builtin::find(root).ok_or("registries.json not found")?;
+    let builtin = Builtin::load(&path)?;
+    let names = &builtin
+        .get("minecraft:block_entity_type")
+        .ok_or("missing block entity type registry")?
+        .names;
+    let membership = mods
+        .iter()
+        .flat_map(|m| &m.content.block_entity_types)
+        .flat_map(|kind| {
+            kind.blocks
+                .iter()
+                .map(|block| (block.clone(), kind.id.clone()))
+        })
+        .collect();
+    block_entity_types::install(BlockEntityTypes::new(membership, names.clone()))?;
+    Ok(())
+}
+
+/// Manifest identity for the configuration-phase mod check.
+fn announced_entry(m: &horizon_mods::Manifest) -> horizon_protocol::mod_list::Entry {
     use horizon_mods::Side;
     use horizon_protocol::mod_list;
-    use sha2::{Digest, Sha256};
-    let sha256 = if path.is_file() {
-        std::fs::read(path)
-            .ok()
-            .map(|bytes| Sha256::digest(bytes).into())
-    } else {
-        None
-    };
     mod_list::Entry {
         id: m.id.clone(),
         version: m.version.clone(),
-        sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
             Side::Client => mod_list::Side::Client,
@@ -270,20 +274,6 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
 
 /// What the launcher writes beside a game it built with native mods: their ids under `mods`.
 const BUILD_INFO: &str = "native-mods.json";
-
-/// Native content follows the compiled build; content-only mods follow the player's selection.
-fn content_enabled(
-    id: &str,
-    native: bool,
-    enabled: &std::collections::BTreeSet<String>,
-    built: &std::collections::BTreeSet<String>,
-) -> bool {
-    if native {
-        built.contains(id)
-    } else {
-        enabled.contains(id)
-    }
-}
 
 /// IDs compiled into this executable, from the launcher's build record.
 fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
@@ -427,64 +417,6 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn native_content_follows_the_build_not_the_next_toggle() {
-        let built = built_ids(r#"{"mods":[{"id":"machine_sample"}]}"#);
-        let toggled_off = std::collections::BTreeSet::new();
-        assert!(content_enabled(
-            "machine_sample",
-            true,
-            &toggled_off,
-            &built
-        ));
-        assert!(!content_enabled(
-            "machine_sample",
-            false,
-            &toggled_off,
-            &built
-        ));
-        let rebuilt = built_ids(r#"{"mods":[]}"#);
-        assert!(!content_enabled(
-            "machine_sample",
-            true,
-            &toggled_off,
-            &rebuilt
-        ));
-    }
-
-    #[test]
-    fn misplaced_packages_follow_their_actual_kind() {
-        let dir = std::env::temp_dir().join(format!("horizon-misplaced-{}", std::process::id()));
-        let content = dir.join("horizon-mods");
-        let native = dir.join("horizon-native-mods");
-        std::fs::create_dir_all(&content).unwrap();
-        std::fs::create_dir_all(&native).unwrap();
-        hmod(&content, "built");
-        let file = std::fs::File::create(native.join("plain.hmod")).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
-            .unwrap();
-        zip.write_all(b"content").unwrap();
-        zip.finish().unwrap();
-        let built = built_ids(r#"{"mods":[{"id":"built"}]}"#);
-        let enabled = std::collections::BTreeSet::from(["plain".to_string()]);
-        assert!(content_enabled(
-            "built",
-            horizon_mods::index::native::holds(&content.join("built.hmod")),
-            &enabled,
-            &built
-        ));
-        assert!(content_enabled(
-            "plain",
-            horizon_mods::index::native::holds(&native.join("plain.hmod")),
-            &enabled,
-            &built
-        ));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
     /// Only a build whose `native-mods.json` lists a mod counts as built with mods.
     #[test]
     fn only_a_listed_mod_makes_a_build_a_mod_build() {
@@ -495,25 +427,19 @@ mod tests {
         assert!(build_lists_mods(r#"{"mods":[{"id":"worldmap"}]}"#));
     }
 
-    /// A minimal `.hmod` the registry accepts: its manifest and its mixin's.
+    /// A minimal flat native `.hmod`.
     fn hmod(dir: &std::path::Path, id: &str) {
-        let horizon = "a".repeat(40);
-        let manifest = serde_json::json!({
-            "schema": 1, "id": id, "version": "0.3.0", "game": "26.3",
-            "horizon": horizon, "mixins": "b".repeat(40),
-        });
-        let mixin = format!(
-            "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
+        let manifest = format!(
+            "id = '{id}'\nname = '{id}'\nversion = '0.3.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
         );
-        let file = std::fs::File::create(dir.join(format!("{id}.hmod"))).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default();
-        zip.start_file("horizon-native.json", options).unwrap();
-        zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("native/horizon-mixin.toml", options)
-            .unwrap();
-        zip.write_all(mixin.as_bytes()).unwrap();
-        zip.finish().unwrap();
+        let files: &[(&str, &[u8])] = &[
+            ("Cargo.toml", b"[package]\nname='example'\nversion='1'\n"),
+            ("src/lib.rs", b"pub fn hooks() {}"),
+        ];
+        let bytes = horizon_mods::Package::write_files(&manifest, files).unwrap();
+        std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
     }
 
     #[test]

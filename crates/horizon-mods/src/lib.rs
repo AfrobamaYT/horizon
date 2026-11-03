@@ -3,10 +3,12 @@
 //! native (docs/native-mods.md).
 pub mod content;
 pub mod game_identity;
+pub mod icon;
 #[cfg(feature = "index")]
 pub mod index;
 pub mod manifest;
 pub mod modpack;
+pub mod selection;
 
 pub use content::Content;
 pub use manifest::{Capability, Manifest, Package, Side, find};

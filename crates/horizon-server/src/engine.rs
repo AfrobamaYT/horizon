@@ -4,7 +4,8 @@
 
 use crate::config::Config;
 use std::{
-    io::{BufRead, BufReader, Write},
+    fmt,
+    io::{self, BufRead, BufReader, Write},
     net::{Ipv4Addr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -32,6 +33,16 @@ pub fn program_in(
     dir: &Path,
     install: Option<&crate::update::Install>,
 ) -> Result<PathBuf, String> {
+    let executable = std::env::current_exe().ok();
+    program_near(config, dir, install, executable.as_deref())
+}
+
+fn program_near(
+    config: &Config,
+    dir: &Path,
+    install: Option<&crate::update::Install>,
+    executable: Option<&Path>,
+) -> Result<PathBuf, String> {
     if !config.engine.path.is_empty() {
         let path = dir.join(&config.engine.path);
         return path
@@ -40,11 +51,9 @@ pub fn program_in(
             .ok_or_else(|| format!("engine.path {} is not a file", config.engine.path));
     }
     // Installed: the release `current` points at now, so a switch applies at the next start.
-    let beside = install.map(crate::update::Install::programs).or_else(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|e| e.parent().map(Path::to_path_buf))
-    });
+    let beside = install
+        .map(crate::update::Install::programs)
+        .or_else(|| executable.and_then(|e| e.parent().map(Path::to_path_buf)));
     let path_dirs = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
         .unwrap_or_default();
@@ -62,6 +71,58 @@ pub fn program_in(
              install it there, or set engine.path in server.toml"
                 .into()
         })
+}
+
+/// A failure while describing a configured dedicated-engine command, without starting it.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum EngineCommandError {
+    Configuration(String),
+    Program(String),
+    Resources(String),
+    Io { path: PathBuf, source: io::Error },
+}
+
+impl fmt::Display for EngineCommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Configuration(error) | Self::Program(error) | Self::Resources(error) => {
+                f.write_str(error)
+            }
+            Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+        }
+    }
+}
+impl std::error::Error for EngineCommandError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// Describe the engine the supervisor at `supervisor` would run in `dir`.
+/// Uses the same config, install/current, PATH, resources and command builder as the supervisor.
+/// Does not launch the engine, run a preflight query, write properties, or download anything.
+pub fn engine_command(supervisor: &Path, dir: &Path) -> Result<Command, EngineCommandError> {
+    let supervisor =
+        std::fs::canonicalize(supervisor).map_err(|source| EngineCommandError::Io {
+            path: supervisor.to_owned(),
+            source,
+        })?;
+    let config = Config::load(dir).map_err(EngineCommandError::Configuration)?;
+    let install = crate::update::Install::around(&supervisor);
+    let program = program_near(&config, dir, install.as_ref(), Some(&supervisor))
+        .map_err(EngineCommandError::Program)?;
+    let resources =
+        resources(&config, dir, Some(&program)).map_err(EngineCommandError::Resources)?;
+    command(&program, &resources, dir, config.engine.low_memory).map_err(|source| {
+        EngineCommandError::Io {
+            path: dir.to_owned(),
+            source,
+        }
+    })
 }
 
 /// Checks that the game program starts at all: `--help` loads no game files, so it fails only when the
@@ -331,6 +392,66 @@ impl Control {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_command_uses_the_given_supervisor_and_config_without_starting() {
+        let root = prepared_folder("command");
+        let bin = root.join("bin");
+        let server = root.join("server");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&server).unwrap();
+        let supervisor = bin.join(format!("horizon-server{}", std::env::consts::EXE_SUFFIX));
+        let game = bin.join(format!("horizon-engine{}", std::env::consts::EXE_SUFFIX));
+        let client = bin.join(format!("horizon-client{}", std::env::consts::EXE_SUFFIX));
+        // Invalid executables prove description does not spawn or preflight any program.
+        for path in [&supervisor, &game, &client] {
+            std::fs::write(path, "not executable").unwrap();
+        }
+        let mut config = Config::default();
+        config.engine.resources = root.to_str().unwrap().into();
+        config.engine.low_memory = true;
+        std::fs::write(server.join("server.toml"), crate::config::render(&config)).unwrap();
+        let command = crate::engine_command(&supervisor, &server).unwrap();
+        assert_eq!(command.get_program(), game);
+        assert_eq!(command.get_current_dir(), Some(server.as_path()));
+        let args: Vec<_> = command.get_args().map(std::ffi::OsStr::to_owned).collect();
+        assert_eq!(
+            args,
+            vec![
+                "--resources".into(),
+                root.clone().into_os_string(),
+                "--control-socket".into(),
+                server.join(".horizon/engine.json").into_os_string(),
+                "--dedicated".into(),
+                "--nogui".into(),
+            ]
+        );
+        assert!(
+            command
+                .get_envs()
+                .any(|(key, value)| key == "MIMALLOC_ALLOW_THP"
+                    && value == Some(std::ffi::OsStr::new("0")))
+        );
+        assert!(!server.join("server.properties").exists());
+        assert!(!server.join(".horizon").exists());
+
+        let external = root.join("external-engine");
+        std::fs::write(&external, "not executable either").unwrap();
+        config.engine.path = "../external-engine".into();
+        std::fs::write(server.join("server.toml"), crate::config::render(&config)).unwrap();
+        assert_eq!(
+            crate::engine_command(&supervisor, &server)
+                .unwrap()
+                .get_program(),
+            server.join("../external-engine")
+        );
+        std::fs::write(server.join("server.toml"), "not TOML").unwrap();
+        assert!(matches!(
+            crate::engine_command(&supervisor, &server),
+            Err(EngineCommandError::Configuration(_))
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn low_memory_turns_huge_pages_off_for_the_game() {

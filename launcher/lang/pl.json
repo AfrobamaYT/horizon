@@ -1,5 +1,4 @@
 {
-  "Building {name}'s post-build step": "Budowanie kroku po kompilacji moda {name}",
   "In use": "W użyciu",
   "Prepare": "Przygotuj",
   "Developer options": "Opcje programistyczne",
@@ -519,7 +518,6 @@
   "{size} on disk": "{size} na dysku",
   "Data collection": "Data collection",
   "{name} is a data pack: drop it on a world on Home, or install it into one from there.": "{name} to paczka danych: upuść ją na świat na stronie Start lub zainstaluj ją stamtąd.",
-  "Running {name}'s post-build step": "Uruchamianie kroku po kompilacji moda {name}",
   "Shared: {url}": "Udostępniono: {url}",
   "Friends on the same Wi-Fi: Multiplayer, Add Server, then paste this address.": "Znajomi w tej samej sieci Wi-Fi: Tryb wieloosobowy, Dodaj serwer, a następnie wklej ten adres.",
   "None yet: drop a .hshader or a shader pack .zip here.": "Jeszcze nic nie ma: upuść tutaj plik .hshader lub paczkę shaderów .zip.",
@@ -1022,5 +1020,14 @@
   "Use": "Użyj",
   "installed": "zainstalowana",
   "played by {names}": "grają w nią: {names}",
-  "{day}, {time} UTC": "{day}, {time} UTC"
+  "{day}, {time} UTC": "{day}, {time} UTC",
+  "Microsoft account · online servers too": "Konto Microsoft · także serwery online",
+  "Offline · single player and LAN worlds": "Offline · gra jednoosobowa i światy LAN",
+  "Offline names": "Nazwy offline",
+  "Add a name": "Dodaj nazwę",
+  "3 to 16 letters, numbers or underscores. Switch names from the top bar too. Online servers don't take offline names.": "Od 3 do 16 liter, cyfr lub podkreśleń. Nazwę zmienisz też na górnym pasku. Serwery online nie przyjmują nazw offline.",
+  "Play online with your Microsoft account": "Graj online na koncie Microsoft",
+  "Sign in with the account that owns Minecraft: Java Edition. Your name and skin come along to online servers, like in other launchers.": "Zaloguj się kontem, które ma Minecraft: Java Edition. Twoja nazwa i skin trafią z tobą na serwery online, jak w innych launcherach.",
+  "Microsoft's own page opens in your browser. Horizon never sees your password.": "Strona Microsoftu otwiera się w przeglądarce. Horizon nigdy nie widzi twojego hasła.",
+  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Koloruje przyciski, przełączniki i niebo. Wybierz jeden albo wpisz dowolny kolor hex."
 }

@@ -3,7 +3,7 @@
   "helpers": [
     {
       "name": "level_block_state", "side": "server",
-      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block_state",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_state",
       "receiver": "level"
     },
     {
@@ -25,6 +25,11 @@
     {
       "name": "level_is_loaded", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_is_loaded",
+      "receiver": "level"
+    },
+    {
+      "name": "level_brightness", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_brightness",
       "receiver": "level"
     },
     {

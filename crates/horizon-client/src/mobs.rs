@@ -942,10 +942,10 @@ pub struct Extra {
     pub sheared: bool,
     /// `Mob.canPickUpLoot` (also lets dispensers equip it).
     pub pick_up_loot: bool,
-    /// The body (horse and wolf armour, harnesses, carpets) and saddle
-    /// (`EquipmentSlot.BODY`, `SADDLE`), with their count, damage and
-    /// components. The hands and armour are in the fields below until they
-    /// move here too.
+    /// What the mob holds and wears, in each `EquipmentSlot` (`LivingEntity.equipment`):
+    /// the hands, armour, body (horse and wolf armour, harnesses, carpets)
+    /// and saddle, with their count, damage and components. The enchantments
+    /// and trims of the hands and armour are overlaid from `gear`.
     pub equipment: horizon_items::equipment::Equipment,
     /// `Cat.RELAX_STATE_ONE`: watching a sleeping owner before lying down.
     pub relax_one: bool,
@@ -979,20 +979,6 @@ pub struct Extra {
     pub player_created: bool,
     pub carried: Option<horizon_world::registry::BlockStateId>,
     pub charged: bool,
-    /// Held item ids (main hand, off hand) and head item.
-    pub main_hand: Option<Arc<str>>,
-    /// Components of the current held stack; setters clear these on replacement.
-    main_hand_stack: Option<crate::items::ItemStack>,
-    pub off_hand: Option<Arc<str>>,
-    /// The head item (`getItemBySlot(HEAD)`), on every mob.
-    pub head: Option<Arc<str>>,
-    /// Worn armour below the head (humanoid mobs).
-    pub chest: Option<Arc<str>>,
-    pub legs: Option<Arc<str>>,
-    pub feet: Option<Arc<str>>,
-    /// The worn armour stacks (head to feet): the dyed colour and the
-    /// trim of a piece are on the stack, not on its id.
-    pub armor: [Option<crate::items::ItemStack>; 4],
     pub using_item: i32,
     pub using_off_hand: bool,
     /// `LivingEntity.recentKineticEnemies`: when the entities this mob's
@@ -1057,6 +1043,8 @@ pub struct Extra {
     pub vector: [f64; 3],
     /// Active status effects: (effect id, ticks left, amplifier).
     pub effects: Vec<(&'static str, i32, i32)>,
+    /// Hidden effect instances behind an active effect, keyed by effect id.
+    pub effect_chains: Vec<crate::effects::EffectInstance>,
     /// The effects above given with `hideParticles`: no swirls for them.
     pub hidden_effects: Vec<&'static str>,
     /// The effects above that are ambient (`MobEffectInstance.isAmbient`: a beacon's), whose swirls
@@ -1107,7 +1095,7 @@ pub struct Extra {
     /// A skeleton horse waiting to spring its trap, and how long it has waited.
     pub trap: bool,
     pub trap_time: i32,
-    /// Enchantments on the equipment above.
+    /// Enchantments on the equipment.
     pub gear: Option<Box<gear::Gear>>,
     /// `Mob.dropChances` by `EquipmentSlot` (`drops::SLOTS` order) when set
     /// explicitly; None uses the defaults of `drops::drop_chance`.
@@ -1199,22 +1187,58 @@ impl Extra {
         self.equipment.set(horizon_items::equipment::SADDLE, saddle);
     }
 
+    /// The id of the item in `slot` (`EquipmentSlot` ordinal).
+    pub fn slot_id(&self, slot: usize) -> Option<&str> {
+        self.equipment.get(slot).map(|s| &*s.item)
+    }
+    /// The stack in `slot`, as it was kept (the `gear` enchantments and trim
+    /// are not on it: `finalize::item_stack` overlays them).
+    pub fn slot_stack(&self, slot: usize) -> Option<&crate::items::ItemStack> {
+        self.equipment.get(slot)
+    }
+    pub fn set_slot_stack(&mut self, slot: usize, stack: Option<crate::items::ItemStack>) {
+        self.equipment.set(slot, stack);
+    }
+    /// Puts one plain item of this id in `slot`.
+    pub fn set_slot_id(&mut self, slot: usize, item: Option<Arc<str>>) {
+        self.set_slot_stack(slot, item.map(|id| crate::items::ItemStack::new(&id, 1)));
+    }
+    pub fn main_hand_id(&self) -> Option<&str> {
+        self.slot_id(horizon_items::equipment::MAINHAND)
+    }
+    pub fn off_hand_id(&self) -> Option<&str> {
+        self.slot_id(horizon_items::equipment::OFFHAND)
+    }
+    pub fn head_id(&self) -> Option<&str> {
+        self.slot_id(horizon_items::equipment::HEAD)
+    }
     pub fn set_main_hand(&mut self, item: Option<Arc<str>>) {
-        self.main_hand = item;
-        self.main_hand_stack = None;
+        self.set_slot_id(horizon_items::equipment::MAINHAND, item);
     }
     pub fn set_main_hand_stack(&mut self, stack: Option<crate::items::ItemStack>) {
-        self.main_hand = stack.as_ref().map(|s| s.item.clone());
-        self.main_hand_stack = stack;
+        self.set_slot_stack(horizon_items::equipment::MAINHAND, stack);
     }
     pub fn main_hand_stack(&self) -> Option<&crate::items::ItemStack> {
-        self.main_hand_stack
-            .as_ref()
-            .filter(|s| self.main_hand.as_ref() == Some(&s.item))
+        self.slot_stack(horizon_items::equipment::MAINHAND)
     }
-    pub fn take_main_hand(&mut self) -> Option<Arc<str>> {
-        self.main_hand_stack = None;
-        self.main_hand.take()
+    /// `LivingEntity.swapHandItems`: the two hands trade their whole stacks,
+    /// with the enchantments and trims `gear` keeps for them.
+    pub fn swap_hands(&mut self) {
+        use horizon_items::equipment::{MAINHAND, OFFHAND};
+        let (main, off) = (
+            self.equipment[MAINHAND].take(),
+            self.equipment[OFFHAND].take(),
+        );
+        self.equipment[MAINHAND] = off;
+        self.equipment[OFFHAND] = main;
+        if let Some(g) = self.gear.as_deref_mut() {
+            g.slots.swap(gear::MAIN, gear::OFF);
+            g.trims.swap(gear::MAIN, gear::OFF);
+        }
+    }
+    /// Empties `slot` and returns the id of what it held.
+    pub fn take_slot_id(&mut self, slot: usize) -> Option<Arc<str>> {
+        self.equipment[slot].take().map(|s| s.item)
     }
 }
 
@@ -1274,6 +1298,8 @@ pub struct Mob {
     pub name_visible: bool,
     /// `Entity.DATA_SHARED_FLAGS_ID` bit 0x20: the model is hidden.
     pub invisible: bool,
+    /// Effects changed and need a shared flag update on the next tick.
+    pub effects_dirty: bool,
     pub random: LegacyRandom,
     pub ai: Box<ai::Ai>,
     pub extra: Extra,
@@ -1464,9 +1490,10 @@ pub enum MobEvent {
         count: i32,
         speed: f64,
     },
-    /// `UseBonemeal`: the villager's bone meal grows the crop at `pos`
-    /// (`BoneMealItem.growCrop`, then level event 1505).
+    /// `UseBonemeal`: villager `mob`'s bone meal on the crop at `pos`
+    /// (`BoneMealItem.growCrop`, then level event 1505 when it grew).
     Bonemeal {
+        mob: u32,
         pos: [i32; 3],
     },
     /// `RingBell`: the villager rings the meeting-point bell
@@ -2275,36 +2302,16 @@ impl Mob {
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
     pub fn equipment_stacks(&self) -> horizon_items::equipment::Equipment {
-        use crate::items::ItemStack;
-        let e = &self.extra;
-        let offhand = finalize::stored_stack(self, finalize::OFFHAND);
-        let armor = [
-            finalize::HEAD,
-            finalize::CHEST,
-            finalize::LEGS,
-            finalize::FEET,
-        ]
-        .map(|slot| finalize::stored_stack(self, slot));
-        let slots = [
-            (0usize, &e.main_hand, e.main_hand_stack()),
-            (1, &e.off_hand, offhand.as_ref()),
-            (2, &e.feet, armor[3].as_ref()),
-            (3, &e.legs, armor[2].as_ref()),
-            (4, &e.chest, armor[1].as_ref()),
-            (5, &e.head, armor[0].as_ref()),
-        ];
-        let mut out: [Option<ItemStack>; 8] = Default::default();
-        for (slot, item, worn) in slots {
-            let Some(item) = item else {
-                continue;
-            };
-            // The worn armour keeps its stack: a dyed leather piece keeps
-            // its colour.
-            out[slot] = Some(worn.cloned().unwrap_or_else(|| ItemStack::new(item, 1)));
+        use horizon_items::equipment::{HEAD, MAINHAND};
+        let mut out = self.extra.equipment.clone();
+        // The worn armour keeps its stack: a dyed leather piece keeps its
+        // colour, and the enchantments and trim come from `gear`.
+        for slot in MAINHAND..=HEAD {
+            if let Some(stack) = finalize::stored_stack(self, slot) {
+                out.set(slot, Some(stack));
+            }
         }
-        out[6] = e.body_stack().cloned();
-        out[7] = e.equipment.get(horizon_items::equipment::SADDLE).cloned();
-        out.into()
+        out
     }
     /// Remove and return the complete body stack.
     pub fn take_body_equipment(&mut self) -> Option<crate::items::ItemStack> {
@@ -2327,34 +2334,20 @@ impl Mob {
             self.set_saddle(stack);
             return true;
         }
-        let (gear_slot, armor_index) = match slot {
-            0 => (gear::MAIN, None),
-            1 => (gear::OFF, None),
-            2 => (gear::FEET, Some(3)),
-            3 => (gear::LEGS, Some(2)),
-            4 => (gear::CHEST, Some(1)),
-            5 => (gear::HEAD, Some(0)),
+        let gear_slot = match slot {
+            0 => gear::MAIN,
+            1 => gear::OFF,
+            2 => gear::FEET,
+            3 => gear::LEGS,
+            4 => gear::CHEST,
+            5 => gear::HEAD,
             _ => return false,
         };
         if let Some(stack) = stack {
-            finalize::set_item_stack(self, slot, stack.clone());
-            if let Some(index) = armor_index {
-                self.extra.armor[index] = Some(stack);
-            }
+            finalize::set_item_stack(self, slot, stack);
         } else {
-            match slot {
-                0 => self.extra.set_main_hand(None),
-                1 => self.extra.off_hand = None,
-                2 => self.extra.feet = None,
-                3 => self.extra.legs = None,
-                4 => self.extra.chest = None,
-                5 => self.extra.head = None,
-                _ => unreachable!(),
-            }
+            self.extra.set_slot_stack(slot, None);
             gear::set(self, gear_slot, Vec::new());
-            if let Some(index) = armor_index {
-                self.extra.armor[index] = None;
-            }
         }
         true
     }
@@ -2897,6 +2890,7 @@ impl Mob {
             custom_name_text: None,
             name_visible: false,
             invisible: false,
+            effects_dirty: true,
             anim: anim::AnimState::default(),
             rider: None,
             outbox: Vec::new(),
@@ -2947,7 +2941,7 @@ impl Mob {
     /// something off its pickup cooldown, a sulfur cube with no block.
     pub fn can_pick_up_loot(&self) -> bool {
         match self.species() {
-            Species::Allay => self.extra.main_hand.is_some() && self.extra.ints[3] <= 0,
+            Species::Allay => self.extra.main_hand_id().is_some() && self.extra.ints[3] <= 0,
             Species::SulfurCube => !sulfur_cube::has_body(self),
             _ => self.extra.pick_up_loot,
         }
@@ -3016,16 +3010,11 @@ impl Mob {
         } else {
             (0.0, 0.0)
         };
-        [
-            &self.extra.head,
-            &self.extra.chest,
-            &self.extra.legs,
-            &self.extra.feet,
-        ]
-        .into_iter()
-        .flatten()
-        .map(|i| spawning::armor_stats(i))
-        .fold(body, |(a, t), (x, y)| (a + x, t + y))
+        horizon_items::equipment::ARMOR
+            .into_iter()
+            .filter_map(|slot| self.extra.slot_id(slot))
+            .map(spawning::armor_stats)
+            .fold(body, |(a, t), (x, y)| (a + x, t + y))
     }
     /// `damage` of a blow whose causing entity is `aim` (`SulfurCube.knockback` reads it).
     pub fn damage_aimed(&mut self, amount: f32, source: Damage, aim: Option<Aim>) -> bool {
@@ -3133,7 +3122,7 @@ impl Mob {
         if matches!(
             source.kind,
             DamageKind::FallingBlock | DamageKind::FallingAnvil | DamageKind::FallingStalactite
-        ) && self.extra.head.is_some()
+        ) && self.extra.head_id().is_some()
         {
             amount *= 0.75;
         }
@@ -3536,10 +3525,44 @@ impl Mob {
     pub fn is_currently_glowing(&self) -> bool {
         self.glowing || self.has_effect("minecraft:glowing")
     }
-    /// `Entity.isInvisible`: the shared flag 0x20 a server sends (`invisible`),
-    /// or the Invisibility effect on a mob this game ticks itself.
+    /// `Entity.isInvisible`: shared flag 5.
     pub fn is_invisible(&self) -> bool {
-        self.invisible || self.has_effect("minecraft:invisibility")
+        self.invisible
+    }
+    /// Removes effects and schedules the effect-status update when needed.
+    pub fn retain_effects(
+        &mut self,
+        mut keep: impl FnMut(&(&'static str, i32, i32)) -> bool,
+    ) -> bool {
+        let before = self.extra.effects.len();
+        self.extra.effects.retain(|e| {
+            let keep = keep(e);
+            if !keep && e.0 == "minecraft:absorption" {
+                self.absorption = (self.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
+            }
+            keep
+        });
+        let changed = self.extra.effects.len() != before;
+        if changed {
+            let effects = &self.extra.effects;
+            self.extra
+                .effect_chains
+                .retain(|e| effects.iter().any(|x| x.0 == e.id));
+            self.extra
+                .hidden_effects
+                .retain(|e| effects.iter().any(|x| x.0 == *e));
+            self.extra
+                .ambient_effects
+                .retain(|e| effects.iter().any(|x| x.0 == *e));
+        }
+        self.effects_dirty |= changed;
+        changed
+    }
+    /// Loads an effect without applying its attribute modifiers a second time.
+    pub fn load_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
+        self.extra.effects.retain(|e| e.0 != effect);
+        self.extra.effects.push((effect, ticks, amplifier));
+        self.effects_dirty = true;
     }
     /// `LivingEntity.addEffect` of a `MobEffectInstance` with its flags: the effect as
     /// `add_effect` has it, and `MobEffectInstance.update`'s rules for the flags of one already
@@ -3552,37 +3575,49 @@ impl Mob {
         amplifier: i32,
         ambient: bool,
         visible: bool,
-    ) {
+    ) -> bool {
         let effect = horizon_client_core::potions::namespaced(effect);
-        let before = self
-            .extra
-            .effects
-            .iter()
-            .find(|e| e.0 == effect)
-            .map(|e| (e.1, e.2));
-        self.add_effect(effect, ticks, amplifier);
-        let after = self
-            .extra
-            .effects
-            .iter()
-            .find(|e| e.0 == effect)
-            .map(|e| (e.1, e.2));
-        let present_ambient = self.extra.ambient_effects.contains(&effect);
-        // A new effect takes its flags as they are; one already there by update's rules.
-        let take_ambient = match before {
-            None => true,
-            Some(_) => (!ambient && present_ambient) || before != after,
-        };
-        if take_ambient {
-            self.extra.ambient_effects.retain(|h| *h != effect);
-            if ambient {
-                self.extra.ambient_effects.push(effect);
+        let mut incoming = crate::effects::EffectInstance::new(effect, ticks, amplifier);
+        incoming.ambient = ambient;
+        incoming.visible = visible;
+        let index = self.extra.effects.iter().position(|e| e.0 == effect);
+        let old_amp = index.map(|i| self.extra.effects[i].2);
+        let mut active = if let Some(i) = index {
+            let (_, duration, amp) = self.extra.effects[i];
+            let mut active = crate::effects::EffectInstance::new(effect, duration, amp);
+            active.ambient = self.extra.ambient_effects.contains(&effect);
+            active.visible = !self.extra.hidden_effects.contains(&effect);
+            if let Some(i) = self.extra.effect_chains.iter().position(|e| e.id == effect) {
+                active.hidden = Some(Box::new(self.extra.effect_chains.remove(i)));
             }
+            active
+        } else {
+            incoming.clone()
+        };
+        let changed = index.is_none() || active.update(&incoming);
+        if let Some(hidden) = active.hidden.take() {
+            self.extra.effect_chains.push(*hidden);
+        }
+        if let Some(i) = index {
+            self.extra.effects[i] = (effect, active.duration, active.amplifier);
+        } else {
+            self.extra
+                .effects
+                .push((effect, active.duration, active.amplifier));
+        }
+        self.extra.ambient_effects.retain(|h| *h != effect);
+        if active.ambient {
+            self.extra.ambient_effects.push(effect);
         }
         self.extra.hidden_effects.retain(|h| *h != effect);
-        if !visible {
+        if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
+        if effect == "minecraft:absorption" && old_amp.is_none_or(|amp| active.amplifier > amp) {
+            self.absorption = self.absorption.max(4.0 * (active.amplifier + 1) as f32);
+        }
+        self.effects_dirty |= changed;
+        changed
     }
     /// `LivingEntity.actuallyHurt`: the absorption amount takes the damage first;
     /// what is left reaches the health.
@@ -3602,8 +3637,8 @@ impl Mob {
         // `getItemInHand`: the main hand first. The totem is the only item in
         // the shipped data with `minecraft:death_protection`.
         const TOTEM: &str = "minecraft:totem_of_undying";
-        let main = self.extra.main_hand.as_deref() == Some(TOTEM);
-        let off = !main && self.extra.off_hand.as_deref() == Some(TOTEM);
+        let main = self.extra.main_hand_id() == Some(TOTEM);
+        let off = !main && self.extra.off_hand_id() == Some(TOTEM);
         if !main && !off {
             return false;
         }
@@ -3617,7 +3652,8 @@ impl Mob {
         if main {
             self.extra.set_main_hand(None);
         } else {
-            self.extra.off_hand = None;
+            self.extra
+                .set_slot_stack(horizon_items::equipment::OFFHAND, None);
         }
         // `setHealth(1.0F)`, then `DeathProtection.TOTEM_EFFECTS`.
         self.health = 1.0;
@@ -3660,31 +3696,7 @@ impl Mob {
         }
     }
     pub fn add_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
-        let effect = horizon_client_core::potions::namespaced(effect);
-        // AbsorptionMobEffect.addAttributeModifiers: at least 4 hearts-halves per level.
-        if effect == "minecraft:absorption"
-            && self
-                .extra
-                .effects
-                .iter()
-                .find(|e| e.0 == effect)
-                .is_none_or(|e| amplifier > e.2)
-        {
-            self.absorption = self.absorption.max(4.0 * (amplifier + 1) as f32);
-        }
-        if let Some(e) = self.extra.effects.iter_mut().find(|e| e.0 == effect) {
-            // MobEffectInstance.update: a stronger effect replaces with its
-            // own duration, an equal one only extends it; a weaker one is
-            // ignored (vanilla keeps it hidden behind the active one).
-            if amplifier > e.2 {
-                e.1 = ticks;
-                e.2 = amplifier;
-            } else if amplifier == e.2 && e.1 != -1 && (ticks == -1 || e.1 < ticks) {
-                e.1 = ticks;
-            }
-        } else {
-            self.extra.effects.push((effect, ticks, amplifier));
-        }
+        self.add_effect_with(effect, ticks, amplifier, false, true);
     }
     pub fn speed_bonus(&self) -> f64 {
         ai::speed_bonus(self)
@@ -4611,10 +4623,10 @@ mod held_stack_tests {
             Some("Old Sword")
         );
         extra.set_main_hand(Some(named.item.clone()));
-        assert!(extra.main_hand_stack().is_none());
+        assert_eq!(extra.main_hand_stack().unwrap().custom_name(), None);
         extra.set_main_hand_stack(Some(named));
-        extra.take_main_hand();
-        assert!(extra.main_hand.is_none());
+        extra.take_slot_id(horizon_items::equipment::MAINHAND);
+        assert!(extra.main_hand_id().is_none());
         assert!(extra.main_hand_stack().is_none());
     }
 }
@@ -4756,6 +4768,51 @@ mod magic_absorb_tests {
         m.add_effect_with("speed", 900, 0, true, true);
         assert!(m.extra.ambient_effects.contains(&speed));
         assert_eq!(m.extra.effects, vec![(speed, 900, 0)]);
+    }
+
+    #[test]
+    fn absorption_downgrade_keeps_spent_hearts() {
+        // LivingEntity.onEffectUpdated -> refreshDirtyAttributes clamps
+        // absorption to the new MAX_ABSORPTION (4 for amplifier 0); it never raises it.
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 0, false, true);
+        m.add_effect_with("absorption", 90, 1, false, true);
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 2.0;
+        for _ in 0..90 {
+            ai::tick_effects(&mut m, None);
+        }
+        assert_eq!(m.extra.effects, vec![("minecraft:absorption", 110, 0)]);
+        assert_eq!(m.absorption, 2.0);
+    }
+
+    #[test]
+    fn stronger_effect_restores_its_hidden_predecessor_after_expiry() {
+        let mut m = witch();
+        m.add_effect_with("speed", 200, 0, false, true);
+        m.add_effect_with("speed", 90, 1, false, true);
+        for _ in 0..90 {
+            ai::tick_effects(&mut m, None);
+        }
+        assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
+    }
+
+    #[test]
+    fn weaker_longer_effect_returns_with_its_flags_and_removal_clears_the_chain() {
+        let mut m = witch();
+        assert!(m.add_effect_with("speed", 2, 1, false, false));
+        assert!(!m.add_effect_with("speed", 5, 0, true, false));
+        for _ in 0..2 {
+            ai::tick_effects(&mut m, None);
+        }
+        assert_eq!(m.extra.effects, vec![("minecraft:speed", 3, 0)]);
+        assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));
+        assert!(m.extra.hidden_effects.contains(&"minecraft:speed"));
+        m.add_effect("speed", 1, 2);
+        assert!(m.retain_effects(|_| false));
+        assert!(m.extra.effect_chains.is_empty());
+        assert!(m.extra.ambient_effects.is_empty());
+        assert!(m.extra.hidden_effects.is_empty());
     }
 
     /// `Witch.getDamageAfterMagicAbsorb`: `#witch_resistant_to` (`magic`,
@@ -4918,7 +4975,10 @@ mod armor_hurt_tests {
     fn a_horse_holds_a_helmet_and_its_body_armour_at_once() {
         use horizon_world::player_inventory::EquipmentSlot;
         let mut m = horse();
-        m.extra.head = Some("minecraft:iron_helmet".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:iron_helmet".into()),
+        );
         m.extra
             .set_body(Some("minecraft:diamond_horse_armor".into()));
         let gear = m.equipment_stacks();
@@ -5016,7 +5076,7 @@ mod totem_tests {
         assert!(m.damage(1000.0, Damage::of(DamageKind::Generic)));
         assert!(m.alive(), "the totem kept it alive");
         assert_eq!(m.health, 1.0);
-        assert_eq!(m.extra.main_hand, None, "the totem was used up");
+        assert_eq!(m.extra.main_hand_id(), None, "the totem was used up");
         // DeathProtection.TOTEM_EFFECTS.
         assert_eq!(
             m.extra.effects,
@@ -5037,11 +5097,14 @@ mod totem_tests {
     #[test]
     fn a_totem_in_the_off_hand_saves_a_fox_too() {
         let mut m = fox();
-        m.extra.off_hand = Some("minecraft:totem_of_undying".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::OFFHAND,
+            Some("minecraft:totem_of_undying".into()),
+        );
         assert!(m.damage(1000.0, Damage::of(DamageKind::Generic)));
         assert!(m.alive());
         assert_eq!(m.health, 1.0);
-        assert_eq!(m.extra.off_hand, None);
+        assert_eq!(m.extra.off_hand_id(), None);
     }
 
     /// Without one in either hand the blow kills it as before.
@@ -5064,7 +5127,7 @@ mod totem_tests {
         assert!(m.damage(1000.0, Damage::of(DamageKind::GenericKill)));
         assert!(!m.alive());
         assert_eq!(
-            m.extra.main_hand.as_deref(),
+            m.extra.main_hand_id(),
             Some("minecraft:totem_of_undying"),
             "the totem is still in the mouth"
         );

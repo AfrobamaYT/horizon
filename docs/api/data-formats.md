@@ -10,8 +10,8 @@ and worlds. Each entry names its version field, its documentation and its level 
 | Benchmark report | the benchmark's output, the local log, uploads | `"format": "horizon-benchmark-report"`, `"version": 1` | stable | [benchmark-report.md](../benchmark-report.md) |
 | Telemetry batch | `POST /v1/batch` from the launcher | `"schema": 1` | stable | [telemetry.md](../telemetry.md) |
 | Telemetry consent | `telemetry/consent.json` in the game folder | `"version": 2` | stable | [telemetry.md](../telemetry.md) |
-| Content mod package | `.hmod`: a zip with `horizon-mod.toml`, `assets/`, `data/` | the manifest's `api` | preview | [mod-files.md](mod-files.md), [mods.md](../mods.md#the-manifest), [mod-index.md](mod-index.md) |
-| Native mod package | `.hmod` with native code: a zip with `horizon-native.json` and the bundle's `.rs` and `.toml` files | `schema` | experimental | [mod-files.md](mod-files.md), [native-mods.md](../native-mods.md) |
+| Content mod package | `.hmod`: a zip with `horizon-mod.toml`, `assets/`, `data/` and optional `icon.png` | the manifest's `api` | preview | [mod-files.md](mod-files.md), [mods.md](../mods.md#the-manifest), [mod-index.md](mod-index.md) |
+| Native mod package | `.hmod` with native code: the same flat package plus root `Cargo.toml` and `src/`, with `[native]` in `horizon-mod.toml` | the manifest's `api` for content; exact `horizon` and `mixins` source pins for code | experimental | [mod-files.md](mod-files.md), [native-mods.md](../native-mods.md) |
 | Mods turned on | `horizon-mods.txt` | none | preview | [mods.md](../mods.md#playing-with-mods) |
 | Horizon settings | `horizon-graphics.txt`, `horizon-extras.txt` (`key:value`, as `options.txt`) | none: unknown keys fall back to defaults | preview | [graphics.md](../graphics.md), [extras.md](../extras.md#options-storage) |
 | Server settings | `server.toml` | its keys | stable | [server-reference.md](server-reference.md) |
@@ -40,3 +40,4 @@ Worlds are vanilla's format, so any tool that reads a 26.3 world reads a Horizon
 
 - Benchmark report version 1; telemetry schema 1, consent version 2.
 - Content mods can declare mob effects in `data/<id>/horizon/mob_effect/<name>.json` (`category`, `color`).
+- Content mods can declare how a fluid looks on the client in `data/<id>/horizon/fluid/<name>.json` (`sprite`, an atlas sprite id, and `tint`, `0xAARRGGBB`, both optional), as NeoForge's `IClientFluidTypeExtensions`; the fluid needs no block.

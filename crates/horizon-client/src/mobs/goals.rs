@@ -84,9 +84,13 @@ pub struct GoalSelector {
 }
 impl GoalSelector {
     pub fn add(&mut self, priority: i32, goal: impl Goal + 'static) {
+        self.add_boxed(priority, Box::new(goal));
+    }
+    /// `add` for a goal built at runtime (`Box<dyn Goal>`).
+    pub fn add_boxed(&mut self, priority: i32, goal: Box<dyn Goal>) {
         self.goals.push(Wrapped {
             priority,
-            goal: Box::new(goal),
+            goal,
             running: false,
         });
     }
@@ -184,6 +188,41 @@ impl GoalSelector {
             self.stop(i, m, cx);
         }
         self.locked = [None; 4];
+    }
+    /// `GoalSelector.removeAllGoals(predicate)`: every goal `predicate`
+    /// picks goes, a running one stopped first (`removeGoal` stops it), and
+    /// the flag locks it held move with the list. How many went.
+    pub fn remove_all(
+        &mut self,
+        predicate: impl Fn(&dyn Goal) -> bool,
+        m: &mut Mob,
+        cx: &mut Cx,
+    ) -> usize {
+        let mut removed = 0;
+        let mut i = 0;
+        while i < self.goals.len() {
+            if predicate(&*self.goals[i].goal) {
+                self.stop(i, m, cx);
+                self.goals.remove(i);
+                removed += 1;
+                for slot in &mut self.locked {
+                    match *slot {
+                        Some(j) if j == i => *slot = None,
+                        Some(j) if j > i => *slot = Some(j - 1),
+                        _ => {}
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
+        removed
+    }
+    /// Every goal as (priority, name, running), in registration order.
+    pub fn entries(&self) -> impl Iterator<Item = (i32, &'static str, bool)> + '_ {
+        self.goals
+            .iter()
+            .map(|g| (g.priority, g.goal.name(), g.running))
     }
 }
 
@@ -682,9 +721,12 @@ impl Mob {
     }
     /// `canAttack` for the player: a golem a player built never attacks
     /// players (`IronGolem.canAttack`), and a pet never attacks its owner
-    /// (`TamableAnimal.canAttack`: `isOwnedBy`).
+    /// (`TamableAnimal.canAttack`: `isOwnedBy`). In Peaceful nothing attacks a
+    /// player (`LivingEntity.canAttack`, `TargetingConditions.test`: combat
+    /// conditions fail when the difficulty is PEACEFUL).
     pub fn spares_players(&self, w: &MobWorld) -> bool {
-        self.built_by_player()
+        (w.difficulty.base == 0 && w.player.is_some())
+            || self.built_by_player()
             || (self.is_tamable_animal()
                 && self.extra.tame
                 && w.player
@@ -2475,7 +2517,7 @@ impl Goal for RestrictSun {
         0
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.daylight && m.extra.head.is_none()
+        cx.w.daylight && m.extra.head_id().is_none()
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.ai.nav.avoid_sun = true;
@@ -2528,7 +2570,11 @@ impl Goal for FleeSun {
         MOVE
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        if m.ai.target.is_some() || !cx.w.daylight || m.fire_ticks <= 0 || m.extra.head.is_some() {
+        if m.ai.target.is_some()
+            || !cx.w.daylight
+            || m.fire_ticks <= 0
+            || m.extra.head_id().is_some()
+        {
             return false;
         }
         let (bx, by, bz) = (
@@ -3150,5 +3196,138 @@ mod built_by_player_tests {
         for s in [Species::Allay, Species::Fox, Species::Zombie] {
             assert!(!mob(s).is_tamable(), "{s:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod remove_all_tests {
+    use super::*;
+    use crate::mobs::world::with_built_test_world_rules;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// A goal that always wants to walk and leaves a mark while it runs, so
+    /// `removeAllGoals` has one running to stop.
+    #[derive(Clone, Debug)]
+    struct Walk;
+    impl Goal for Walk {
+        goal_clone!();
+        fn flags(&self) -> u8 {
+            MOVE
+        }
+        fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+            true
+        }
+        fn start(&mut self, m: &mut Mob, _: &mut Cx) {
+            m.ai.panicking = true;
+        }
+        fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+            m.ai.panicking = false;
+        }
+        fn name(&self) -> &'static str {
+            "Walk"
+        }
+    }
+
+    /// `removeAllGoals` stops a running goal before it goes, frees the flag
+    /// lock it held, and moves the locks behind the removed one, so the next
+    /// tick still finds the survivor that kept its place.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn remove_all_stops_the_running_goal_and_moves_the_locks() {
+        let ran = with_built_test_world_rules(
+            &[],
+            true,
+            |_, _| {},
+            |w, types| {
+                let kind = Arc::new(types.types["minecraft:zombie"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                // `Mob::new` registered the species' own goals; only the ones
+                // this test adds matter here.
+                let mut goals = {
+                    let mut goals = std::mem::take(&mut m.ai.goals);
+                    goals.clear();
+                    goals
+                };
+                goals.add(0, Float);
+                goals.add(1, Walk);
+                let mut lr = LegacyRandom::new(0);
+                let mut events = Vec::new();
+                {
+                    let mut cx = Cx {
+                        w,
+                        lr: &mut lr,
+                        events: &mut events,
+                    };
+                    goals.tick(&mut m, &mut cx);
+                    // The Walk runs; Float needs water the empty world has none of.
+                    assert_eq!(
+                        goals.entries().collect::<Vec<_>>(),
+                        vec![(0, "Float", false), (1, "Walk", true)]
+                    );
+                    assert!(m.ai.panicking);
+                    // The Walk before it goes: its lock index moves with the list.
+                    let removed = goals.remove_all(|g| g.name() == "Float", &mut m, &mut cx);
+                    assert_eq!(removed, 1);
+                    // A stale lock would point past the list's end here.
+                    goals.tick(&mut m, &mut cx);
+                    assert_eq!(goals.entries().collect::<Vec<_>>(), vec![(1, "Walk", true)]);
+                    // The running Walk's own removal stops it.
+                    let removed = goals.remove_all(|g| g.name() == "Walk", &mut m, &mut cx);
+                    assert_eq!(removed, 1);
+                }
+                assert!(!m.ai.panicking);
+                assert_eq!(goals.entries().count(), 0);
+                m.ai.goals = goals;
+            },
+        );
+        assert!(ran, "the test world's resources are missing");
+    }
+}
+
+#[cfg(test)]
+mod peaceful_targets_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+
+    /// `LivingEntity.canAttack` / `TargetingConditions.test`: in Peaceful a
+    /// hurt wolf neither takes its attacker (a player) as target nor picks one
+    /// by sight, while at Normal it does.
+    #[test]
+    fn peaceful_mobs_never_target_the_player() {
+        with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(2.5, 64.0, 0.5)));
+            let kind = Arc::new(types.types["minecraft:wolf"].clone());
+            let mut wolf = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            wolf.ai.last_hurt_by = Some(Who::Player);
+            wolf.ai.last_hurt_by_time = 5;
+            let mut random = LegacyRandom::new(0);
+            let mut events = Vec::new();
+            let mut cx = Cx {
+                w: &w,
+                lr: &mut random,
+                events: &mut events,
+            };
+            assert!(
+                HurtByTarget::default().can_use(&mut wolf, &mut cx),
+                "normal"
+            );
+            assert!(wolf.can_target_player(&w, 16.0, false), "normal");
+
+            let mut peaceful = w.clone();
+            peaceful.difficulty = crate::mobs::spawning::LocalDifficulty::new(0, 18000, 0, 0.0);
+            let mut cx = Cx {
+                w: &peaceful,
+                lr: &mut random,
+                events: &mut events,
+            };
+            assert!(
+                !HurtByTarget::default().can_use(&mut wolf, &mut cx),
+                "peaceful"
+            );
+            assert!(!wolf.can_target_player(&peaceful, 16.0, false), "peaceful");
+            assert!(!wolf.can_keep_target_player(&peaceful, 16.0), "peaceful");
+        });
     }
 }

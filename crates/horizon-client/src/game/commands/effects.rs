@@ -118,36 +118,13 @@ impl Game<'_> {
         for t in self.living_targets(ctx)? {
             let changed = match (t, effect) {
                 (Target::Player | Target::Guest(_), None) => self
-                    .for_player(t, |g| {
-                        let any = !g.potions.effects.list.is_empty();
-                        g.potions.effects.clear();
-                        g.apply_effect_status();
-                        any
-                    })
+                    .for_player(t, |g| g.remove_player_effects(None))
                     .unwrap_or(false),
                 (Target::Player | Target::Guest(_), Some(e)) => self
-                    .for_player(t, |g| {
-                        let before = g.potions.effects.list.len();
-                        g.potions.effects.list.retain(|x| x.id != e.id);
-                        g.apply_effect_status();
-                        g.potions.effects.list.len() != before
-                    })
+                    .for_player(t, |g| g.remove_player_effects(Some(e.id)))
                     .unwrap_or(false),
                 (Target::Mob(id), e) => match self.mobs.iter_mut().find(|m| m.id == id) {
-                    Some(m) => {
-                        let before = m.extra.effects.len();
-                        m.extra
-                            .effects
-                            .retain(|x| e.is_some_and(|e| x.0 != namespaced(e.id)));
-                        let left = &m.extra.effects;
-                        m.extra
-                            .hidden_effects
-                            .retain(|h| left.iter().any(|x| x.0 == *h));
-                        m.extra
-                            .ambient_effects
-                            .retain(|h| left.iter().any(|x| x.0 == *h));
-                        m.extra.effects.len() != before
-                    }
+                    Some(m) => m.retain_effects(|x| e.is_some_and(|e| x.0 != namespaced(e.id))),
                     None => false,
                 },
                 _ => continue,
@@ -236,7 +213,7 @@ impl Game<'_> {
                         .mobs
                         .iter()
                         .find(|m| m.id == mob)
-                        .and_then(|m| m.extra.main_hand.clone());
+                        .and_then(|m| m.extra.main_hand_id().map(str::to_owned));
                     if single {
                         return Err(match held {
                             None => err(

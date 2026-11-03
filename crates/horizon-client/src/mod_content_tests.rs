@@ -1,6 +1,8 @@
 use super::*;
 use crate::{assets::Assets, blocks::BlockFacts, items::Items};
 
+#[path = "mod_content_block_entity_tests.rs"]
+mod block_entity_tests;
 #[path = "mod_content_farmland_tests.rs"]
 mod farmland_tests;
 
@@ -91,6 +93,8 @@ fn creative_tabs_keep_vanilla_items_missing_from_search() {
         vanilla_items: tab.items.iter().cloned().collect(),
         effects: Vec::new(),
         entity_types: Vec::new(),
+        block_entity_types: Vec::new(),
+        block_entity_membership: BTreeMap::new(),
         menu_types: Vec::new(),
         states: 0,
         defaults: BTreeMap::new(),
@@ -296,6 +300,14 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
         ],
     );
     let mut mods = vec![ruby, alpha];
+    mods[0].content.block_entity_types.push(BlockEntityType {
+        id: "ruby:machine".into(),
+        blocks: vec!["alpha:zblock".into()],
+    });
+    mods[1].content.block_entity_types.push(BlockEntityType {
+        id: "alpha:machine".into(),
+        blocks: vec!["ruby:zblock".into()],
+    });
     for index in 0..2 {
         let plan = Plan::new(&base, &mods).unwrap();
         let blocks: Vec<_> = plan
@@ -349,10 +361,12 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
         assert_eq!(id("minecraft:block", "minecraft:iron_block"), 11);
         assert_eq!(id("minecraft:block", "alpha:zblock"), 12);
         assert_eq!(id("minecraft:block", "ruby:zblock"), 13);
-        // Each mod block names a block entity type, after vanilla's.
+        // Only declared block entity types get IDs, sorted independently of blocks.
         assert_eq!(id("minecraft:block_entity_type", "minecraft:chest"), 1);
-        assert_eq!(id("minecraft:block_entity_type", "alpha:zblock"), 2);
-        assert_eq!(id("minecraft:block_entity_type", "ruby:zblock"), 3);
+        assert_eq!(id("minecraft:block_entity_type", "alpha:machine"), 2);
+        assert_eq!(id("minecraft:block_entity_type", "ruby:machine"), 3);
+        assert!(registry["minecraft:block_entity_type"]["entries"]["alpha:zblock"].is_null());
+        assert!(registry["minecraft:block_entity_type"]["entries"]["ruby:zblock"].is_null());
 
         assert_eq!(id("minecraft:mob_effect", "minecraft:luck"), 25);
         assert_eq!(id("minecraft:mob_effect", "alpha:dull"), 26);
@@ -383,6 +397,10 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
         assert_eq!(
             built, registry,
             "the built root must use the tested allocation"
+        );
+        assert_eq!(
+            fs::read_to_string(output.join(BLOCK_ENTITY_TYPES)).unwrap(),
+            r#"{"alpha:zblock":"ruby:machine","ruby:zblock":"alpha:machine"}"#
         );
         mods.reverse();
     }
@@ -415,7 +433,7 @@ fn ruby_mod_with_pistons(dir: &Path, pistons: bool) -> ContentMod {
             "data/ruby/horizon/block/ruby_block.json",
             r##"{"template": "minecraft:iron_block", "properties": {"hardness": 4.0, "light": 3,
                 "sounds": "minecraft:amethyst_block", "map_color": 28, "friction": 0.8,
-                "random_ticks": true},
+                "random_ticks": true, "occludes": false},
                 "components": {"minecraft:max_stack_size": 16,
                     "minecraft:damage_resistant": {"types": "#minecraft:is_fire"}}}"##,
         ),
@@ -591,6 +609,21 @@ fn content_root_loads_with_every_table() {
         independent_behaviours.facts(ruby).push,
         independent_behaviours.facts(iron).push
     );
+    // `occludes: false` (noOcclusion): the iron-template block occludes nothing, iron still does.
+    assert!(!facts.get(ruby).can_occlude && !facts.get(ruby).solid_render);
+    // Its light dampening is a non-solid full block's, as leaves' and spawners' are (iron's is 15).
+    assert_eq!(
+        (facts.get(ruby).dampening, facts.get(iron).dampening),
+        (1, 15)
+    );
+    assert!(facts.get(iron).can_occlude && facts.get(iron).solid_render);
+    let definitions: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("render-definitions.json")).unwrap()).unwrap();
+    assert_eq!(
+        definitions["ruby:ruby_block"]["can_occlude"], false,
+        "faces beside it are drawn"
+    );
+    assert_eq!(definitions["minecraft:iron_block"]["can_occlude"], true);
     // `render_shape` leaves the glass's model out of the chunk mesh; the block keeps the template's.
     assert_eq!(
         facts.get(BlockStateId(n + 65)).render_shape,
@@ -1146,7 +1179,7 @@ fn content_root_is_reused_until_a_mod_changes() {
     };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-reuse-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
-    let m = ruby_mod(&scratch.join("ruby"));
+    let mut m = ruby_mod(&scratch.join("ruby"));
     let cache = scratch.join("cache");
     let root = resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
     // A rebuild starts from an empty folder: this file tells them apart.
@@ -1157,18 +1190,31 @@ fn content_root_is_reused_until_a_mod_changes() {
         root
     );
     assert!(sentinel.exists(), "an unchanged mod rebuilt the root");
+    let old_lang = fs::read(root.join("assets/ruby/lang/en_us.json")).unwrap();
     let lang = scratch.join("ruby/assets/ruby/lang/en_us.json");
     fs::write(&lang, r#"{"block.ruby.ruby_block": "Ruby Block"}"#).unwrap();
     let file = fs::File::options().write(true).open(&lang).unwrap();
     file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
         .unwrap();
-    resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
-    assert!(!sentinel.exists(), "a changed mod kept the old root");
+    let changed = resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
+    assert_ne!(changed, root);
+    assert!(sentinel.exists(), "a rebuild removed the active root");
+    assert_eq!(
+        fs::read(root.join("assets/ruby/lang/en_us.json")).unwrap(),
+        old_lang
+    );
     assert!(
-        fs::read_to_string(root.join("assets/ruby/lang/en_us.json"))
+        fs::read_to_string(changed.join("assets/ruby/lang/en_us.json"))
             .unwrap()
             .contains("Ruby Block")
     );
+    m.content.blocks[0].template = "minecraft:missing_template".into();
+    assert!(resource_root(&base, std::slice::from_ref(&m), &cache).is_err());
+    assert!(
+        changed.exists(),
+        "a refused rebuild removed the accepted root"
+    );
+    assert!(sentinel.exists());
     let _ = fs::remove_dir_all(&scratch);
 }
 
@@ -4143,6 +4189,7 @@ fn blocks_and_items_declared_in_code_get_ids() {
         &mut mods,
         &[block("ruby:ruby_log"), block("gears:shaft")],
         &[wrench],
+        &[],
         &known,
     );
     assert!(errors.is_empty(), "{errors:?}");
@@ -4159,6 +4206,7 @@ fn blocks_and_items_declared_in_code_get_ids() {
     let refused = accept_declared(
         &mut mods,
         &[block("ruby:ruby_block"), block("ruby:ruby_post")],
+        &[],
         &[],
         &known,
     );
@@ -4206,8 +4254,13 @@ fn blocks_and_items_declared_in_code_get_ids() {
     );
     let stamp = fs::read(root.join(STAMP)).unwrap();
     mods[1].content.items[0].max_stack_size = Some(2);
-    resource_root(&base, &mods, &scratch.join("cache")).unwrap();
-    assert_ne!(fs::read(root.join(STAMP)).unwrap(), stamp);
+    let changed = resource_root(&base, &mods, &scratch.join("cache")).unwrap();
+    assert_ne!(changed, root);
+    assert_eq!(fs::read(root.join(STAMP)).unwrap(), stamp);
+    assert_ne!(fs::read(changed.join(STAMP)).unwrap(), stamp);
+    let changed_items = Items::load(&changed, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+    assert_eq!(changed_items.items["gears:wrench"].max_stack, 2);
+    assert_eq!(items.items["gears:wrench"].max_stack, 1);
     let _ = fs::remove_dir_all(&scratch);
 }
 

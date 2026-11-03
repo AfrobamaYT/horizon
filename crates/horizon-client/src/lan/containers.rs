@@ -873,7 +873,7 @@ fn next_sound_seed(g: &mut impl RandomSource) -> i64 {
 
 /// `PlayerList.broadcast`'s distance test: the summed squared axis distances
 /// against the squared radius, and a player exactly at the radius is out.
-fn within_range(at: [f64; 3], pos: [f64; 3], range: f64) -> bool {
+pub fn within_range(at: [f64; 3], pos: [f64; 3], range: f64) -> bool {
     let d: f64 = (0..3).map(|k| (pos[k] - at[k]).powi(2)).sum();
     d < range * range
 }

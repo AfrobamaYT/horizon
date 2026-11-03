@@ -855,6 +855,7 @@ impl Game<'_> {
             let target_player = m.ai.target == Some(horizon_client::mobs::Who::Player);
             let (health, range) = (m.health, m.attrs.follow_range);
             let raids = &mut self.raiding.raids;
+            let wears_banner = m.extra.head_id() == Some(raider::BANNER);
             let s = m.extra.raider.get_or_insert_with(Box::default);
             s.rider = has_rider;
             s.in_village = in_village;
@@ -911,7 +912,7 @@ impl Game<'_> {
                 && s.active_raid
                 && !s.raid_over
                 && raider::can_be_leader(species)
-                && m.extra.head.as_deref() != Some(raider::BANNER)
+                && !wears_banner
                 && raids.get(id).is_some_and(|r| r.leader(s.wave).is_none())
                 && !leaders.contains(&(id, s.wave))
             {
@@ -1076,7 +1077,7 @@ impl Game<'_> {
     /// `Raider.die`: the wave loses its leader, the killing player becomes
     /// a hero of the village, and the raider leaves the raid (its health
     /// stays in the bar's total).
-    pub(super) fn raider_died(&mut self, m: &Mob, by_player: bool) {
+    pub(super) fn raider_died(&mut self, m: &Mob, by_player: bool, killer: Option<u32>) {
         let Some(s) = raider::state(m) else {
             return;
         };
@@ -1086,7 +1087,7 @@ impl Game<'_> {
         let (leader, wave) = (s.patrol_leader, s.wave);
         self.flush_raid_bar(id);
         let living = self.raid_living_health(id, Some(m.id));
-        let uuid = self.level.player_uuid;
+        let uuid = self.player_uuid_of(killer);
         if let Some(r) = self.raiding.raids.get_mut(id) {
             if leader {
                 r.remove_leader(wave);

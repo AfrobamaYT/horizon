@@ -255,12 +255,11 @@ impl Game<'_> {
             enchantments: &self.stations().enchantments,
             maps: Some(&maps),
         };
-        let Some((player_uuid, player_entity_id)) = self.lan.as_ref().map(|host| {
-            let g = &host.hub.guests[gi];
-            (g.uuid, g.entity_id)
-        }) else {
+        let Some(host) = self.lan.as_ref() else {
             return false;
         };
+        let g = &host.hub.guests[gi];
+        let (player_uuid, player_entity_id) = (g.uuid, g.entity_id);
         let env = Env {
             player: Some(player_uuid),
             player_entity_id: Some(player_entity_id),
@@ -274,6 +273,8 @@ impl Game<'_> {
             names: &self.pack.names,
             trade: Some(&trade_env),
             maps: None,
+            limited_crafting: host.hub.limited_crafting,
+            known_recipes: Some(&g.recipe_book),
         };
         let mut menu = Menu::new(Kind::Merchant);
         if let Some(host) = self.lan.as_ref() {
@@ -875,6 +876,7 @@ mod tests {
     fn a_trade_hook_fired_by_a_real_select_can_write_the_open_trade() {
         use horizon_client::mod_api::{self, Hooks, TradeSelectEvent};
         struct Observer(Seen);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn trade_select(&self, host: &mut dyn ServerHost, event: &mut TradeSelectEvent<'_>) {
                 let merchant = event

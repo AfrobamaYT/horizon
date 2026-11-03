@@ -170,7 +170,7 @@ impl Game<'_> {
             if self.native_menu_storage(*menu, *slot).is_none() {
                 return 0;
             }
-            self.journal_menus(menu.player.uuid());
+            self.journal_menus(menu.player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 fill(held, &mut rest);
             }
@@ -266,7 +266,7 @@ impl Game<'_> {
             if took == 0 {
                 return 0;
             }
-            self.journal_menus(menu.player.uuid());
+            self.journal_menus(menu.player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 *held = held.as_ref().map(|h| left(h, took)).filter(|h| h.count > 0);
             }
@@ -532,7 +532,7 @@ mod tests {
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let pumpkin = ItemResource::of(&ItemStack::new("minecraft:carved_pumpkin", 1));
             let wrote =
@@ -554,7 +554,7 @@ mod tests {
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             assert_eq!(
@@ -587,9 +587,9 @@ mod tests {
             ));
             let host: &mut dyn ServerHost = game;
             let entity = host.entity(500).unwrap();
-            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             game.persist.removals.push(Target::Cart(500));
-            assert!(entity.capability(game, &ENTITY_ITEMS).is_none());
+            assert!(entity.capability(game, &ENTITY_ITEMS, ()).is_none());
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let host: &mut dyn ServerHost = game;
             let wrote =
@@ -615,7 +615,7 @@ mod tests {
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let helmet = ItemResource::of(&helmet);
             assert_eq!(items.amount(host, 39), 1);
@@ -641,7 +641,7 @@ mod tests {
             let items = host
                 .entity(20)
                 .unwrap()
-                .capability(host, &ENTITY_ITEMS)
+                .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let helmet = ItemResource::of(&ItemStack::new("minecraft:iron_helmet", 1))
                 .with_component(
@@ -676,10 +676,10 @@ mod tests {
             ));
             let host: &mut dyn ServerHost = game;
             let entity = host.entity(500).unwrap();
-            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             game.native_lifecycle.begin_close();
             game.native_lifecycle.world_close_final();
-            assert!(entity.capability(game, &ENTITY_ITEMS).is_none());
+            assert!(entity.capability(game, &ENTITY_ITEMS, ()).is_none());
             let host: &mut dyn ServerHost = game;
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let wrote =
@@ -1071,7 +1071,7 @@ mod tests {
             let before = inventories(game);
             let host: &mut dyn ServerHost = game;
             let entity = host.entity(20).unwrap();
-            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             assert_eq!(items.size(host), 41);
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let aborted = host.transaction(|host, tx| {
@@ -1109,7 +1109,7 @@ mod tests {
         let host: &mut dyn ServerHost = game;
         let items = |host: &mut dyn ServerHost, id| {
             let entity = host.entity(id).unwrap();
-            entity.capability(host, &ENTITY_ITEMS).unwrap()
+            entity.capability(host, &ENTITY_ITEMS, ()).unwrap()
         };
         let (seller, buyer) = (items(host, 20), items(host, 21));
         host.transaction(|host, tx| {
@@ -1221,7 +1221,7 @@ mod tests {
             let host: &mut dyn ServerHost = game;
             let cart = host.entity(500).unwrap();
             assert_eq!(cart.kind(host).as_deref(), Some("minecraft:chest_minecart"));
-            let items = cart.capability(host, &ENTITY_ITEMS).unwrap();
+            let items = cart.capability(host, &ENTITY_ITEMS, ()).unwrap();
             assert_eq!(items.size(host), 27);
             let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
             let aborted = host.transaction(|host, tx| {
@@ -1247,7 +1247,7 @@ mod tests {
                 .push(Minecart::new(501, CartKind::Rideable, position));
             let host: &mut dyn ServerHost = game;
             let plain = host.entity(501).unwrap();
-            assert!(plain.capability(host, &ENTITY_ITEMS).is_none());
+            assert!(plain.capability(host, &ENTITY_ITEMS, ()).is_none());
         });
     }
 }
