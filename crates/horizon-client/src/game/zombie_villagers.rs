@@ -233,7 +233,10 @@ fn carry_over(from: &Mob, to: &mut Mob) {
     to.extra.feet = from.extra.feet.clone();
     to.extra.armor = from.extra.armor.clone();
     to.extra.gear = from.extra.gear.clone();
-    to.extra.effects = from.extra.effects.clone();
+    to.retain_effects(|_| false);
+    for &(effect, ticks, amplifier) in &from.extra.effects {
+        to.load_effect(effect, ticks, amplifier);
+    }
     // VillagerData and the trades, experience and gossip.
     to.extra.variant = from.extra.variant;
     to.extra.variant2 = from.extra.variant2;

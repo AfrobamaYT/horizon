@@ -3582,6 +3582,7 @@ impl Mob {
             .find(|e| e.0 == effect)
             .map(|e| (e.1, e.2));
         let present_ambient = self.extra.ambient_effects.contains(&effect);
+        let present_hidden = self.extra.hidden_effects.contains(&effect);
         // A new effect takes its flags as they are; one already there by update's rules.
         let take_ambient = match before {
             None => true,
@@ -3597,6 +3598,8 @@ impl Mob {
         if !visible {
             self.extra.hidden_effects.push(effect);
         }
+        self.effects_dirty |= present_ambient != self.extra.ambient_effects.contains(&effect)
+            || present_hidden != self.extra.hidden_effects.contains(&effect);
     }
     /// `LivingEntity.actuallyHurt`: the absorption amount takes the damage first;
     /// what is left reaches the health.
