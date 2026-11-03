@@ -3239,9 +3239,9 @@ capabilities the same way.
 
 A key is known by its name, which must be namespaced (`chem_api:chemical`), and a name has one handler type. Two
 mods that each declare their own `Chemical` under one name, rather than sharing the defining mod's, would never see
-each other's handlers. So the game refuses that at startup, naming both mods and both types, as it refuses a key
-whose name has no namespace. Both checks run once, when the mods register. This is a fork addition: NeoForge has
-the same model, without the type check, since Java's generics are erased.
+each other's handlers. So the game refuses that at startup, naming both mods and both types, as NeoForge's
+`CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
+namespace. Both checks run once, when the mods register.
 
 ### Testing a trait mod
 
