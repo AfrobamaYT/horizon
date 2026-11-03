@@ -653,10 +653,13 @@ impl Game<'_> {
         }
     }
     /// After `ServerRecipeBook.addRecipes`: the toast and the
-    /// `recipe_unlocked` trigger of each recipe now known.
-    pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) {
+    /// `recipe_unlocked` trigger of each recipe now known. Returns the
+    /// number of recipe displays taken back out because a mod refused their
+    /// discovery.
+    pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) -> usize {
         let mut allowed = Vec::with_capacity(unlocked.len());
         let mut refused = Vec::new();
+        let mut taken_back = 0;
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             for recipe in unlocked {
                 let mut cancel = false;
@@ -672,6 +675,7 @@ impl Game<'_> {
                     .level
                     .recipe_book
                     .remove_recipes(&world_stations!(self).recipe_index, &refused);
+                taken_back = removed.len();
                 if self.lan_acting.is_some() && !removed.is_empty() {
                     self.guest_packets.push(C::RecipeBookRemove(
                         horizon_protocol::packets::recipes::RecipeBookRemove { ids: removed },
@@ -688,7 +692,7 @@ impl Game<'_> {
             self.recipe_toast(&allowed);
         }
         if allowed.is_empty() || self.remote.is_some() || self.no_player_here() {
-            return;
+            return taken_back;
         }
         self.load_advancements();
         let tree = self.adv.tree.clone();
@@ -698,6 +702,7 @@ impl Game<'_> {
                 c["recipes"].as_str() == Some(r.as_str())
             });
         }
+        taken_back
     }
     /// `KnowledgeBookItem.use`: the recipes the book names become known and it
     /// is used up. A book naming a recipe this server does not have is

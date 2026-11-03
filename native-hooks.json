@@ -253,10 +253,6 @@
       "target": "horizon_client::game::native_claimed_items::Game<'_>::native_poll", "side": "client"
     },
     {
-      "name": "set_item_entity",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_item_entity", "side": "server"
-    },
-    {
       "name": "update_output_neighbors",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_update_output_neighbors", "side": "server"
     },
@@ -3516,18 +3512,6 @@
       }
     },
     {
-      "name": "note_play",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_play",
-      "neoforge": "near match of NeoForge NoteBlockEvent.Play (cancel only; Bukkit's NotePlayEvent); note_block_play is the counterpart",
-      "side": "server",
-      "cancellable": true,
-      "mod_api": {
-        "contract": "cancel",
-        "out": "cancel"
-      }
-    },
-    {
       "name": "player_advancement_criterion_grant",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_criterion_grant",
@@ -3626,16 +3610,6 @@
       "name": "player_change_beacon_effect",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_beacon_effect",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "player_change_main_hand",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_main_hand",
       "neoforge": "none (NeoForge has no such event)",
       "side": "server",
       "mod_api": {
@@ -3784,16 +3758,6 @@
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_level_change",
       "neoforge": "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "player_locale_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_locale_change",
-      "neoforge": "none (NeoForge has no such event)",
       "side": "server",
       "mod_api": {
         "contract": "listen"
@@ -4091,17 +4055,6 @@
       "side": "server",
       "mod_api": {
         "contract": "listen"
-      }
-    },
-    {
-      "name": "prepare_anvil",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_anvil",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "replace",
-        "out": "result"
       }
     },
     {
