@@ -1699,13 +1699,10 @@ impl Game<'_> {
                 continue;
             };
             let mut c = self.carts[i].clone();
-            // Writes a mod makes to this cart while it ticks are kept here.
-            self.native_cart_writes = Some((id, Vec::new()));
             let alive = self.tick_cart(&mut c, [0.0; 2]);
             if c.kind == CartKind::Hopper && c.enabled {
                 self.hopper_cart_suck(&mut c);
             }
-            let writes = self.native_cart_writes.take().map(|w| w.1);
             let Some(i) = cart_at(&self.carts, id, i) else {
                 self.native_tick_post_one(&round, id, kind);
                 continue;
@@ -1713,9 +1710,6 @@ impl Game<'_> {
             if alive {
                 let due = std::mem::take(&mut c.command_due);
                 self.carts[i] = c;
-                for write in writes.into_iter().flatten() {
-                    write.apply(&mut self.carts[i]);
-                }
                 if due {
                     self.perform_cart_command(id);
                 }

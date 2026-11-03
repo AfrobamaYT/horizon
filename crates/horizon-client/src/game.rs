@@ -2955,9 +2955,6 @@ struct Game<'a> {
     /// Models drawn only once such an entity shows up (lead knots, wind charges...).
     entity_models: EntityModels,
     carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
-    /// The mod writes to the minecart that is ticking, applied after its tick
-    /// (`native_minecart_refs.rs`).
-    native_cart_writes: Option<(u32, Vec<native_minecart_refs::CartWrite>)>,
     /// The boats and minecarts `native_vehicle_moved` follows (lan_vehicles.rs).
     watched_vehicles: Vec<lan_vehicles::WatchedVehicle>,
     /// Songs playing from jukeboxes (tracked sound handles).
@@ -19377,7 +19374,6 @@ impl<'a> Game<'a> {
             post_effects: Vec::new(),
             spectated_post_effect: None,
             experience_display: Default::default(),
-            native_cart_writes: None,
             boats: Default::default(),
             leash_boats: Vec::new(),
             boat_models: prepared.boat_models,
