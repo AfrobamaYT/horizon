@@ -14905,6 +14905,7 @@ impl Game<'_> {
             p.velocity = Vec3::ZERO;
             p.pitch = 0.0;
             p.teleported = true;
+            p.teleported_delta = [false; 3];
         }
         self.pitch = 0.0;
         if self.lan_acting.is_none() {
@@ -22201,7 +22202,7 @@ mod tests {
         }
         let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
         mod_api::install_parts(&mods).unwrap();
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
             game.reload_world_tables();
@@ -22253,7 +22254,7 @@ mod tests {
                 Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
                     as Box<dyn Hooks>,
             ]);
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
