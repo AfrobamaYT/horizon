@@ -451,13 +451,28 @@ fn handle_method<'a>(
     }
     sig.inputs = rest.into_iter().collect();
     let docs = doc_comments(&method.attrs, name, true)?;
-    let backend = if mutable { "backend_mut" } else { "backend" };
+    let backend = if mutable {
+        "backend_mut_of"
+    } else {
+        "backend_of"
+    };
+    let returns = |ident: &str| {
+        matches!(&sig.output, syn::ReturnType::Type(_, ty) if matches!(&**ty, syn::Type::Path(path)
+            if path.path.segments.last().is_some_and(|seg| seg.ident == ident)))
+    };
+    let call = format!("{name}(self{args})");
+    let body = if returns("Option") {
+        format!("{backend}(host)?.{call}")
+    } else if returns("bool") {
+        format!("{backend}(host).map(|backend| backend.{call}).unwrap_or(false)")
+    } else {
+        return Err(format!(
+            "{name}: a {receiver} helper returns Option or bool, the value a host without a backend refuses"
+        ));
+    };
     Ok((
         handle,
-        format!(
-            "{docs}pub {} {{ host.{backend}(BackendToken(())).{name}(self{args}) }}\n",
-            sig.to_token_stream()
-        ),
+        format!("{docs}pub {} {{ {body} }}\n", sig.to_token_stream()),
     ))
 }
 
@@ -1422,12 +1437,14 @@ mod tests {
             ("http_request", "HTTPRequestRef"),
         ] {
             let name = format!("{receiver}_kind");
-            let method =
-                syn::parse_str(&format!("fn native_{name}(&self, value: {ty}) {{}}")).unwrap();
+            let method = syn::parse_str(&format!(
+                "fn native_{name}(&self, value: {ty}) -> Option<()> {{}}"
+            ))
+            .unwrap();
             let (handle, code) =
                 super::handle_method(&method, &name, receiver, &types.handles).unwrap();
             assert_eq!(handle, ty);
-            assert!(code.contains(&format!("host.backend(BackendToken(())).{name}(self)")));
+            assert!(code.contains(&format!("backend_of(host)?.{name}(self)")));
         }
         let method = syn::parse_quote! { fn native_hidden_kind(&self, value: HiddenRef) {} };
         for receiver in [
@@ -1465,15 +1482,17 @@ mod tests {
         assert_eq!(handle, "EntityRef");
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
-        assert!(code.contains("host.backend(BackendToken(())).entity_position(self, scale)"));
+        assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
         let write: syn::ItemFn = syn::parse_quote! {
-            fn native_level_set(&mut self, level: LevelRef) {}
+            fn native_level_set(&mut self, level: LevelRef) -> bool { todo!() }
         };
         let (handle, code) =
             super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
         assert_eq!(handle, "LevelRef");
         assert!(code.contains("host : & mut dyn Host"));
-        assert!(code.contains("host.backend_mut(BackendToken(())).level_set(self)"));
+        assert!(code.contains(
+            "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
+        ));
         for (method, name, receiver, error) in [
             (
                 syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
@@ -1492,6 +1511,12 @@ mod tests {
                 "entity_type",
                 "entity",
                 "not a method name",
+            ),
+            (
+                syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
+                "entity_x",
+                "entity",
+                "returns Option or bool",
             ),
             (
                 syn::parse_quote! { fn native_entity_x(entity: EntityRef) {} },

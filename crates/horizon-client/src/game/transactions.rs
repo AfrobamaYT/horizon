@@ -449,6 +449,10 @@ mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+        // Pins the opaque backend: a real game always hands one out, so a None
+        // from Host::backend is a bug, never a fallback.
+        assert!(crate::mod_api::Host::backend(&game).is_some());
+        assert!(crate::mod_api::Host::backend_mut(&mut game).is_some());
         let level = game.native_level("minecraft:overworld").unwrap();
         let registry = &game.pack.assets.registry;
         let chest = registry.default_state("minecraft:chest").unwrap();

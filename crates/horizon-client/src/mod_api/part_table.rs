@@ -770,6 +770,18 @@ pub(crate) mod tests {
     struct NoHost;
     impl Host for NoHost {}
 
+    #[test]
+    fn a_host_without_a_backend_refuses_handle_calls() {
+        // NoHost implements nothing, so Host::backend keeps its None default:
+        // every handle answers its typed refusal, never a no-op success.
+        let level = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld");
+        assert!(!level.in_place(&NoHost));
+        assert_eq!(
+            level.entities_in(&NoHost, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
+            None
+        );
+    }
+
     /// A comparator reading of 100 more, for the blocks in tag `test:gauged`.
     struct TagGauge;
     impl BlockPart for TagGauge {
@@ -1011,11 +1023,11 @@ pub(crate) mod tests {
         }
     }
     impl Host for PipeWorld {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self, _: BackendToken) -> &mut dyn BackendMut {
-            self
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1215,8 +1227,7 @@ pub(crate) mod tests {
     struct Charms;
     impl PlaceProvider for Charms {
         fn stack(&self, host: &mut dyn Host, key: u64) -> Option<ItemStack> {
-            host.backend_mut(crate::mod_api::BackendToken(()))
-                .game_stack(&charm_slot(key))
+            backend_mut_of(host).and_then(|backend| backend.game_stack(&charm_slot(key)))
         }
         fn insert(
             &self,
@@ -1364,11 +1375,11 @@ pub(crate) mod tests {
                 _ => None,
             }
         }
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self, _: BackendToken) -> &mut dyn BackendMut {
-            self
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1632,11 +1643,11 @@ pub(crate) mod tests {
         }
     }
     impl Host for Shelf {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self, _: BackendToken) -> &mut dyn BackendMut {
-            self
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
         fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
             // An iron sword's, as its item report gives them.
@@ -1671,25 +1682,24 @@ pub(crate) mod tests {
     struct ItemOverstates;
     impl ResourceHandler<ItemResource> for ItemOverstates {
         fn size(&self, host: &mut dyn Host) -> usize {
-            host.backend(crate::mod_api::BackendToken(()))
-                .container_size(on(SHELF, None))
+            backend_of(&*host)
+                .and_then(|backend| backend.container_size(on(SHELF, None)))
                 .unwrap_or(0)
         }
         fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
             Some(ItemResource::of(
-                &host
-                    .backend(crate::mod_api::BackendToken(()))
-                    .container_stack(on(SHELF, None), index)?,
+                &backend_of(&*host)?.container_stack(on(SHELF, None), index)?,
             ))
         }
         fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
-            host.backend(crate::mod_api::BackendToken(()))
-                .container_stack(on(SHELF, None), index)
+            backend_of(&*host)
+                .and_then(|backend| backend.container_stack(on(SHELF, None), index))
                 .map_or(0, |held| held.count)
         }
         fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
-            host.backend(crate::mod_api::BackendToken(()))
-                .container_capacity(on(SHELF, None), index, &resource.to_stack(1))
+            backend_of(&*host).map_or(0, |backend| {
+                backend.container_capacity(on(SHELF, None), index, &resource.to_stack(1))
+            })
         }
         fn insert(
             &self,
@@ -1709,7 +1719,10 @@ pub(crate) mod tests {
             _: &ItemResource,
             amount: u32,
         ) -> u32 {
-            host.backend_mut(crate::mod_api::BackendToken(()))
+            let Some(backend) = backend_mut_of(host) else {
+                return 0;
+            };
+            backend
                 .container_extract(on(SHELF, None), index, amount + 5, tx)
                 .map_or(0, |out| out.count)
         }
@@ -1898,15 +1911,14 @@ pub(crate) mod tests {
             host.transaction(|host, tx| Err(pipe.insert(host, tx, 0, &stick_, 1)));
         assert_eq!(aborted, Err(1));
         assert!(
-            host.backend(crate::mod_api::BackendToken(()))
-                .container_stack(on(CHEST, None), 0)
+            backend_of(&*host)
+                .and_then(|backend| backend.container_stack(on(CHEST, None), 0))
                 .is_none()
         );
         let went = host.transaction(|host, tx| Ok::<_, ()>(pipe.insert(host, tx, 0, &stick_, 1)));
         assert_eq!(went, Ok(1));
         assert_eq!(
-            host.backend(crate::mod_api::BackendToken(()))
-                .container_stack(on(CHEST, None), 0),
+            backend_of(&*host).and_then(|backend| backend.container_stack(on(CHEST, None), 0)),
             Some(stick())
         );
         let went = host.transaction(|host, tx| Ok::<_, ()>(pipe.insert(host, tx, 0, &stick_, 1)));
@@ -2117,11 +2129,11 @@ pub(crate) mod tests {
         }
     }
     impl Host for TwoChests {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self, _: BackendToken) -> &mut dyn BackendMut {
-            self
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -2805,8 +2817,8 @@ pub(crate) mod tests {
         }
     }
     impl Host for Ordered {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -2837,9 +2849,8 @@ pub(crate) mod tests {
                 pos: [x, 64, 0],
                 side: None,
             };
-            let game_slots = host
-                .backend(crate::mod_api::BackendToken(()))
-                .container_size(at)
+            let game_slots = backend_of(&*host)
+                .and_then(|backend| backend.container_size(at))
                 .is_some();
             let providers = block_entity_providers(&ITEMS, host, at)?;
             providers
@@ -2882,8 +2893,8 @@ pub(crate) mod tests {
         }
     }
     impl Host for TypeOf {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -2904,11 +2915,11 @@ pub(crate) mod tests {
         }
     }
     impl Host for HeldItem {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self, _: BackendToken) -> &mut dyn BackendMut {
-            self
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
     }
 
@@ -2919,8 +2930,8 @@ pub(crate) mod tests {
             if side == Some(Direction::Up) {
                 return 0;
             }
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank_count(on(at, None))
+            backend_of(host)
+                .and_then(|backend| backend.fluid_tank_count(on(at, None)))
                 .unwrap_or(0)
         }
         fn fluid(
@@ -2930,8 +2941,7 @@ pub(crate) mod tests {
             _: Option<Direction>,
             tank: usize,
         ) -> Option<FluidStack> {
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank(on(at, None), tank)
+            backend_of(host)?.fluid_tank(on(at, None), tank)
         }
         fn capacity(
             &self,
@@ -2941,8 +2951,9 @@ pub(crate) mod tests {
             tank: usize,
             fluid: &FluidStack,
         ) -> u32 {
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank_capacity(on(at, None), tank, fluid)
+            backend_of(host).map_or(0, |backend| {
+                backend.fluid_tank_capacity(on(at, None), tank, fluid)
+            })
         }
         fn insert(
             &self,
@@ -2953,8 +2964,7 @@ pub(crate) mod tests {
             fluid: FluidStack,
             simulate: bool,
         ) -> Option<FluidStack> {
-            host.backend_mut(crate::mod_api::BackendToken(()))
-                .fluid_tank_insert(on(at, None), tank, fluid, simulate)
+            backend_mut_of(host)?.fluid_tank_insert(on(at, None), tank, fluid, simulate)
         }
         fn extract(
             &self,
@@ -2965,8 +2975,7 @@ pub(crate) mod tests {
             max: u32,
             simulate: bool,
         ) -> Option<FluidStack> {
-            host.backend_mut(crate::mod_api::BackendToken(()))
-                .fluid_tank_extract(on(at, None), tank, max, simulate)
+            backend_mut_of(host)?.fluid_tank_extract(on(at, None), tank, max, simulate)
         }
     }
 
@@ -3029,8 +3038,8 @@ pub(crate) mod tests {
     }
     impl FluidHandler for Overstates {
         fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank_count(on(at, side))
+            backend_of(host)
+                .and_then(|backend| backend.fluid_tank_count(on(at, side)))
                 .unwrap_or(0)
         }
         fn fluid(
@@ -3040,8 +3049,7 @@ pub(crate) mod tests {
             side: Option<Direction>,
             tank: usize,
         ) -> Option<FluidStack> {
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank(on(at, side), tank)
+            backend_of(host)?.fluid_tank(on(at, side), tank)
         }
         fn capacity(
             &self,
@@ -3051,8 +3059,9 @@ pub(crate) mod tests {
             tank: usize,
             fluid: &FluidStack,
         ) -> u32 {
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank_capacity(on(at, side), tank, fluid)
+            backend_of(host).map_or(0, |backend| {
+                backend.fluid_tank_capacity(on(at, side), tank, fluid)
+            })
         }
         fn insert(
             &self,
@@ -3066,8 +3075,7 @@ pub(crate) mod tests {
             if *self == Self::RefusesMore && !simulate {
                 return Some(fluid.with_amount(fluid.amount + 100));
             }
-            host.backend_mut(crate::mod_api::BackendToken(()))
-                .fluid_tank_insert(on(at, side), tank, fluid, simulate)
+            backend_mut_of(host)?.fluid_tank_insert(on(at, side), tank, fluid, simulate)
         }
         fn extract(
             &self,
@@ -3079,13 +3087,10 @@ pub(crate) mod tests {
             simulate: bool,
         ) -> Option<FluidStack> {
             if simulate {
-                return host
-                    .backend_mut(crate::mod_api::BackendToken(()))
-                    .fluid_tank_extract(on(at, side), tank, max, true);
+                return backend_mut_of(host)?.fluid_tank_extract(on(at, side), tank, max, true);
             }
             let more = if *self == Self::GivesMore { 100 } else { 0 };
-            host.backend_mut(crate::mod_api::BackendToken(()))
-                .fluid_tank_extract(on(at, side), tank, max + more, false)
+            backend_mut_of(host)?.fluid_tank_extract(on(at, side), tank, max + more, false)
         }
     }
 
@@ -3228,11 +3233,11 @@ pub(crate) mod tests {
         }
     }
     impl Host for TankWorld {
-        fn backend(&self, _: BackendToken) -> &dyn Backend {
-            self
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self, _: BackendToken) -> &mut dyn BackendMut {
-            self
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -3289,8 +3294,9 @@ pub(crate) mod tests {
         world.tank(TANK, None, false);
         let host: &mut dyn Host = &mut world;
         assert_eq!(
-            host.backend(crate::mod_api::BackendToken(()))
-                .fluid_tank_capacity(on(TANK, None), 0, &water),
+            backend_of(&*host).map_or(0, |backend| {
+                backend.fluid_tank_capacity(on(TANK, None), 0, &water)
+            }),
             0
         );
         assert!(

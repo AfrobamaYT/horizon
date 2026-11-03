@@ -10,7 +10,7 @@
 //! answering more than it was asked is a mod bug, named once, and the write aborts.
 use super::{
     Capability, Direction, Hand, Host, ITEMS, ItemResource, ItemStack, LevelRef, ResourceHandler,
-    Transaction,
+    Transaction, backend_mut_of, backend_of,
 };
 use std::{collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
 
@@ -103,11 +103,9 @@ impl<T: ?Sized + 'static> ItemCapabilityKey<T> {
 pub const ITEM_ITEMS: ItemCapabilityKey<dyn ResourceHandler<ItemResource>> = ItemCapabilityKey {
     name: "horizon:item_items",
     default: Some(|host, place, stack| {
-        host.backend(crate::mod_api::BackendToken(()))
-            .item_container_slots(stack)
-            .map(|_| {
-                Box::new(GameItemItems(place.clone())) as Box<dyn ResourceHandler<ItemResource>>
-            })
+        backend_of(host)?.item_container_slots(stack).map(|_| {
+            Box::new(GameItemItems(place.clone())) as Box<dyn ResourceHandler<ItemResource>>
+        })
     }),
     handler: PhantomData,
 };
@@ -117,7 +115,7 @@ struct GameItemItems(ItemPlace);
 impl GameItemItems {
     fn slot(&self, host: &mut dyn Host, index: usize) -> Option<ItemStack> {
         let held = self.0.stack(host)?;
-        host.backend(crate::mod_api::BackendToken(()))
+        backend_of(&*host)?
             .item_container_slots(&held)?
             .get(index)?
             .clone()
@@ -141,8 +139,7 @@ impl ResourceHandler<ItemResource> for GameItemItems {
         self.0
             .stack(host)
             .and_then(|held| {
-                host.backend(crate::mod_api::BackendToken(()))
-                    .item_container_slots(&held)
+                backend_of(&*host).and_then(|backend| backend.item_container_slots(&held))
             })
             .map_or(0, |slots| slots.len())
     }
@@ -154,8 +151,9 @@ impl ResourceHandler<ItemResource> for GameItemItems {
     }
     fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
         self.0.stack(host).map_or(0, |held| {
-            host.backend(crate::mod_api::BackendToken(()))
-                .item_container_capacity(&held, index, &resource.to_stack(1))
+            backend_of(&*host).map_or(0, |backend| {
+                backend.item_container_capacity(&held, index, &resource.to_stack(1))
+            })
         })
     }
     fn insert(
@@ -168,8 +166,8 @@ impl ResourceHandler<ItemResource> for GameItemItems {
     ) -> u32 {
         let offer = resource.to_stack(amount);
         let Some((went, changed)) = self.0.stack(host).and_then(|held| {
-            host.backend(crate::mod_api::BackendToken(()))
-                .item_container_insert_slot(&held, index, &offer)
+            backend_of(&*host)
+                .and_then(|backend| backend.item_container_insert_slot(&held, index, &offer))
         }) else {
             return 0;
         };
@@ -193,8 +191,8 @@ impl ResourceHandler<ItemResource> for GameItemItems {
             return 0;
         }
         let Some((Some(out), changed)) = self.0.stack(host).and_then(|held| {
-            host.backend(crate::mod_api::BackendToken(()))
-                .item_container_extract(&held, index, amount)
+            backend_of(&*host)
+                .and_then(|backend| backend.item_container_extract(&held, index, amount))
         }) else {
             return 0;
         };
@@ -245,9 +243,7 @@ impl ItemPlace {
             ItemPlace::Mod { provider, key } => {
                 super::place_provider(provider)?.1.stack(host, *key)
             }
-            _ => host
-                .backend_mut(crate::mod_api::BackendToken(()))
-                .game_stack(self),
+            _ => backend_mut_of(host).and_then(|backend| backend.game_stack(self)),
         }
         .filter(|stack| stack.count > 0)
     }
@@ -384,12 +380,12 @@ impl ItemPlace {
                 Ok(moved)
             }
             _ => Ok(match insert {
-                true => host
-                    .backend_mut(crate::mod_api::BackendToken(()))
-                    .game_insert(self, resource.to_stack(amount), tx),
-                false => host
-                    .backend_mut(crate::mod_api::BackendToken(()))
-                    .game_extract(self, resource.to_stack(amount), tx),
+                true => backend_mut_of(host).map_or(0, |backend| {
+                    backend.game_insert(self, resource.to_stack(amount), tx)
+                }),
+                false => backend_mut_of(host).map_or(0, |backend| {
+                    backend.game_extract(self, resource.to_stack(amount), tx)
+                }),
             }),
         });
         moved.unwrap_or(0)

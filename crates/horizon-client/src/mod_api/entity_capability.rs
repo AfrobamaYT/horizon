@@ -2,8 +2,8 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    BackendToken, Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace,
-    ItemResource, ProvidedBy, ResourceHandler, Tag, Transaction,
+    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource, ProvidedBy,
+    ResourceHandler, Tag, Transaction, backend_of,
 };
 use std::marker::PhantomData;
 
@@ -36,9 +36,7 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
         name: "horizon:entity_items",
         default: Some(|host, entity| {
             if entity.kind(host)? != "minecraft:player" {
-                let size = host
-                    .backend(BackendToken(()))
-                    .entity_container_size(entity.id())?;
+                let size = backend_of(host)?.entity_container_size(entity.id())?;
                 return Some(Box::new(ContainerItems { entity, size }));
             }
             let player = entity.uuid(host)?;
