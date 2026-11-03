@@ -160,6 +160,8 @@ pub(super) struct GuestSwap {
     selected: usize,
     mode: horizon_client::command::args::GameMode,
     creative: bool,
+    /// The abilities of the turn this one nests in.
+    abilities: Option<horizon_client::lan::abilities::PlayerAbilities>,
     /// The host's cached interaction ranges, restored after the guest turn.
     entity_reach: f64,
     block_reach: f64,
@@ -406,6 +408,8 @@ impl Game<'_> {
                 // LivingEntity.readAdditionalSaveData: the saved attributes.
                 let _ =
                     m.apply_saved_attributes(g.saved.as_ref().and_then(|t| t.get("attributes")));
+                // The abilities' walking speed is the movement speed's base.
+                let _ = m.set_walking_speed_base(g.abilities.walking_speed);
             }
             // ServerPlayer.restoreFrom: a body that follows another takes its
             // attributes (a scale of 0.1 stays 0.1 after a respawn or a trip
@@ -465,12 +469,13 @@ impl Game<'_> {
         motion.yaw = g.yaw;
         motion.pitch = g.pitch;
         motion.sprinting = g.sprinting;
-        motion.may_fly = g.creative() || g.game_mode == SPECTATOR;
-        motion.flying = g.flying;
-        motion.flying_speed = g.flying_speed;
+        let abilities = g.abilities;
+        motion.may_fly = abilities.may_fly;
+        motion.flying = abilities.flying;
+        motion.flying_speed = abilities.flying_speed;
         // FireworkRocketItem.use boosts only a gliding player.
         motion.fall_flying = g.fall_flying;
-        motion.invulnerable = motion.may_fly;
+        motion.invulnerable = abilities.invulnerable;
         // `ServerPlayer.isInvulnerableTo`'s connection term, as of now.
         motion.client_loaded = g.client_loaded();
         let _ = motion.set_health(g.health, false);
@@ -489,6 +494,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.carried, &mut g.carried);
         let selected = std::mem::replace(&mut self.selected, g.selected);
         let (mode, creative) = (self.mode, self.creative);
+        let outer_abilities = self.acting_abilities.replace(g.abilities);
         let (entity_reach, block_reach) = (self.entity_reach, self.block_reach);
         self.set_mode_raw(g.game_mode);
         let xp = std::mem::replace(
@@ -625,6 +631,7 @@ impl Game<'_> {
             selected,
             mode,
             creative,
+            abilities: outer_abilities,
             entity_reach,
             block_reach,
             permission,
@@ -727,6 +734,7 @@ impl Game<'_> {
             selected,
             mode,
             creative,
+            abilities: outer_abilities,
             entity_reach,
             block_reach,
             permission,
@@ -996,6 +1004,7 @@ impl Game<'_> {
         g.xp_progress = new_xp.progress;
         g.xp_total = new_xp.total;
         let new_mode = self.mode_id();
+        let turn_abilities = std::mem::replace(&mut self.acting_abilities, outer_abilities);
         self.mode = mode;
         self.creative = creative;
         self.entity_reach = entity_reach;
@@ -1084,6 +1093,15 @@ impl Game<'_> {
             let conn = g.conn;
             host.hub
                 .set_game_mode(conn, new_mode, &self.world, Some(self.collision));
+        }
+        // The turn's abilities: a mode change made in it set the flags first
+        // (`Game::set_mode`), then a mod's writes won, as in vanilla.
+        let g = &mut host.hub.guests[i];
+        if let Some(now) = turn_abilities
+            && now != g.abilities
+        {
+            g.abilities = now;
+            g.send(&g.abilities_packet());
         }
         // LivingEntity.checkTotemDeathProtection's entity event, to every
         // client around, the guest's own included; this window draws it too.
@@ -1762,12 +1780,8 @@ impl Game<'_> {
             return;
         }
         if let Some(g) = host.hub.guest_mut(conn) {
-            g.flying = !flying;
-            g.send(&C::PlayerAbilities(play::PlayerAbilities {
-                flags: g.ability_flags(),
-                flying_speed: 0.05,
-                walking_speed: 0.1,
-            }));
+            g.abilities.flying = !flying;
+            g.send(&g.abilities_packet());
         }
     }
 
@@ -4848,7 +4862,7 @@ impl Game<'_> {
     /// a glider that its next point of wear won't break.
     fn guest_can_glide(&mut self, host: &mut LanHost, conn: u32) -> Option<bool> {
         let g = host.hub.guest_mut(conn)?;
-        if g.flying || g.on_ground || g.vehicle.is_some() {
+        if g.abilities.flying || g.on_ground || g.vehicle.is_some() {
             return Some(false);
         }
         self.as_guest(host, conn, |game| {

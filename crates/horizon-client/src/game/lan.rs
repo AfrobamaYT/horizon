@@ -2475,7 +2475,7 @@ impl Game<'_> {
         }
     }
 
-    fn lan_guest_joined(
+    pub(super) fn lan_guest_joined(
         &mut self,
         host: &mut LanHost,
         conn: u32,
@@ -2506,6 +2506,8 @@ impl Game<'_> {
         playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
+            // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
+            g.abilities.update_for_mode(default_mode);
         }
         if !known {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
