@@ -31,7 +31,7 @@ pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
-pub use crate::menu::StackedOnOther;
+pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
@@ -79,6 +79,26 @@ pub struct NativeCamera {
     /// Reversed-Z projection matrix in column-major order.
     pub projection: [f32; 16],
     pub dimension: String,
+}
+
+/// Context and adjustable pose for a first-person hand render.
+///
+/// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
+/// The renderer applies the transform before the ordinary hand and item poses.
+pub struct NativeHandRender<'a> {
+    pub player: u128,
+    pub player_entity_id: i32,
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub interpolated_pitch: f32,
+    pub swing: f32,
+    pub equip: f32,
+    /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
+    pub packed_light: u32,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 3],
+    pub scale: f32,
 }
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
@@ -918,6 +938,49 @@ impl From<PlayerRef> for EntityRef {
     }
 }
 
+/// A player's game mode (vanilla's `GameType`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GameMode {
+    Survival,
+    Creative,
+    Adventure,
+    Spectator,
+}
+
+impl GameMode {
+    /// Every mode, in id order.
+    pub const ALL: [Self; 4] = [
+        Self::Survival,
+        Self::Creative,
+        Self::Adventure,
+        Self::Spectator,
+    ];
+    /// `GameType.getId`: 0 survival, 1 creative, 2 adventure, 3 spectator.
+    pub fn id(self) -> i32 {
+        match self {
+            Self::Survival => 0,
+            Self::Creative => 1,
+            Self::Adventure => 2,
+            Self::Spectator => 3,
+        }
+    }
+    /// The mode with `GameType` id `id`, or None for an id vanilla doesn't
+    /// have.
+    pub fn from_id(id: i32) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+    /// `GameType.getName`: `survival`, `creative`, `adventure`, `spectator`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Survival => "survival",
+            Self::Creative => "creative",
+            Self::Adventure => "adventure",
+            Self::Spectator => "spectator",
+        }
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
@@ -1095,6 +1158,24 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// The player responsible for a game rule change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GameRuleActor<'a> {
+    /// Player UUID.
+    pub uuid: u128,
+    /// Server entity ID.
+    pub entity_id: i32,
+    /// Player name.
+    pub name: &'a str,
+}
+
+/// How a criterion's advancement progress changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeProgressType {
+    Grant,
+    Revoke,
+}
+
 /// Read-only context for a tool modification.
 #[non_exhaustive]
 pub struct ToolUse {
@@ -1219,8 +1300,7 @@ pub enum Flow {
 pub struct BlockHit {
     /// The point clicked, in world coordinates (`getLocation`).
     pub point: [f64; 3],
-    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`), the same
-    /// as the event's `face`.
+    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`).
     pub face: [i32; 3],
     /// The ray started inside the block's shape (`isInside`).
     pub inside: bool,
@@ -1231,6 +1311,74 @@ impl BlockHit {
             point,
             face,
             inside,
+        }
+    }
+}
+
+/// A player's right click on a block, for `right_click_block`
+/// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
+/// `useItemOn` starts, on the clicking client and on the server.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeBlockClick<'a> {
+    /// The side running the click (`getSide`).
+    pub side: LogicalSide,
+    /// The clicking player's level (`getLevel`).
+    pub dimension: LevelDimension,
+    /// The block clicked (`getPos`).
+    pub pos: [i32; 3],
+    /// Where it was clicked (`getHitVec`); `hit.face` is `getFace`.
+    pub hit: BlockHit,
+    /// The hand clicking (`getHand`) and what it holds (`getItemStack`).
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    /// The clicking player's UUID and entity id (`getEntity`).
+    pub player: u128,
+    pub player_entity_id: i32,
+}
+
+/// Vanilla's `InteractionResult`, as a hook answers it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeInteractionResult {
+    /// `SUCCESS`: the action is used and the hand swings on the clicking
+    /// client (`SwingSource.PREDICTED`).
+    Success,
+    /// `SUCCESS_SERVER`: the action is used and the server swings the hand.
+    SuccessServer,
+    /// `CONSUME`: the action is used, with no swing.
+    Consume,
+    /// `FAIL`: nothing happens and the click ends.
+    Fail,
+    /// `PASS`: nothing happens and the click goes on.
+    #[default]
+    Pass,
+    /// `TRY_WITH_EMPTY_HAND`: passes, as `PASS` does here.
+    TryWithEmptyHand,
+}
+impl NativeInteractionResult {
+    /// `consumesAction`: the click is used up.
+    pub fn consumes_action(self) -> bool {
+        matches!(self, Self::Success | Self::SuccessServer | Self::Consume)
+    }
+}
+
+/// NeoForge's `TriState`: force a part of an action off or on, or leave it
+/// to vanilla.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeTriState {
+    False,
+    #[default]
+    Default,
+    True,
+}
+impl NativeTriState {
+    /// Whether the part runs, `vanilla` deciding for `Default`.
+    pub fn or(self, vanilla: bool) -> bool {
+        match self {
+            Self::False => false,
+            Self::Default => vanilla,
+            Self::True => true,
         }
     }
 }
@@ -1353,6 +1501,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    #[test]
+    fn game_modes_round_trip_through_their_ids() {
+        for mode in GameMode::ALL {
+            assert_eq!(GameMode::from_id(mode.id()), Some(mode));
+        }
+        assert_eq!(GameMode::from_id(-1), None);
+        assert_eq!(GameMode::from_id(4), None);
+        assert_eq!(GameMode::Adventure.name(), "adventure");
+    }
+
     struct Quiet;
     impl Hooks for Quiet {}
 
@@ -1363,15 +1521,19 @@ mod tests {
         }
     }
 
-    /// A double with the three `Host` methods the probe calls.
+    /// A double with the `Host` methods the probe calls.
     struct Reader {
         block: &'static str,
         lines: Vec<Text>,
     }
 
     impl Host for Reader {
-        fn block(&self, _pos: [i32; 3]) -> String {
-            self.block.to_string()
+        fn level(&self, dimension: &str) -> Option<LevelRef> {
+            (dimension == "minecraft:overworld")
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+        }
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {
@@ -1392,19 +1554,104 @@ mod tests {
         }
     }
 
+    #[test]
+    fn render_hand_chains_pose_until_cancelled() {
+        struct HandMod {
+            offset: f32,
+            cancel: bool,
+        }
+        impl Hooks for HandMod {
+            fn render_hand(&self, _host: &dyn Host, event: &mut RenderHandEvent<'_, '_>) -> Flow {
+                assert_eq!((event.render.player, event.render.player_entity_id), (7, 9));
+                event.render.translation[0] += self.offset;
+                if self.cancel {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(HandMod {
+                offset: 1.0,
+                cancel: false,
+            }),
+            Box::new(HandMod {
+                offset: 2.0,
+                cancel: true,
+            }),
+            Box::new(HandMod {
+                offset: 4.0,
+                cancel: false,
+            }),
+        ];
+        let host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut render = NativeHandRender {
+            player: 7,
+            player_entity_id: 9,
+            hand: Hand::Main,
+            stack: None,
+            partial: 0.5,
+            interpolated_pitch: 0.0,
+            swing: 0.0,
+            equip: 0.0,
+            packed_light: 0,
+            translation: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: 1.0,
+        };
+        let mut canceled = false;
+        dispatch_render_hand(&host, &mods, &mut render, &mut canceled);
+        assert!(canceled);
+        assert_eq!(render.translation, [3.0, 0.0, 0.0]);
+    }
+
     /// Claims a use on stone, after telling the player what the block is.
     struct Probe;
 
     impl Hooks for Probe {
         fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-            let block = host.block(event.pos);
             let player = host.acting_player().expect("a player acts");
+            let level = host.level(&player.dimension).expect("a loaded level");
+            let block = level.block(host, event.pos).expect("a loaded block");
             host.action_bar(player.uuid, Text::literal(block.clone()));
             if block == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue
             }
+        }
+    }
+
+    #[test]
+    fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
+        struct XpHook(bool);
+        impl Hooks for XpHook {
+            fn player_xp_change(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerXpChangeEvent<'_>,
+            ) -> Flow {
+                assert_eq!(
+                    (event.player, event.player_entity_id, event.name),
+                    (7, 42, "Probe")
+                );
+                event.amount = -5;
+                if self.0 { Flow::Cancel } else { Flow::Continue }
+            }
+        }
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for cancelled in [false, true] {
+            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let (mut amount, mut cancel) = (10, false);
+            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            assert_eq!((amount, cancel), (-5, cancelled));
         }
     }
 
@@ -1720,15 +1967,23 @@ mod tests {
         }
 
         fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
-            let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
-            if event.hand == Hand::Off
+            let click = event.click;
+            let top_half = click.hit.point[1] - f64::from(click.pos[1]) >= 0.5;
+            if click.hand == Hand::Off
                 && top_half
-                && event.player == 7
-                && event.player_entity_id == 41
-                && !event.hit.inside
+                && click.player == 7
+                && click.player_entity_id == 41
+                && !click.hit.inside
             {
+                *event.cancellation_result = NativeInteractionResult::Fail;
                 Flow::Cancel
             } else {
+                // A held stick never uses the block; an empty hand always does.
+                *event.use_block = if click.stack.is_some() {
+                    NativeTriState::False
+                } else {
+                    NativeTriState::True
+                };
                 Flow::Continue
             }
         }
@@ -1757,24 +2012,59 @@ mod tests {
         );
         assert!(!claimed);
         let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
-        for (hand, hit, expected) in [
-            (Hand::Off, top_hit(), true),
-            (Hand::Main, top_hit(), false),
-            (Hand::Off, low, false),
+        let held = stick();
+        for (hand, hit, stack, canceled, answer, use_block) in [
+            (
+                Hand::Off,
+                top_hit(),
+                None,
+                true,
+                NativeInteractionResult::Fail,
+                NativeTriState::Default,
+            ),
+            (
+                Hand::Main,
+                top_hit(),
+                Some(&held),
+                false,
+                NativeInteractionResult::Pass,
+                NativeTriState::False,
+            ),
+            (
+                Hand::Off,
+                low,
+                None,
+                false,
+                NativeInteractionResult::Pass,
+                NativeTriState::True,
+            ),
         ] {
-            let mut canceled = false;
+            let click = NativeBlockClick {
+                side: LogicalSide::Server,
+                dimension: LevelDimension::Overworld,
+                pos: [0; 3],
+                hit,
+                hand,
+                stack,
+                player: 7,
+                player_entity_id: 41,
+            };
+            let (mut block, mut item) = (NativeTriState::Default, NativeTriState::Default);
+            let (mut result, mut was_canceled) = (NativeInteractionResult::Pass, false);
             dispatch_right_click_block(
                 &mut host,
                 &mods,
-                [0; 3],
-                hit.face,
-                hand,
-                hit,
-                7,
-                41,
-                &mut canceled,
+                &click,
+                &mut block,
+                &mut item,
+                &mut result,
+                &mut was_canceled,
             );
-            assert_eq!(canceled, expected, "{hand:?} {hit:?}");
+            assert_eq!(
+                (was_canceled, result, block, item),
+                (canceled, answer, use_block, NativeTriState::Default),
+                "{hand:?} {hit:?}"
+            );
         }
     }
 
@@ -1900,6 +2190,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn game_rule_change_reports_optional_actor() {
+        struct ActorRecorder(Arc<Mutex<Vec<Option<(u128, i32, String)>>>>);
+        impl Hooks for ActorRecorder {
+            fn game_rule_changed(&self, _: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+                self.0.lock().unwrap().push(
+                    event
+                        .actor
+                        .map(|actor| (actor.uuid, actor.entity_id, actor.name.to_owned())),
+                );
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let actor = GameRuleActor {
+            uuid: 123,
+            entity_id: 42,
+            name: "Alex",
+        };
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(true),
+            Some(&actor),
+        );
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(false),
+            None,
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [Some((123, 42, "Alex".into())), None]
+        );
+    }
+
     /// `GameRuleChangedEvent` as the server's setters fire it: only for a
     /// rule `GameRules.set` took, with its id and new value, to every mod.
     #[test]
@@ -1917,7 +2250,13 @@ mod tests {
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
-                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+                dispatch_game_rule_changed(
+                    &mut host,
+                    &mods,
+                    &["minecraft:", name].concat(),
+                    value,
+                    None,
+                );
             }
         };
         set("keep_inventory", GameRuleValue::Bool(true));

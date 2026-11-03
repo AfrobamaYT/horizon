@@ -2,37 +2,37 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "entity_vehicle",
+      "name": "entity_vehicle", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_vehicle",
       "receiver": "entity"
     },
     {
-      "name": "entity_is_passenger",
+      "name": "entity_is_passenger", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_is_passenger",
       "receiver": "entity"
     },
     {
-      "name": "entity_root_vehicle",
+      "name": "entity_root_vehicle", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_root_vehicle",
       "receiver": "entity"
     },
     {
-      "name": "entity_passengers",
+      "name": "entity_passengers", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_passengers",
       "receiver": "entity"
     },
     {
-      "name": "entity_is_vehicle",
+      "name": "entity_is_vehicle", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_is_vehicle",
       "receiver": "entity"
     },
     {
-      "name": "entity_stop_riding",
+      "name": "entity_stop_riding", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_stop_riding",
       "receiver": "entity"
     },
     {
-      "name": "entity_eject_passengers",
+      "name": "entity_eject_passengers", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_eject_passengers",
       "receiver": "entity"
     }
