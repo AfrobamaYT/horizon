@@ -26,7 +26,7 @@ once no loaded mod overrides it. Vanilla properties do not enter the hook.
 ```rust,ignore
 fn item_model_property(
     &self,
-    _host: &dyn Host,
+    _host: &dyn ClientHost,
     event: &mut ItemModelPropertyEvent<'_>,
 ) {
     if event.property == "example:charged" {
@@ -36,7 +36,7 @@ fn item_model_property(
 }
 ```
 
-`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
@@ -126,6 +126,8 @@ the catalog, not a global API number, source comments or documentation histories
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
   `native_block_entity_tick`): made when the block is placed, ticked on the server and saved with the chunk.
+  `entity.id()` reads its type identity, fixed at construction; mutable events give a `ModBlockEntityView` whose
+  payload contains `nbt`, `items` and `data`. A mod cannot replace the view or access its private entity handle.
 
 - Item slots for those block entities (`native_block_entity_container`): hoppers, comparators and breaking the
   block use them as they use vanilla's containers, and `native_block_entity_tick` also gets the slots.
@@ -948,6 +950,81 @@ there is no per-particle code hook.
 - Biome colours for client mods, for seasons: `native_biome_colors(biome, colors)` changes a biome's grass, foliage, dry
   foliage and water tints, asked for every biome when a mod calls `native_refresh_biome_colors()`, which rebuilds the
   loaded terrain with them.
+
+### Server data reload listeners
+
+Trait mods implement `Hooks::add_server_reload_listeners` (server only), the counterpart of
+NeoForge 26.3's `AddServerReloadListenersEvent`. Registration runs on world open, `/reload`
+and `/datapack` changes, after pack selection. The `&dyn Host` beside the event gives registry
+access at registration, as `AddServerReloadListenersEvent.getRegistryAccess` does. Register an
+`Arc<impl ServerReloadListener>`
+with a unique `Identifier` and `FileToIdConverter::json("machines")`, or `::new("machines", ".bin")`
+for another suffix. The listener's `ServerReloadContext` lists converted IDs and reads their
+bytes from `data/*/machines/`, including a mod's packaged files and later selected datapack
+overrides. A file `data/other/machines/heavy/press.json` becomes `other:heavy/press`: the directory
+and extension are removed, subdirectories preserved, and all namespaces included. It cannot
+read assets, other directories, or filesystem paths. Converter directories have no leading or
+trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view fields are private.
+
+The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
+`SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
+changing live state and returns `ServerReloadApply::new(move || { /* publish parsed state */ })`.
+All listeners prepare before **any** apply runs. Do not read another listener's new published
+state in prepare: dependencies order both phases but do not remove this barrier. Publication
+cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
+parses its files logs and skips one that will not parse, carrying the rest through. Returning
+`Err` from `prepare` — like any preparation, registration or ordering error — aborts the whole
+reload: all pending applies are dropped and the old mod data and vanilla function library are
+kept. The error names the namespaced listener and, for file errors, resource ID; world open
+fails, and `/reload` reports the failure. A failed `/datapack` change also preserves the
+selected packs on disk.
+
+`event.listeners.add_dependency(first, second)` orders named listeners. Both names must
+already be registered; unknown names fail immediately, and cycles fail after registration.
+`VanillaServerListeners::functions()` names Horizon's function-library listener; `first()` and
+`last()` are ordering boundaries. These anchors and dependency ends use `Identifier`. Mod
+listeners run after vanilla by default, in registration order; an explicit dependency before
+`functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
+`get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
+objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
+context or retained-listener lookup here.
+
+```rust,ignore
+use std::sync::{Arc, RwLock};
+use horizon_client::mod_api::{
+    AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier, ServerReloadApply,
+    ServerReloadContext, ServerReloadError, ServerReloadListener,
+};
+
+struct MachineData(Arc<RwLock<serde_json::Value>>);
+impl ServerReloadListener for MachineData {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+        let id = Identifier::parse("my_mod:press").unwrap();
+        let next = match context.read(&id) {
+            Some(bytes) => serde_json::from_slice(bytes)
+                .map_err(|error| ServerReloadError::new(id, error))?,
+            None => serde_json::Value::Null,
+        };
+        let live = self.0.clone();
+        Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
+    }
+}
+struct MyMod(Arc<MachineData>);
+impl Hooks for MyMod {
+    fn add_server_reload_listeners(&self, _host: &dyn Host, event: &mut AddServerReloadListenersEvent<'_>) {
+        event.listeners.add_listener(
+            Identifier::parse("my_mod:machines").unwrap(),
+            FileToIdConverter::json("machines").unwrap(),
+            self.0.clone(),
+        ).unwrap();
+    }
+}
+```
+
+Reload work only: graph ordering, listing selected files, reading the winning bytes and one
+boxed apply closure per listener. No new work or filesystem reads run on the tick path.
+The existing post-success server-data notice below is a different moment, not a second
+reload registration path.
 
 - `native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it.
 
@@ -2381,6 +2458,17 @@ client, so a call a tick looks smooth.
 several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
 a dimension.
 
+An entity held out of storage while it is changed refuses handle reads and writes: reads return `None` and writes return
+`false`. This includes cart and ridden-cart ticks, boat ticks (including ridden-boat leash ticks), and a copper golem turning into a
+statue. A block entity also refuses its handle while it is being ticked. Tick hooks before and after that work can use
+the handle normally.
+
+The client also owns a world epoch, separate from the server's. It begins when a play login creates the
+client level, changes when a dimension change or later login replaces that level, and retires after the
+client logout hook or when reconfiguration clears the level. A same-level respawn keeps the epoch.
+Client epochs do not fire server world lifecycle or server tick hooks. This bookkeeping does not make
+the server entity and level reads available on a client.
+
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
 - `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
@@ -3252,7 +3340,7 @@ move undone, in its transaction, and is warned once naming the mod, and `move_re
 neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
 panic the game.
 
-`host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
+On a `ServerHost`, import `HostTransaction` to call `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`). It runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
 what every handler and place write takes, so none happens outside one. Inside, a capability write applies at once, so later steps see it,
 and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
@@ -3310,14 +3398,15 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{Hooks, Host, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
 impl Host for HostDouble {}
+impl ServerHost for HostDouble {}
 struct Counter(Arc<AtomicUsize>);
 impl Hooks for Counter {
-    fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
+    fn tick(&self, _: &mut dyn ServerHost, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -3385,7 +3474,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
     sync: false,
 };
-// Inside a server hook, or mixin code, with `host: &mut dyn Host`:
+// Inside a server hook, or mixin code, with `host: &mut dyn ServerHost`:
 if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
@@ -3476,11 +3565,13 @@ The `native_camera()` helper returns the most recently extracted world frame's c
 
 `ClientHost::crosshair_target()` returns the ordinary interaction-range target as
 `NativeCrosshairTarget::Block { pos, state, hit }` or
-`NativeCrosshairTarget::Entity { id, point }`. The block hit contains its world-space
+`NativeCrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
 It uses the game's current targeting ray and block/entity reach, respects blocks
 occluding entities, and returns `None` on a miss or without a client world.
-It can be read with a screen open. The entity id is a network id in the current
-world, including dragon-part ids, not a persistent handle; use the planned client
-handles for entity data. Unlike `view_hit` and `raycast`, this does not find blocks
+It can be read with a screen open. `entity` is an `EntityRef` carrying the current
+client level's epoch and network entity ID, including dragon parts. It becomes stale
+when the client level is replaced or the client disconnects; a same-level respawn
+keeps its epoch. This supplies identity, not client entity reads: the server-only
+entity data methods still reject client handles. Unlike `view_hit` and `raycast`, this does not find blocks
 in distant terrain or return a block behind a targeted entity.
