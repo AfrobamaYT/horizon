@@ -115,13 +115,13 @@ impl Game<'_> {
         }
         let back = self.dim;
         for (dim, head) in std::mem::take(&mut self.player_beds) {
-            self.enter_level(None, dim)?;
+            self.enter_level(dim)?;
             // A client holds no other levels (`enter_level`).
             if self.dim == dim {
                 self.set_bed_occupied(head, false);
             }
         }
-        self.enter_level(None, back)
+        self.enter_level(back)
     }
 }
 
