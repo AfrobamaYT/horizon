@@ -5649,9 +5649,9 @@ mod tests {
                     .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
                 let state = |name| game.pack.assets.registry.default_state(name).unwrap();
                 let stone = state("minecraft:stone");
-                let pot = state("minecraft:potted_dandelion");
+                let crop = state("minecraft:wheat");
                 game.world.set(0, 64, 0, stone).unwrap();
-                game.world.set(1, 64, 0, pot).unwrap();
+                game.world.set(1, 64, 0, crop).unwrap();
                 assert_eq!(
                     &*game.picked_stack([0, 64, 0], true).unwrap().item,
                     "minecraft:diamond"
@@ -5662,7 +5662,7 @@ mod tests {
                 );
                 assert_eq!(
                     &*game.picked_stack([1, 64, 0], true).unwrap().item,
-                    "minecraft:dandelion"
+                    "minecraft:wheat_seeds"
                 );
                 assert_eq!(*seen.lock().unwrap(), [true, false]);
 
