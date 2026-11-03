@@ -165,8 +165,6 @@
 //!
 //! API 278 adds A server player selected a stonecutter recipe (`native_player_stonecutter_recipe_select`).
 //!
-//! API 277 adds A server player's respawn point about to change, cancellable (`native_player_spawn_point_set`).
-//!
 //! API 276 adds A player's shield was disabled by a blocked hit (`native_player_shield_disable`).
 //!
 //! API 275 adds A player about to shear a mob, cancellable (`native_player_shear_entity`).
@@ -685,8 +683,6 @@
 //!
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
-//!
-//! API 51 adds `native_menu_button_v2`: a mod container's menu button with the clicking player's cursor stack (`clickMenuButton(Player, int)`).
 //!
 //! API 50 adds damage a mod can change or cancel (`native_living_incoming_damage`).
 //!
@@ -2539,12 +2535,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_health_hud(self, mod_api::mods(), inputs, wi, hi, draws);
     }
-    /// A key or mouse button went down or up, by its vanilla name
-    /// (`key.keyboard.z`, `key.mouse.left`): keys on any screen (check
-    /// `native_playing`), mouse buttons while playing. Repeats are left out.
-    pub(super) fn native_key(&mut self, key: &str, pressed: bool) {
-        mod_api::dispatch_key(self, mod_api::mods(), key, pressed);
-    }
     /// A real window key event after handling, including repeats and consumed shortcuts.
     /// Receives the original physical/logical key, text, location, state and repeat flag.
     /// Modifier bits use the screen hooks' GLFW encoding. Not cancellable.
@@ -3413,13 +3403,13 @@ impl Game<'_> {
     }
     /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
     /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
-    /// vanilla's name for the key (`key.keyboard.e`, the name `native_key`
-    /// hands over) — a key with no name fires nothing — `repeat` whether it is
+    /// vanilla's name for the key (`key.keyboard.e`) — a key with no name
+    /// fires nothing — `repeat` whether it is
     /// the keyboard's auto-repeat of a held press (Horizon's extra; NeoForge
     /// folds repeats into the event), and `modifiers` GLFW's bits (shift 1,
     /// control 2, alt 4, super 8). Set `canceled` and the press goes no
     /// further: no focus move, no Escape-close, no inventory or hotbar key, no
-    /// typing by the key itself, no `native_key`.
+    /// typing by the key itself.
     ///
     /// It fires for the window's presses and their repeats, and for the
     /// control socket's `key` (a release fires nothing), after the window's
@@ -3430,9 +3420,8 @@ impl Game<'_> {
     /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
-    /// game's own. A cancelled press's release still runs, so a `native_key`
-    /// listener sees that release without its press, and its characters are
-    /// GLFW's separate char callback and still come; see
+    /// game's own. A cancelled press's release still runs, and its characters
+    /// are GLFW's separate char callback and still come; see
     /// `native_screen_char_typed_pre`.
     /// API 104.
     pub(super) fn native_screen_key_pressed_pre(
@@ -3728,31 +3717,16 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_tooltip(self, mod_api::mods(), block, data, at, lines);
     }
-    /// A player pressed menu button `id` on the menu of the mod block entity
-    /// at `pos` (`AbstractContainerMenu.clickMenuButton`), on the server:
-    /// change `entity` when its id is yours. It is out of the world during
-    /// the call, as in `native_block_entity_tick`. API 20.
+    /// A player pressed a mod container's button (`clickMenuButton`), on
+    /// the server. The block entity is out of the world during the call;
+    /// mods may change it and the clicking player's carried stack.
     pub(super) fn native_menu_button(
         &mut self,
-        pos: [i32; 3],
+        context: &horizon_client::menu::MenuButtonContext,
         entity: &mut ModBlockEntity,
-        id: i32,
-    ) {
-        mod_api::dispatch_menu_button(self, mod_api::mods(), pos, entity, id);
-    }
-    /// `AbstractContainerMenu.clickMenuButton(Player, int)`'s other half:
-    /// the acting player's cursor stack, `getCarried()`/`setCarried()`,
-    /// which `native_menu_button` cannot reach. Fires right after it, same
-    /// moment, same `pos`/`entity`/`id`; change `carried` when its id is
-    /// yours. On the server. API 51.
-    pub(super) fn native_menu_button_v2(
-        &mut self,
-        pos: [i32; 3],
-        entity: &mut ModBlockEntity,
-        id: i32,
         carried: &mut Option<ItemStack>,
     ) {
-        mod_api::dispatch_menu_button_v2(self, mod_api::mods(), pos, entity, id, carried);
+        mod_api::dispatch_menu_button(self, mod_api::mods(), context, entity, carried);
     }
     /// A player shift-clicked slot `slot` of the menu of the mod block
     /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
@@ -4748,29 +4722,34 @@ impl Game<'_> {
             cancel,
         );
     }
-    /// A server player's respawn point is about to change. `cause` is `bed`,
-    /// `respawn_anchor`, `command` or `death_reset`; `pos` is its block
-    /// position. The player's state is not swapped in, so helpers that look
-    /// them up through `self.lan` may find nothing while a guest packet is
-    /// handled. Set `cancel` to keep the old point. Server-side.
-    /// 277.
-    pub(super) fn native_player_spawn_point_set(
+    /// NeoForge's `PlayerSetSpawnEvent`: a server player's respawn point is about to be
+    /// set (`ServerPlayer.setRespawnPosition`), once for each call vanilla makes: every sleep
+    /// in a bed (the same bed too, which refreshes its angle), an anchor that is a new
+    /// point, `/spawnpoint`, and the copy to the new player when a player respawns and their
+    /// respawn block was found (`pos` is none for a player with no point). A respawn block
+    /// that is gone makes no call. `pos` is the block position and `dimension` its level;
+    /// `forced` is `/spawnpoint`'s flag. Set `cancel` and the point stays as it was (the
+    /// respawned player is left with none). `player_entity_id` is the server's entity id for
+    /// the player. Server-side.
+    pub(super) fn native_player_set_spawn(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         dimension: &str,
-        pos: [i32; 3],
-        cause: &str,
+        pos: Option<[i32; 3]>,
+        forced: bool,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_player_spawn_point_set(
+        mod_api::dispatch_player_set_spawn(
             self,
             mod_api::mods(),
             player,
+            player_entity_id,
             name,
             dimension,
             pos,
-            cause,
+            forced,
             cancel,
         );
     }
@@ -8210,6 +8189,32 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
+    /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
+    /// `death_protection` item `item` in its `hand` (main or off;
+    /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
+    /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
+    /// source that bypasses invulnerability never reaches it. `native_player_totem` still
+    /// hears a server player's totem that did save them, after this. No `self`, as
+    /// `native_living_shield_block`: the game is in the middle of the hit.
+    pub(super) fn native_living_use_totem(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        hand: Hand,
+        item: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_use_totem(
+            mod_api::mods(),
+            entity,
+            kind,
+            source,
+            hand,
+            item,
+            cancel,
+        );
+    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -8398,6 +8403,26 @@ impl Game<'_> {
             damage,
         );
     }
+}
+
+/// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
+/// canceled the totem. The entity and the source are named as the damage hook names them.
+pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
+    if mod_api::mods().is_empty() {
+        return false;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    let hand = if off_hand { Hand::Off } else { Hand::Main };
+    let mut cancel = false;
+    Game::native_living_use_totem(
+        entity,
+        kind,
+        &source,
+        hand,
+        "minecraft:totem_of_undying",
+        &mut cancel,
+    );
+    cancel
 }
 
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
@@ -10523,7 +10548,12 @@ impl Game<'_> {
     }
     /// Menu button `id` on the mod container at `pos` (`clickMenuButton`),
     /// with the acting player's cursor stack (`carried`, read and written).
-    pub(super) fn mod_menu_button(&mut self, pos: Pos, id: i32, carried: &mut Option<ItemStack>) {
+    pub(super) fn mod_menu_button(
+        &mut self,
+        context: horizon_client::menu::MenuButtonContext,
+        carried: &mut Option<ItemStack>,
+    ) {
+        let pos = (context.pos[0], context.pos[1], context.pos[2]);
         if self.mod_menu_at(pos).is_none() {
             return;
         }
@@ -10535,8 +10565,7 @@ impl Game<'_> {
         }
         let mut taken = std::mem::take(&mut **m);
         let items = taken.items.clone();
-        self.native_menu_button([pos.0, pos.1, pos.2], &mut taken, id);
-        self.native_menu_button_v2([pos.0, pos.1, pos.2], &mut taken, id, carried);
+        self.native_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
     /// The cursor from the open mod screen's top left, with its block and
@@ -10645,16 +10674,13 @@ impl Game<'_> {
             page.buttons = buttons;
         }
     }
-    /// A key event for `native_key`.
-    pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
-        if repeat {
-            return;
-        }
-        if let Some(name) = keybinds::key_name(key) {
-            if pressed {
-                self.native_panel_key(name);
-            }
-            self.native_key(name, pressed);
+    /// Deliver a non-repeat key press to the native panel.
+    pub(super) fn native_panel_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
+        if pressed
+            && !repeat
+            && let Some(name) = keybinds::key_name(key)
+        {
+            self.native_panel_key(name);
         }
     }
     /// `ClientHooks.onClickInput`: tells `native_interaction_key` that `button`
@@ -10673,11 +10699,6 @@ impl Game<'_> {
         let (mut swing_hand, mut canceled) = (true, false);
         self.native_interaction_key(button, key_mapping, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
-    }
-    /// A mouse button while playing, for `native_key`.
-    pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
-        let name = keybinds::mouse_name(button);
-        self.native_key(&name, pressed);
     }
     /// A native mod's command.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {
