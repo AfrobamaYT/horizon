@@ -932,12 +932,13 @@ mod tests {
 
     /// Three shelf slots at (2, 64, 0), answered by the game's handler, else by `Liar`. A slot
     /// takes up to `limit` of one item, the `output` slot none, and gives at most one item per
-    /// extract; with `one_per_insert`, it takes at most one per insert too.
+    /// extract, unless `whole_extract`; with `one_per_insert`, it takes at most one per insert.
     struct Shelf {
         slots: [Option<ItemStack>; 3],
         limit: u32,
         output: Option<usize>,
         one_per_insert: bool,
+        whole_extract: bool,
         liar: bool,
         dropped: Vec<ItemStack>,
     }
@@ -947,6 +948,7 @@ mod tests {
             limit: 64,
             output: None,
             one_per_insert: false,
+            whole_extract: false,
             liar: false,
             dropped: Vec::new(),
         }
@@ -1025,16 +1027,17 @@ mod tests {
             _: [i32; 3],
             _: Option<Direction>,
             slot: usize,
-            _: u32,
+            max: u32,
             simulate: bool,
         ) -> Option<ItemStack> {
+            let most = if self.whole_extract { max } else { 1 };
             let held = self.slots.get_mut(slot)?.as_mut()?;
             let out = ItemStack {
-                count: 1,
+                count: most.min(held.count),
                 ..held.clone()
             };
             if !simulate {
-                held.count -= 1;
+                held.count -= out.count;
                 if held.count == 0 {
                     self.slots[slot] = None;
                 }
@@ -1481,17 +1484,19 @@ mod tests {
     fn a_truthful_handler_short_of_room_refuses_a_swap_cleanly() {
         game_thread();
         // A slot of 64 that takes one item per insert: its capacity, a hint, says 2 bread fit,
-        // but once the apple is out, the empty slot takes one. The apple goes back.
-        let apple = || Some(stack("minecraft:apple", 1, 0));
-        let mut shelf_ = shelf([apple(), None, None]);
+        // but once the 3 apples are out, the empty slot takes one per insert. The apples go
+        // back in passes, one each, and none is dropped.
+        let apples = || Some(stack("minecraft:apple", 3, 0));
+        let mut shelf_ = shelf([apples(), None, None]);
         shelf_.one_per_insert = true;
+        shelf_.whole_extract = true;
         let host: &mut dyn Host = &mut shelf_;
-        let bread = stack("minecraft:bread", 2, 0);
+        let bread = |count| stack("minecraft:bread", count, 0);
         assert_eq!(
-            host.set_place_stack(&shelf_slot(0), bread.clone(), false, false),
-            Some(bread)
+            host.set_place_stack(&shelf_slot(0), bread(2), false, false),
+            Some(bread(2))
         );
-        assert_eq!(shelf_.slots, [apple(), None, None]);
+        assert_eq!(shelf_.slots, [apples(), None, None]);
         assert!(shelf_.dropped.is_empty());
         assert!(!super::super::item_place::warned_about("the game"));
     }

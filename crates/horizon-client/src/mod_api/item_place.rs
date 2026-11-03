@@ -258,6 +258,20 @@ impl Container<'_> {
             Self::Item(h, at) => h.extract(host, at, slot, max, simulate),
         }
     }
+    /// Inserts `stack` into `slot` for real, in passes until one takes nothing, as
+    /// `Inventory.add` and NeoForge's insert loops do: a handler may take less per call than
+    /// it holds. What is left.
+    fn insert_all(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) -> Option<ItemStack> {
+        let mut left = stack;
+        loop {
+            let count = left.count;
+            match self.insert(host, slot, left, false) {
+                Some(rest) if rest.count >= count => return Some(rest),
+                Some(rest) if rest.count > 0 => left = rest,
+                _ => return None,
+            }
+        }
+    }
     fn capacity(&self, host: &mut dyn Host, slot: usize, stack: &ItemStack) -> u32 {
         match self {
             Self::Block(h, pos, side) => h.capacity(host, *pos, *side, slot, stack),
@@ -273,7 +287,7 @@ impl Container<'_> {
     /// nothing moved. With `one_by_one`, from a stack of more than one, one item comes out and
     /// `stack` goes into the other slots (`ItemAccess.forHandlerIndex`). With `simulate`, only
     /// the plan. All or nothing, while the handler's real calls answer as its simulations did
-    /// (`broken` when they don't).
+    /// (`broken` when they don't). Real inserts go in passes (`insert_all`).
     fn set(
         &self,
         host: &mut dyn Host,
@@ -306,9 +320,7 @@ impl Container<'_> {
                     count,
                     ..stack.clone()
                 };
-                left += self
-                    .insert(host, to, some, false)
-                    .map_or(0, |rest| rest.count);
+                left += self.insert_all(host, to, some).map_or(0, |rest| rest.count);
             }
             let left = (left > 0).then_some(ItemStack {
                 count: left,
@@ -344,13 +356,11 @@ impl Container<'_> {
                 self.broken(host, place, slot, out);
                 return false;
             }
-            // Emptied, the slot answers for itself. Short of room, the old stack goes back, as
-            // its simulation says it can, and the write is refused cleanly.
+            // Emptied, the slot answers for itself. Short of room, the old stack goes back, in
+            // passes, and the write is refused cleanly; only what the slot then won't take
+            // back is `broken`.
             if stack.count > 0 && self.insert(host, slot, stack.clone(), true).is_some() {
-                let rest = match self.insert(host, slot, old.clone(), true) {
-                    None => self.insert(host, slot, old.clone(), false),
-                    Some(_) => Some(old.clone()),
-                };
+                let rest = self.insert_all(host, slot, old.clone());
                 if rest.is_some() {
                     self.broken(host, place, slot, rest);
                 }
@@ -360,7 +370,7 @@ impl Container<'_> {
         if stack.count == 0 {
             return true;
         }
-        match self.insert(host, slot, stack.clone(), false) {
+        match self.insert_all(host, slot, stack.clone()) {
             None => true,
             // Nothing went in: the old stack goes back, and the write is refused.
             Some(rest) if rest.count >= stack.count => {
@@ -427,7 +437,7 @@ impl Container<'_> {
         let Self::Block(_, pos, _) = self else {
             return false;
         };
-        if let Some(rest) = loose.and_then(|loose| self.insert(host, slot, loose, false)) {
+        if let Some(rest) = loose.and_then(|loose| self.insert_all(host, slot, loose)) {
             host.drop_at(*pos, rest);
         }
         true
