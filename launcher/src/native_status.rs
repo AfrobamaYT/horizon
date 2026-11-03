@@ -244,7 +244,7 @@ mod tests {
             let source = format!("[mod]\nid = \"{id}\"\nversion = \"1.2\"\n[compatibility]\nhorizon_revision = \"{pin}\"\n");
             for (name, bytes) in [
                 ("horizon-native.json".into(), manifest.to_string()),
-                (format!("mixins/{id}/horizon-mixin.toml"), source),
+                (format!("native/horizon-mixin.toml"), source),
             ] {
                 zip.start_file(name, zip::write::SimpleFileOptions::default())
                     .unwrap();
