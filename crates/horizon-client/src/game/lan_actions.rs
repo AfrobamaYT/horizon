@@ -6515,7 +6515,7 @@ mod tests {
                     assert!(game.use_hand(Some(&replaced_hit)).unwrap());
                     assert_eq!(
                         game.swings_started - before,
-                        u64::from(answer != Answer::Consume)
+                        u32::from(answer != Answer::Consume)
                     );
                     assert_eq!(game.world.block(8, 64, 4), floor_lever);
                     assert_eq!(user.empty_clicks.lock().unwrap().len(), calls + 1);
