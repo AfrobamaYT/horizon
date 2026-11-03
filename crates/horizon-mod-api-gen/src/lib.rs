@@ -1784,12 +1784,15 @@ mod tests {
             Some(("horizon-client", "menu::native_menu_slot_rules".to_owned()))
         );
         assert_eq!(
-            super::free_function_source("horizon_client_lib::breathing::native_breathe"),
-            Some(("horizon-client", "breathing::native_breathe".to_owned()))
+            super::free_function_source("horizon_client_lib::breathing::native_living_breathe"),
+            Some((
+                "horizon-client",
+                "breathing::native_living_breathe".to_owned()
+            ))
         );
         for target in [
             "horizon_client::menu::native_menu_slot_rules",
-            "horizon_client::breathing::native_breathe",
+            "horizon_client::breathing::native_living_breathe",
         ] {
             assert_eq!(super::free_function_source(target), None);
         }
