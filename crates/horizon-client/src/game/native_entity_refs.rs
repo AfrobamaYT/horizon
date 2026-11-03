@@ -10,7 +10,7 @@ use super::{
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
 };
-use horizon_client::mod_api::{EntityRef, LevelRef, NativeBlockUpdateFlags};
+use horizon_client::mod_api::{EntityRef, LevelRef, NativeBlockShapeKind, NativeBlockUpdateFlags};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
@@ -172,6 +172,43 @@ impl Game<'_> {
             && self.world.loaded(pos[0], pos[2])
             && (self.world.layout().min_y()..self.world.layout().max_y()).contains(&pos[1])
     }
+    /// Block-local outline or collision boxes with an empty context. Interaction,
+    /// visual, occlusion and support shapes are not exposed. Returns None on a
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
+    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// API @API:level_shapes@.
+    pub(super) fn native_level_block_shape(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(level.epoch()) {
+            return None;
+        }
+        let (world, anims) = if self.dim.id() == level.dimension() {
+            (&self.world, &self.be_anims)
+        } else {
+            let dim = self
+                .levels
+                .parked_dims()
+                .into_iter()
+                .find(|dim| dim.id() == level.dimension())?;
+            (
+                self.levels.parked_world(dim)?,
+                self.levels.parked_anims(dim)?,
+            )
+        };
+        Some(match kind {
+            NativeBlockShapeKind::Outline => self
+                .outline_boxes_in_context(world, anims, pos, false)
+                .into_iter()
+                .map(|b| std::array::from_fn(|i| b[i] - f64::from(pos[i % 3])))
+                .collect(),
+            NativeBlockShapeKind::Collision => self.native_block_collision_in(world, pos),
+        })
+    }
+
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
@@ -287,6 +324,159 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_shapes_use_empty_context() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{NativeAuthority, NativeBlockShapeKind},
+        };
+        use std::{sync::Arc, time::Instant};
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.native_lifecycle
+            .begin_open(NativeAuthority::IntegratedServer);
+        let level = game.native_level("minecraft:overworld").unwrap();
+        assert!(
+            game.enter_command_level(super::super::Dim::Nether)
+                .is_some()
+        );
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.set(0, 64, 0, stone).unwrap();
+        assert!(
+            game.enter_command_level(super::super::Dim::Overworld)
+                .is_some()
+        );
+        let nether = game.native_level("minecraft:the_nether").unwrap();
+        let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
+        assert_eq!(
+            game.native_level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Outline),
+            Some(cube.clone())
+        );
+        assert_eq!(
+            game.native_level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Collision),
+            Some(cube)
+        );
+        let shape = |game: &mut Game<'_>, name: &str, kind| {
+            let state = game.pack.assets.registry.default_state(name).unwrap();
+            game.world.set(0, 64, 0, state).unwrap();
+            game.native_level_block_shape(level, [0, 64, 0], kind)
+                .unwrap()
+        };
+        game.inventory[game.selected] = Some(horizon_client::items::ItemStack {
+            item: "minecraft:light".into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        });
+        assert!(shape(&mut game, "minecraft:light", NativeBlockShapeKind::Outline).is_empty());
+        assert_eq!(
+            game.outline_boxes([0, 64, 0]),
+            vec![[0.0, 64.0, 0.0, 1.0, 65.0, 1.0]]
+        );
+        game.inventory[game.selected].as_mut().unwrap().item = "minecraft:scaffolding".into();
+        let scaffolding = shape(
+            &mut game,
+            "minecraft:scaffolding",
+            NativeBlockShapeKind::Outline,
+        );
+        assert!(!scaffolding.is_empty());
+        assert_ne!(scaffolding, vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]);
+        assert_eq!(
+            game.outline_boxes([0, 64, 0]),
+            vec![[0.0, 64.0, 0.0, 1.0, 65.0, 1.0]]
+        );
+        assert_eq!(
+            shape(
+                &mut game,
+                "minecraft:stone_slab",
+                NativeBlockShapeKind::Outline
+            ),
+            vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]
+        );
+        assert_eq!(
+            shape(
+                &mut game,
+                "minecraft:stone_slab",
+                NativeBlockShapeKind::Collision
+            ),
+            vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]]
+        );
+        let contains = |boxes: &[[f64; 6]], p: [f64; 3]| {
+            boxes
+                .iter()
+                .any(|b| (0..3).all(|i| b[i] < p[i] && p[i] < b[i + 3]))
+        };
+        let stair = shape(
+            &mut game,
+            "minecraft:oak_stairs",
+            NativeBlockShapeKind::Outline,
+        );
+        assert!(contains(&stair, [0.25, 0.25, 0.25]));
+        let upper = [
+            [0.25, 0.75, 0.25],
+            [0.75, 0.75, 0.25],
+            [0.25, 0.75, 0.75],
+            [0.75, 0.75, 0.75],
+        ];
+        assert_eq!(
+            upper.into_iter().filter(|p| contains(&stair, *p)).count(),
+            2
+        );
+        let fence = shape(
+            &mut game,
+            "minecraft:oak_fence",
+            NativeBlockShapeKind::Outline,
+        );
+        assert!(contains(&fence, [0.5, 0.5, 0.5]));
+        assert!(!contains(&fence, [0.1, 0.5, 0.1]));
+        let lectern = shape(
+            &mut game,
+            "minecraft:lectern",
+            NativeBlockShapeKind::Collision,
+        );
+        assert!(contains(&lectern, [0.5, 0.5, 0.5]));
+        assert!(!contains(&lectern, [0.1, 0.5, 0.1]));
     }
 
     #[test]

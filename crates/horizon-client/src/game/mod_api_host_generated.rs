@@ -557,6 +557,14 @@ impl Host for super::Game<'_> {
     ) -> Option<Vec<EntityRef>> {
         self.native_level_entities_in(level, min, max)
     }
+    fn level_block_shape(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        self.native_level_block_shape(level, pos, kind)
+    }
     fn living(&self, entity: EntityRef) -> Option<LivingRef> {
         self.native_living(entity)
     }
