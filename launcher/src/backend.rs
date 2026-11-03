@@ -1995,11 +1995,6 @@ pub fn game_home() -> PathBuf {
     if let Some(home) = std::env::var_os("HORIZON_HOME").filter(|h| !h.is_empty()) {
         return PathBuf::from(home);
     }
-    default_game_home()
-}
-
-/// The platform default, without the optional HORIZON_HOME override.
-pub(crate) fn default_game_home() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("horizon")
@@ -3125,6 +3120,14 @@ pub enum Msg {
     /// The owner gate's answer for the game about to start: the selected account's session
     /// file (none = offline) and why it plays offline, if it does.
     Session(Result<(Option<PathBuf>, Option<String>), crate::account::NoOwner>),
+    JarConsent {
+        jars: Vec<horizon_mods::manifest::JarRef>,
+        reply: std::sync::mpsc::Sender<bool>,
+    },
+    JarClient {
+        run: Option<String>,
+        prepared: Box<Result<Command, String>>,
+    },
     /// A modpack step's line (`modpacks`).
     PackLine(String),
     /// A modpack step ended: the pack as it now is.

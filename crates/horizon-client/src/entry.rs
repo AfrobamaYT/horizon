@@ -40,9 +40,7 @@ pub fn main_with(mods: crate::mod_api::Mods, built: &'static [horizon_mods::runt
             std::process::exit(game::exit_code::USAGE);
         }
     };
-    let help = launch.rest.iter().any(|arg| {
-        matches!(arg, Argument::Switch(name) if matches!(name.as_str(), "--help" | "-h" | "--launch-api"))
-    });
+    let help = launch.is_information_request();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
     let (home, side, thread) = if launch

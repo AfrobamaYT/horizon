@@ -1,7 +1,9 @@
 //! Resolve a mod set's passive Java jars before a launcher-managed launch.
+mod launch;
 use crate::i18n::{tr, trf};
 use horizon_mods::manifest::JarRef;
 use horizon_port_pack::{fetch, modrinth};
+pub use launch::{prepare_launch, LaunchError};
 use std::{
     collections::BTreeMap,
     fmt, fs, io,
@@ -14,6 +16,17 @@ pub enum Permission<'a> {
     Refuse,
     Allow,
     Ask(&'a dyn Fn(&[&JarRef]) -> bool),
+}
+
+impl Permission<'static> {
+    /// Headless managed launches never ask: downloading needs an explicit per-call opt-in.
+    pub fn headless(allow_downloads: bool) -> Self {
+        if allow_downloads {
+            Self::Allow
+        } else {
+            Self::Refuse
+        }
+    }
 }
 
 /// The same file cannot claim two different Java mod identities.
