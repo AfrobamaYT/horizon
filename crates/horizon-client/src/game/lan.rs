@@ -182,7 +182,7 @@ pub(super) struct LanHost {
     pub far: Option<horizon_client::lod_net::Service>,
     /// Native mods' commands and the level each needs, once asked
     /// (game/native_server.rs).
-    pub native_commands: Option<HashMap<String, u8>>,
+    pub(super) native_commands: Option<super::native_server::NativeCommands>,
     /// The players a native mod leaves out of the sleep count when they
     /// aren't in bed (`native_sleep_ignored`).
     pub sleep_ignored: std::collections::HashSet<u128>,
@@ -2889,7 +2889,7 @@ impl Game<'_> {
     }
 
     /// Keep the chunks around every guest loaded.
-    fn lan_update_streaming(&mut self, host: &LanHost) {
+    pub(super) fn lan_update_streaming(&mut self, host: &LanHost) {
         // DistanceManager.PlayerTicketTracker: every chunk within the server's
         // view distance (Chebyshev) of a player holds a PLAYER_LOADING ticket
         // at the entity-ticking level (31), whatever the player asked for;

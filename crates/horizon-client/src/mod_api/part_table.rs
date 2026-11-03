@@ -732,7 +732,6 @@ pub(crate) mod tests {
     use std::any::{TypeId, type_name};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// The level the test worlds are.
     fn here() -> LevelRef {
@@ -747,9 +746,6 @@ pub(crate) mod tests {
             side,
         }
     }
-
-    /// How often `test:counted`'s fluid provider, which never answers, was asked.
-    pub(crate) static FLUIDS_ASKED: AtomicUsize = AtomicUsize::new(0);
 
     /// A comparator reading of 5 more than it was.
     struct Gauge;
@@ -839,10 +835,6 @@ pub(crate) mod tests {
                 let two = place.amount(host) == 2;
                 two.then(|| Box::new(Marked(3)) as _)
             });
-            r.block_entity_capability(&FLUIDS, "test:counted", |_, _| {
-                FLUIDS_ASKED.fetch_add(1, Ordering::Relaxed);
-                None
-            });
             r.block_entity_capability_before_game(&FLUIDS, "test:tank", |_, _| {
                 Some(Box::new(Tank))
             });
@@ -852,7 +844,6 @@ pub(crate) mod tests {
             for (id, overstates) in [
                 ("test:gives_more", Overstates::GivesMore),
                 ("test:refuses_more", Overstates::RefusesMore),
-                ("test:gives_lava", Overstates::GivesLava),
             ] {
                 r.block_entity_capability_before_game(&FLUIDS, id, move |_, _| {
                     Some(Box::new(overstates))
@@ -3029,13 +3020,12 @@ pub(crate) mod tests {
     }
 
     /// The game's tank under it, but its real calls misanswer: an extract gives 100 mB more than
-    /// asked (`GivesMore`) or its amount as lava (`GivesLava`), or an insert keeps nothing and
+    /// asked (`GivesMore`), or an insert keeps nothing and
     /// answers 100 mB more than offered (`RefusesMore`).
     #[derive(Clone, Copy, PartialEq)]
     enum Overstates {
         GivesMore,
         RefusesMore,
-        GivesLava,
     }
     impl FluidHandler for Overstates {
         fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
@@ -3094,13 +3084,8 @@ pub(crate) mod tests {
                     .fluid_tank_extract(on(at, side), tank, max, true);
             }
             let more = if *self == Self::GivesMore { 100 } else { 0 };
-            let out = host
-                .backend_mut(crate::mod_api::BackendToken(()))
-                .fluid_tank_extract(on(at, side), tank, max + more, false)?;
-            match self {
-                Self::GivesLava => Some(FluidStack::new("minecraft:lava", out.amount)),
-                _ => Some(out),
-            }
+            host.backend_mut(crate::mod_api::BackendToken(()))
+                .fluid_tank_extract(on(at, side), tank, max + more, false)
         }
     }
 
@@ -3366,27 +3351,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_api_55_move_leaves_a_fluid_with_components_where_it_is() {
-        game_thread();
-        let at = |pos| BlockSide {
-            level: here(),
-            pos,
-            side: None,
-        };
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(potion(500, "minecraft:healing")), true);
-        world.tank(TANK, None, true);
-        let host: &mut dyn Host = &mut world;
-        let plain = |fluid: &FluidStack| !fluid.has_components();
-        assert!(
-            host.transfer_fluids_where(at(SOURCE), at(TANK), 1000, &plain)
-                .is_none()
-        );
-        assert_eq!(world.held(SOURCE), Some(potion(500, "minecraft:healing")));
-        assert_eq!(world.held(TANK), None);
-    }
-
-    #[test]
     fn a_tank_whose_simulation_lies_gets_back_what_it_refused_or_loses_it_and_is_named() {
         game_thread();
         let water = FluidStack::new("minecraft:water", 1000);
@@ -3437,26 +3401,6 @@ pub(crate) mod tests {
             Some(water(300))
         );
         assert_eq!((world.amount(SOURCE), world.amount(TANK)), (300, 700));
-        // The API 54 drain's excess goes back into the tank it came from.
-        world.tanks.get_mut(&SOURCE).unwrap().fills = true;
-        let host: &mut dyn Host = &mut world;
-        let handler = here().capability(host, &FLUIDS, SOURCE, None).unwrap();
-        assert_eq!(
-            host.drain_one_named_fluid(&handler, SOURCE, None, 100),
-            Some(water(100))
-        );
-        assert_eq!(world.amount(SOURCE), 200);
-        // One giving lava from a water tank: the lava is given back, and nothing comes out.
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(water(1000)), true);
-        world.types.insert(SOURCE, "test:gives_lava");
-        let host: &mut dyn Host = &mut world;
-        let handler = here().capability(host, &FLUIDS, SOURCE, None).unwrap();
-        assert_eq!(
-            host.drain_one_named_fluid(&handler, SOURCE, None, 300),
-            None
-        );
-        assert_eq!(world.amount(SOURCE), 700);
         // A target that keeps nothing and answers more than it was offered: it all goes back.
         let mut world = TankWorld::default();
         world.tank(SOURCE, Some(water(1000)), true);

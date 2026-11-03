@@ -261,7 +261,7 @@ impl Game<'_> {
         self.command_source = outer;
         ok
     }
-    fn syntax_failure(&mut self, e: &CommandError, command: &str) {
+    pub(super) fn syntax_failure(&mut self, e: &CommandError, command: &str) {
         self.command_failure(e.message.clone());
         let Some(input) = &e.input else { return };
         let cursor = e.cursor.min(input.len());
@@ -3770,8 +3770,7 @@ impl Game<'_> {
         let players: Vec<(u128, String)> = self
             .lan
             .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .filter(|g| g.placed)
+            .flat_map(|h| h.hub.online_players())
             .map(|g| (g.uuid, g.name.clone()))
             .collect();
         let max = self
