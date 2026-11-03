@@ -3558,6 +3558,13 @@ impl Game<'_> {
         }
         self.finalize_breeding(&p, partner, Some(&child));
         let at = [p.position.x, p.position.y, p.position.z];
+        let fox = p.species() == Species::Fox;
+        let mut child = Some(child);
+        let joined = if fox {
+            self.insert_spawned_mob(child.take().unwrap(), true, false, false)
+        } else {
+            None
+        };
         match experience {
             horizon_client::mobs::BreedExperience::Deferred => {
                 self.award_breeding_experience(parent, at);
@@ -3565,7 +3572,11 @@ impl Game<'_> {
             horizon_client::mobs::BreedExperience::Drawn(Some(amount)) => self.add_orb(at, amount),
             horizon_client::mobs::BreedExperience::Drawn(None) => {}
         }
-        self.insert_spawned_mob(child, true, false, false)
+        if let Some(child) = child {
+            self.insert_spawned_mob(child, true, false, false)
+        } else {
+            joined
+        }
     }
     /// `MobEffectUtil.addEffectToPlayersAround` for an elder guardian:
     /// mining fatigue III for five minutes unless a stronger or longer one

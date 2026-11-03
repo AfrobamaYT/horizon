@@ -2243,7 +2243,10 @@ impl Goal for Breed {
                     Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
                 ))
             .then(|| m.random.next_boolean());
-            let experience = if (llama.is_some() || parent_variant.is_some()) && !cx.w.ask_mods {
+            let experience = if (llama.is_some() || parent_variant.is_some())
+                && !cx.w.ask_mods
+                && m.species() != Species::Fox
+            {
                 super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
             } else {
                 super::BreedExperience::Deferred
