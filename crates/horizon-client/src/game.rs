@@ -18124,7 +18124,15 @@ impl Game<'_> {
                     }
                     horizon_client::ram_limit::frame();
                     self.limit_frame();
-                    self.pause = self.pauses_game();
+                    let paused = self.pauses_game();
+                    if paused != self.pause {
+                        let mut cancel = false;
+                        self.native_client_pause_change_pre(paused, &mut cancel);
+                        if !cancel {
+                            self.pause = paused;
+                            self.native_client_pause_change_post(paused);
+                        }
+                    }
                     if let Some(server) = &self.integrated {
                         server.set_paused(self.pause);
                         server.set_distances(
