@@ -145,7 +145,7 @@ the catalog, not a global API number, source comments or documentation histories
   own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
 
 - Buttons, tooltips and item icons on mod screens: `native_screen_click` and `native_screen_tooltip` (the client), `native_menu_button`
-  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_data`, `native_block`,
+  (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_block`,
   `native_block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
 - `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
