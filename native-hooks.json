@@ -578,7 +578,7 @@
       }
     },
     {
-      "name": "block_entity_ticks", "side": "server",
+      "name": "block_entity_ticks", "host": "read", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_ticks",
       "mod_api": {
@@ -609,7 +609,7 @@
       }
     },
     {
-      "name": "block_entity_container", "side": "both",
+      "name": "block_entity_container", "host": "read", "side": "both",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_container",
       "mod_api": {
@@ -618,7 +618,7 @@
       }
     },
     {
-      "name": "screen", "side": "both",
+      "name": "screen", "host": "read", "side": "both",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen",
       "mod_api": {
@@ -718,9 +718,9 @@
       }
     },
     {
-      "name": "use_item_on", "side": "server",
+      "name": "use_on", "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_use_item_on",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_use_on",
       "mod_api": {
         "contract": "cancel",
         "out": "claimed",
@@ -978,7 +978,7 @@
       }
     },
     {
-      "name": "block_entity_fluids", "side": "server",
+      "name": "block_entity_fluids", "host": "read", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_fluids",
       "mod_api": {
@@ -987,7 +987,7 @@
       }
     },
     {
-      "name": "should_apply_effect_tick_this_tick", "side": "server",
+      "name": "should_apply_effect_tick_this_tick", "host": "read", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_should_apply_effect_tick_this_tick",
       "mod_api": {
@@ -995,7 +995,7 @@
       }
     },
     {
-      "name": "apply_effect_tick", "side": "server",
+      "name": "apply_effect_tick", "host": "read", "side": "server",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_apply_effect_tick",
       "mod_api": {
@@ -1388,7 +1388,7 @@
       }
     },
     {
-      "name": "use_duration", "side": "both",
+      "name": "use_duration", "side": "both", "host": "read",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_use_duration",
       "mod_api": {
@@ -1409,7 +1409,7 @@
       }
     },
     {
-      "name": "can_eat", "side": "both",
+      "name": "can_eat", "side": "both", "host": "read",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_can_eat",
       "mod_api": {
@@ -1837,7 +1837,7 @@
       }
     },
     {
-      "name": "hears_projectile_impacts",
+      "name": "hears_projectile_impacts", "host": "read",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_hears_projectile_impacts",
       "side": "server",
@@ -1940,7 +1940,7 @@
       }
     },
     {
-      "name": "block_entity_energy",
+      "name": "block_entity_energy", "host": "read",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_energy",
       "neoforge": "Capabilities.Energy.BLOCK",
@@ -2355,7 +2355,7 @@
       }
     },
     {
-      "name": "broadcast_message",
+      "name": "broadcast_message", "host": "read",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_broadcast_message",
       "neoforge": "none (NeoForge has no such event; Bukkit's BroadcastMessageEvent)",
@@ -2834,7 +2834,7 @@
       }
     },
     {
-      "name": "inventory_move_item",
+      "name": "inventory_move_item", "host": "read",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_inventory_move_item",
       "neoforge": "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",

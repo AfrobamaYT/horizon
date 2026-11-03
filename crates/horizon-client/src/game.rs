@@ -225,6 +225,8 @@ mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
+#[cfg(test)]
+mod native_guest_turn_tests;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;
@@ -1270,7 +1272,9 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         feature: Option<&'a str>,
     ) -> Option<std::borrow::Cow<'a, str>> {
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::BlockGrowFeature)
+        {
             return feature.map(std::borrow::Cow::Borrowed);
         }
         let mut feature = feature.map(str::to_owned);
@@ -1346,7 +1350,9 @@ impl LevelAccess for GameLevel<'_> {
         note: &mut i32,
     ) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::NoteBlockPlay)
+        {
             return true;
         }
         let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
@@ -1380,7 +1386,9 @@ impl LevelAccess for GameLevel<'_> {
         shape: &horizon_world::level::PortalShape,
     ) -> bool {
         let mut cancel = false;
-        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+        if self.native_authoritative
+            && crate::mod_api::listened(crate::mod_api::HookId::PortalSpawn)
+        {
             let b = shape.bottom_left;
             let shape = horizon_client::mod_api::NativePortalShape {
                 x_axis: shape.x_axis,
@@ -2804,6 +2812,11 @@ struct Game<'a> {
     armor: [Option<ItemStack>; 4],
     /// The off hand (Inventory slot 40, saved as slot 150; menu slot 504 here).
     offhand: Option<ItemStack>,
+    /// The body and saddle slots (`EquipmentSlot.BODY`, `SADDLE`; Inventory
+    /// slots 41 and 42, saved as 151 and 152). The hands and armor stay in
+    /// the fields above. Nothing in the game reads these yet; they are kept
+    /// for mods and saves.
+    equipment: horizon_items::equipment::Equipment,
     /// `ItemStack.popTime` of the nine hotbar stacks, then the off hand: set to 5
     /// when a slot gains items, counted down each tick.
     hotbar_pop: [u8; 10],
@@ -3241,9 +3254,8 @@ struct Game<'a> {
     lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
-    /// records, so a hook in one guest's turn (when the hub is out of
-    /// `self.lan`) still reaches the others'. The acting guest's are in
-    /// `player_attachments` for the turn.
+    /// records, so a hook in one guest's turn still reaches the others'.
+    /// The acting guest's are in `player_attachments` for the turn.
     guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
@@ -3258,8 +3270,7 @@ struct Game<'a> {
     tnt_refused: Option<BlockPos>,
     /// Their permission level: an op's above 0 (`PlayerList.isOp`).
     lan_acting_permission: Option<u8>,
-    /// Their entity id, which the hub (often taken out of `lan` while they
-    /// act) would otherwise have to be asked for.
+    /// Their entity id while their player state is in place.
     lan_acting_entity: Option<u32>,
     /// Whether the player currently swapped into the game is connectionless.
     lan_acting_fake: bool,
@@ -4068,6 +4079,7 @@ impl Game<'_> {
             stacks.extend(self.inventory.iter_mut().filter_map(Option::take));
             stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
             stacks.extend(self.offhand.take());
+            stacks.extend(self.equipment.take_all());
             stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
             self.apply_equipment();
         }
@@ -6777,7 +6789,7 @@ impl Game<'_> {
         if let Some(hit) = block_hit {
             let (player, player_entity_id) = self.native_clicker();
             let (hand, at) = (self.hand, hit.native());
-            self.native_use_item_on(
+            self.native_use_on(
                 &stack,
                 hit.pos,
                 hit.face,
@@ -8105,7 +8117,7 @@ impl Game<'_> {
         let active = self.focused || self.agent_pointer;
         if active
             && grabbed
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::CalculatePlayerTurn)
             && let Some(remote) = &self.remote
         {
             self.native_calculate_player_turn(
@@ -12405,7 +12417,8 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         self.fns = Default::default();
-        self.world_tables = self.build_world_tables();
+        let stack = self.reload_datapacks(false, &level.enabled_features);
+        self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
@@ -12433,35 +12446,13 @@ impl Game<'_> {
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
-        self.prefetch_advancement_tree();
+        self.prefetch_advancement_tree(&stack);
         self.restore_player_state = true;
         self.rand_sequences = rand_sequences;
         self.border = Default::default();
         self.set_mode_id(level.mode());
         self.previous_mode = level.previous_game_mode.map(game_mode::mode_from_id);
-        let mut inventory = vec![None; 36];
-        self.armor = [None, None, None, None];
-        self.offhand = None;
-        self.ender_items = if level.ender_items.len() == 27 {
-            level.ender_items.clone()
-        } else {
-            vec![None; 27]
-        };
-        for (slot, id, count, damage) in &level.inventory {
-            let stack = ItemStack {
-                item: Arc::from(id.as_str()),
-                count: *count,
-                damage: *damage,
-                extra: level.inventory_components.get(slot).cloned(),
-            };
-            if (100..104).contains(slot) {
-                self.armor[usize::from(103 - slot)] = Some(stack);
-            } else if *slot == 150 {
-                self.offhand = Some(stack);
-            } else if let Some(cell) = inventory.get_mut(usize::from(*slot)) {
-                *cell = Some(stack);
-            }
-        }
+        let mut inventory = self.load_saved_inventory(&level);
         if self.creative && level.inventory.is_empty() && level.position.is_none() {
             for (i, name) in [
                 "minecraft:grass_block",
@@ -12944,7 +12935,7 @@ impl Game<'_> {
         });
         // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
         let mut amounts = [amount; 4];
-        if !horizon_client::mod_api::mods().is_empty()
+        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
             let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
@@ -14192,7 +14183,7 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<Vertex>,
     ) {
-        if !crate::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::RenderArm) {
             let eye = self.eye_position().unwrap_or_default();
             let mut draw = BlockEntityDraw::posed(
                 partial,
@@ -14322,7 +14313,7 @@ impl Game<'_> {
                 scale: 1.0,
             };
             let mut canceled = false;
-            if !horizon_client::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::RenderHand) {
                 self.native_render_hand(&mut render, &mut canceled);
             }
             if canceled {
@@ -15436,6 +15427,7 @@ impl Game<'_> {
                     self.inventory.fill(None);
                     self.armor.fill(None);
                     self.offhand = None;
+                    self.equipment = Default::default();
                     self.craft_grid[..4].fill(None);
                     self.player_equipment_changed(&before);
                     self.apply_equipment();
@@ -15583,6 +15575,16 @@ impl Game<'_> {
                 level.inventory_components.insert(150, extra);
             }
         }
+        for (equipment_slot, s) in self.equipment.iter().enumerate() {
+            if let (Some(s), Some(slot)) = (s, horizon_client::save::saved_slot(equipment_slot)) {
+                level
+                    .inventory
+                    .push((slot, s.item.to_string(), s.count, s.damage));
+                if let Some(extra) = s.extra.clone() {
+                    level.inventory_components.insert(slot, extra);
+                }
+            }
+        }
         // Vanilla stores armor in slots 100 (feet) to 103 (head).
         for (i, s) in self.armor.iter().enumerate() {
             if let Some(s) = s {
@@ -15603,6 +15605,37 @@ impl Game<'_> {
         }
         level.ender_items = self.ender_items.clone();
         level.active_effects = self.potions.effects.saved();
+    }
+    /// The saved player's hands, armor, body, saddle and ender chest go in
+    /// their fields; the 36 inventory slots come back.
+    fn load_saved_inventory(&mut self, level: &Level) -> Vec<Option<ItemStack>> {
+        let mut inventory = vec![None; 36];
+        self.armor = [None, None, None, None];
+        self.offhand = None;
+        self.equipment = Default::default();
+        self.ender_items = if level.ender_items.len() == 27 {
+            level.ender_items.clone()
+        } else {
+            vec![None; 27]
+        };
+        for (slot, id, count, damage) in &level.inventory {
+            let stack = ItemStack {
+                item: Arc::from(id.as_str()),
+                count: *count,
+                damage: *damage,
+                extra: level.inventory_components.get(slot).cloned(),
+            };
+            if (100..104).contains(slot) {
+                self.armor[usize::from(103 - slot)] = Some(stack);
+            } else if *slot == 150 {
+                self.offhand = Some(stack);
+            } else if let Some(equipment_slot) = horizon_client::save::equipment_slot(*slot) {
+                self.equipment.set(equipment_slot, Some(stack));
+            } else if let Some(cell) = inventory.get_mut(usize::from(*slot)) {
+                *cell = Some(stack);
+            }
+        }
+        inventory
     }
     fn save_game(&mut self) -> Result<()> {
         self.save_game_with(true)
@@ -15691,16 +15724,14 @@ impl Game<'_> {
         // (`playerdata::load_owner`).
         if self.options.dedicated.is_some()
             && !self.options.execution_role.is_client()
-            && let Some(host) = self.lan.take()
+            && let Some(host) = self.lan.as_mut()
         {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
-            let mut host = host;
             for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
-                self.guest_attachments_into(g);
+                Self::guest_attachments_into(&self.guest_attachments, g);
                 self.player_autosaves.enqueue(g, &self.world_root);
             }
-            self.lan = Some(host);
         }
         self.save_world_state();
         self.message = Some(("Saved the game".into(), Instant::now()));
@@ -15708,7 +15739,7 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
-        self.save.save_forced_chunks(&self.streaming.forced)?;
+        self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match self.streaming.prepare_save(&mut self.world, wait, deadline) {
@@ -15739,7 +15770,7 @@ impl Game<'_> {
         if wait {
             self.save.flush()?;
         }
-        if !horizon_client::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::LevelSave) {
             self.native_level_save(self.dim.id());
         }
         Ok(())
@@ -16197,6 +16228,12 @@ impl Game<'_> {
             static_block_entities = static_sections;
             visible_static_block_entity_sections = visible_static_sections;
             static_block_entity_stats = static_stats;
+        } else {
+            // No level behind the panorama, so no entity either: the GPU path's
+            // draws are started by `begin_skinning`, which only `entity_geometry`
+            // runs, and would otherwise stay those of the last world frame and
+            // be drawn over the title (#8192). Its models stay stored.
+            self.skin_frame.get_mut().clear_draws();
         }
         let bolts = if title {
             Vec::new()
@@ -19305,6 +19342,7 @@ impl<'a> Game<'a> {
             title: None,
             armor: [None, None, None, None],
             offhand: None,
+            equipment: Default::default(),
             hotbar_pop: [0; 10],
             hand: Hand::Main,
             shield_cooldown: 0,
@@ -19927,18 +19965,12 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-    fn build_world_tables(&self) -> Option<WorldTables> {
+    fn build_world_tables(&mut self, stack: &functions::PackStack) -> Option<WorldTables> {
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
-        let files = functions::overlay_files(
-            &self.world_root,
-            &self.options.resources,
-            self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
-            contributed,
-        );
+        let files = functions::overlay_files(stack, contributed);
         if files.is_empty() {
             return None;
         }
@@ -20017,17 +20049,19 @@ impl Game<'_> {
             horizon_client::mod_api::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
                 item: &|id| items.items.contains_key(id),
+                state_count: registry.len(),
+                state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
         .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self) {
+    pub(super) fn reload_world_tables(&mut self, stack: &functions::PackStack) {
         if self.remote.is_some() {
             return;
         }
-        self.world_tables = self.build_world_tables();
+        self.world_tables = self.build_world_tables(stack);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
@@ -21882,17 +21916,22 @@ pub fn run_with() -> Result<()> {
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    options.resources = packs::startup_root(&vanilla_root, &early_settings.resource_packs, &[])
-        .unwrap_or_else(|e| {
-            log::warn!("Horizon: resource packs not applied: {e}");
-            pack_error = Some(e.to_string());
-            vanilla_root.clone()
-        });
-    options.resources = mods::content_root(
-        &options.resources,
+    options.resources = packs::startup_root(
+        &vanilla_root,
+        &early_settings.resource_packs,
+        &[],
         &early_settings.mods.enabled,
         &options.dev_mods,
-    );
+    )
+    .unwrap_or_else(|e| {
+        log::warn!("Horizon: resource packs not applied: {e}");
+        pack_error = Some(e.to_string());
+        mods::content_root(
+            &vanilla_root,
+            &early_settings.mods.enabled,
+            &options.dev_mods,
+        )
+    });
     let loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),
@@ -22222,10 +22261,11 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
+    use crate::mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn reload_resolves_parts_against_reloaded_tags() {
-        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Host, Registrar};
+        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
         struct TagPart;
         impl BlockPart for TagPart {}
         struct ReloadMod;
@@ -22233,7 +22273,7 @@ mod tests {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
-            fn data_pack_files(&self, _: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+            fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
                 event.files.push((
                     "tags/test:block/reload".into(),
                     br#"{"values":["minecraft:stone"]}"#.to_vec(),
@@ -22246,12 +22286,20 @@ mod tests {
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
-            game.reload_world_tables();
-            assert!(
-                !mod_api::parts("test")
-                    .block(|| Some("minecraft:stone"))
-                    .is_empty()
+            let stack = super::functions::pack_stack(
+                &game.world_root,
+                &game.options.resources,
+                game.cmds.vanilla_disabled,
+                &game.level.enabled_features,
             );
+            game.reload_world_tables(&stack);
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            assert!(!mod_api::parts("test").block_state(stone).is_empty());
         });
     }
     use super::*;
@@ -22261,7 +22309,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn right_click_block_controls_cauldron_use() {
         use horizon_client::mod_api::{
-            self, Flow, Hooks, Host, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
+            self, Flow, Hooks, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
         };
         use std::sync::{
             Arc,
@@ -22271,7 +22319,7 @@ mod tests {
         impl Hooks for Observer {
             fn right_click_block(
                 &self,
-                _: &mut dyn Host,
+                _: crate::mod_api::HostSide,
                 event: &mut RightClickBlockEvent<'_>,
             ) -> Flow {
                 self.2.fetch_add(1, Ordering::SeqCst);

@@ -16,6 +16,10 @@ pub(super) fn generate(
     )?;
     let mut host_traits = String::new();
     let mut host_impl = String::new();
+    let mut server_traits = String::new();
+    let mut server_impl = String::new();
+    let mut client_traits = String::new();
+    let mut client_impl = String::new();
     let mut backend_reads = String::new();
     let mut backend_writes = String::new();
     let mut backend_read_impl = String::new();
@@ -57,24 +61,38 @@ pub(super) fn generate(
         }
         let target = helper["target"].as_str().ok_or("helper target missing")?;
         let method = helper_target(&game, name, target)?;
-        let (declaration, implementation) = host_method(method, name, &types.exports)?;
+        let receiver = helper.get("receiver");
+        let is_backend = match helper.get("backend") {
+            None => false,
+            Some(value) => value.as_bool().ok_or("helper backend must be a boolean")?,
+        };
+        let trait_name = if receiver.is_some() || is_backend {
+            if matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
+            {
+                "BackendMut"
+            } else {
+                "Backend"
+            }
+        } else {
+            match side {
+                HelperSide::Both => "Host",
+                HelperSide::Server => "ServerHost",
+                HelperSide::Client => "ClientHost",
+            }
+        };
+        let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
         if let Some(client_target) = helper.get("client_target") {
             let client_target = client_target
                 .as_str()
                 .ok_or("client_target must be a string")?;
             let client = helper_target(&game, name, client_target)?;
-            let (_, client_implementation) = host_method(client, name, &types.exports)?;
+            let (_, client_implementation) = host_method(client, name, trait_name, &types.exports)?;
             matching_helper_signatures(&implementation, &client_implementation, name)?;
         }
         let side_doc = match side {
             HelperSide::Server => "/// Side: server.\n",
             HelperSide::Client => "/// Side: client.\n",
             HelperSide::Both => "/// Side: both.\n",
-        };
-        let receiver = helper.get("receiver");
-        let is_backend = match helper.get("backend") {
-            None => false,
-            Some(value) => value.as_bool().ok_or("helper backend must be a boolean")?,
         };
         if receiver.is_some() || is_backend {
             let mutable = matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
@@ -90,15 +108,20 @@ pub(super) fn generate(
                 let receiver = receiver
                     .as_str()
                     .ok_or("helper receiver must be a string")?;
-                let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
+                let (handle, code) = handle_method(method, name, receiver, side, &types.handles)?;
                 let methods = handles.entry(handle).or_default();
                 methods.push_str(side_doc);
                 methods.push_str(&code);
             }
         } else {
-            host_traits.push_str(side_doc);
-            host_traits.push_str(&declaration);
-            host_impl.push_str(&implementation);
+            let (traits, implementation_out) = match side {
+                HelperSide::Both => (&mut host_traits, &mut host_impl),
+                HelperSide::Server => (&mut server_traits, &mut server_impl),
+                HelperSide::Client => (&mut client_traits, &mut client_impl),
+            };
+            traits.push_str(side_doc);
+            traits.push_str(&declaration);
+            implementation_out.push_str(&implementation);
         }
     }
     let handles = handles
@@ -119,7 +142,7 @@ pub(super) fn generate(
         }
     }
     let host_trait: syn::ItemTrait = syn::parse_str(&format!(
-        "trait Host {{ {host_traits} {backend_reads} {backend_writes} }}"
+        "trait Host {{ {host_traits} {server_traits} {client_traits} {backend_reads} {backend_writes} }}"
     ))
     .map_err(|e| format!("generated Host: {e}"))?;
     let mut std_types = StdTypes {
@@ -134,11 +157,25 @@ pub(super) fn generate(
     if std_types.arc {
         imports.push_str("use std::sync::Arc;\n");
     }
+    let side_enum = |name: &str, server: &str, client: &str| {
+        format!(
+            "/// The logical side of a hook's host.\n#[non_exhaustive]\npub enum {name}<'a> {{ Server({server}), Client({client}) }}\n"
+        )
+    };
+    let sides = format!(
+        "{}{}",
+        side_enum(
+            "HostSide",
+            "&'a mut dyn ServerHost",
+            "&'a mut dyn ClientHost"
+        ),
+        side_enum("LevelSide", "&'a dyn LevelHost", "&'a dyn LevelHost")
+    );
     let host = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n{imports}/// Services supplied by the game to trait mods.\n/// Each method's default panics with its name, so a test double implements only what its test calls; the game implements every one.\n/// The backend accessors are the exception: they default to None, so a double without a backend answers every handle's typed refusal.\npub trait Host {{\n#[doc(hidden)] fn backend(&self) -> Option<BackendRef<'_>> {{ None }}\n#[doc(hidden)] fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ None }}\n{host_traits}}}\n#[doc(hidden)] pub trait Backend {{\n{backend_reads}}}\n#[doc(hidden)] pub trait BackendMut {{\n{backend_writes}}}\n{handles}"
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n{imports}/// Services supplied by the game to trait mods.\n/// Each method's default panics with its name, so a test double implements only what its test calls; the game implements every one.\n/// The backend accessors are the exception: they default to None, so a double without a backend answers every handle's typed refusal.\npub trait Host {{\n#[doc(hidden)] fn backend(&self) -> Option<BackendRef<'_>> {{ None }}\n{host_traits}}}\npub trait ServerHost: Host {{\n#[doc(hidden)] fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ None }}\n{server_traits}}}\npub trait ClientHost: Host {{\n{client_traits}}}\n{sides}#[doc(hidden)] pub trait Backend {{\n{backend_reads}}}\n#[doc(hidden)] pub trait BackendMut {{\n{backend_writes}}}\n{handles}"
     );
     let implementation = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse horizon_client::mod_api::*;\n{imports}impl Host for super::Game<'_> {{\nfn backend(&self) -> Option<BackendRef<'_>> {{ Some(BackendRef::of(self)) }}\nfn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ Some(BackendMutRef::of(self)) }}\n{host_impl}}}\nimpl Backend for super::Game<'_> {{\n{backend_read_impl}}}\nimpl BackendMut for super::Game<'_> {{\n{backend_write_impl}}}\n"
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse horizon_client::mod_api::*;\n{imports}impl Host for super::Game<'_> {{\nfn backend(&self) -> Option<BackendRef<'_>> {{ Some(BackendRef::of(self)) }}\n{host_impl}}}\nimpl ServerHost for super::Game<'_> {{\nfn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {{ Some(BackendMutRef::of(self)) }}\n{server_impl}}}\nimpl ClientHost for super::Game<'_> {{\n{client_impl}}}\nimpl Backend for super::Game<'_> {{\n{backend_read_impl}}}\nimpl BackendMut for super::Game<'_> {{\n{backend_write_impl}}}\n"
     );
     Ok((host, implementation))
 }
