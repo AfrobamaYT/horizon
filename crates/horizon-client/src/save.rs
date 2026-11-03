@@ -920,6 +920,10 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     for key in ["id", "x", "y", "z"] {
         nbt.remove(&key.into());
     }
+    // Placing an item adds the (empty) component patch every block entity has.
+    if nbt.get(&"components".into()) == Some(&Tag::Compound(Compound::new())) {
+        nbt.remove(&"components".into());
+    }
     // `Slot` is a byte: 256 slots at most.
     let mut items = decode_items(nbt.get(&"Items".into()), 256);
     if nbt.get(&"Items".into()) == Some(&encode_items(&items)) {

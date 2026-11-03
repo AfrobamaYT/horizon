@@ -72,10 +72,13 @@ pub fn decode_component(id: &str, t: &Tag) -> Result<(), String> {
                     } else {
                         format!("minecraft:{id}")
                     };
-                    let known = horizon_client_core::block_entity_nbt::TYPES
-                        .iter()
-                        .chain(&horizon_client_core::block_entity_nbt::NEWEST)
-                        .any(|k| *k == id);
+                    // A mod's type is registered by the mod at run time, so only the
+                    // game that places the item can say it is unknown.
+                    let known = horizon_client_core::block_entity_nbt::is_mod_type(&id)
+                        || horizon_client_core::block_entity_nbt::TYPES
+                            .iter()
+                            .chain(&horizon_client_core::block_entity_nbt::NEWEST)
+                            .any(|k| *k == id);
                     if known {
                         Ok(())
                     } else {
@@ -649,6 +652,7 @@ mod tests {
             check("{Command:\"say\"}"),
             Err("Expected 'id' field in {Command:\"say\"}".into())
         );
+        assert_eq!(check("{id:\"gtbasic:drum\",Tank:1}"), Ok(()));
         assert_eq!(
             check("{id:\"minecraft:stone\"}"),
             Err("Unknown registry key in ResourceKey[minecraft:root / minecraft:block_entity_type]: minecraft:stone".into())

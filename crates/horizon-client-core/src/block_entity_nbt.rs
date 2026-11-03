@@ -307,6 +307,11 @@ pub fn id(tag: &Tag) -> Option<String> {
     text(tag.get("id"))
 }
 
+/// A block entity type that is not vanilla's (a mod's, `namespace:name`).
+pub fn is_mod_type(id: &str) -> bool {
+    id.contains(':') && !id.starts_with("minecraft:")
+}
+
 /// Every `BlockEntityType` id this module knows.
 pub const TYPES: [&str; 47] = [
     "minecraft:furnace",
@@ -366,6 +371,11 @@ pub const NEWEST: [&str; 2] = ["minecraft:copper_golem_statue", "minecraft:poten
 pub fn canonical(tag: &Tag) -> Option<Tag> {
     let id = id(tag)?;
     let (x, y, z) = (int(tag.get("x"))?, int(tag.get("y"))?, int(tag.get("z"))?);
+    // A mod's block entity type has no fields this module knows: its saved
+    // compound is already its canonical form, so item data can carry it.
+    if is_mod_type(&id) {
+        return Some(tag.clone());
+    }
     let mut f = Fields {
         input: tag,
         out: Compound::new(),
