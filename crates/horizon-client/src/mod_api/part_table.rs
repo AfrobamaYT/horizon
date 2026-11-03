@@ -128,9 +128,7 @@ struct Installed {
 }
 
 pub(crate) fn block_entity_types() -> &'static [super::BlockEntityTypeKey] {
-    INSTALLED
-        .get()
-        .map_or(&[], |installed| &installed.block_entity_types)
+    installed().map_or(&[], |installed| &installed.block_entity_types)
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
