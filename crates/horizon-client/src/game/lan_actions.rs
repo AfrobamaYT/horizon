@@ -241,6 +241,14 @@ impl GuestPlay {
     pub(super) fn using(&self) -> Option<(usize, u32)> {
         self.using
     }
+    /// `LivingEntity.useItemRemaining` of the item in use, 0 when none is.
+    pub(super) fn use_remaining(&self) -> i32 {
+        super::item_use::remaining_of(self.using, self.use_duration)
+    }
+    /// Sets `useItemRemaining`; false when no item is in use.
+    pub(super) fn set_use_remaining(&mut self, remaining: i32) -> bool {
+        super::item_use::set_remaining(self.using, &mut self.use_duration, remaining)
+    }
     /// The `ServerPlayerGameMode.destroyProgressStart` a STOP on `pos` is measured from: the clock
     /// belongs to the block the START named (`destroyPos`), and only a START writes either, so a
     /// dig resumed after a fall still runs on the first START's ticks (#4124).
@@ -5454,7 +5462,7 @@ impl Game<'_> {
 
 /// ClientboundSwingAnimationPacket: the hand and the animation (its type and
 /// base duration; each client applies the swinger's haste and fatigue).
-fn swing_packet(id: i32, hand: Hand, animation: SwingAnimation) -> C {
+pub(super) fn swing_packet(id: i32, hand: Hand, animation: SwingAnimation) -> C {
     C::SwingAnimation(play::SwingAnimation {
         id,
         hand: i32::from(hand == Hand::Off),

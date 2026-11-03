@@ -35,8 +35,8 @@ struct Entry {
 pub(super) struct Stuck {
     pub(super) arrows: i32,
     pub(super) stingers: i32,
-    remove_arrow_time: i32,
-    remove_stinger_time: i32,
+    pub(super) remove_arrow_time: i32,
+    pub(super) remove_stinger_time: i32,
 }
 /// Who `LivingEntity.resolvePlayerResponsibleForDamage` credits: a player by
 /// entity id, or the owner of a tamed animal by UUID.
