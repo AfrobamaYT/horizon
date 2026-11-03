@@ -855,6 +855,12 @@ pub(crate) mod tests {
                 Some(Box::new(ItemOverstates))
             });
             r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _| Some(Box::new(Cargo)));
+            r.entity_capability(&ENTITY_ENERGY, "minecraft:armor_stand", |_, entity| {
+                Some(Box::new(EntityBattery(entity)))
+            });
+            r.entity_capability(&ENTITY_FLUIDS, "minecraft:armor_stand", |_, entity| {
+                Some(Box::new(EntityTank(entity)))
+            });
             r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
                 Some(Box::new(Pouch(place.clone())))
             });
@@ -1884,6 +1890,111 @@ pub(crate) mod tests {
             let came = amount.min(held);
             self.set(host, &held_chemical, held - came);
             came
+        }
+    }
+
+    const ROBOT_ENERGY: AttachmentType<u32> = AttachmentType {
+        namespace: "test",
+        name: "energy",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    pub(crate) const ROBOT_FLUID: AttachmentType<u32> = AttachmentType {
+        namespace: "test",
+        name: "fluid",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
+    struct EntityBattery(EntityRef);
+    impl EnergyHandler for EntityBattery {
+        fn amount(&self, host: &mut dyn Host) -> u32 {
+            ROBOT_ENERGY
+                .get_existing(host, Holder::Entity(self.0.id()))
+                .unwrap()
+                .unwrap_or(0)
+        }
+        fn capacity(&self, _: &mut dyn Host) -> u32 {
+            1000
+        }
+        fn insert(&self, host: &mut dyn Host, _: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            let moved = amount.min(1000 - held);
+            ROBOT_ENERGY
+                .set(host, Holder::Entity(self.0.id()), held + moved)
+                .unwrap();
+            moved
+        }
+        fn extract(&self, host: &mut dyn Host, _: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            let moved = amount.min(held);
+            ROBOT_ENERGY
+                .set(host, Holder::Entity(self.0.id()), held - moved)
+                .unwrap();
+            moved
+        }
+    }
+
+    struct EntityTank(EntityRef);
+    impl ResourceHandler<FluidResource> for EntityTank {
+        fn size(&self, _: &mut dyn Host) -> usize {
+            1
+        }
+        fn resource(&self, host: &mut dyn Host, _: usize) -> Option<FluidResource> {
+            (self.amount(host, 0) > 0)
+                .then(|| FluidResource::of(&FluidStack::new("minecraft:water", 1)))
+        }
+        fn amount(&self, host: &mut dyn Host, _: usize) -> u32 {
+            ROBOT_FLUID
+                .get_existing(host, Holder::Entity(self.0.id()))
+                .unwrap()
+                .unwrap_or(0)
+        }
+        fn capacity(&self, _: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+            if index == 0 && resource == &FluidResource::of(&FluidStack::new("minecraft:water", 1))
+            {
+                1000
+            } else {
+                0
+            }
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            _: &Transaction,
+            index: usize,
+            resource: &FluidResource,
+            amount: u32,
+        ) -> u32 {
+            let held = self.amount(host, index);
+            let moved = amount.min(self.capacity(host, index, resource).saturating_sub(held));
+            ROBOT_FLUID
+                .set(host, Holder::Entity(self.0.id()), held + moved)
+                .unwrap();
+            moved
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            _: &Transaction,
+            index: usize,
+            resource: &FluidResource,
+            amount: u32,
+        ) -> u32 {
+            let held = self.amount(host, index);
+            let moved = if self.capacity(host, index, resource) > 0 {
+                amount.min(held)
+            } else {
+                0
+            };
+            ROBOT_FLUID
+                .set(host, Holder::Entity(self.0.id()), held - moved)
+                .unwrap();
+            moved
         }
     }
 

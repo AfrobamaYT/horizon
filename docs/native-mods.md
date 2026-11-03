@@ -3154,6 +3154,13 @@ host.transaction(|host, tx| {
 })
 ```
 
+#### Entity energy and fluids
+
+`entity.capability(host, &ENTITY_ENERGY)` and `entity.capability(host, &ENTITY_FLUIDS)` reach a mod's entity energy
+and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` and `Capabilities.Fluid.ENTITY`). Vanilla answers
+neither; register a provider with `r.entity_capability`. The existing `move_energy` and `move_resources` transfer
+between these and block or item handlers inside a transaction.
+
 #### A menu's slots
 
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`host.menu(player)`). It is

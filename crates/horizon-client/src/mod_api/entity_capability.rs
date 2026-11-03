@@ -2,8 +2,9 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource,
-    PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, Tag, Transaction, backend_of,
+    Capability, ComponentId, EnergyHandler, EntityProvider, EntityRef, FluidResource, Host,
+    ItemPlace, ItemResource, PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, Tag, Transaction,
+    backend_of,
 };
 use std::marker::PhantomData;
 
@@ -44,6 +45,15 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
         }),
         handler: PhantomData,
     };
+
+/// An entity's energy, as NeoForge 26.3's `Capabilities.Energy.ENTITY`. Vanilla has no entity
+/// that holds energy, so only mods answer it.
+pub const ENTITY_ENERGY: EntityCapabilityKey<dyn EnergyHandler> =
+    EntityCapabilityKey::new("horizon:entity_energy");
+/// An entity's fluids, as NeoForge 26.3's `Capabilities.Fluid.ENTITY`. Vanilla has no entity
+/// that holds a fluid, so only mods answer it.
+pub const ENTITY_FLUIDS: EntityCapabilityKey<dyn ResourceHandler<FluidResource>> =
+    EntityCapabilityKey::new("horizon:entity_fluids");
 
 impl EntityRef {
     /// `key`'s handler for this entity (`Entity.getCapability`): the first provider to answer, of
