@@ -4,6 +4,7 @@
 use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::{RegistrationContext, RegistrationPhase};
 use horizon_client::mod_list::{self, Installed};
+use horizon_mods::selection::{BUILD_INFO, built_ids};
 use std::path::PathBuf;
 
 #[derive(Default)]
@@ -55,13 +56,7 @@ fn native_declared() -> &'static NativeDeclared {
             &RegistrationContext::new(RegistrationPhase::Items),
             &mut items,
         );
-        let types = crate::mod_api::block_entity_types()
-            .iter()
-            .map(|kind| horizon_mods::content::BlockEntityType {
-                id: kind.id().to_owned(),
-                blocks: kind.blocks().to_vec(),
-            })
-            .collect();
+        let types = crate::mod_api::block_entity_types().to_vec();
         NativeDeclared {
             blocks,
             items,
@@ -204,7 +199,9 @@ fn register_block_entity_types(
                 .map(|block| (block.clone(), kind.id.clone()))
         })
         .collect();
-    block_entity_types::install(BlockEntityTypes::new(membership, names.clone()))?;
+    let types = BlockEntityTypes::new(membership, names.clone());
+    crate::mod_api::validate_block_entity_type_keys(&types)?;
+    block_entity_types::install(types)?;
     Ok(())
 }
 
@@ -286,20 +283,6 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
-}
-
-/// What the launcher writes beside a game it built with native mods: their ids under `mods`.
-const BUILD_INFO: &str = "native-mods.json";
-
-/// IDs compiled into this executable, from the launcher's build record.
-fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
-    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
-    info["mods"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str().map(str::to_owned))
-        .collect()
 }
 
 /// `native-mods.json`'s `mods` list is not empty: the game was built with mods.

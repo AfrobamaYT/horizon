@@ -7,7 +7,9 @@ pub mod icon;
 #[cfg(feature = "index")]
 pub mod index;
 pub mod manifest;
+pub mod mod_list;
 pub mod modpack;
+pub mod packages;
 pub mod selection;
 
 pub use content::Content;

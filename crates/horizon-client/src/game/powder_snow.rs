@@ -133,7 +133,9 @@ impl cauldron::Player for HeldSlot<'_, '_> {
     fn drop_stack(&mut self, stack: ItemStack) {
         match self.dropper {
             Some(uuid) => self.game.drop_after_commit(uuid, stack),
-            None => self.game.drop_plain(stack),
+            None => {
+                self.game.drop_plain(stack);
+            }
         }
     }
 }

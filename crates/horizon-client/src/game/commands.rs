@@ -1463,7 +1463,7 @@ impl Game<'_> {
                             p[1] + g.target_eye_height(Target::Player),
                             p[2],
                         ]);
-                        g.throw_from_eyes(rest, eye, false);
+                        g.throw_from_eyes(rest, eye, false, false);
                         if let Some(item) = g.just_spawned_item() {
                             item.thrower = None;
                             item.pickup_delay = 0;
