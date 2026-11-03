@@ -564,6 +564,7 @@ impl Game<'_> {
         let death_cause = std::mem::replace(&mut self.ui.death_cause, play.death_cause.take());
         let [x, y, z] = g.known_movement;
         let known_movement = std::mem::replace(&mut self.known_movement, Vec3::new(x, y, z));
+        self.lan_guest_swaps.push(conn);
         let acting = (
             self.lan_acting.replace(conn),
             self.lan_acting_name.replace(g.name.clone()),
@@ -837,6 +838,8 @@ impl Game<'_> {
                 }),
             );
         }
+        debug_assert_eq!(self.lan_guest_swaps.last(), Some(&conn));
+        self.lan_guest_swaps.pop();
         (
             self.lan_acting,
             self.lan_acting_name,

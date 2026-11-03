@@ -222,12 +222,14 @@ mod native_item_energy;
 mod native_item_entity_refs;
 mod native_item_fluids;
 mod native_item_places;
+mod native_level_effects;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
+mod native_mob_refs;
 mod native_mobs;
 mod native_motion;
 mod native_mounts;
@@ -3121,6 +3123,8 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// Guests whose records are displaced by nested player swaps, outer first.
+    lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -19175,6 +19179,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,
