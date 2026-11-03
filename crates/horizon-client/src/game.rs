@@ -6306,7 +6306,13 @@ impl Game<'_> {
             if matches!(self.guest_use, Some(GuestUse::OnBlock(_)))
                 && let Some(hit) = self.pick()
             {
-                self.spectator_open_menu(hit.pos);
+                let held = self.held().cloned();
+                if matches!(
+                    self.right_click_block(&hit, self.hand, held.as_ref()),
+                    native_hooks::BlockClickAnswer::Go { .. }
+                ) {
+                    self.spectator_open_menu(hit.pos);
+                }
             }
             return Ok(None);
         }
@@ -6347,11 +6353,6 @@ impl Game<'_> {
         for hand in hands {
             // The off hand's turn starts on the entity too (Minecraft.startUseItem).
             if entity && hand == Hand::Off && self.with_hand(hand, |g| g.interact_entity(None))? {
-                return Ok(Some(hand));
-            }
-            // A click on the fence block: `LeadItem.useOn`. A client whose crosshair
-            // met the knot first sends Interact with the knot's id instead.
-            if on_block && self.with_hand(hand, Game::interact_knot) {
                 return Ok(Some(hand));
             }
             if self.with_hand(hand, |game| game.use_hand(block_hit.as_ref()))? {
@@ -6474,11 +6475,25 @@ impl Game<'_> {
                 }
             }
         }
+        // A fence click reaches the hook before attaching a lead.
+        if on_block && use_item.or(true) && self.interact_knot() {
+            return Ok(true);
+        }
         // MultiPlayerGameMode.useItemOn: blocks react first.
         if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
+            if self.use_on_cauldron(hit.pos)? {
+                self.swing_arm();
+                return Ok(true);
+            }
+            if let Some(placed) = self.use_on_campfire(hit.pos)? {
+                if placed {
+                    self.swing_arm();
+                }
+                return Ok(true);
+            }
             if self.use_lectern(hit.pos, held.as_ref()) {
                 self.swing_arm();
                 return Ok(true);
@@ -13019,10 +13034,6 @@ impl Game<'_> {
         let Some(held) = self.held() else {
             return Ok(false);
         };
-        // Player.isSecondaryUseActive with an item in hand skips useItemOn.
-        if self.keys.contains(&KeyCode::ShiftLeft) {
-            return Ok(false);
-        }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
         let mut hand = powder_snow::HeldSlot {
@@ -13354,19 +13365,6 @@ impl Game<'_> {
                 f64::from(p[2]) + 0.5,
             ]
         };
-        if allow_block_actions
-            && let Some(hit) = self.pick()
-            && self.use_on_cauldron(hit.pos)?
-        {
-            return Ok(UseResult::Success { swing: true });
-        }
-        if allow_block_actions
-            && let Some(hit) = self.pick()
-            && let Some(placed) = self.use_on_campfire(hit.pos)?
-        {
-            // SUCCESS_SERVER swings; a full campfire's CONSUME does not.
-            return Ok(UseResult::Success { swing: placed });
-        }
         // BucketItem has no useOn: a guest's UseItemOn leaves it to UseItem.
         let bucket = horizon_client::items::bucket_contents(&stack.item);
         if matches!(self.guest_use, Some(GuestUse::OnBlock(_)))
