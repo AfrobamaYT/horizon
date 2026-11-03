@@ -992,7 +992,11 @@ mod tests {
         }
         std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
         let function = pack.join("data/test/function/start.mcfunction");
-        std::fs::write(&function, "scoreboard objectives add loaded dummy\n").unwrap();
+        std::fs::write(
+            &function,
+            "scoreboard objectives add loaded dummy\nscoreboard players add times loaded 1\n",
+        )
+        .unwrap();
         std::fs::write(
             pack.join("data/minecraft/tags/function/load.json"),
             r#"{"values":["test:start"]}"#,
@@ -1032,15 +1036,9 @@ mod tests {
             assert!(game.score.board.objective("loaded").is_some());
             assert!(game.score.board.objective("changed").is_none());
             game.tick_functions();
-            assert_eq!(
-                game.score
-                    .board
-                    .objectives
-                    .iter()
-                    .filter(|o| o.name == "loaded")
-                    .count(),
-                1
-            );
+            assert_eq!(game.score.board.score("times", "loaded").unwrap().value, 1);
+            assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
+            assert!(game.stations().recipe_index.contains("test:sample"));
         });
         std::fs::remove_dir_all(root).unwrap();
     }
