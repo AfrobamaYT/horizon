@@ -137,9 +137,10 @@ pub enum HostEvent {
     MainHandChanged(u32, bool),
     /// A guest changed their client language option.
     LocaleChanged(u32, String),
-    /// A guest sent new client information; the old one, for the mods.
+    /// A guest sent new client information: the values before and after, for the mods.
     ClientInformation(
         u32,
+        Box<horizon_protocol::packets::configuration::ClientInformation>,
         Box<horizon_protocol::packets::configuration::ClientInformation>,
     ),
     /// A guest's client finished loading the level around them.
@@ -3338,7 +3339,8 @@ impl Hub {
                     let old_info = self.mods_loaded.then(|| Box::new(g.info.clone()));
                     g.info = info;
                     if let Some(old) = old_info {
-                        events.push(HostEvent::ClientInformation(conn, old));
+                        let new = Box::new(g.info.clone());
+                        events.push(HostEvent::ClientInformation(conn, old, new));
                     }
                     if g.info.main_hand != old_main_hand {
                         events.push(HostEvent::MainHandChanged(conn, g.info.main_hand == 0));

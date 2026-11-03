@@ -2450,13 +2450,26 @@ impl Game<'_> {
                 self.guest_far_terrain(host, conn, &p.data)
             }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
-            // MinecraftServer.handleCustomClickAction only logs it: the mods hear it.
+            // ServerCommonPacketListenerImpl.handleCustomClickAction: the server only logs
+            // the click, so a mod's cancel leaves nothing else to skip.
             S::CustomClickAction(p) => {
-                if !horizon_client::mod_api::mods().is_empty() {
-                    let g = &host.hub.guests[gi];
-                    let (uuid, name) = (g.uuid, g.name.clone());
-                    let payload = p.payload.as_ref().map(horizon_client::snbt::to_snbt);
-                    self.native_custom_click_action(uuid, &name, &p.id, payload.as_deref());
+                let g = &host.hub.guests[gi];
+                let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
+                let mut cancel = false;
+                self.native_custom_click_action(
+                    uuid,
+                    entity_id,
+                    &name,
+                    &p.id,
+                    p.payload.as_ref(),
+                    &mut cancel,
+                );
+                if !cancel {
+                    log::debug!(
+                        "Received custom click action {} with payload {:?}",
+                        p.id,
+                        p.payload
+                    );
                 }
             }
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {

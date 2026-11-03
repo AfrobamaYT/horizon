@@ -521,23 +521,45 @@ pub enum NativeBlockShapeKind {
     Collision,
 }
 
+/// `ChatVisiblity`: which chat a client shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeChatVisibility {
+    Full,
+    System,
+    Hidden,
+}
+
+/// `HumanoidArm`: a player's main hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeMainHand {
+    Left,
+    Right,
+}
+
+/// `ParticleStatus`: how many particles a client shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeParticleStatus {
+    All,
+    Decreased,
+    Minimal,
+}
+
 /// A player's client options, as `ServerboundClientInformationPacket` carries them
-/// (vanilla's `ClientInformation`).
+/// (vanilla's `ClientInformation`). Raw ids map as vanilla's `ByIdMap` does: chat
+/// visibility and particle status wrap (`floorMod(id, 3)`), the main hand reads an
+/// unknown id as left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeClientInfo {
     pub language: String,
     pub view_distance: i8,
-    /// 0 full, 1 system, 2 hidden.
-    pub chat_visibility: i32,
+    pub chat_visibility: NativeChatVisibility,
     pub chat_colors: bool,
     /// Skin layer bits (`PlayerModelPart`).
     pub model_customisation: u8,
-    /// 0 left, 1 right.
-    pub main_hand: i32,
+    pub main_hand: NativeMainHand,
     pub text_filtering: bool,
     pub allows_listing: bool,
-    /// 0 all, 1 decreased, 2 minimal.
-    pub particle_status: i32,
+    pub particle_status: NativeParticleStatus,
 }
 
 impl From<&horizon_protocol::packets::configuration::ClientInformation> for NativeClientInfo {
@@ -545,13 +567,25 @@ impl From<&horizon_protocol::packets::configuration::ClientInformation> for Nati
         Self {
             language: i.language.clone(),
             view_distance: i.view_distance,
-            chat_visibility: i.chat_visibility,
+            chat_visibility: match i.chat_visibility.rem_euclid(3) {
+                0 => NativeChatVisibility::Full,
+                1 => NativeChatVisibility::System,
+                _ => NativeChatVisibility::Hidden,
+            },
             chat_colors: i.chat_colors,
             model_customisation: i.model_customisation,
-            main_hand: i.main_hand,
+            main_hand: if i.main_hand == 1 {
+                NativeMainHand::Right
+            } else {
+                NativeMainHand::Left
+            },
             text_filtering: i.text_filtering,
             allows_listing: i.allows_listing,
-            particle_status: i.particle_status,
+            particle_status: match i.particle_status.rem_euclid(3) {
+                0 => NativeParticleStatus::All,
+                1 => NativeParticleStatus::Decreased,
+                _ => NativeParticleStatus::Minimal,
+            },
         }
     }
 }

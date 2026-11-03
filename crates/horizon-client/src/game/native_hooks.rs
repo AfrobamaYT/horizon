@@ -926,7 +926,7 @@ use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
-    nbt::Compound,
+    nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
 use std::{
@@ -5530,29 +5530,53 @@ impl Game<'_> {
     /// NeoForge's `ClientInformationUpdatedEvent`: a server player's client sent new
     /// client information (language, view distance, chat, skin parts, main hand,
     /// filtering, listing, particles) in play. `old` and `new` are the values before and
-    /// after; they can be equal. The player is not swapped in. Server-side.
+    /// after this packet, one call per packet; they can be equal. The join's own
+    /// information (the configuration phase, `ServerPlayer`'s constructor) is not
+    /// reported. The player is not swapped in. Server-side.
     /// @API:client_information_updated@.
     pub(super) fn native_client_information_updated(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         old: &horizon_client::mod_api::NativeClientInfo,
         new: &horizon_client::mod_api::NativeClientInfo,
     ) {
-        mod_api::dispatch_client_information_updated(self, mod_api::mods(), player, name, old, new);
+        mod_api::dispatch_client_information_updated(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            old,
+            new,
+        );
     }
-    /// A server player's client sent a `custom` click action (a dialog button or a
-    /// text component's click event): its id and its payload as SNBT text, if any.
-    /// Vanilla only logs it. The player is not swapped in. Server-side.
+    /// NeoForge's `CustomClickActionEvent`: a server player's client sent a `custom`
+    /// click action (a dialog button or a text component's click event): its id and
+    /// optional payload. Vanilla only logs it; set `cancel` to skip that. Only play-phase
+    /// clicks are reported: one sent during configuration (no player yet) is not. The
+    /// player is not swapped in. Server-side.
     /// @API:custom_click_action@.
     pub(super) fn native_custom_click_action(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         id: &str,
-        payload: Option<&str>,
+        payload: Option<&Tag>,
+        cancel: &mut bool,
     ) {
-        mod_api::dispatch_custom_click_action(self, mod_api::mods(), player, name, id, payload);
+        mod_api::dispatch_custom_click_action(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            id,
+            payload,
+            cancel,
+        );
     }
     /// A server entity was moved by a same-level teleport command, after its
     /// position changed. `entity` is its network id; `from` and `to` are
