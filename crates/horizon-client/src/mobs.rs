@@ -2783,7 +2783,8 @@ pub struct MobWorld<'a> {
     /// A server with native mods, which the game asks before a tame or a
     /// baby (`AnimalTameEvent`, `BabyEntitySpawnEvent`): the goals then
     /// leave what a cancel would undo to the game (a horse's `tame`, a
-    /// llama's breeding experience).
+    /// llama's breeding experience). Ravagers also use it to defer their jump
+    /// when `BreakBlock` leaves may be kept by a mod (`IfBroke`).
     pub ask_mods: bool,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
