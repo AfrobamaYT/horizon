@@ -58,9 +58,9 @@ impl Game<'_> {
         true
     }
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
-    /// `setXRot`), as `/rotate` does: the pitch is clamped to -90..90, and a
-    /// player's client is told. False for kinds whose rotation Horizon does not
-    /// fully store, or an unavailable player. Does not teleport or dismount.
+    /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds
+    /// whose rotation Horizon does not fully store, or an unavailable player.
+    /// Does not teleport or dismount.
     /// API @API:entity_moves@.
     pub(super) fn native_entity_set_rotation(
         &mut self,
