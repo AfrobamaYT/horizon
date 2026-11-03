@@ -464,12 +464,8 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        let body = matches!(m.species(), Species::ZombieHorse | Species::ZombieNautilus);
-        let slot = if body {
-            EquipmentSlot::Body
-        } else {
-            EquipmentSlot::Head
-        };
+        let slot = m.sun_protection_slot();
+        let body = slot == EquipmentSlot::Body;
         let Some(mut stack) = m.item_by_slot(slot) else {
             return;
         };

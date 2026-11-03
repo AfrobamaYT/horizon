@@ -1560,7 +1560,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// or without AI (`NoAI` only skips `serverAiStep`).
 fn burn_undead(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.kind.flags.burns_in_day && m.alive() && sun_burn_tick(m, w) {
-        if m.extra.head.is_some() {
+        if m.item_by_slot(m.sun_protection_slot()).is_some() {
             events.push(MobEvent::SunProtectionWear { mob: m.id });
         } else {
             m.ignite_for_ticks(160);
