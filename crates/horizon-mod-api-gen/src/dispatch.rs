@@ -231,7 +231,7 @@ pub(super) fn emit(
             } else if param.ty.starts_with("&mut ") {
                 format!("&mut *{name}")
             } else {
-                format!("&*{name}")
+                name.clone()
             });
         }
 
