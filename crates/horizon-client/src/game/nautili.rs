@@ -118,8 +118,9 @@ impl Game<'_> {
                 return true;
             }
             if item.ends_with("_nautilus_armor") && tame && m.extra.body.is_none() {
-                m.extra.body_count = 0;
-                m.extra.body = Some(item.into());
+                let held = self.inventory[self.selected].clone();
+                m.extra
+                    .set_body_stack(held.map(|s| ItemStack { count: 1, ..s }));
                 self.nautilus_sound(index, "item.armor.equip_nautilus");
                 self.consume_held();
                 return true;

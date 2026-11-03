@@ -245,8 +245,8 @@ impl Game<'_> {
             && tamed
             && m.extra.body.is_none()
         {
-            m.extra.body_count = 0;
-            m.extra.body = Some(item.into());
+            m.extra
+                .set_body_stack(held.map(|s| ItemStack { count: 1, ..s }));
             Some("minecraft:entity.horse.armor")
         } else if item == "minecraft:chest"
             && matches!(species, Species::Donkey | Species::Mule)

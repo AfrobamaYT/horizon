@@ -155,8 +155,10 @@ impl Game<'_> {
                 return false;
             }
             self.eject_sulfur_block(index);
-            self.mobs[index].extra.body_count = 0;
-            self.mobs[index].extra.body = Some(item.into());
+            let held = self.inventory[self.selected]
+                .clone()
+                .map(|s| ItemStack { count: 1, ..s });
+            self.mobs[index].extra.set_body_stack(held);
             self.consume_held();
             self.sulfur_sound(index, "entity.sulfur_cube.absorb");
             return true;
@@ -248,7 +250,6 @@ impl Game<'_> {
             if !griefing || !close {
                 continue;
             }
-            let item = e.stack.item.clone();
             let thrown_by_player = e
                 .thrower
                 .is_some_and(|uuid| Some(uuid) == self.level.player_uuid);
@@ -265,8 +266,7 @@ impl Game<'_> {
                 self.remove_dropped(j);
             }
             let m = &mut self.mobs[i];
-            m.extra.body_count = 0;
-            m.extra.body = Some(item);
+            m.extra.set_body_stack(Some(swallowed.clone()));
             m.extra.point = None;
             self.sulfur_sound(i, "entity.sulfur_cube.absorb");
             if thrown_by_player {

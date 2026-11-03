@@ -118,8 +118,11 @@ impl Game<'_> {
                 return true;
             }
             if carpet(item) && m.extra.body.is_none() {
-                self.mobs[index].extra.body_count = 0;
-                self.mobs[index].extra.body = Some(item.into());
+                let held = self.inventory[self.selected].clone().map(|mut stack| {
+                    stack.count = 1;
+                    stack
+                });
+                self.mobs[index].extra.set_body_stack(held);
                 self.llama_sound(index, "entity.llama.swag", 1.0);
                 self.consume_held();
                 return true;
