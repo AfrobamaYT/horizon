@@ -2,22 +2,22 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "level_level_event",
+      "name": "level_level_event", "side": "server",
       "target": "horizon_client::game::native_level_events::Game<'_>::native_level_level_event",
       "receiver": "level"
     },
     {
-      "name": "level_game_event",
+      "name": "level_game_event", "side": "server",
       "target": "horizon_client::game::native_level_events::Game<'_>::native_level_game_event",
       "receiver": "level"
     },
     {
-      "name": "level_explode",
+      "name": "level_explode", "side": "server",
       "target": "horizon_client::game::native_level_events::Game<'_>::native_level_explode",
       "receiver": "level"
     },
     {
-      "name": "level_strike_lightning",
+      "name": "level_strike_lightning", "side": "server",
       "target": "horizon_client::game::native_level_events::Game<'_>::native_level_strike_lightning",
       "receiver": "level"
     }

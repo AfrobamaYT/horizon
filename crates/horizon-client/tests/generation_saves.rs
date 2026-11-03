@@ -167,8 +167,26 @@ impl Session {
     }
     fn save(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(120);
-        while !self.streaming.poll_save(&mut self.world) {
+        'save: loop {
             assert!(Instant::now() < deadline, "incremental save never finished");
+            let tick_deadline = Instant::now() + Duration::from_millis(2);
+            loop {
+                match self
+                    .streaming
+                    .prepare_poll_save(&mut self.world, tick_deadline)
+                {
+                    horizon_client::streaming::SaveStep::Pending => break,
+                    horizon_client::streaming::SaveStep::Full(chunk) => {
+                        self.streaming.save_finished(chunk)
+                    }
+                    horizon_client::streaming::SaveStep::Protos(protos) => {
+                        if self.streaming.submit_protos(protos) {
+                            break 'save;
+                        }
+                        break;
+                    }
+                }
+            }
             thread::sleep(Duration::from_millis(1));
         }
         for key in std::mem::take(&mut self.world.modified) {
@@ -534,11 +552,11 @@ fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
         }
         fn final_block_entities(
             &self,
-            _: &Proto,
-            writes: &[([i32; 3], u32)],
+            entries: &[(&Proto, &[([i32; 3], u32)])],
         ) -> Vec<((i32, i32, i32), BlockEntity)> {
-            writes
+            entries
                 .iter()
+                .flat_map(|(_, writes)| writes.iter())
                 .map(|([x, y, z], _)| ((*x, *y, *z), BlockEntity::Chest(Vec::new())))
                 .collect()
         }
@@ -559,7 +577,8 @@ fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
         registry: assets,
         biomes,
     };
-    let made = generator.final_block_entities(&(Box::new(()) as Proto), &[([1, 64, 2], 5)]);
+    let proto = Box::new(()) as Proto;
+    let made = generator.final_block_entities(&[(&proto, &[([1, 64, 2], 5)])]);
     assert_eq!(made.len(), 1, "Persistent drops the block entities");
     assert_eq!(made[0].0, (1, 64, 2));
     let _ = std::fs::remove_dir_all(&dir);

@@ -21,7 +21,7 @@ use std::{
 use tower::ServiceExt;
 
 const PUBLIC: &str = "https://playhorizon.test";
-const HMOD_SHA: &str = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53";
+const HMOD_SHA: &str = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce";
 
 #[derive(Default)]
 struct Mock {
@@ -419,7 +419,10 @@ async fn a_submission_becomes_a_pull_request() {
             "{body}"
         );
         assert!(body.contains("/mods/submit) by @alice."), "{body}");
-        assert!(body.contains("may draw text on your screen"), "{body}");
+        assert!(
+            body.contains("may add blocks, items, mob effects"),
+            "{body}"
+        );
     }
     // The same version again: its pull request is open.
     let (status, json) = client.submit(&csrf, &form(), &file).await;
@@ -562,11 +565,15 @@ async fn what_the_form_refuses() {
     refused(status, &json, "the file's id is \"coords_hud\"");
     // A broken signature.
     let mut f = form();
-    f["signature"] = json!(
-        std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.hmod.minisig"))
-            .unwrap()
-            .replace("RUTV", "RUTW")
-    );
+    let signature =
+        std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.hmod.minisig")).unwrap();
+    let mut lines: Vec<_> = signature.lines().map(str::to_owned).collect();
+    let mut bytes = STANDARD.decode(&lines[1]).unwrap();
+    bytes[10] ^= 1;
+    lines[1] = STANDARD.encode(bytes);
+    let broken = lines.join("\n");
+    assert_ne!(broken, signature.trim_end());
+    f["signature"] = json!(broken);
     let (status, json) = client.submit(&csrf, &f, &file).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
     // A shader pack runs the game's own check: a mod's file isn't one.
@@ -903,8 +910,8 @@ async fn a_retry_takes_up_its_own_branch() {
     assert_eq!(mock.lock().unwrap().resets, [branch.as_str()]);
 }
 
-/// A native rewrite (`.hnmod`) of `coords_hud` at `version`.
-fn hnmod(version: &str) -> Vec<u8> {
+/// A native rewrite (`.hmod`) of `coords_hud` at `version`.
+fn hmod(version: &str) -> Vec<u8> {
     use std::io::Write;
     let revision = "a".repeat(40);
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
@@ -922,10 +929,8 @@ fn hnmod(version: &str) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
-/// A WebAssembly mod's entry turns `native-mod` once, by its owner; its
-/// `.hmod` versions stay. No other kind change.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_mod_turns_native_once() {
+async fn a_mod_cannot_turn_native() {
     let (mut client, mock) = setup().await;
     let published = format!(
         "id = \"coords_hud\"\nkind = \"mod\"\nname = \"C\"\nsummary = \"s\"\nowners = [\"Alice\"]\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"0.1.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.1.0.hmod\"\nsha256 = \"{HMOD_SHA}\"\n"
@@ -933,63 +938,17 @@ async fn a_mod_turns_native_once() {
     mock.lock()
         .unwrap()
         .main
-        .insert("mods/coords_hud.toml".into(), published.clone());
+        .insert("mods/coords_hud.toml".into(), published);
     let csrf = client.sign_in().await;
     let mut native = form();
     native["kind"] = json!("native-mod");
     native["version"] = json!("0.2.0");
     native["key"] = Value::Null;
     native["signature"] = Value::Null;
-    let file = hnmod("0.2.0");
-
-    // Not by someone who isn't an owner.
-    mock.lock().unwrap().main.insert(
-        "mods/coords_hud.toml".into(),
-        published.replace("\"Alice\"", "\"bob\""),
-    );
-    let (status, json) = client.submit(&csrf, &native, &file).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
-
-    mock.lock()
-        .unwrap()
-        .main
-        .insert("mods/coords_hud.toml".into(), published);
-    let (status, json) = client.submit(&csrf, &native, &file).await;
-    assert_eq!(status, StatusCode::OK, "{json}");
-    let text = {
-        let m = mock.lock().unwrap();
-        let (text, _, replaced) = &m.commits[&(
-            "submit/coords_hud-0.2.0".into(),
-            "mods/coords_hud.toml".into(),
-        )];
-        assert_eq!(replaced.as_deref(), Some("blob1"));
-        assert!(m.assets[0].0.ends_with(".hnmod"), "{:?}", m.assets);
-        let body = m.pulls[0]["body"].as_str().unwrap();
-        assert!(body.contains("(native-mod, update: turns native"), "{body}");
-        // Reviewed by hand: never merged as an owner update.
-        assert!(
-            !body.contains("owner-update") && m.labels.is_empty(),
-            "{body}"
-        );
-        text.clone()
-    };
-    let entry: Entry = toml::from_str(&text).unwrap();
-    assert_eq!(entry.kind.name(), "native-mod");
-    let files: Vec<&str> = entry.versions.iter().map(|v| v.file.as_str()).collect();
-    assert_eq!(files, ["coords_hud-0.2.0.hnmod", "coords_hud-0.1.0.hmod"]);
-
-    // Once native, never back.
-    mock.lock()
-        .unwrap()
-        .main
-        .insert("mods/coords_hud.toml".into(), text);
-    let wasm = std::fs::read(fixtures().join("coords_hud-0.1.0.hmod")).unwrap();
-    let (status, json) = client.submit(&csrf, &form(), &wasm).await;
+    let (status, json) = client.submit(&csrf, &native, &hmod("0.2.0")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
-    assert_eq!(
-        json["error"],
-        "coords_hud is a native-mod, not a mod: a project's kind never changes (only a mod may turn native-mod, once)"
-    );
+    assert_eq!(json["error"], "coords_hud: its kind can't change");
+    assert!(mock.lock().unwrap().pulls.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

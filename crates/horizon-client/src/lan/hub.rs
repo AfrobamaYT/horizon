@@ -182,6 +182,19 @@ pub enum HostEvent {
         sender: u128,
         text: String,
     },
+    /// A chat message the sender's chain and the chat filter let through,
+    /// not yet broadcast: with server mods loaded, the game tells them
+    /// (`native_server_chat`, NeoForge's `ServerChatEvent`) and then
+    /// broadcasts it with `Hub::broadcast_chat`.
+    ChatSubmitted {
+        message: Box<chat::ChatMessage>,
+        bound: Box<play::ChatTypeBound>,
+        name: String,
+    },
+    /// A new chat session's announcement (`PlayerInfoUpdate` with
+    /// INITIALIZE_CHAT) held behind a `ChatSubmitted` of the same tick: the
+    /// game broadcasts it once it has relayed that message.
+    ChatSessionStarted(Box<play::PlayerInfoUpdate>),
     /// A player's text the chat filter refused (docs/chat-filter.md): relayed to nobody, for the
     /// game to log and to carry out `action`.
     ChatFiltered {
@@ -4485,6 +4498,51 @@ mod tests {
         };
         assert_eq!(update.entries.len(), 1);
         assert_eq!(update.entries[0].uuid, 1);
+    }
+
+    /// `handleChatSessionUpdate` shares `chatMessageChain` with chat: a new
+    /// session is announced after a message that came before it. With mods
+    /// loaded that message waits for the game (`ChatSubmitted`), so the
+    /// announcement waits behind it; with nothing held it goes out at once.
+    #[test]
+    fn a_new_chat_session_waits_behind_chat_the_mods_hold() {
+        let (mut hub, rx) = hub_with_a_guest();
+        let update = || play::PlayerInfoUpdate {
+            actions: 2,
+            entries: vec![play::PlayerInfo {
+                uuid: 1,
+                ..Default::default()
+            }],
+        };
+        let mut events = Vec::new();
+        hub.announce_chat_session(update(), &mut events);
+        assert!(events.is_empty());
+        assert_eq!(rx.try_iter().count(), 1, "announced at once");
+
+        let mut events = vec![HostEvent::ChatSubmitted {
+            message: Box::new(chat::ChatMessage {
+                sender: 1,
+                index: 0,
+                signature: None,
+                content: "hi".into(),
+                timestamp: 0,
+                salt: 0,
+                last_seen: Vec::new(),
+                unsigned_content: None,
+            }),
+            bound: Box::new(play::ChatTypeBound {
+                chat_type: 0,
+                name: horizon_world::nbt::Tag::String("Bob".into()),
+                target: None,
+            }),
+            name: "Bob".into(),
+        }];
+        hub.announce_chat_session(update(), &mut events);
+        assert_eq!(rx.try_iter().count(), 0, "held behind the chat");
+        assert!(matches!(
+            events.as_slice(),
+            [HostEvent::ChatSubmitted { .. }, HostEvent::ChatSessionStarted(u)] if **u == update()
+        ));
     }
 
     /// `handlePlayerCommand` START_RIDING_JUMP (3) and STOP_RIDING_JUMP (4): the

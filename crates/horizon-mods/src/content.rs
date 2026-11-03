@@ -3,13 +3,13 @@
 //! effects, entity types and menu types it declares in
 //! `data/<id>/horizon/{block,item,mob_effect,entity_type,menu}/`.
 //!
-//! Content is data, not code: nothing here runs in the sandbox. What a mod
+//! Content is data, not code: nothing here executes. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
 //! manifest lists), plus additions to vanilla tags and to the convention
 //! tags (`c`, which NeoForge and Fabric mods share). Paths are plain, files
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
-use crate::manifest::{Capability, MANIFEST, Manifest};
+use crate::manifest::Manifest;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -141,12 +141,10 @@ impl RandomTicks {
     }
 }
 
-/// Boxes selected by one property (legacy) or an ordered tuple of properties.
+/// Boxes selected by an ordered tuple of properties.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BlockShapes {
-    #[serde(default)]
-    pub property: String,
     #[serde(default)]
     pub properties: Vec<String>,
     #[serde(default)]
@@ -155,18 +153,9 @@ pub struct BlockShapes {
 }
 
 impl BlockShapes {
-    pub fn property_names(&self) -> Vec<&str> {
-        if self.property.is_empty() {
-            self.properties.iter().map(String::as_str).collect()
-        } else {
-            vec![self.property.as_str()]
-        }
-    }
-
     fn check(&self) -> Result<(), String> {
-        let names = self.property_names();
-        if (!self.property.is_empty() && !self.properties.is_empty())
-            || names.iter().any(|name| !state_name(name))
+        let names = &self.properties;
+        if names.iter().any(|name| !state_name(name))
             || names.iter().collect::<BTreeSet<_>>().len() != names.len()
             || (names.is_empty() && !self.values.is_empty())
             || (self.values.is_empty() && self.default.is_none())
@@ -244,6 +233,8 @@ struct BlockFile {
     wood_type: Option<String>,
     #[serde(default)]
     wall_block: Option<String>,
+    #[serde(default)]
+    base_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
@@ -290,6 +281,8 @@ pub struct Block {
     /// template is the matching wall sign and which has no item. The
     /// template's when unset.
     pub wall_block: Option<String>,
+    /// The block farmland turns into; the template's base when unset.
+    pub base_block: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -663,11 +656,6 @@ impl Content {
     /// Where content may go, and the declarations.
     fn check(&mut self, manifest: &Manifest, declared: &[String]) -> Result<(), String> {
         let id = manifest.id.as_str();
-        if !self.files.is_empty() && !manifest.capabilities.contains(&Capability::Registries) {
-            return Err(format!(
-                "has assets/ or data/ but not capability registries in {MANIFEST}"
-            ));
-        }
         let mut blocks = Vec::new();
         let mut items = Vec::new();
         let mut effects = Vec::new();
@@ -758,6 +746,7 @@ impl Content {
                 thickness: file.thickness,
                 wood_type: file.wood_type,
                 wall_block: file.wall_block,
+                base_block: file.base_block,
             };
             check_block(&block).map_err(|e| format!("{name}: {e}"))?;
             if block.item {
@@ -1045,6 +1034,14 @@ fn check_block(file: &Block) -> Result<(), String> {
         }
         _ => {}
     }
+    if let Some(base) = &file.base_block {
+        if file.template != "minecraft:farmland" {
+            return Err("base_block needs template minecraft:farmland".into());
+        }
+        if !namespaced_id(base) {
+            return Err("base_block is a block id, namespace:path".into());
+        }
+    }
     // Every vanilla `SignBlock`'s id ends in `_sign`, and no other block's does.
     let sign = file.template.ends_with("_sign");
     if let Some(wood) = &file.wood_type {
@@ -1172,15 +1169,17 @@ capabilities = ["registries"]
         )]).unwrap();
         let block = &content.blocks[0];
         assert_eq!(
-            block.shapes.as_ref().unwrap().property_names(),
+            block.shapes.as_ref().unwrap().properties,
             ["facing", "count"]
         );
         assert_eq!(
             block.collision_shapes.as_ref().unwrap().default,
             Some(vec![])
         );
+        assert!(
+            serde_json::from_str::<BlockShapes>(r#"{"property":"axis","default":[]}"#).is_err()
+        );
         for value in [
-            r#"{"property":"axis","properties":["count"],"default":[]}"#,
             r#"{"properties":["axis","axis"],"default":[]}"#,
             r#"{"properties":["Axis"],"default":[]}"#,
             r#"{"properties":["axis","count"],"values":{"x":[]}}"#,
@@ -1203,7 +1202,6 @@ capabilities = ["registries"]
             );
         }
         let oversized = BlockShapes {
-            property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
@@ -1217,7 +1215,7 @@ capabilities = ["registries"]
     fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
         let dir = scratch(name);
         let path = dir.join("m.hmod");
-        std::fs::write(&path, Package::write_files(manifest, None, files)?).unwrap();
+        std::fs::write(&path, Package::write_files(manifest, files)?).unwrap();
         let package = Package::read(&path);
         let content = package.and_then(|p| Content::read(&path, &p.manifest));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1335,6 +1333,7 @@ capabilities = ["registries"]
                 thickness: None,
                 wood_type: None,
                 wall_block: None,
+                base_block: None,
             }]
         );
         assert_eq!(content.items[0].id, "ruby:ruby");
@@ -1403,11 +1402,7 @@ capabilities = ["registries"]
         let read = |declared: &[String]| {
             let dir = scratch("declared-remainder");
             let path = dir.join("m.hmod");
-            std::fs::write(
-                &path,
-                Package::write_files(MANIFEST_TEXT, None, files).unwrap(),
-            )
-            .unwrap();
+            std::fs::write(&path, Package::write_files(MANIFEST_TEXT, files).unwrap()).unwrap();
             let package = Package::read(&path).unwrap();
             let content = Content::read_declaring(&path, &package.manifest, declared);
             std::fs::remove_dir_all(&dir).unwrap();
@@ -1690,12 +1685,11 @@ capabilities = ["registries"]
     #[test]
     fn folder_mod_reads_the_same() {
         let dir = scratch("folder");
-        std::fs::write(dir.join(MANIFEST), MANIFEST_TEXT).unwrap();
+        std::fs::write(dir.join(crate::manifest::MANIFEST), MANIFEST_TEXT).unwrap();
         let block = dir.join("data/ruby/horizon/block");
         std::fs::create_dir_all(&block).unwrap();
         std::fs::write(block.join("ruby_block.json"), BLOCK).unwrap();
         let package = Package::read(&dir).unwrap();
-        assert!(package.wasm.is_none());
         let content = Content::read(&dir, &package.manifest).unwrap();
         assert_eq!(content.files, ["data/ruby/horizon/block/ruby_block.json"]);
         assert_eq!(content.file(&content.files[0]).unwrap(), BLOCK);
@@ -1734,6 +1728,26 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn farmland_base_requires_farmland_and_a_block_id() {
+        let block = |json: &str| {
+            hmod(
+                "farmland",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/farm.json", json.as_bytes())],
+            )
+        };
+        let parsed =
+            block(r#"{"template":"minecraft:farmland","base_block":"ruby:soil"}"#).unwrap();
+        assert_eq!(parsed.blocks[0].base_block.as_deref(), Some("ruby:soil"));
+        for bad in [
+            r#"{"template":"minecraft:stone","base_block":"ruby:soil"}"#,
+            r#"{"template":"minecraft:farmland","base_block":"soil"}"#,
+        ] {
+            assert!(block(bad).unwrap_err().contains("base_block"));
         }
     }
 
@@ -1920,13 +1934,13 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:stone", "glow": true}"#,
             )],
         );
-        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
-        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[0,0,0,1,1]]}}}"#)]);
+        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
+        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{"x":[[0,0,0,1,1]]}}}"#)]);
         refused(
             "shape-no-values",
             &[(
                 "data/ruby/horizon/block/a.json",
-                br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{}}}"#,
+                br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{}}}"#,
             )],
         );
         let e = refused(
@@ -2084,32 +2098,6 @@ capabilities = ["registries"]
             Some("mods t_and_t and kaisyn both use the namespace kaisyn; turn one of them off")
         );
         assert_eq!(clash(("t_and_t", &t_and_t), ("ruby", &ruby)), None);
-    }
-
-    #[test]
-    fn content_needs_the_registries_capability() {
-        let code_only = MANIFEST_TEXT
-            .replace("api = \"0.2\"", "api = \"0.1\"")
-            .replace("capabilities = [\"registries\"]", "capabilities = []");
-        // No code and no registries: nothing to load.
-        let e = hmod("empty", &code_only, &[]).unwrap_err();
-        assert!(e.contains("mod.wasm: missing"), "{e}");
-        // Registries on API 0.1.
-        let old = MANIFEST_TEXT.replace("api = \"0.2\"", "api = \"0.1\"");
-        assert!(Manifest::parse(&old).unwrap_err().contains("needs api"));
-        // Content without the capability, in a mod with code.
-        let dir = scratch("no-cap");
-        let path = dir.join("m.hmod");
-        let files: &[(&str, &[u8])] = &[("assets/ruby/lang/en_us.json", b"{}")];
-        std::fs::write(
-            &path,
-            Package::write_files(&code_only, Some(b"\0asm"), files).unwrap(),
-        )
-        .unwrap();
-        let package = Package::read(&path).unwrap();
-        let e = Content::read(&path, &package.manifest).err().unwrap();
-        assert!(e.contains("not capability registries"), "{e}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

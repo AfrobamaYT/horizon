@@ -60,7 +60,7 @@ impl Game<'_> {
     }
     /// Whether this game simulates a world: a client's copy has no places to write.
     fn places_simulated(&self) -> bool {
-        self.serving.is_some() || self.options.dedicated.is_some()
+        self.is_logical_server()
     }
     /// The slot of the player in place that `place` names.
     fn player_place(&mut self, place: &ItemPlace) -> Option<&mut Option<ItemStack>> {
@@ -75,6 +75,31 @@ impl Game<'_> {
             ItemPlace::PlayerCursor { .. } => Some(&mut self.carried),
             _ => None,
         }
+    }
+    /// How many slots the inventory of entity `entity` in the level in place has, as
+    /// `entity_slots` reaches them: none for an entity without one, and on a client.
+    pub(super) fn native_entity_container_size(&self, entity: u32) -> Option<usize> {
+        if self.remote.is_some() {
+            return None;
+        }
+        if let Some(c) = self.carts.iter().find(|c| c.id == entity) {
+            let container = matches!(c.kind, CartKind::Chest | CartKind::Hopper);
+            return container.then_some(c.items.len());
+        }
+        if let Some(b) = self.boats.iter().find(|b| b.id == entity) {
+            return b.chest.then_some(b.items.len());
+        }
+        let m = self
+            .mobs
+            .iter()
+            .find(|m| m.id == entity && m.extra.chested)?;
+        Some(super::mount_menu::mount_columns(m) * 3)
+    }
+    /// `EntityType.is(TagKey)`: whether `entity_type` (`minecraft:player`) is in the entity
+    /// type tag `tag` (`minecraft:cannot_be_pushed_onto_boats`). API @API:item_places@.
+    pub(super) fn native_entity_type_in_tag(&self, entity_type: &str, tag: &str) -> bool {
+        let tag = horizon_client::command::args::normalize(tag);
+        self.res.mob_data().entity_has(&tag, entity_type)
     }
     /// The stack at a player's or an item entity's place; none for an empty one, a player who
     /// isn't here or is dead, an item entity not in the level in place, any other place
@@ -283,58 +308,70 @@ mod tests {
     use horizon_client::{
         items::ItemStack,
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-        mod_api::{Host, ItemPlace, ItemResource},
+        mod_api::{ENTITY_ITEMS, Host, ItemPlace, ItemResource},
     };
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+    /// A world open to LAN on a dedicated server, as a guest's actions run.
+    fn open_to_lan(game: &mut super::Game<'_>) {
+        game.options.dedicated = Some(Vec::new());
+        let settings = super::super::lan::LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        };
+        let net = NetConfig {
+            announce: false,
+            ..NetConfig::lan(0, "PlaceTest".into(), 2)
+        };
+        let config = HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 10,
+            simulation_distance: 10,
+            dimension: "minecraft:overworld".into(),
+            allow_flight: false,
+            seed: 0,
+            max_players: 2,
+            integrated: false,
+            levels: Default::default(),
+        };
+        game.lan_host(settings, net, config).unwrap();
+    }
+
+    /// A placed guest on connection `conn`, with UUID and entity id `conn + 122` and
+    /// `conn + 19`.
+    fn guest(conn: u32) -> Guest {
+        let (tx, _rx) = mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn,
+                uuid: u128::from(conn) + 122,
+                name: format!("guest{conn}"),
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::default()),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+            },
+            conn as i32 + 19,
+            [0.0; 3],
+            8,
+        );
+        guest.placed = true;
+        guest
+    }
 
     #[test]
     #[ignore = "needs prepared resources"]
     fn a_guests_place_is_written_as_theirs_and_an_abort_puts_it_back() {
         with_game(|game| {
-            game.options.dedicated = Some(Vec::new());
-            let settings = super::super::lan::LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            };
-            let net = NetConfig {
-                announce: false,
-                ..NetConfig::lan(0, "PlaceTest".into(), 2)
-            };
-            let config = HubConfig {
-                default_game_mode: 0,
-                guest_commands: false,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 10,
-                simulation_distance: 10,
-                dimension: "minecraft:overworld".into(),
-                allow_flight: false,
-                seed: 0,
-                max_players: 2,
-                integrated: false,
-                levels: Default::default(),
-            };
-            game.lan_host(settings, net, config).unwrap();
-            let (tx, _rx) = mpsc::channel();
-            let mut guest = Guest::new(
-                Joined {
-                    conn: 1,
-                    uuid: 123,
-                    name: "guest".into(),
-                    properties: Vec::new(),
-                    info: ClientInformation::new(8),
-                    brand: String::new(),
-                    sender: PlayerSender::new(tx, Arc::default()),
-                    latency: Arc::new(AtomicI32::new(0)),
-                    address: "127.0.0.1:1".parse().unwrap(),
-                },
-                20,
-                [0.0; 3],
-                8,
-            );
-            guest.placed = true;
+            open_to_lan(game);
+            let mut guest = guest(1);
             guest.inventory[0] = Some(ItemStack::new("minecraft:bucket", 3));
             game.lan.as_mut().unwrap().hub.guests.push(guest);
             let host_before = game.inventory.clone();
@@ -370,6 +407,372 @@ mod tests {
                 1
             );
             assert_eq!(game.inventory, host_before);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_armour_slot_holds_one() {
+        with_game(|game| {
+            open_to_lan(game);
+            game.lan.as_mut().unwrap().hub.guests.push(guest(1));
+            let host: &mut dyn Host = game;
+            let items = host
+                .entity(20)
+                .unwrap()
+                .capability(host, &ENTITY_ITEMS)
+                .unwrap();
+            let pumpkin = ItemResource::of(&ItemStack::new("minecraft:carved_pumpkin", 1));
+            let wrote =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 39, &pumpkin, 64)));
+            assert_eq!(wrote, Ok(1));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_creative_players_selected_stack_takes_what_fits_and_keeps_it() {
+        with_game(|game| {
+            open_to_lan(game);
+            let mut player = guest(1);
+            player.game_mode = 1;
+            player.inventory[0] = Some(ItemStack::new("minecraft:stick", 60));
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let host: &mut dyn Host = game;
+            let items = host
+                .entity(20)
+                .unwrap()
+                .capability(host, &ENTITY_ITEMS)
+                .unwrap();
+            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            assert_eq!(
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 4))),
+                Ok(4)
+            );
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0].inventory[0]
+                    .as_ref()
+                    .unwrap()
+                    .count,
+                64
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_kept_handler_reaches_nothing_once_its_cart_is_removed() {
+        use super::super::{
+            commands::Target,
+            minecarts::{CartKind, Minecart},
+        };
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.carts.push(Minecart::new(
+                500,
+                CartKind::Chest,
+                horizon_core::geometry::Vec3::ZERO,
+            ));
+            let host: &mut dyn Host = game;
+            let entity = host.entity(500).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            game.persist.removals.push(Target::Cart(500));
+            assert!(entity.capability(game, &ENTITY_ITEMS).is_none());
+            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let host: &mut dyn Host = game;
+            let wrote =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sticks, 1)));
+            assert_eq!(wrote, Ok(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn bound_armour_comes_off_only_in_creative() {
+        with_game(|game| {
+            open_to_lan(game);
+            let mut player = guest(1);
+            let mut helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            helmet
+                .data_mut()
+                .enchantments
+                .push(("minecraft:binding_curse".into(), 1));
+            player.armor[0] = Some(helmet.clone());
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let host: &mut dyn Host = game;
+            let items = host
+                .entity(20)
+                .unwrap()
+                .capability(host, &ENTITY_ITEMS)
+                .unwrap();
+            let helmet = ItemResource::of(&helmet);
+            assert_eq!(items.amount(host, 39), 1);
+            let take = |host: &mut dyn Host| {
+                host.transaction(|host, tx| Ok::<_, ()>(items.extract(host, tx, 39, &helmet, 1)))
+            };
+            assert_eq!(take(host), Ok(0));
+            // A creative player takes it off (`ArmorSlot.mayPickup`'s `isCreative`).
+            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+            assert_eq!(take(game), Ok(1));
+            assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].armor[0], None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn an_equippable_whose_entity_tag_holds_the_player_fits_its_slot() {
+        use horizon_client::mod_api::{ComponentId, Tag};
+        with_game(|game| {
+            open_to_lan(game);
+            game.lan.as_mut().unwrap().hub.guests.push(guest(1));
+            let host: &mut dyn Host = game;
+            let items = host
+                .entity(20)
+                .unwrap()
+                .capability(host, &ENTITY_ITEMS)
+                .unwrap();
+            let helmet = ItemResource::of(&ItemStack::new("minecraft:iron_helmet", 1))
+                .with_component(
+                    host,
+                    &ComponentId::new("minecraft:equippable").unwrap(),
+                    Tag::Compound(
+                        [
+                            ("slot".into(), Tag::String("head".into())),
+                            (
+                                "allowed_entities".into(),
+                                Tag::String("#minecraft:cannot_be_pushed_onto_boats".into()),
+                            ),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                );
+            assert_eq!(items.capacity(host, 39, &helmet), 1);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_kept_handler_reaches_nothing_once_its_world_closes() {
+        use super::super::minecarts::{CartKind, Minecart};
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.carts.push(Minecart::new(
+                500,
+                CartKind::Chest,
+                horizon_core::geometry::Vec3::ZERO,
+            ));
+            let host: &mut dyn Host = game;
+            let entity = host.entity(500).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            game.native_lifecycle.begin_close();
+            game.native_lifecycle.world_close_final();
+            assert!(entity.capability(game, &ENTITY_ITEMS).is_none());
+            let host: &mut dyn Host = game;
+            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let wrote =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sticks, 1)));
+            assert_eq!(wrote, Ok(0));
+        });
+    }
+
+    /// The guests' inventories, by connection.
+    fn inventories(game: &super::Game<'_>) -> Vec<Vec<Option<ItemStack>>> {
+        let guests = &game.lan.as_ref().unwrap().hub.guests;
+        guests.iter().map(|g| g.inventory.clone()).collect()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_players_items_go_where_inventory_add_puts_them_and_an_abort_puts_them_back() {
+        with_game(|game| {
+            open_to_lan(game);
+            let mut player = guest(1);
+            player.selected = 4;
+            player.inventory[4] = Some(ItemStack::new("minecraft:stick", 60));
+            player.inventory[7] = Some(ItemStack::new("minecraft:stick", 10));
+            player.inventory[2] = Some(ItemStack::new("minecraft:stone", 1));
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let before = inventories(game);
+            let host: &mut dyn Host = game;
+            let entity = host.entity(20).unwrap();
+            let items = entity.capability(host, &ENTITY_ITEMS).unwrap();
+            assert_eq!(items.size(host), 41);
+            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let aborted = host.transaction(|host, tx| {
+                assert_eq!(items.insert_any(host, tx, &sticks, 70), 70);
+                Err::<(), ()>(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(inventories(game), before);
+
+            // `Inventory.add`: onto the selected stack (4 more), then the same item in order
+            // (54 more), then the first empty slot (the other 12); not onto the stone.
+            let host: &mut dyn Host = game;
+            let went =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 70)));
+            assert_eq!(went, Ok(70));
+            let after = &inventories(game)[0];
+            assert_eq!(after[4], Some(ItemStack::new("minecraft:stick", 64)));
+            assert_eq!(after[7], Some(ItemStack::new("minecraft:stick", 64)));
+            assert_eq!(after[0], Some(ItemStack::new("minecraft:stick", 12)));
+            assert_eq!(after[2], Some(ItemStack::new("minecraft:stone", 1)));
+            // Index 39 is the head: a stick doesn't go there.
+            let host: &mut dyn Host = game;
+            let head =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 39, &sticks, 1)));
+            assert_eq!(head, Ok(0));
+        });
+    }
+
+    /// One player's offer in a trade: inventory index `.0` must still hold exactly `.1`.
+    type Offer = (usize, ItemStack);
+
+    /// Two guests' trade on a menu, as the docs' recipe has it: each offer's index must still
+    /// hold exactly what was offered, and goes whole to the other player, or nothing moves.
+    fn trade(game: &mut super::Game<'_>, a: &[Offer], b: &[Offer]) -> Result<(), ()> {
+        let host: &mut dyn Host = game;
+        let items = |host: &mut dyn Host, id| {
+            let entity = host.entity(id).unwrap();
+            entity.capability(host, &ENTITY_ITEMS).unwrap()
+        };
+        let (seller, buyer) = (items(host, 20), items(host, 21));
+        host.transaction(|host, tx| {
+            for (from, to, offer) in [(&seller, &buyer, a), (&buyer, &seller, b)] {
+                for (index, stack) in offer {
+                    let offered = ItemResource::of(stack);
+                    let still = from.resource(host, *index).as_ref() == Some(&offered)
+                        && from.amount(host, *index) == stack.count;
+                    if !still
+                        || from.extract(host, tx, *index, &offered, stack.count) != stack.count
+                        || to.insert_any(host, tx, &offered, stack.count) != stack.count
+                    {
+                        return Err(());
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// A seller with 3 diamonds in slot 0 and a buyer with 5 emeralds in slot 0, beside
+    /// `buyer_rest` in every other slot and the off hand.
+    fn traders(game: &mut super::Game<'_>, buyer_rest: Option<ItemStack>) {
+        open_to_lan(game);
+        let mut seller = guest(1);
+        seller.inventory[0] = Some(ItemStack::new("minecraft:diamond", 3));
+        let mut buyer = guest(2);
+        buyer.inventory[0] = Some(ItemStack::new("minecraft:emerald", 5));
+        for slot in &mut buyer.inventory[1..36] {
+            *slot = buyer_rest.clone();
+        }
+        buyer.offhand = buyer_rest;
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guests
+            .extend([seller, buyer]);
+    }
+
+    fn offers() -> ([Offer; 1], [Offer; 1]) {
+        (
+            [(0, ItemStack::new("minecraft:diamond", 3))],
+            [(0, ItemStack::new("minecraft:emerald", 5))],
+        )
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_trade_between_two_players_moves_both_offers() {
+        with_game(|game| {
+            traders(game, None);
+            let (diamonds, emeralds) = offers();
+            assert_eq!(trade(game, &diamonds, &emeralds), Ok(()));
+            // The diamonds go first, into the buyer's first empty slot (1: the emeralds are
+            // still in 0), then the emeralds into the seller's emptied slot 0.
+            let after = inventories(game);
+            assert_eq!(after[0][0], Some(ItemStack::new("minecraft:emerald", 5)));
+            assert_eq!(after[1][0], None);
+            assert_eq!(after[1][1], Some(ItemStack::new("minecraft:diamond", 3)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_trade_into_a_full_inventory_moves_nothing() {
+        with_game(|game| {
+            // The buyer's other slots and off hand hold stone, so only slot 0 is free once the
+            // emeralds leave; the diamonds go before the emeralds and find no room.
+            traders(game, Some(ItemStack::new("minecraft:stone", 64)));
+            let before = inventories(game);
+            let (diamonds, emeralds) = offers();
+            assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
+            assert_eq!(inventories(game), before);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_stale_offer_moves_nothing() {
+        with_game(|game| {
+            traders(game, None);
+            let (diamonds, emeralds) = offers();
+            // The seller used a diamond after offering three, and the buyer moved the emeralds
+            // to another slot: each offer no longer matches its index.
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests[0].inventory[0] = Some(ItemStack::new("minecraft:diamond", 2));
+            let before = inventories(game);
+            assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
+            assert_eq!(inventories(game), before);
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests[0].inventory[0] = Some(ItemStack::new("minecraft:diamond", 3));
+            guests[1].inventory[4] = guests[1].inventory[0].take();
+            let before = inventories(game);
+            assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
+            assert_eq!(inventories(game), before);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_chest_minecarts_items_are_its_slots() {
+        use super::super::minecarts::{CartKind, Minecart};
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let position = horizon_core::geometry::Vec3::new(0.5, 65.0, 0.5);
+            game.carts
+                .push(Minecart::new(500, CartKind::Chest, position));
+            let host: &mut dyn Host = game;
+            let cart = host.entity(500).unwrap();
+            assert_eq!(cart.kind(host).as_deref(), Some("minecraft:chest_minecart"));
+            let items = cart.capability(host, &ENTITY_ITEMS).unwrap();
+            assert_eq!(items.size(host), 27);
+            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let aborted = host.transaction(|host, tx| {
+                assert_eq!(items.insert_any(host, tx, &sticks, 70), 70);
+                Err::<(), ()>(())
+            });
+            assert!(aborted.is_err());
+            assert!(game.carts[0].items.iter().all(Option::is_none));
+            let host: &mut dyn Host = game;
+            let went =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 70)));
+            assert_eq!(went, Ok(70));
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:stick", 64))
+            );
+            assert_eq!(
+                game.carts[0].items[1],
+                Some(ItemStack::new("minecraft:stick", 6))
+            );
+            // A plain minecart has no items.
+            game.carts
+                .push(Minecart::new(501, CartKind::Rideable, position));
+            let host: &mut dyn Host = game;
+            let plain = host.entity(501).unwrap();
+            assert!(plain.capability(host, &ENTITY_ITEMS).is_none());
         });
     }
 }

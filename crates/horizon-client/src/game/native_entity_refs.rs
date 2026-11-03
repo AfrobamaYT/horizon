@@ -20,7 +20,7 @@ use horizon_world::registry::BlockStateId;
 impl Game<'_> {
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+        if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(entity.epoch()) {
             return None;
         }
         let id = i32::try_from(entity.id()).ok()?;
@@ -65,7 +65,7 @@ impl Game<'_> {
     /// client, with no world open, or for a dimension the server hasn't
     /// loaded. API @API:entity_handles@.
     pub(super) fn native_level(&self, dimension: &str) -> Option<LevelRef> {
-        if self.remote.is_some() {
+        if !self.is_logical_server() {
             return None;
         }
         let epoch = self.native_lifecycle.epoch()?;
@@ -93,7 +93,7 @@ impl Game<'_> {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
-        if self.remote.is_some()
+        if !self.is_logical_server()
             || self.native_lifecycle.epoch() != Some(level.epoch())
             || level.dimension() != self.dim.id()
         {
@@ -169,7 +169,7 @@ impl Game<'_> {
         drop: bool,
     ) -> bool {
         if !self.native_level_write_allowed(level, pos)
-            || (self.serving.is_none() && self.options.dedicated.is_none())
+            || !self.is_logical_server()
             || self.dim.id() != level.dimension()
         {
             return false;
@@ -180,10 +180,10 @@ impl Game<'_> {
         changed
     }
     fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.remote.is_none()
+        self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && self.world.loaded(pos[0], pos[2])
-            && (self.world.layout().min_y()..self.world.layout().max_y()).contains(&pos[1])
+            && self.world.shape.contains_y(pos[1])
     }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
@@ -196,7 +196,7 @@ impl Game<'_> {
         pos: [i32; 3],
         kind: NativeBlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
-        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(level.epoch()) {
+        if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
         }
         let (world, anims) = if self.dim.id() == level.dimension() {
@@ -410,6 +410,42 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn side_guards_agree_across_integrated_dedicated_and_client() {
+        use super::super::execution_role::ExecutionRole;
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            // The integrated server thread (game/integrated.rs sets the role and
+            // `dedicated` on the serving Game) and a dedicated server simulate;
+            // a client never does. A remote client runs with the `Client` role
+            // (connecting changes `remote`, not the role), and the guards read
+            // only the role, so it answers like the title-screen game here.
+            for (role, dedicated) in [
+                (ExecutionRole::IntegratedServer, true),
+                (ExecutionRole::DedicatedServer, true),
+            ] {
+                game.options.execution_role = role;
+                game.options.dedicated = dedicated.then(Vec::new);
+                assert!(game.native_simulates());
+                assert!(game.native_level(game.dim.id()).is_some());
+                assert!(game.native_level_in_place(level));
+                assert!(game.native_level_write_allowed(level, [-32, 64, 48]));
+            }
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            assert!(!game.native_simulates());
+            assert!(game.native_level(game.dim.id()).is_none());
+            assert!(!game.native_level_in_place(level));
+            assert!(!game.native_level_write_allowed(level, [-32, 64, 48]));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
         use horizon_client::{
             chunk::Chunk,
@@ -448,6 +484,50 @@ pub(super) mod tests {
             assert!(game.chunk(level, [-2, 3]).is_none());
             assert!(!chunk.loaded(game));
             assert_eq!(chunk.status(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_reads_and_writes_use_dimension_build_height() {
+        use horizon_client::{
+            chunk::{Chunk, LevelShape},
+            mod_api::NativeBlockUpdateFlags,
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world.shape = LevelShape::new(0, 128, 128, true, false).unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 127, 0, stone).unwrap();
+            game.world.set(0, 128, 0, stone).unwrap();
+            assert!(game.native_level_is_loaded(level, [0, 127, 0]));
+            assert_eq!(game.native_level_state(level, [0, 127, 0]), Some(stone));
+            assert_eq!(
+                game.native_level_block(level, [0, 127, 0]).as_deref(),
+                Some("minecraft:stone")
+            );
+            assert!(game.native_level_write_allowed(level, [0, 127, 0]));
+            assert!(!game.native_level_is_loaded(level, [0, 128, 0]));
+            assert_eq!(game.native_level_state(level, [0, 128, 0]), None);
+            assert_eq!(game.native_level_block(level, [0, 128, 0]), None);
+            assert!(!game.native_level_is_loaded(level, [0, -1, 0]));
+            assert_eq!(game.native_level_state(level, [0, -1, 0]), None);
+            assert!(!game.native_level_set_block(
+                level,
+                [0, 128, 0],
+                stone,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(!game.native_level_destroy_block(level, [0, 128, 0], false));
         });
     }
 
@@ -564,7 +644,7 @@ pub(super) mod tests {
         use horizon_client::{
             items::ItemStack,
             lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-            mod_api::EquipmentSlot,
+            mod_api::{EquipmentSlot, GameMode},
         };
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{
@@ -624,15 +704,19 @@ pub(super) mod tests {
             }
             game.lan = Some(host);
             let player = game.native_player_ref(12).unwrap();
-            assert!(!game.native_player_set_game_mode(player, -1));
-            assert!(!game.native_player_set_game_mode(player, 4));
-            assert!(!game.native_player_set_game_mode(player, 0));
-            assert!(game.native_player_set_game_mode(player, 1));
-            assert_eq!(game.native_player_game_mode(player), Some(1));
+            assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
+            assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+            assert_eq!(
+                game.native_player_game_mode(player),
+                Some(GameMode::Creative)
+            );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
-            assert!(game.native_player_set_game_mode(player, 0));
-            assert_eq!(game.native_player_game_mode(player), Some(0));
+            assert!(game.native_player_set_game_mode(player, GameMode::Survival));
+            assert_eq!(
+                game.native_player_game_mode(player),
+                Some(GameMode::Survival)
+            );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
             let mut stale = player;
@@ -640,7 +724,7 @@ pub(super) mod tests {
                 horizon_client::mod_api::NativeWorldEpoch::new(0),
                 player.entity.id(),
             );
-            assert!(!game.native_player_set_game_mode(stale, 1));
+            assert!(!game.native_player_set_game_mode(stale, GameMode::Creative));
             host = game.lan.take().unwrap();
             let other = game
                 .native_lifecycle
@@ -685,11 +769,14 @@ pub(super) mod tests {
             );
             let player = game.native_player_ref(13).unwrap();
             assert_eq!(player.entity, other);
-            assert_eq!(player.game_mode(game), Some(0));
-            assert!(!game.native_player_set_game_mode(player, 1));
+            assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+            assert!(!game.native_player_set_game_mode(player, GameMode::Creative));
             let acting = game.native_player_ref(12).unwrap();
-            assert!(game.native_player_set_game_mode(acting, 2));
-            assert_eq!(game.native_player_game_mode(acting), Some(2));
+            assert!(game.native_player_set_game_mode(acting, GameMode::Adventure));
+            assert_eq!(
+                game.native_player_game_mode(acting),
+                Some(GameMode::Adventure)
+            );
             host = game.lan.take().unwrap();
             let nested = game.enter_guest(&mut host, 13).unwrap();
             game.lan = Some(host);

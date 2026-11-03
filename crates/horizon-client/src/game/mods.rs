@@ -1,6 +1,6 @@
 //! Mods in the game (`docs/mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
-//! (`native_hooks.rs`); WebAssembly code mods don't run any more.
+//! (`native_hooks.rs`); executable components in content packages are refused.
 use super::Game;
 use horizon_client::mod_list::{self, Installed};
 use std::path::PathBuf;
@@ -68,11 +68,17 @@ pub(super) fn content_root(
     dev: &[std::path::PathBuf],
 ) -> std::path::PathBuf {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::{Capability, Content, Package};
+    use horizon_mods::{Content, Package};
     let here = std::env::current_dir().unwrap_or_default();
     let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
-    paths.retain(|p| !dev.contains(p));
+    paths.extend(horizon_mods::find(&here.join(mod_list::NATIVE_DIR)));
+    paths.retain(|path| !dev.contains(path));
     paths.extend(dev.iter().cloned());
+    let built = std::env::current_exe()
+        .ok()
+        .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
+        .map(|info| built_ids(&info))
+        .unwrap_or_default();
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
     // The first load's list stays (`set_local`): a reload does not hash the files again.
@@ -83,11 +89,9 @@ pub(super) fn content_root(
             continue;
         };
         let m = &package.manifest;
-        let on = enabled.contains(&m.id) || dev.contains(path);
-        if !on
-            || !m.capabilities.contains(&Capability::Registries)
-            || mods.iter().any(|c| c.id == m.id)
-        {
+        let native = horizon_mods::index::native::holds(path);
+        let on = content_enabled(&m.id, native, enabled, &built) || dev.contains(path);
+        if !on || mods.iter().any(|c| c.id == m.id) {
             continue;
         }
         // The items this mod's native code declares may be a file item's crafting remainder.
@@ -193,7 +197,6 @@ fn announced_entry(
         sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
-            Side::Server => mod_list::Side::Server,
             Side::Client => mod_list::Side::Client,
         },
     }
@@ -268,6 +271,31 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
 /// What the launcher writes beside a game it built with native mods: their ids under `mods`.
 const BUILD_INFO: &str = "native-mods.json";
 
+/// Native content follows the compiled build; content-only mods follow the player's selection.
+fn content_enabled(
+    id: &str,
+    native: bool,
+    enabled: &std::collections::BTreeSet<String>,
+    built: &std::collections::BTreeSet<String>,
+) -> bool {
+    if native {
+        built.contains(id)
+    } else {
+        enabled.contains(id)
+    }
+}
+
+/// IDs compiled into this executable, from the launcher's build record.
+fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
+    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
+    info["mods"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
 /// `native-mods.json`'s `mods` list is not empty: the game was built with mods.
 fn build_lists_mods(built: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(built)
@@ -301,21 +329,16 @@ fn native_mods_detail(built: &str) -> Option<String> {
     (!list.is_empty()).then_some(list)
 }
 
-/// A row for each native mod the launcher installed in `dir` (`<id>.hnmod`) that this game wasn't
+/// A row for each native mod the launcher installed in `dir` (`<id>.hmod`) that this game wasn't
 /// built with (`built`: its [`BUILD_INFO`], empty for a release or Nightly) and that has no row
 /// yet. The page said "No mods" before, and players copied the files into `horizon-mods` (#4770).
 /// Its toggle is the `mod.<id>` line the launcher's next build follows.
 fn not_built(dir: &std::path::Path, built: &str, rows: &[Installed]) -> Vec<Installed> {
-    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
-    let in_build = |id: &str| {
-        info["mods"]
-            .as_array()
-            .is_some_and(|mods| mods.iter().any(|m| m["id"] == id))
-    };
+    let in_build = built_ids(built);
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|d| d.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hmod"));
     paths.sort();
     let mut out: Vec<Installed> = Vec::new();
     for path in paths {
@@ -324,7 +347,7 @@ fn not_built(dir: &std::path::Path, built: &str, rows: &[Installed]) -> Vec<Inst
         };
         let m = bundle.manifest;
         let listed = rows.iter().chain(&out).any(|row| row.id == m.id);
-        if !listed && !in_build(&m.id) {
+        if !listed && !in_build.contains(&m.id) {
             out.push(Installed {
                 title: format!("{} {}", m.id, m.version),
                 id: m.id,
@@ -338,13 +361,10 @@ fn not_built(dir: &std::path::Path, built: &str, rows: &[Installed]) -> Vec<Inst
     out
 }
 
-/// A WebAssembly code mod's row on the Mods page.
-const STOPPED: &str = "Doesn't run any more: needs a native port";
-
 impl Game<'_> {
     /// Lists the installed mods on the Mods page. Content mods load with the resources
-    /// (`content_root`); native ones are built into the game (`native_hooks.rs`). WebAssembly code
-    /// mods don't run any more: their rows say so.
+    /// (`content_root`); native ones are built into the game (`native_hooks.rs`). Unsupported
+    /// files get the same unreadable-file row as any other invalid package.
     pub(super) fn start_mods(&mut self) {
         let dir = Self::game_dir().join(mod_list::DIR);
         let mut paths = horizon_mods::find(&dir);
@@ -368,12 +388,11 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let problem = package.wasm.is_some().then(|| STOPPED.to_owned());
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem,
+                    problem: None,
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
@@ -410,6 +429,62 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    #[test]
+    fn native_content_follows_the_build_not_the_next_toggle() {
+        let built = built_ids(r#"{"mods":[{"id":"machine_sample"}]}"#);
+        let toggled_off = std::collections::BTreeSet::new();
+        assert!(content_enabled(
+            "machine_sample",
+            true,
+            &toggled_off,
+            &built
+        ));
+        assert!(!content_enabled(
+            "machine_sample",
+            false,
+            &toggled_off,
+            &built
+        ));
+        let rebuilt = built_ids(r#"{"mods":[]}"#);
+        assert!(!content_enabled(
+            "machine_sample",
+            true,
+            &toggled_off,
+            &rebuilt
+        ));
+    }
+
+    #[test]
+    fn misplaced_packages_follow_their_actual_kind() {
+        let dir = std::env::temp_dir().join(format!("horizon-misplaced-{}", std::process::id()));
+        let content = dir.join("horizon-mods");
+        let native = dir.join("horizon-native-mods");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::create_dir_all(&native).unwrap();
+        hmod(&content, "built");
+        let file = std::fs::File::create(native.join("plain.hmod")).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"content").unwrap();
+        zip.finish().unwrap();
+        let built = built_ids(r#"{"mods":[{"id":"built"}]}"#);
+        let enabled = std::collections::BTreeSet::from(["plain".to_string()]);
+        assert!(content_enabled(
+            "built",
+            horizon_mods::index::native::holds(&content.join("built.hmod")),
+            &enabled,
+            &built
+        ));
+        assert!(content_enabled(
+            "plain",
+            horizon_mods::index::native::holds(&native.join("plain.hmod")),
+            &enabled,
+            &built
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Only a build whose `native-mods.json` lists a mod counts as built with mods.
     #[test]
     fn only_a_listed_mod_makes_a_build_a_mod_build() {
@@ -420,8 +495,8 @@ mod tests {
         assert!(build_lists_mods(r#"{"mods":[{"id":"worldmap"}]}"#));
     }
 
-    /// A minimal `.hnmod` the registry accepts: its manifest and its mixin's.
-    fn hnmod(dir: &std::path::Path, id: &str) {
+    /// A minimal `.hmod` the registry accepts: its manifest and its mixin's.
+    fn hmod(dir: &std::path::Path, id: &str) {
         let horizon = "a".repeat(40);
         let manifest = serde_json::json!({
             "schema": 1, "id": id, "version": "0.3.0", "game": "26.3",
@@ -430,7 +505,7 @@ mod tests {
         let mixin = format!(
             "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
         );
-        let file = std::fs::File::create(dir.join(format!("{id}.hnmod"))).unwrap();
+        let file = std::fs::File::create(dir.join(format!("{id}.hmod"))).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file("horizon-native.json", options).unwrap();
@@ -459,10 +534,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for id in ["veinminer", "zoom", "minimap"] {
-            hnmod(&dir, id);
+            hmod(&dir, id);
         }
         std::fs::write(dir.join("notes.txt"), "not a mod").unwrap();
-        std::fs::write(dir.join("broken.hnmod"), "not a zip").unwrap();
+        std::fs::write(dir.join("broken.hmod"), "not a zip").unwrap();
         // A release: none is built in; the page lists them, sorted, instead of "No mods".
         let rows = not_built(&dir, "", &[]);
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
