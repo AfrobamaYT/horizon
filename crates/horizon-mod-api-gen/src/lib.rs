@@ -158,6 +158,76 @@ fn api_types(source: &str, generated: &str) -> Result<ApiTypes, String> {
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HelperSide {
+    Server,
+    Client,
+    Both,
+}
+
+impl HelperSide {
+    fn parse(value: &serde_json::Value) -> Result<Option<Self>, String> {
+        let side = match value.get("side") {
+            None => Ok(None),
+            Some(serde_json::Value::String(side)) => match side.as_str() {
+                "server" => Ok(Some(Self::Server)),
+                "client" => Ok(Some(Self::Client)),
+                "both" => Ok(Some(Self::Both)),
+                _ => Err(format!("unknown helper side {side}")),
+            },
+            Some(_) => Err("helper side must be a string".into()),
+        }?;
+        if value.get("client_target").is_some() && side != Some(Self::Both) {
+            return Err("client_target requires side both".into());
+        }
+        Ok(side)
+    }
+}
+
+fn helper_target<'a>(
+    game: &'a [(String, syn::ItemFn)],
+    name: &str,
+    target: &str,
+) -> Result<&'a syn::ItemFn, String> {
+    let native = target
+        .rsplit("::")
+        .next()
+        .ok_or("helper target missing method")?;
+    if !native.starts_with("native_") {
+        return Err(format!("invalid helper target {target}"));
+    }
+    let method = one_function(game.iter().map(|(_, method)| method), native)?;
+    let (module, _) = game
+        .iter()
+        .find(|(_, other)| std::ptr::eq(other, method))
+        .expect("method found");
+    let expected = format!("{module}::Game<'_>::{native}");
+    if target != expected {
+        return Err(format!(
+            "wrong target for helper {name}: {target}, it is {expected}"
+        ));
+    }
+    Ok(method)
+}
+
+fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<(), String> {
+    let normalize = |code: &str| -> Result<String, String> {
+        let mut sig = syn::parse_str::<syn::ImplItemFn>(code)
+            .map_err(|e| format!("{name}: {e}"))?
+            .sig;
+        for arg in &mut sig.inputs {
+            if let syn::FnArg::Typed(arg) = arg {
+                *arg.pat = syn::parse_quote!(_);
+            }
+        }
+        Ok(sig.to_token_stream().to_string())
+    };
+    if normalize(server)? != normalize(client)? {
+        return Err(format!("{name}: client and server signatures differ"));
+    }
+    Ok(())
+}
+
 fn host_method(
     method: &syn::ItemFn,
     name: &str,
@@ -583,8 +653,7 @@ fn catalog_hooks(
 
 /// The crate folder and module path of a hook target that is a free function
 /// outside `Game`. `horizon-client-lib` builds from `horizon-client/src`
-/// (`client_lib.rs`); `menu` and `breathing` are also accepted under their
-/// older `horizon_client::` names.
+/// (`client_lib.rs`).
 fn free_function_source(target: &str) -> Option<(&'static str, String)> {
     let prefixes = [
         ("horizon_world::", "horizon-world"),
@@ -594,13 +663,6 @@ fn free_function_source(target: &str) -> Option<(&'static str, String)> {
     prefixes
         .into_iter()
         .find_map(|(prefix, krate)| target.strip_prefix(prefix).map(|p| (krate, p.to_owned())))
-        .or_else(|| {
-            ["menu", "breathing"].into_iter().find_map(|module| {
-                target
-                    .strip_prefix(&format!("horizon_client::{module}::"))
-                    .map(|p| ("horizon-client", format!("{module}::{p}")))
-            })
-        })
 }
 
 /// Whether a hook function needs its dispatch `call` filled in: false when it
@@ -1153,29 +1215,28 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
+        let side = HelperSide::parse(helper)?;
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
         let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let native = target
-            .rsplit("::")
-            .next()
-            .ok_or("helper target missing method")?;
-        if !native.starts_with("native_") {
-            return Err(format!("invalid helper target {target}"));
-        }
-        let method = one_function(game.iter().map(|(_, method)| method), native)?;
-        let (module, _) = game
-            .iter()
-            .find(|(_, other)| std::ptr::eq(other, method))
-            .expect("the method was found in the list");
-        let expected = format!("{module}::Game<'_>::{native}");
-        if target != expected {
-            return Err(format!(
-                "wrong target for helper {name}: {target}, it is {expected}"
-            ));
-        }
+        let method = helper_target(&game, name, target)?;
         let (declaration, implementation) = host_method(method, name, &types.exports)?;
+        if let Some(client_target) = helper.get("client_target") {
+            let client_target = client_target
+                .as_str()
+                .ok_or("client_target must be a string")?;
+            let client = helper_target(&game, name, client_target)?;
+            let (_, client_implementation) = host_method(client, name, &types.exports)?;
+            matching_helper_signatures(&implementation, &client_implementation, name)?;
+        }
+        let side_doc = match side {
+            Some(HelperSide::Server) => "/// Side: server.\n",
+            Some(HelperSide::Client) => "/// Side: client.\n",
+            Some(HelperSide::Both) => "/// Side: both.\n",
+            None => "",
+        };
+        host_traits.push_str(side_doc);
         host_traits.push_str(&declaration);
         host_impl.push_str(&implementation);
         if let Some(receiver) = helper.get("receiver") {
@@ -1183,7 +1244,9 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
                 .as_str()
                 .ok_or("helper receiver must be a string")?;
             let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
-            handles.entry(handle).or_default().push_str(&code);
+            let methods = handles.entry(handle).or_default();
+            methods.push_str(side_doc);
+            methods.push_str(&code);
         }
     }
     let handles = handles
@@ -1286,6 +1349,75 @@ pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn helper_side_is_optional_and_typed() {
+        use super::HelperSide;
+        use serde_json::json;
+        assert_eq!(HelperSide::parse(&json!({})), Ok(None));
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"server"})),
+            Ok(Some(HelperSide::Server))
+        );
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"client"})),
+            Ok(Some(HelperSide::Client))
+        );
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"both"})),
+            Ok(Some(HelperSide::Both))
+        );
+        assert!(HelperSide::parse(&json!({"side":null})).is_err());
+        assert!(HelperSide::parse(&json!({"side":"unknown"})).is_err());
+        assert!(HelperSide::parse(&json!({"client_target":"somewhere"})).is_err());
+        assert!(HelperSide::parse(&json!({"side":"server", "client_target":"somewhere"})).is_err());
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"both", "client_target":"somewhere"})),
+            Ok(Some(HelperSide::Both))
+        );
+    }
+    #[test]
+    fn helper_targets_must_name_the_real_game_method() {
+        let game = vec![(
+            "horizon_client::game::sample".to_owned(),
+            syn::parse_quote!(
+                fn native_sample(&self) {}
+            ),
+        )];
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::sample::Game<'_>::native_sample"
+            )
+            .is_ok()
+        );
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::wrong::Game<'_>::native_sample"
+            )
+            .is_err()
+        );
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::sample::Game<'_>::missing"
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn dual_targets_require_matching_host_signatures() {
+        let server = "fn value(&self, x: i32) -> Option<i32> { None }";
+        let same = "fn value(&self, y: i32) -> Option<i32> { Some(y) }";
+        let wrong_type = "fn value(&self, y: u32) -> Option<i32> { None }";
+        let wrong_receiver = "fn value(&mut self, y: i32) -> Option<i32> { None }";
+        assert!(super::matching_helper_signatures(server, same, "value").is_ok());
+        assert!(super::matching_helper_signatures(server, wrong_type, "value").is_err());
+        assert!(super::matching_helper_signatures(server, wrong_receiver, "value").is_err());
+    }
     use quote::ToTokens;
     use serde_json::Value;
     #[test]
@@ -1787,14 +1919,22 @@ mod tests {
 
     #[test]
     fn library_crate_targets_resolve_to_their_source() {
+        assert_eq!(
+            super::free_function_source("horizon_client_lib::menu::native_menu_slot_rules"),
+            Some(("horizon-client", "menu::native_menu_slot_rules".to_owned()))
+        );
+        assert_eq!(
+            super::free_function_source("horizon_client_lib::breathing::native_living_breathe"),
+            Some((
+                "horizon-client",
+                "breathing::native_living_breathe".to_owned()
+            ))
+        );
         for target in [
-            "horizon_client_lib::menu::native_menu_slot_rules",
             "horizon_client::menu::native_menu_slot_rules",
+            "horizon_client::breathing::native_living_breathe",
         ] {
-            assert_eq!(
-                super::free_function_source(target),
-                Some(("horizon-client", "menu::native_menu_slot_rules".to_owned()))
-            );
+            assert_eq!(super::free_function_source(target), None);
         }
         assert_eq!(
             super::free_function_source("horizon_client_lib::crafting::native_ingredient"),
