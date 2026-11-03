@@ -6723,7 +6723,11 @@ impl Game<'_> {
                         self.native_use_without_item(state, &click, &mut empty_answer);
                     }
                     if empty_answer.is_none()
-                        && self.res.facts().get(state).is(Class::Fence)
+                        && self
+                            .res
+                            .facts()
+                            .get(state)
+                            .is(horizon_world::level::classes::Class::Fence)
                         && self.use_knot(hit.pos, false)
                     {
                         self.trigger_default_block_use(hit.pos);
