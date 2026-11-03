@@ -2087,6 +2087,7 @@ pub(crate) mod tests {
     /// Install a weak-power part on glass for a real-game query.
     pub(crate) fn weak_power_game_thread() {
         struct WeakPower;
+        #[mod_api::horizon_part]
         impl BlockPart for WeakPower {
             fn should_check_weak_power(
                 &self,
