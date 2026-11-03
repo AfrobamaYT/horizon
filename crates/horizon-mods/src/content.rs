@@ -48,9 +48,6 @@ pub fn check_path(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A vanilla identifier, `minecraft:path`.
-/// `Identifier.isValidNamespace` and `isValidPath` on an id with both parts
-/// given: `[a-z0-9_.-]`, and `/` in the path too.
 /// The shared resource namespace fence for folders and native archives.
 pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), String> {
     let mut parts = name.splitn(3, '/');
@@ -81,7 +78,10 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
     Ok(())
 }
 
-fn namespaced_id(id: &str) -> bool {
+/// A vanilla identifier, `minecraft:path`.
+/// `Identifier.isValidNamespace` and `isValidPath` on an id with both parts
+/// given: `[a-z0-9_.-]`, and `/` in the path too.
+pub fn namespaced_id(id: &str) -> bool {
     let ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b);
     id.split_once(':').is_some_and(|(namespace, path)| {
         !namespace.is_empty()
@@ -123,6 +123,9 @@ pub struct BlockProperties {
     /// Vanilla's piston push reaction, or the template's when unset.
     #[serde(default, deserialize_with = "deserialize_push_reaction")]
     pub push_reaction: Option<PushReaction>,
+    /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
+    /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
+    pub occludes: Option<bool>,
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -451,6 +454,13 @@ pub struct EntityType {
     pub damage: f32,
 }
 
+/// A block entity type declared in code, with the blocks it supports.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockEntityType {
+    pub id: String,
+    pub blocks: Vec<String>,
+}
+
 /// a menu type the mod adds (vanilla's `MenuType`, NeoForge's
 /// `IMenuTypeExtension.create`): its container's slot count, the
 /// `ContainerData` count its menu syncs, and its take-only slots
@@ -480,7 +490,7 @@ pub const MAX_MENU_SLOTS: u16 = 256;
 enum Source {
     Dir(PathBuf),
     Zip(PathBuf),
-    /// No files: blocks and items a native mod declares in code.
+    /// No files: content a native mod declares in code.
     Code,
 }
 
@@ -496,6 +506,8 @@ pub struct Content {
     /// Its creative inventory tabs, by id.
     pub creative_tabs: Vec<CreativeTab>,
     pub entity_types: Vec<EntityType>,
+    /// Block entity types declared by native code, not content files.
+    pub block_entity_types: Vec<BlockEntityType>,
     pub menu_types: Vec<MenuType>,
     /// The namespaces it owns: the mod id, then the manifest's `namespaces`.
     pub namespaces: Vec<String>,
@@ -592,6 +604,7 @@ impl Content {
             effects: Vec::new(),
             creative_tabs: Vec::new(),
             entity_types: Vec::new(),
+            block_entity_types: Vec::new(),
             menu_types: Vec::new(),
             namespaces: manifest.owned_namespaces().map(str::to_owned).collect(),
         };
@@ -599,8 +612,8 @@ impl Content {
         Ok(content)
     }
 
-    /// Content with no files, for the blocks and items native mods declare
-    /// in code in `namespace` ([`Content::declare`]).
+    /// Content with no files, for native declarations in `namespace`
+    /// ([`Content::declare`]).
     pub fn declared(namespace: &str) -> Content {
         Content {
             source: Source::Code,
@@ -610,6 +623,7 @@ impl Content {
             effects: Vec::new(),
             creative_tabs: Vec::new(),
             entity_types: Vec::new(),
+            block_entity_types: Vec::new(),
             menu_types: Vec::new(),
             namespaces: vec![namespace.to_owned()],
         }
@@ -1675,6 +1689,22 @@ capabilities = ["registries"]
         ];
         let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("already throws another entity type"), "{e}");
+    }
+
+    #[test]
+    fn a_block_may_occlude_nothing() {
+        let block = |occludes: &str| {
+            let text = format!(
+                r#"{{"template": "minecraft:barrel", "properties": {{"occludes": {occludes}}}}}"#
+            );
+            let files: &[(&str, &[u8])] =
+                &[("data/ruby/horizon/block/panel.json", text.as_bytes())];
+            hmod("occludes", MANIFEST_TEXT, files)
+        };
+        let occludes = |c: Result<Content, String>| c.unwrap().blocks[0].properties.occludes;
+        assert_eq!(occludes(block("false")), Some(false));
+        assert_eq!(occludes(block("true")), Some(true));
+        assert!(block(r#""no""#).is_err());
     }
 
     #[test]

@@ -6,7 +6,6 @@ use super::Game;
 use horizon_client::{
     block_entity_item,
     containers::{BlockEntity, Jukebox},
-    first_person::Hand,
     items::ItemStack,
     mobs::Species,
     particles::{ParticleOptions, ParticleType},
@@ -110,37 +109,51 @@ impl Game<'_> {
         self.set_has_record(pos, false);
         self.jukebox_changed(pos);
     }
-    /// `JukeboxBlock.useItemOn` / `useWithoutItem` on the jukebox at `pos`.
-    pub(super) fn use_jukebox(&mut self, pos: [i32; 3], held: Option<&ItemStack>) -> bool {
-        if &*self
-            .res
-            .facts()
-            .get(self.world.block(pos[0], pos[1], pos[2]))
-            .name
-            != "minecraft:jukebox"
-        {
-            return false;
+    /// The jukebox's item or empty-hand method, on the captured block state.
+    pub(super) fn use_jukebox(
+        &mut self,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+        held: Option<&ItemStack>,
+        branch: horizon_world::level::UseBranch,
+    ) -> Option<horizon_client::mod_api::NativeInteractionResult> {
+        use horizon_client::mod_api::NativeInteractionResult as Answer;
+        if &*self.res.facts().get(state).name != "minecraft:jukebox" {
+            return None;
         }
-        if self.jukebox(pos).is_some_and(|j| j.record().is_some()) {
-            // TRY_WITH_EMPTY_HAND: only the main hand goes on to useWithoutItem.
-            if self.hand != Hand::Main {
-                return false;
+        let has_record = |state| {
+            self.pack
+                .assets
+                .registry
+                .state(state)
+                .and_then(|s| s.properties.get("has_record"))
+                .is_some_and(|v| v == "true")
+        };
+        if matches!(branch, horizon_world::level::UseBranch::WithoutItem) {
+            if has_record(state) && self.jukebox(pos).is_some_and(|j| j.record().is_some()) {
+                self.eject_record(pos);
+                return Some(Answer::Success);
             }
-            self.eject_record(pos);
-            // ServerPlayerGameMode.useItemOn: useWithoutItem consumed the click.
-            self.trigger_default_block_use(pos);
-            return true;
+            return Some(Answer::Pass);
         }
-        let Some(stack) = held else { return false };
+        if has_record(state) {
+            return Some(Answer::TryWithEmptyHand);
+        }
+        let current = self.world.block(pos[0], pos[1], pos[2]);
+        if &*self.res.facts().get(current).name != "minecraft:jukebox" || has_record(current) {
+            return Some(Answer::TryWithEmptyHand);
+        }
+        let Some(stack) = held else {
+            return Some(Answer::TryWithEmptyHand);
+        };
         let Some(song) = self
             .res
             .items()
             .get(&stack.item)
             .and_then(|i| i.jukebox_song.clone())
         else {
-            return false;
+            return Some(Answer::TryWithEmptyHand);
         };
-        // JukeboxPlayable.tryInsertIntoJukebox
         let record = ItemStack {
             count: 1,
             ..stack.clone()
@@ -160,9 +173,7 @@ impl Game<'_> {
         self.set_has_record(pos, true);
         self.start_song(pos, &song);
         self.jukebox_changed(pos);
-        // ServerPlayerGameMode.useItemOn: the action was consumed.
-        self.trigger_block("minecraft:item_used_on_block", pos, stack);
-        true
+        Some(Answer::Success)
     }
     /// `JukeboxBlock.useItemOn` on this client's level for the main hand:
     /// whether the jukebox at `pos` takes the click (`has_record` pops the

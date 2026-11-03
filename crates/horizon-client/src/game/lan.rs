@@ -1369,7 +1369,7 @@ impl Game<'_> {
             return;
         };
         host.hub.disconnect_all();
-        // Give the writer threads a moment to flush the disconnect packets.
+        // Give the network threads a moment to flush the disconnect packets.
         std::thread::sleep(std::time::Duration::from_millis(100));
         self.world.block_log = None;
         self.world.light_log = None;
@@ -2494,6 +2494,8 @@ impl Game<'_> {
                 }
                 host.hub
                     .set_immediate_respawn(self.ui.rules.bool("immediate_respawn"));
+                host.hub
+                    .set_limited_crafting(self.ui.rules.bool("limited_crafting"));
                 // A server with several levels runs a pass for each
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
