@@ -1207,7 +1207,11 @@ mod pufferfish_sting_tests {
 
     /// What a pufferfish puffed to `puff` stings in one `ai_step`, as
     /// `(target, damage)`, with `others` standing `x` blocks east of it.
-    fn stings(puff: i32, others: &[(&str, f64)]) -> Option<Vec<(u32, f32)>> {
+    fn stings(
+        level: &mut DamageLevel<'_>,
+        puff: i32,
+        others: &[(&str, f64)],
+    ) -> Option<Vec<(u32, f32)>> {
         let mut built = None;
         with_test_world(&[], |_, types| {
             let mob = |id: u32, name: &str, at: Vec3| {
@@ -1226,7 +1230,7 @@ mod pufferfish_sting_tests {
         });
         let (mut fish, seen) = built?;
         let mut events = Vec::new();
-        with_test_world(&seen, |w, _| ai_step(&mut fish, w, &mut events));
+        with_test_world(&seen, |w, _| ai_step(&mut fish, w, level, &mut events));
         Some(
             events
                 .iter()
@@ -1257,25 +1261,35 @@ mod pufferfish_sting_tests {
     /// `getPuffState() + 1`.
     #[test]
     fn a_puffed_pufferfish_stings_the_mobs_that_touch_it() {
-        let Some(half) = stings(1, &[("minecraft:zombie", 0.5)]) else {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let Some(half) = stings(level, 1, &[("minecraft:zombie", 0.5)]) else {
             return;
         };
         assert_eq!(half, vec![(2, 2.0)], "puff state 1 stings for 1 + 1");
-        let full = stings(2, &[("minecraft:zombie", 0.5)]).unwrap();
+        let full = stings(level, 2, &[("minecraft:zombie", 0.5)]).unwrap();
         assert_eq!(full, vec![(2, 3.0)], "puff state 2 stings for 1 + 2");
         assert!(
-            stings(0, &[("minecraft:zombie", 0.5)]).unwrap().is_empty(),
+            stings(level, 0, &[("minecraft:zombie", 0.5)])
+                .unwrap()
+                .is_empty(),
             "a deflated pufferfish stings nobody"
         );
         assert!(
-            stings(2, &[("minecraft:zombie", 1.5)]).unwrap().is_empty(),
+            stings(level, 2, &[("minecraft:zombie", 1.5)])
+                .unwrap()
+                .is_empty(),
             "a zombie a block away never touches it"
         );
         // `#not_scary_for_pufferfish`: its tank mates are left alone.
         assert!(
-            stings(2, &[("minecraft:cod", 0.4), ("minecraft:squid", 0.3)])
-                .unwrap()
-                .is_empty(),
+            stings(
+                level,
+                2,
+                &[("minecraft:cod", 0.4), ("minecraft:squid", 0.3)]
+            )
+            .unwrap()
+            .is_empty(),
             "a cod and a squid are not scary"
         );
     }

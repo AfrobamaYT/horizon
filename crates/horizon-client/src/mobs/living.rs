@@ -1901,6 +1901,8 @@ mod tests {
     /// stone, 1 on hay or honey, 0 on slime, 1 on a bed, and a stalagmite kills.
     #[test]
     fn a_mob_bounces_off_a_bouncy_block_and_not_off_stone() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1992,7 +1994,7 @@ mod tests {
             // Falling faster than gravity, so the landing is hard enough.
             m.velocity = Vec3::new(0.0, -1.0, 0.0);
             m.fall_distance = 8.0;
-            m.do_move(&w, &mut Vec::new());
+            m.do_move(&w, level, &mut Vec::new());
             assert_eq!(m.health, health, "{ground}: health after an 8 block fall");
             assert!(
                 m.vertical_collision_below,
@@ -2022,6 +2024,8 @@ mod tests {
     /// gets nothing and goes on sinking.
     #[test]
     fn a_ridden_horse_floats_in_deep_water() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -2122,7 +2126,7 @@ mod tests {
             }
             m.fluids.in_water = true;
             m.fluids.water = 1.0;
-            m.travel(&w, Vec3::ZERO, &mut Vec::new());
+            m.travel(&w, level, Vec3::ZERO, &mut Vec::new());
             if ridden {
                 floated = m.velocity.y;
             } else {
@@ -2144,7 +2148,9 @@ mod tests {
     /// the lift (0.06 for each column block its box touches) on top of it.
     #[test]
     fn a_bubble_column_lifts_a_mob_after_travel_not_inside_it() {
-        let run = |column: bool| {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut run = |column: bool| {
             let mut out = None;
             let build =
                 |world: &mut crate::world::World,
@@ -2180,7 +2186,7 @@ mod tests {
                 let mut m = Mob::new(1, kind, Vec3::new(1.5, 2.0, 1.5), 0.0);
                 m.fluids.in_water = true;
                 m.fluids.water = 1.0;
-                m.travel(w, Vec3::ZERO, &mut Vec::new());
+                m.travel(w, level, Vec3::ZERO, &mut Vec::new());
                 let after_travel = m.velocity.y;
                 m.apply_effects_from_blocks(w, &mut Vec::new());
                 out = Some((after_travel, m.velocity.y));
@@ -2207,6 +2213,8 @@ mod tests {
     /// on stone it keeps all of it, and its vertical speed is untouched.
     #[test]
     fn a_mob_on_soul_sand_or_honey_is_slowed_by_the_move() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for (block, factor) in [
             ("minecraft:stone", 1.0),
             ("minecraft:soul_sand", 0.4),
@@ -2231,7 +2239,7 @@ mod tests {
                 let mut m = Mob::new(1, kind, Vec3::new(0.5, 1.0, 1.5), 0.0);
                 m.on_ground = true;
                 m.velocity = Vec3::new(0.2, 0.0, 0.0);
-                m.do_move(w, &mut Vec::new());
+                m.do_move(w, level, &mut Vec::new());
                 let expected = f64::from(factor as f32) * 0.2;
                 assert!(
                     (m.velocity.x - expected).abs() < 1.0e-9,
@@ -2247,6 +2255,8 @@ mod tests {
     /// has its east wall at x = 13.
     #[test]
     fn the_world_border_stops_a_mob() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let border =
             horizon_core::geometry::border::BorderGeometry::new([8.0, 8.0], 10.0, 29_999_984)
                 .unwrap();
@@ -2268,7 +2278,7 @@ mod tests {
                 // 1.5 blocks east from x = 11.5: past the wall at 13 if nothing stops it.
                 let mut m = Mob::new(1, kind.clone(), Vec3::new(11.5, 64.0, 8.5), 0.0);
                 m.velocity = Vec3::new(1.5, 0.0, 0.0);
-                m.do_move(&w, &mut Vec::new());
+                m.do_move(&w, level, &mut Vec::new());
                 east_edge[i] = m.bounds().max_position().x;
                 assert_eq!(m.horizontal_collision, bordered);
             }
@@ -2402,7 +2412,9 @@ mod tests {
     /// and the fall distance, reset before each move, is that one move.
     #[test]
     fn a_mob_in_vines_slides_down_slowly() {
-        let run = |vines: bool| {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut run = |vines: bool| {
             let mut out = None;
             let build =
                 |world: &mut crate::world::World,
@@ -2433,7 +2445,7 @@ mod tests {
                 let mut drops = Vec::new();
                 for _ in 0..12 {
                     let before = m.position.y;
-                    m.travel(w, Vec3::ZERO, &mut Vec::new());
+                    m.travel(w, level, Vec3::ZERO, &mut Vec::new());
                     drops.push(before - m.position.y);
                 }
                 out = Some((drops, m.fall_distance));

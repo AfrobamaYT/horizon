@@ -212,6 +212,26 @@ impl LentLevel {
         world.attachment_syncs = self.attachment_syncs;
     }
 }
+/// An empty level for tests of hits: an air-only world whose random is seeded with `seed`.
+#[cfg(any(test, feature = "test-support"))]
+pub struct TestLevel {
+    world: crate::world::World,
+    registry: horizon_world::registry::BlockRegistry,
+}
+#[cfg(any(test, feature = "test-support"))]
+impl TestLevel {
+    pub fn new(seed: i64) -> Self {
+        let facts =
+            br#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#;
+        Self {
+            world: crate::world::World::new(horizon_world::registry::BlockStateId(0), seed),
+            registry: horizon_world::registry::BlockRegistry::from_facts_json(&facts[..]).unwrap(),
+        }
+    }
+    pub fn level(&mut self) -> DamageLevel<'_> {
+        DamageLevel::of(&mut self.world, &self.registry)
+    }
+}
 /// A knockback's strength and direction, as `LivingEntity.knockback` has them
 /// before knockback resistance is applied. The entity is pushed away from
 /// the direction (`x`, `z`), which vanilla points at the source of the hit.
@@ -1333,6 +1353,8 @@ mod tests {
     }
     #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1348,7 +1370,7 @@ mod tests {
         let id = health.damage.id("minecraft:mob_attack").unwrap();
         let mut hit = |amount| {
             player
-                .hurt_blocking(health, rules, id, amount, None)
+                .hurt_blocking(level, health, rules, id, amount, None)
                 .unwrap()
         };
         let first = hit(1.0);
@@ -1367,6 +1389,8 @@ mod tests {
     /// and `blockedByItem` must not pull the player toward the mob.
     #[test]
     fn a_shield_fully_blocks_a_hit_scaled_down_by_easy() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use horizon_world::blocking_rules::{BlockingRules, DamageReduction, ItemDamageFunction};
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -1406,7 +1430,7 @@ mod tests {
         };
         let id = health.damage.id("minecraft:mob_attack").unwrap();
         let o = player
-            .hurt_caused_by(health, rules, id, 4.0, Some(shield), true, 0)
+            .hurt_caused_by(level, health, rules, id, 4.0, Some(shield), true, 0)
             .unwrap();
         assert_eq!(o.blocked, 3.0, "Easy scales 4 to 3 before the shield");
         assert!(o.fully_blocked && !o.knockback);
@@ -1417,6 +1441,8 @@ mod tests {
     /// follows.
     #[test]
     fn an_arrow_kills_a_player_at_one_health() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1431,7 +1457,7 @@ mod tests {
         player.set_health(1.0, false).unwrap();
         let (health, rules) = (&resources.health, super::HealthRules::default());
         let id = health.damage.id("minecraft:arrow").unwrap();
-        let hurt = player.hurt(health, rules, id, 5.0).unwrap();
+        let hurt = player.hurt(level, health, rules, id, 5.0).unwrap();
         assert!(hurt, "the arrow must hurt");
         assert_eq!(player.health.health(), 0.0, "the health must be spent");
         assert!(player.health.dead_or_dying(), "the player must be dead");
@@ -1478,6 +1504,8 @@ mod tests {
 
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_mobs_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use crate::mobs::{Damage, DamageKind, Mob};
         let seen = set_hook();
         let mob = |id| {
@@ -1495,7 +1523,7 @@ mod tests {
         };
         // Canceled: no damage, cooldown, sound or knockback.
         let mut kept = mob(9001);
-        assert!(!kept.damage(2.0, hit));
+        assert!(!kept.damage(level, 2.0, hit));
         assert_eq!(
             (kept.health, kept.invulnerable, kept.hurt_time),
             (10.0, 0, 0)
@@ -1503,12 +1531,12 @@ mod tests {
         assert!(kept.outbox.is_empty() && kept.velocity == Default::default());
         assert_eq!(seen(9001), [("PlayerAttack".to_owned(), 2.0)]);
         let mut doubled = mob(9002);
-        assert!(doubled.damage(2.0, hit));
+        assert!(doubled.damage(level, 2.0, hit));
         assert_eq!(doubled.health, 6.0);
         // LivingEntity.hurtServer: a negative amount hurts by 0, a NaN by
         // Float.MAX_VALUE.
         let (mut negative, mut nan) = (mob(9003), mob(9004));
-        assert!(negative.damage(2.0, hit) && nan.damage(2.0, hit));
+        assert!(negative.damage(level, 2.0, hit) && nan.damage(level, 2.0, hit));
         assert!(negative.health == 10.0 && nan.health <= 0.0);
     }
 
@@ -1516,6 +1544,8 @@ mod tests {
     /// without it.
     #[test]
     fn the_native_damage_hook_changes_or_cancels_a_players_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1533,13 +1563,13 @@ mod tests {
             p
         };
         let mut kept = player(9011);
-        assert!(!kept.hurt(health, rules, id, 5.0).unwrap());
+        assert!(!kept.hurt(level, health, rules, id, 5.0).unwrap());
         assert_eq!((kept.health.health(), kept.health.hurt.cooldown), (20.0, 0));
         let mut doubled = player(9012);
-        assert!(doubled.hurt(health, rules, id, 5.0).unwrap());
+        assert!(doubled.hurt(level, health, rules, id, 5.0).unwrap());
         assert_eq!(doubled.health.health(), 10.0);
         // The causing mob when it is known, else 0.
-        let hurt = player(9013).hurt_caused_by(health, rules, id, 5.0, None, false, 44);
+        let hurt = player(9013).hurt_caused_by(level, health, rules, id, 5.0, None, false, 44);
         assert!(hurt.unwrap().hurt);
         assert_eq!(seen(9011), [("minecraft:arrow 0".to_owned(), 5.0)]);
         assert_eq!(seen(9013), [("minecraft:arrow 44".to_owned(), 5.0)]);
@@ -1628,6 +1658,8 @@ mod tests {
     /// speed becomes `min(0.4, vy / 2 + strength)`.
     #[test]
     fn the_native_knockback_hook_changes_or_cancels_a_mobs_push() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use super::Knock;
         use crate::mobs::{Damage, Mob};
         let seen = set_knockback_hook();
@@ -1680,7 +1712,7 @@ mod tests {
         assert_eq!(velocity(&stopped), (0.0, 0.0, 0.0));
         // The game's own hit on a mob reaches the hook with its damage.
         let mut hurt = mob(9106, 0.0);
-        assert!(hurt.damage(2.0, hit));
+        assert!(hurt.damage(level, 2.0, hit));
         // dealDefaultKnockback pushes with the float 0.4F.
         let strength = f64::from(0.4_f32);
         assert_eq!(velocity(&hurt), (-strength, 0.4, 0.0));
@@ -1693,6 +1725,8 @@ mod tests {
     /// world; once it has, the void hurts again.
     #[test]
     fn the_void_spares_a_player_whose_client_has_not_loaded() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1708,13 +1742,13 @@ mod tests {
         let id = health.damage.id("minecraft:out_of_world").unwrap();
         player.client_loaded = false;
         assert!(
-            !player.hurt(health, rules, id, 4.0).unwrap(),
+            !player.hurt(level, health, rules, id, 4.0).unwrap(),
             "an unloaded client must not take void damage"
         );
         assert_eq!(player.health.health(), 20.0);
         player.client_loaded = true;
         assert!(
-            player.hurt(health, rules, id, 4.0).unwrap(),
+            player.hurt(level, health, rules, id, 4.0).unwrap(),
             "a loaded client takes the void's 4.0"
         );
         assert_eq!(player.health.health(), 16.0);
@@ -1743,6 +1777,8 @@ mod tests {
     /// and recompute them when it does not.
     #[test]
     fn a_bypassing_hit_leaves_the_armor_instances_dirty() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -1788,7 +1824,7 @@ mod tests {
         // `minecraft:fall` is in the tag: neither instance is read.
         let (mut bypassing, bypassing_handles) = armoured(&resources);
         let fall = health.damage.id("minecraft:fall").unwrap();
-        assert!(bypassing.hurt(health, rules, fall, 5.0).unwrap());
+        assert!(bypassing.hurt(level, health, rules, fall, 5.0).unwrap());
         assert_eq!(
             states(&bypassing, &bypassing_handles),
             [(7.0, true, 0.0), (7.0, true, 0.0)],
@@ -1804,7 +1840,7 @@ mod tests {
         // values, so the hit recomputes them and the record reads them back.
         let (mut meeting, meeting_handles) = armoured(&resources);
         let attack = health.damage.id("minecraft:mob_attack").unwrap();
-        assert!(meeting.hurt(health, rules, attack, 5.0).unwrap());
+        assert!(meeting.hurt(level, health, rules, attack, 5.0).unwrap());
         assert_eq!(
             states(&meeting, &meeting_handles),
             [(7.0, false, 7.0), (7.0, false, 7.0)],

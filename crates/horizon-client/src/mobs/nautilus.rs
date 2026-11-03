@@ -656,10 +656,11 @@ mod tests {
             );
             m.ai.target = Some(Who::Player);
             let mut goal = Charge::new(0.5);
-            let mut lr = horizon_core::random::LegacyRandom::new(1);
+            let mut test_level = crate::health::TestLevel::new(1);
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             goal.tick(&mut m, &mut cx);

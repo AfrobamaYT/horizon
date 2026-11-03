@@ -2986,6 +2986,8 @@ mod poison_effect_tests {
 
     #[test]
     fn poison_effect_damages_living_mobs_but_not_undead() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -3000,7 +3002,7 @@ mod poison_effect_tests {
         pig.add_effect("poison", 100, 0);
         assert_eq!(pig.extra.effects[0].0, "minecraft:poison");
         let initial_pig_health = pig.health;
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert_eq!(
             pig.health,
             initial_pig_health - 1.0,
@@ -3012,7 +3014,7 @@ mod poison_effect_tests {
         let mut zombie = Mob::new(2, zombie_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         zombie.add_effect("poison", 100, 0);
         let initial_zombie_health = zombie.health;
-        tick_effects(&mut zombie, None);
+        tick_effects(&mut zombie, level, None);
         assert_eq!(
             zombie.health, initial_zombie_health,
             "undead mobs are immune to poison"
@@ -3024,6 +3026,8 @@ mod poison_effect_tests {
     /// damage before health, Slow Falling capping gravity while it falls.
     #[test]
     fn mob_effects_heal_harm_resist_absorb_and_slow_the_fall() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use std::sync::Arc;
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -3042,34 +3046,34 @@ mod poison_effect_tests {
         // instant_health 1 heals 8 a tick, instant_damage 0 hurts 6 once (hit frames).
         let mut golem = make("minecraft:iron_golem");
         golem.add_effect("instant_health", 6, 1);
-        tick_effects(&mut golem, None);
+        tick_effects(&mut golem, level, None);
         assert_eq!(golem.health, 68.0);
         let mut golem = make("minecraft:iron_golem");
         golem.add_effect("instant_damage", 6, 0);
-        tick_effects(&mut golem, None);
+        tick_effects(&mut golem, level, None);
         assert_eq!(golem.health, 54.0);
         // The undead are healed by harm.
         let mut zombie = make("minecraft:zombie");
         zombie.add_effect("instant_damage", 6, 0);
-        tick_effects(&mut zombie, None);
+        tick_effects(&mut zombie, level, None);
         assert_eq!(zombie.health, 64.0);
         // Resistance V (amplifier 4) takes it all, III takes 80%.
         let mut golem = make("minecraft:iron_golem");
         golem.health = 100.0;
         golem.add_effect("resistance", 100, 4);
-        golem.damage(5.0, Damage::of(DamageKind::Generic));
+        golem.damage(level, 5.0, Damage::of(DamageKind::Generic));
         assert_eq!(golem.health, 100.0);
         let mut golem = make("minecraft:iron_golem");
         golem.health = 100.0;
         golem.add_effect("resistance", 100, 2);
-        golem.damage(10.0, Damage::of(DamageKind::Generic));
+        golem.damage(level, 10.0, Damage::of(DamageKind::Generic));
         assert_eq!(golem.health, 96.0);
         // Absorption II: 8 hearts-halves, 5 damage leaves 3 and costs no health.
         let mut golem = make("minecraft:iron_golem");
         golem.health = 100.0;
         golem.add_effect("absorption", 100, 1);
         assert_eq!(golem.absorption, 8.0);
-        golem.damage(5.0, Damage::of(DamageKind::Generic));
+        golem.damage(level, 5.0, Damage::of(DamageKind::Generic));
         assert_eq!((golem.health, golem.absorption), (100.0, 3.0));
         // Slow Falling: gravity floors at 0.01 while falling, not while rising.
         let mut pig = make("minecraft:pig");
@@ -3083,6 +3087,8 @@ mod poison_effect_tests {
 
     #[test]
     fn invisibility_flag_updates_only_when_effects_change() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -3093,20 +3099,22 @@ mod poison_effect_tests {
         let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("invisibility", 4, 0);
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert!(pig.is_invisible());
         pig.invisible = false;
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert!(!pig.is_invisible());
         pig.add_effect("speed", 10, 0);
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert!(pig.is_invisible());
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert!(!pig.is_invisible());
     }
 
     #[test]
     fn effect_refresh_every_600_ticks_resets_manual_visibility() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -3117,10 +3125,10 @@ mod poison_effect_tests {
         let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("speed", 602, 0);
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert!(!pig.is_invisible());
         pig.invisible = true;
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert_eq!(pig.extra.effects[0].1, 600);
         assert!(
             !pig.is_invisible(),
@@ -3132,6 +3140,8 @@ mod poison_effect_tests {
     /// place: a Poison hit reads Resistance there (0.8 of 1.0 at level I).
     #[test]
     fn effect_ticks_find_the_other_effects() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -3144,14 +3154,14 @@ mod poison_effect_tests {
         pig.health = 20.0;
         pig.extra.effects.push(("minecraft:poison", 25, 0));
         pig.extra.effects.push(("minecraft:resistance", -1, 0));
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert_eq!(pig.health, 19.2);
         // `onMobHurt` finds Infested in the same in-place list: the hurt mob
         // leaves a silverfish call in the outbox.
         let mut pig = Mob::new(2, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.extra.effects.push(("minecraft:poison", 25, 0));
         pig.extra.effects.push(("minecraft:infested", -1, 0));
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert!(
             pig.outbox
                 .iter()
@@ -3164,6 +3174,8 @@ mod poison_effect_tests {
     /// effects to the live list: they stay on the mob after the tick.
     #[test]
     fn a_totem_fired_by_effect_damage_keeps_its_effects() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -3176,7 +3188,7 @@ mod poison_effect_tests {
         pig.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
         pig.extra.effects.push(("minecraft:instant_damage", 5, 4));
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert_eq!(pig.health, 1.0);
         for effect in [
             "minecraft:regeneration",
@@ -3194,6 +3206,8 @@ mod poison_effect_tests {
     /// the damage the tick deals keeps its kind.
     #[test]
     fn the_wither_effect_hurts_with_wither() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -3204,7 +3218,7 @@ mod poison_effect_tests {
         let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.extra.effects.push(("minecraft:wither", 40, 0));
-        tick_effects(&mut pig, None);
+        tick_effects(&mut pig, level, None);
         assert_eq!(
             pig.last_damage.map(|(d, _)| d.kind),
             Some(DamageKind::Wither)
@@ -3242,10 +3256,11 @@ mod hit_effect_tests {
                     Vec3::new(0.5, 64.0, 0.5),
                     0.0,
                 );
-                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 do_hurt_target(&mut m, Who::Mob(2), &mut cx);
@@ -3301,10 +3316,11 @@ mod hit_effect_tests {
                 Vec3::new(0.5, 64.0, 0.5),
                 0.0,
             );
-            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
+            let level = &mut test_level.level();
             let mut cx = Cx {
                 w: &easy,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             do_hurt_target(&mut m, Who::Mob(2), &mut cx);
@@ -3451,9 +3467,11 @@ mod same_vehicle_push_tests {
     /// other (#3199). The camel still pushes a mob that only overlaps it.
     #[test]
     fn a_camel_and_its_rider_never_push_each_other() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // The mobs the camel pushes, and its velocity after, with these mobs
         // around: a husk on its back, and a zombie standing in its back half.
-        let push = |zombie_too: bool| {
+        let mut push = |zombie_too: bool| {
             let mut out = None;
             let mut riders = Vec::new();
             with_test_world(&[], |_, types| {
@@ -3472,7 +3490,9 @@ mod same_vehicle_push_tests {
             });
             let mut camel = out?;
             let mut events = Vec::new();
-            with_test_world(&riders, |w, _| push_entities(&mut camel, w, &mut events));
+            with_test_world(&riders, |w, _| {
+                push_entities(&mut camel, w, level, &mut events)
+            });
             let pushed: Vec<u32> = events
                 .iter()
                 .filter_map(|e| match e {
@@ -3496,6 +3516,8 @@ mod same_vehicle_push_tests {
 
     #[test]
     fn a_ridden_horse_is_not_pushed_but_still_pushes() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let pair = |ridden: bool| {
             let mut out = None;
             with_test_world(&[], |_, types| {
@@ -3528,7 +3550,7 @@ mod same_vehicle_push_tests {
         };
         let mut events = Vec::new();
         with_test_world(&[cow.seen(None)], |w, _| {
-            push_entities(&mut horse, w, &mut events)
+            push_entities(&mut horse, w, level, &mut events)
         });
         assert_eq!(pushed(&events), vec![2], "the ridden horse pushes the cow");
         assert_eq!(
@@ -3540,7 +3562,7 @@ mod same_vehicle_push_tests {
         let (horse, mut cow) = pair(true).unwrap();
         let mut events = Vec::new();
         with_test_world(&[horse.seen(None)], |w, _| {
-            push_entities(&mut cow, w, &mut events)
+            push_entities(&mut cow, w, level, &mut events)
         });
         assert_eq!(
             pushed(&events),
@@ -3552,7 +3574,7 @@ mod same_vehicle_push_tests {
         let (horse, mut cow) = pair(false).unwrap();
         let mut events = Vec::new();
         with_test_world(&[horse.seen(None)], |w, _| {
-            push_entities(&mut cow, w, &mut events)
+            push_entities(&mut cow, w, level, &mut events)
         });
         assert_eq!(
             pushed(&events),
@@ -3583,9 +3605,10 @@ mod ridden_tests {
                 client,
                 ..Default::default()
             });
-            let (mut random, mut events) = (LegacyRandom::new(0), Vec::new());
+            let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
+            let level = &mut test_level.level();
             for _ in 0..5 {
-                tick(&mut m, w, &mut random, &mut events);
+                tick(&mut m, w, level, &mut events);
             }
             out = Some(m);
         });
@@ -3628,8 +3651,9 @@ mod bed_wake_tests {
                 w,
                 &mut events
             ));
-            let mut random = LegacyRandom::new(0);
-            tick(&mut m, w, &mut random, &mut events);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
+            tick(&mut m, w, level, &mut events);
             out = Some(m);
         });
         out
@@ -3692,7 +3716,7 @@ mod feed_tests {
             return;
         }
         let data = MobTypes::load(&root).unwrap();
-        let mut level = LegacyRandom::new(0);
+        let mut level = horizon_core::random::LegacyRandom::new(0);
         for id in ["minecraft:wolf", "minecraft:cat"] {
             let kind = Arc::new(data.types.get(id).unwrap().clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
@@ -3980,7 +4004,12 @@ mod age_up_tests {
                     let ext = super::super::villager::ext_mut(&mut m);
                     ext.sleeping_pos = Some([4, 220, 4]);
                     ext.may_continue_sleeping = Some(may_continue);
-                    tick(&mut m, w, &mut LegacyRandom::new(0), &mut Vec::new());
+                    tick(
+                        &mut m,
+                        w,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut Vec::new(),
+                    );
                     assert_eq!(
                         super::super::villager::sleeping(&m),
                         may_continue,
@@ -4011,7 +4040,9 @@ mod age_up_tests {
                             m.persistent = true;
                             m.extra.age_locked = locked;
                             super::super::finalize::set_age(&mut m, age);
-                            let (mut random, mut events) = (LegacyRandom::new(0), Vec::new());
+                            let (mut test_level, mut events) =
+                                (crate::health::TestLevel::new(0), Vec::new());
+                            let level = &mut test_level.level();
                             let expected = if age > 0 {
                                 [1, 0, 0, 0]
                             } else if locked {
@@ -4022,7 +4053,7 @@ mod age_up_tests {
                             for (elapsed, expected_age) in expected.into_iter().enumerate() {
                                 let previous_age = m.extra.age;
                                 let previous_position = m.position;
-                                tick(&mut m, w, &mut random, &mut events);
+                                tick(&mut m, w, level, &mut events);
                                 assert_eq!(
                                     m.extra.age,
                                     expected_age,
@@ -4108,8 +4139,9 @@ mod age_up_tests {
             // As a natural spawn leaves it, then on its last baby tick.
             super::super::finalize::goat_spawn(&mut m);
             super::super::finalize::set_age(&mut m, -1);
-            let (mut lr, mut events) = (LegacyRandom::new(0), Vec::new());
-            tick(&mut m, w, &mut lr, &mut events);
+            let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
+            let level = &mut test_level.level();
+            tick(&mut m, w, level, &mut events);
             out = Some((m.is_baby(), m.attrs.attack_damage));
         });
         let Some((baby, damage)) = out else {
@@ -4211,16 +4243,18 @@ mod burn_and_rose_tests {
     /// full invulnerable time.
     #[test]
     fn lava_ignites_to_the_full_time_and_hits_after_the_timers_count_down() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         crate::mobs::world::with_built_test_world(&[], build_with("minecraft:lava"), |w, types| {
             let mut m = golem(types);
             let mut events = Vec::new();
             let start = m.health;
-            base_tick(&mut m, w, &mut events);
+            base_tick(&mut m, w, level, &mut events);
             assert_eq!(m.health, start - 4.0, "one lava hit");
             assert_eq!(m.fire_ticks, 300, "fire after the first tick");
             assert_eq!(m.invulnerable, 20, "the hit's own invulnerable time");
             for _ in 0..10 {
-                base_tick(&mut m, w, &mut events);
+                base_tick(&mut m, w, level, &mut events);
             }
             assert_eq!(m.health, start - 8.0, "second hit on tick 11");
             assert_eq!(m.fire_ticks, 300);
@@ -4295,16 +4329,18 @@ mod iron_golem_push_tests {
     /// so a creeper or an animal leaves the golem's random alone.
     #[test]
     fn an_iron_golem_targets_the_monster_that_bumps_it() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         // CI has no prepared 26.3 data, so a world that does not build skips
         // the whole check rather than asserting the data exists.
-        let hits = |victim: Mob| -> Option<u32> {
+        let mut hits = |victim: Mob| -> Option<u32> {
             let seen = victim.seen(None);
             let mut hits = 0;
             let ran = with_test_world(&[seen], |w, _| {
                 let mut golem = mob(1, Species::IronGolem, "monster");
                 for _ in 0..400 {
                     let mut events = Vec::new();
-                    push_entities(&mut golem, w, &mut events);
+                    push_entities(&mut golem, w, level, &mut events);
                     if golem.ai.target.is_some() {
                         hits += 1;
                         golem.ai.target = None;

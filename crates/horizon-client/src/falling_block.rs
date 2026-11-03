@@ -427,6 +427,8 @@ mod tests {
     #[test]
     #[ignore = "requires prepared entity models/data in HORIZON_TEST_RESOURCES"]
     fn impact_hurts_only_living_intersecting_noninvulnerable_mobs() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use crate::mobs::{Mob, MobTypes};
         use std::{path::Path, sync::Arc};
         let root = std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES");
@@ -445,6 +447,7 @@ mod tests {
         );
         let initial = mobs.iter().map(|m| m.health).collect::<Vec<_>>();
         hurt_mobs(
+            level,
             &mut mobs,
             Vec3::ZERO,
             Damage::anvil().impact(5.0).unwrap().amount,

@@ -1,0 +1,171 @@
+//! `living_damage_pre` and `living_damage_post` heard by a trait mod, through the game's own
+//! hooks: the damage container each hit fills, the hit's level host, and the mob and dragon
+//! hits that fire them.
+use super::super::dragon::{Dragon, SPECIAL};
+use super::super::entity::damage_level_of;
+use super::super::native_entity_refs::tests::with_game;
+use crate::mod_api::{
+    self, Hooks, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
+    LivingIncomingDamageEvent, Reduction,
+};
+use horizon_client::{
+    health,
+    mobs::{Damage, DamageKind, Mob},
+};
+use horizon_core::{geometry::Vec3, random::RandomSource};
+use std::sync::{Arc, Mutex};
+
+/// What the probe heard: Pre's entity, original damage, new damage and armor's reduction, and
+/// Post's health damage.
+#[derive(Debug, Default, PartialEq)]
+struct Heard {
+    pre: Vec<(i32, f32, f32, f32)>,
+    post: Vec<(i32, f32)>,
+}
+
+/// The test mod: 225001's incoming hit becomes 4, Pre sets 225003's and 225008's damage to 2,
+/// and draws once from the level's random for 225010.
+struct Probe(Arc<Mutex<Heard>>);
+
+#[mod_api::__subscriptions]
+impl Hooks for Probe {
+    fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> mod_api::Flow {
+        if event.entity == 225001 {
+            event.amount = 4.0;
+        }
+        mod_api::Flow::Continue
+    }
+    fn living_damage_pre(
+        &self,
+        level: &mut dyn LevelRandomHost,
+        event: &mut LivingDamagePreEvent<'_>,
+    ) {
+        let container = &mut *event.container;
+        if matches!(event.entity, 225003 | 225008) {
+            container.set_new_damage(2.0);
+        }
+        if event.entity == 225010 {
+            level.random().unwrap().next_int();
+        }
+        let heard = (
+            event.entity,
+            container.original(),
+            container.new_damage(),
+            container.reduction(Reduction::Armor),
+        );
+        self.0.lock().unwrap().pre.push(heard);
+    }
+    fn living_damage_post(
+        &self,
+        _: &mut dyn LevelRandomHost,
+        event: &mut LivingDamagePostEvent<'_>,
+    ) {
+        let heard = (event.entity, event.container.health_damage());
+        self.0.lock().unwrap().post.push(heard);
+    }
+}
+
+/// Runs `test` in a game with the probe installed, and returns what it heard.
+fn heard(test: impl FnOnce(&mut super::Game<'_>)) -> Heard {
+    let _ = health::HURT_SERVER.set(super::hurt_server);
+    let _ = health::DAMAGE_PRE.set(super::damage_pre);
+    let _ = health::DAMAGE_POST.set(super::damage_post);
+    let log = Arc::new(Mutex::new(Heard::default()));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "probe",
+        Box::new(Probe(log.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || with_game(test));
+    std::mem::take(&mut *log.lock().unwrap())
+}
+
+fn mob(game: &super::Game<'_>, id: u32, kind: &str) -> Mob {
+    let kind = game.res.mob_types().get(kind).unwrap().clone();
+    Mob::new(id, kind, Vec3::ZERO, 0.0)
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn the_original_damage_is_the_hit_before_the_incoming_hook() {
+    let heard = heard(|game| {
+        let mut pig = mob(game, 225001, "minecraft:pig");
+        assert!(pig.damage(
+            damage_level_of!(game),
+            10.0,
+            Damage::of(DamageKind::Generic)
+        ));
+        assert_eq!(pig.health, 6.0);
+    });
+    assert_eq!(heard.pre, [(225001, 10.0, 4.0, 0.0)]);
+    assert_eq!(heard.post, [(225001, 4.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn pre_sets_the_health_lost_and_the_last_hurt_the_cooldown_compares() {
+    let heard = heard(|game| {
+        let mut pig = mob(game, 225003, "minecraft:pig");
+        assert!(pig.damage(damage_level_of!(game), 6.0, Damage::of(DamageKind::Generic)));
+        assert_eq!(pig.health, 8.0);
+        // NeoForge bubbles the inflicted damage up to `lastHurt`.
+        assert_eq!(pig.last_hurt, 2.0);
+    });
+    assert_eq!(heard.pre, [(225003, 6.0, 2.0, 0.0)]);
+    assert_eq!(heard.post, [(225003, 2.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn pre_fires_for_a_hit_its_reductions_took_to_zero() {
+    let heard = heard(|game| {
+        let mut witch = mob(game, 225008, "minecraft:witch");
+        // Witch.getDamageAfterMagicAbsorb: none from its own doing.
+        let own = Damage::mob(225008, [2.0, 0.0, 2.0]);
+        assert!(witch.damage(damage_level_of!(game), 6.0, own));
+        assert_eq!(witch.health, 24.0);
+    });
+    assert_eq!(heard.pre, [(225008, 6.0, 2.0, 0.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn pre_draws_from_the_level_random_of_the_hit() {
+    heard(|game| {
+        let mut expected = game.world.random.clone();
+        expected.next_int();
+        let mut pig = mob(game, 225010, "minecraft:pig");
+        assert!(pig.damage(damage_level_of!(game), 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!(game.world.random.next_int(), expected.next_int());
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_hit_on_the_dragon_fires_pre_and_post() {
+    let heard = heard(|game| {
+        let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
+        dragon.id = 225009;
+        game.dragon = Some(dragon);
+        let _ = game.hit_special(SPECIAL, 6.0, true, DamageKind::Generic, None);
+        assert_eq!(game.dragon.as_ref().unwrap().health, 194.0);
+    });
+    assert_eq!(heard.pre, [(225009, 6.0, 6.0, 0.0)]);
+    assert_eq!(heard.post, [(225009, 6.0)]);
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn the_container_names_what_armor_took() {
+    let heard = heard(|game| {
+        let mut zombie = mob(game, 225011, "minecraft:zombie");
+        assert!(zombie.damage(
+            damage_level_of!(game),
+            10.0,
+            Damage::of(DamageKind::Generic)
+        ));
+    });
+    // A zombie's two armor points: `CombatRules.getDamageAfterAbsorb` keeps 1 - 2/25 of the hit.
+    let after = 10.0 * (1.0 - 2.0_f32 / 25.0);
+    assert_eq!(heard.pre, [(225011, 10.0, after, 10.0 - after)]);
+}

@@ -80,48 +80,60 @@ mod tests {
     }
     #[test]
     fn flying_wing_hurts_and_names_the_dragon() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let (mut m, f) = setup();
-        contact(&mut m, &f, true);
+        contact(level, &mut m, &f, true);
         assert_eq!(m.health, 35.0);
         assert_eq!(m.ai.last_hurt_by, Some(Who::Mob(99)));
     }
     #[test]
     fn perched_wing_pushes_without_damage() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let (mut m, mut f) = setup();
         f.sitting = true;
-        contact(&mut m, &f, true);
+        contact(level, &mut m, &f, true);
         assert_eq!(m.health, 40.0);
         assert_eq!(m.velocity, Vec3::new(4.0, f64::from(0.2_f32), 0.0));
     }
     #[test]
     fn team_protection_keeps_push_but_blocks_damage() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let (mut m, f) = setup();
-        contact(&mut m, &f, false);
+        contact(level, &mut m, &f, false);
         assert_eq!(m.health, 40.0);
         assert_eq!(m.velocity, Vec3::new(4.0, f64::from(0.2_f32), 0.0));
     }
     #[test]
     fn hurt_dragon_does_not_contact_mobs() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let (mut m, mut f) = setup();
         f.recently_hurt = true;
-        contact(&mut m, &f, true);
+        contact(level, &mut m, &f, true);
         assert_eq!(m.health, 40.0);
         assert_eq!(m.velocity, Vec3::ZERO);
     }
     #[test]
     fn head_hurts_even_when_perched() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let (mut m, mut f) = setup();
         f.sitting = true;
         f.wings = [box_at(100.0), box_at(100.0)];
         f.heads[0] = box_at(0.0);
-        contact(&mut m, &f, true);
+        contact(level, &mut m, &f, true);
         assert_eq!(m.health, 30.0);
     }
     #[test]
     fn recent_mob_attack_suppresses_wing_damage() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let (mut m, f) = setup();
         m.ai.last_hurt_by_time = 99;
-        contact(&mut m, &f, true);
+        contact(level, &mut m, &f, true);
         assert_eq!(m.health, 40.0);
         assert_eq!(m.velocity, Vec3::new(4.0, f64::from(0.2_f32), 0.0));
     }
@@ -133,6 +145,8 @@ mod parity {
     #[test]
     #[ignore = "writes the vanilla parity transcript"]
     fn contact_transcript() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut rows = Vec::new();
         for name in [
             "flying",
@@ -173,7 +187,7 @@ mod parity {
                 m.ai.last_hurt_by = Some(Who::Mob(99));
                 m.ai.last_hurt_by_time = 99;
             }
-            contact(&mut m, &f, name != "team");
+            contact(level, &mut m, &f, name != "team");
             rows.push(serde_json::json!({"case":name,"health":m.health,"velocity":[m.velocity.x,m.velocity.y,m.velocity.z],"revenge":m.ai.last_hurt_by==Some(Who::Mob(99))}));
         }
         let path = std::env::var_os("HORIZON_DRAGON_CONTACT_OUTPUT").expect("parity output path");

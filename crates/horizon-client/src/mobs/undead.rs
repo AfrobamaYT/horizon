@@ -1324,11 +1324,12 @@ mod conversion_tests {
             dress(&mut m);
             m.fluids.eye_in_water = true;
             m.extra.counter2 = 1;
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level,
                 events: &mut events,
             };
             custom_server_ai_step(&mut m, &mut cx);
@@ -1436,10 +1437,11 @@ mod creative_target_tests {
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
             m.ai.target = Some(Who::Player);
             m.extra.anger = 300;
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             for _ in 0..40 {
                 let mut events = Vec::new();
-                m.tick(&w, &mut lr, &mut events);
+                m.tick(&w, level, &mut events);
             }
             assert_eq!(m.ai.target, None, "anger {}", m.extra.anger);
         });
@@ -1485,10 +1487,11 @@ mod go_to_water_tests {
                 assert!(w.fluid(3, 64, 3) == crate::blocks::Fluid::Water, "{block}");
                 let mut goal = DrownedGoToWater::default();
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 assert_eq!(goal.can_use(&mut m, &mut cx), expect, "{block}");
@@ -1560,10 +1563,11 @@ mod wither_arrow_tests {
                 let kind = Arc::new(types.types[name].clone());
                 let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
+                let level = &mut test_level.level();
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level,
                     events: &mut events,
                 };
                 perform_ranged_attack(&mut m, Who::Player, &mut cx, 1.0);

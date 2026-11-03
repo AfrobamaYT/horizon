@@ -1257,6 +1257,8 @@ mod tests {
 
     #[test]
     fn a_mob_that_refuses_the_hit_is_still_pushed() {
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         use horizon_client::mobs::{Damage, DamageKind, Mob, Species};
         let hit = (10.0, Damage::of(DamageKind::Explosion));
         let push = Vec3::new(0.5, 0.25, -0.5);
@@ -1272,7 +1274,7 @@ mod tests {
         // An ordinary mob is hurt and pushed.
         let mut m = mob(1, Species::Zombie);
         let health = m.health;
-        hurt_mob(&mut m, true, None, hit);
+        hurt_mob(level, &mut m, true, None, hit);
         m.push_from_explosion(push);
         assert!(m.health < health);
         pushed(&m);
@@ -1280,21 +1282,21 @@ mod tests {
         let mut m = mob(2, Species::Zombie);
         m.invulnerable_flag = true;
         let health = m.health;
-        hurt_mob(&mut m, true, None, hit);
+        hurt_mob(level, &mut m, true, None, hit);
         m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A team mate of the exploding mob is not hurt, but pushed.
         let mut m = mob(3, Species::Zombie);
         let health = m.health;
-        hurt_mob(&mut m, false, None, hit);
+        hurt_mob(level, &mut m, false, None, hit);
         m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A wither shrugs off a blast an undead caused, and is pushed.
         let mut m = mob(4, Species::Wither);
         let health = m.health;
-        hurt_mob(&mut m, true, Some(Species::Skeleton), hit);
+        hurt_mob(level, &mut m, true, Some(Species::Skeleton), hit);
         m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);

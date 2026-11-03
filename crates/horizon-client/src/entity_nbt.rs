@@ -3460,9 +3460,11 @@ mod tests {
 
     #[test]
     fn creeper_fall_swell_uses_custom_fuse_without_a_zero_floor() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for (fuse, expected) in [(Some(1), -4), (None, 25), (Some(40), 35)] {
             let (mut mob, _) = fused_creeper(fuse);
-            mob.cause_fall_damage_from(100.0, 0.0, &mut Vec::new());
+            mob.cause_fall_damage_from(level, 100.0, 0.0, &mut Vec::new());
             assert_eq!(mob.swell, expected, "Fuse={fuse:?}");
         }
     }

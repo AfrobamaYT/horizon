@@ -2872,7 +2872,7 @@ mod breeding_variant_tests {
                 true
             }
             fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-                m.random = LegacyRandom::new(1);
+                m.random = horizon_core::random::LegacyRandom::new(1);
                 self.0.tick(m, cx);
             }
         }
@@ -2907,7 +2907,11 @@ mod breeding_variant_tests {
                     disabled: 0,
                 };
                 let mut events = Vec::new();
-                parent.tick(&w, &mut LegacyRandom::new(1), &mut events);
+                parent.tick(
+                    &w,
+                    &mut crate::health::TestLevel::new(1).level(),
+                    &mut events,
+                );
                 assert!(events.iter().any(|event| matches!(
                     event,
                     MobEvent::Breed {
@@ -2945,17 +2949,18 @@ mod breeding_variant_tests {
                         ..world.clone()
                     };
                     let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
-                    parent.random = LegacyRandom::new(0);
+                    parent.random = horizon_core::random::LegacyRandom::new(0);
                     let mut goal = Breed {
                         speed: 1.0,
                         partner: Some(2),
                         love_time: reduced(60) - 1,
                     };
                     let mut events = Vec::new();
-                    let mut level_random = LegacyRandom::new(1);
+                    let mut test_level = crate::health::TestLevel::new(1);
+                    let level = &mut test_level.level();
                     let mut cx = Cx {
                         w: &world,
-                        lr: &mut level_random,
+                        level,
                         events: &mut events,
                     };
                     goal.tick(&mut parent, &mut cx);
@@ -3037,10 +3042,11 @@ mod eat_block_tests {
         with_built_test_world_rules(&[], griefing, build, |w, types| {
             let kind = Arc::new(types.types["minecraft:sheep"].clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-            let mut random = LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             for _ in 0..6000 {
-                crate::mobs::ai::tick(&mut m, w, &mut random, &mut events);
+                crate::mobs::ai::tick(&mut m, w, level, &mut events);
             }
             out = Some(events);
         });
@@ -3153,11 +3159,12 @@ mod peaceful_targets_tests {
             let mut wolf = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
             wolf.ai.last_hurt_by = Some(Who::Player);
             wolf.ai.last_hurt_by_time = 5;
-            let mut random = LegacyRandom::new(0);
+            let mut test_level = crate::health::TestLevel::new(0);
+            let level = &mut test_level.level();
             let mut events = Vec::new();
             let mut cx = Cx {
                 w: &w,
-                lr: &mut random,
+                level,
                 events: &mut events,
             };
             assert!(
@@ -3170,7 +3177,7 @@ mod peaceful_targets_tests {
             peaceful.difficulty = crate::mobs::spawning::LocalDifficulty::new(0, 18000, 0, 0.0);
             let mut cx = Cx {
                 w: &peaceful,
-                lr: &mut random,
+                level,
                 events: &mut events,
             };
             assert!(

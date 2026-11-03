@@ -4179,9 +4179,11 @@ mod spear_knockback_tests {
     /// knockback (the spear pushes with `causeExtraKnockback` itself).
     #[test]
     fn a_spear_stab_hurts_without_the_default_knockback() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = Mob::new(1, kind(), Vec3::ZERO, 0.0);
         let health = m.health;
-        assert!(m.damage(1.0, Damage::spear([2.0, 0.0, 0.0])));
+        assert!(m.damage(level, 1.0, Damage::spear([2.0, 0.0, 0.0])));
         assert_eq!(m.health, health - 1.0);
         let v = m.velocity;
         assert_eq!([v.x, v.y, v.z], [0.0; 3]);
@@ -4190,8 +4192,10 @@ mod spear_knockback_tests {
     /// a plain player hit still knocks the mob away from the attacker.
     #[test]
     fn a_player_hit_still_knocks_back() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = Mob::new(1, kind(), Vec3::ZERO, 0.0);
-        assert!(m.damage(1.0, Damage::player([2.0, 0.0, 0.0])));
+        assert!(m.damage(level, 1.0, Damage::player([2.0, 0.0, 0.0])));
         assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
     }
 }
@@ -4687,6 +4691,8 @@ mod fire_resistance_damage_tests {
 
     #[test]
     fn fire_resistance_rejects_fire_before_health_and_hurt_cooldown() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for kind in [
             DamageKind::Campfire,
             DamageKind::Fireball,
@@ -4698,7 +4704,7 @@ mod fire_resistance_damage_tests {
         ] {
             let mut mob = pig();
             mob.add_effect("minecraft:fire_resistance", -1, 0);
-            assert!(!mob.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert!(!mob.damage(level, 1.0, Damage::of(kind)), "{kind:?}");
             assert_eq!(mob.health, 10.0, "{kind:?}");
             assert_eq!(
                 (mob.hurt_time, mob.invulnerable, mob.last_hurt),
@@ -4707,43 +4713,45 @@ mod fire_resistance_damage_tests {
             assert!(mob.last_damage.is_none());
             assert!(mob.outbox.is_empty());
             // A refused fire hit must not prevent the next ordinary hit.
-            assert!(mob.damage(1.0, Damage::of(DamageKind::Cactus)));
+            assert!(mob.damage(level, 1.0, Damage::of(DamageKind::Cactus)));
             assert_eq!(mob.health, 9.0);
 
             let mut bare = pig();
-            assert!(bare.damage(1.0, Damage::of(kind)));
+            assert!(bare.damage(level, 1.0, Damage::of(kind)));
             assert_eq!(bare.health, 9.0);
             assert!(
-                !bare.damage(1.0, Damage::of(kind)),
+                !bare.damage(level, 1.0, Damage::of(kind)),
                 "equal hit during cooldown"
             );
             assert!(
-                bare.damage(2.0, Damage::of(kind)),
+                bare.damage(level, 2.0, Damage::of(kind)),
                 "stronger hit during cooldown"
             );
             assert_eq!(bare.health, 8.0);
 
             let mut resistant = pig();
             resistant.add_effect("minecraft:resistance", -1, 0);
-            assert!(resistant.damage(1.0, Damage::of(kind)));
+            assert!(resistant.damage(level, 1.0, Damage::of(kind)));
             assert_eq!(resistant.health, 9.2);
 
             let mut invulnerable = pig();
             invulnerable.invulnerable_flag = true;
-            assert!(!invulnerable.damage(1.0, Damage::of(kind)));
+            assert!(!invulnerable.damage(level, 1.0, Damage::of(kind)));
             assert_eq!(invulnerable.health, 10.0);
         }
     }
 
     #[test]
     fn species_hurt_callbacks_still_run_before_the_living_fire_guard() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut mob = pig();
         let kind = Arc::make_mut(&mut mob.kind);
         kind.id = "minecraft:bat".into();
         kind.species = Species::Bat;
         bat::set_resting(&mut mob, true);
         mob.add_effect("minecraft:fire_resistance", -1, 0);
-        assert!(!mob.damage(1.0, Damage::of(DamageKind::InFire)));
+        assert!(!mob.damage(level, 1.0, Damage::of(DamageKind::InFire)));
         assert!(!bat::resting(&mob));
         assert_eq!(mob.health, 10.0);
         assert_eq!(mob.invulnerable, 0);
@@ -4751,6 +4759,8 @@ mod fire_resistance_damage_tests {
 
     #[test]
     fn reflected_ghast_fireball_still_reports_success_when_fire_resistance_refuses_health_damage() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut mob = pig();
         let kind = Arc::make_mut(&mut mob.kind);
         kind.id = "minecraft:ghast".into();
@@ -4762,7 +4772,7 @@ mod fire_resistance_damage_tests {
             attacker: Some(Who::Player),
             from: None,
         };
-        assert!(mob.damage(1.0, source));
+        assert!(mob.damage(level, 1.0, source));
         assert_eq!(mob.health, 10.0);
         assert_eq!(mob.invulnerable, 0);
     }
@@ -4817,6 +4827,8 @@ mod magic_absorb_tests {
     /// leaves a 10 health witch on 7 of a 20 hit it would not survive whole.
     #[test]
     fn a_witch_takes_15_percent_of_a_witch_resistant_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         for resistant in [
             DamageKind::Magic,
             DamageKind::IndirectMagic,
@@ -4824,7 +4836,7 @@ mod magic_absorb_tests {
             DamageKind::Thorns,
         ] {
             let mut m = witch();
-            assert!(m.damage(20.0, Damage::of(resistant)));
+            assert!(m.damage(level, 20.0, Damage::of(resistant)));
             assert_eq!(m.health, 7.0, "{resistant:?} is in #witch_resistant_to");
         }
     }
@@ -4832,8 +4844,10 @@ mod magic_absorb_tests {
     /// A hit outside the tag (`mob_attack`) takes all of it.
     #[test]
     fn a_witch_takes_all_of_a_physical_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = witch();
-        m.damage(4.0, Damage::of(DamageKind::MobAttack));
+        m.damage(level, 4.0, Damage::of(DamageKind::MobAttack));
         assert_eq!(m.health, 6.0);
     }
 
@@ -4841,13 +4855,15 @@ mod magic_absorb_tests {
     /// itself takes nothing, so its own harming potion cannot hurt it.
     #[test]
     fn a_witch_takes_nothing_from_its_own_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = witch();
         let own = Damage {
             kind: DamageKind::IndirectMagic,
             attacker: Some(Who::Mob(m.id)),
             from: None,
         };
-        m.damage(20.0, own);
+        m.damage(level, 20.0, own);
         assert_eq!(m.health, 10.0);
     }
 }
@@ -4915,6 +4931,8 @@ mod armor_hurt_tests {
     /// applies with the item's own maximum and fire rules.
     #[test]
     fn a_hurt_horse_reports_the_body_armour_wear() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let hit = Damage {
             kind: DamageKind::MobAttack,
             attacker: None,
@@ -4923,7 +4941,7 @@ mod armor_hurt_tests {
         let mut m = horse();
         m.extra
             .set_body(Some("minecraft:diamond_horse_armor".into()));
-        assert!(m.damage(6.0, hit), "the hit landed");
+        assert!(m.damage(level, 6.0, hit), "the hit landed");
         let owed = m.outbox.iter().find_map(|e| match e {
             MobEvent::ArmorHurt { amount, .. } => Some(*amount),
             _ => None,
@@ -4934,7 +4952,7 @@ mod armor_hurt_tests {
         );
         // A horse with no body armour owes nothing.
         let mut bare = horse();
-        assert!(bare.damage(6.0, hit));
+        assert!(bare.damage(level, 6.0, hit));
         assert!(
             !bare
                 .outbox
@@ -4949,10 +4967,12 @@ mod armor_hurt_tests {
     /// armor.body with minecraft:wolf_armor` — wears nothing.
     #[test]
     fn a_donkey_wearing_a_body_item_wears_nothing() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut donkey = mob("minecraft:donkey", Species::Donkey);
         donkey.extra.set_body(Some("minecraft:wolf_armor".into()));
         assert!(
-            donkey.damage(6.0, Damage::of(DamageKind::MobAttack)),
+            donkey.damage(level, 6.0, Damage::of(DamageKind::MobAttack)),
             "the hit landed"
         );
         assert!(
@@ -5010,11 +5030,13 @@ mod armor_hurt_tests {
     /// that falls keeps its body piece whole.
     #[test]
     fn a_fall_does_not_wear_the_body_piece() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = horse();
         m.extra
             .set_body(Some("minecraft:diamond_horse_armor".into()));
         assert!(
-            m.damage(6.0, Damage::of(DamageKind::Fall)),
+            m.damage(level, 6.0, Damage::of(DamageKind::Fall)),
             "the fall landed"
         );
         assert!(
@@ -5031,13 +5053,15 @@ mod armor_hurt_tests {
     /// less than 8 through to the health.
     #[test]
     fn the_wear_is_the_damage_before_the_armour_reduction() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = horse();
         let k = Arc::make_mut(&mut m.kind);
         k.armor = 20.0;
         m.extra
             .set_body(Some("minecraft:diamond_horse_armor".into()));
         let before = m.health;
-        assert!(m.damage(8.0, Damage::of(DamageKind::MobAttack)));
+        assert!(m.damage(level, 8.0, Damage::of(DamageKind::MobAttack)));
         assert!(m.health < before, "the hit reached the health");
         let owed = m.outbox.iter().find_map(|e| match e {
             MobEvent::ArmorHurt { amount, .. } => Some(*amount),
@@ -5067,10 +5091,12 @@ mod totem_tests {
     /// and entity event 35 tells the clients to draw it.
     #[test]
     fn a_totem_in_the_mouth_saves_a_fox() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = fox();
         m.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
-        assert!(m.damage(1000.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 1000.0, Damage::of(DamageKind::Generic)));
         assert!(m.alive(), "the totem kept it alive");
         assert_eq!(m.health, 1.0);
         assert_eq!(m.extra.main_hand_id(), None, "the totem was used up");
@@ -5093,12 +5119,14 @@ mod totem_tests {
     /// `getItemInHand` asks the main hand first, then the off hand.
     #[test]
     fn a_totem_in_the_off_hand_saves_a_fox_too() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = fox();
         m.extra.set_slot_id(
             horizon_items::equipment::OFFHAND,
             Some("minecraft:totem_of_undying".into()),
         );
-        assert!(m.damage(1000.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 1000.0, Damage::of(DamageKind::Generic)));
         assert!(m.alive());
         assert_eq!(m.health, 1.0);
         assert_eq!(m.extra.off_hand_id(), None);
@@ -5107,10 +5135,12 @@ mod totem_tests {
     /// Without one in either hand the blow kills it as before.
     #[test]
     fn without_a_totem_the_blow_kills() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = fox();
         m.extra
             .set_main_hand(Some("minecraft:sweet_berries".into()));
-        assert!(m.damage(1000.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 1000.0, Damage::of(DamageKind::Generic)));
         assert!(!m.alive());
     }
 
@@ -5118,10 +5148,12 @@ mod totem_tests {
     /// something a totem answers.
     #[test]
     fn a_bypassing_killing_blow_ignores_the_totem() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = fox();
         m.extra
             .set_main_hand(Some("minecraft:totem_of_undying".into()));
-        assert!(m.damage(1000.0, Damage::of(DamageKind::GenericKill)));
+        assert!(m.damage(level, 1000.0, Damage::of(DamageKind::GenericKill)));
         assert!(!m.alive());
         assert_eq!(
             m.extra.main_hand_id(),

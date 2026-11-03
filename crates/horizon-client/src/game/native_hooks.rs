@@ -9,6 +9,10 @@
 //! sites may change; rebuild native mods after game updates.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
+#[cfg(test)]
+#[path = "native_damage_tests.rs"]
+mod damage_tests;
+
 use super::native_data_maps::NativeDataMapType;
 use super::{
     Game, GameLevel, LevelDimension, Screen,

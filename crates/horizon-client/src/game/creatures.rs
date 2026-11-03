@@ -8258,11 +8258,12 @@ mod breeding_tests {
                 parent.ai.goals.clear();
                 parent.ai.goals.add(2, Breed::new(1.0));
                 let mut events = Vec::new();
-                let mut level_random = LegacyRandom::new(321);
+                let mut test_level = horizon_client::health::TestLevel::new(321);
+                let level = &mut test_level.level();
                 for _ in 0..200 {
                     // The fixture has no floor; keep the pair within breeding range.
                     parent.position = Vec3::new(0.0, 64.0, 0.0);
-                    parent.tick(&world, &mut level_random, &mut events);
+                    parent.tick(&world, level, &mut events);
                     if let Some(xp) = events.iter().find_map(|event| match event {
                         MobEvent::Breed {
                             experience: BreedExperience::Drawn(Some(xp)),
