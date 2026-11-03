@@ -132,6 +132,93 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// A note block's instrument (`NoteBlockInstrument`), for `note_block_play`,
+/// in the `instrument` property's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum NativeNoteInstrument {
+    Harp,
+    Basedrum,
+    Snare,
+    Hat,
+    Bass,
+    Flute,
+    Bell,
+    Guitar,
+    Chime,
+    Xylophone,
+    IronXylophone,
+    CowBell,
+    Didgeridoo,
+    Bit,
+    Banjo,
+    Pling,
+    Trumpet,
+    TrumpetExposed,
+    TrumpetOxidized,
+    TrumpetWeathered,
+    Zombie,
+    Skeleton,
+    Creeper,
+    Dragon,
+    WitherSkeleton,
+    Piglin,
+    CustomHead,
+}
+
+impl NativeNoteInstrument {
+    /// Every instrument, in the `instrument` property's order.
+    pub const ALL: [Self; 27] = {
+        use NativeNoteInstrument::*;
+        [
+            Harp,
+            Basedrum,
+            Snare,
+            Hat,
+            Bass,
+            Flute,
+            Bell,
+            Guitar,
+            Chime,
+            Xylophone,
+            IronXylophone,
+            CowBell,
+            Didgeridoo,
+            Bit,
+            Banjo,
+            Pling,
+            Trumpet,
+            TrumpetExposed,
+            TrumpetOxidized,
+            TrumpetWeathered,
+            Zombie,
+            Skeleton,
+            Creeper,
+            Dragon,
+            WitherSkeleton,
+            Piglin,
+            CustomHead,
+        ]
+    };
+    /// The `instrument` property's value (`harp`, `cow_bell`).
+    pub fn name(self) -> &'static str {
+        horizon_world::level::data::INSTRUMENTS[self as usize]
+    }
+}
+
+/// The empty frame a fire is about to fill with a nether portal, for
+/// `portal_spawn` (`BlockEvent.PortalSpawnEvent.getPortalSize`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativePortalShape {
+    /// The portal runs along X (else along Z).
+    pub x_axis: bool,
+    /// Its bottom-left inside block.
+    pub bottom_left: [i32; 3],
+    pub width: i32,
+    pub height: i32,
+}
+
 /// A server explosion about to happen, for `explosion_start`
 /// (`ServerLevel.explode`'s `ServerExplosion`).
 #[derive(Clone, Copy, Debug)]
@@ -1581,6 +1668,88 @@ mod tests {
         assert_eq!(stand.items[0], Some(awkward));
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
+
+    /// Writes down every game rule change and level save it hears.
+    struct Recorder(Arc<Mutex<Vec<String>>>);
+
+    impl Hooks for Recorder {
+        fn game_rule_changed(&self, _host: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", event.rule, event.value));
+        }
+        fn level_save(&self, _host: &mut dyn Host, event: &mut LevelSaveEvent<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("saved {}", event.dimension));
+        }
+    }
+
+    /// `GameRuleChangedEvent` as the server's setters fire it: only for a
+    /// rule `GameRules.set` took, with its id and new value, to every mod.
+    #[test]
+    fn a_game_rule_change_reaches_every_mod_once_the_rule_is_set() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(Recorder(seen.clone())),
+            Box::new(Recorder(seen.clone())),
+        ];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut rules = crate::gamerules::GameRules::default();
+        // What `set_game_rule` and the other setters do.
+        let mut set = |name: &str, value: GameRuleValue| {
+            if rules.set(name, value) {
+                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+            }
+        };
+        set("keep_inventory", GameRuleValue::Bool(true));
+        // Out of range, of the wrong type, unknown: GameRules.set refuses them.
+        set("random_tick_speed", GameRuleValue::Int(-1));
+        set("keep_inventory", GameRuleValue::Int(1));
+        set("no_such_rule", GameRuleValue::Bool(true));
+        set("random_tick_speed", GameRuleValue::Int(7));
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "minecraft:keep_inventory true",
+                "minecraft:keep_inventory true",
+                "minecraft:random_tick_speed 7",
+                "minecraft:random_tick_speed 7",
+            ]
+        );
+    }
+
+    /// `LevelEvent.Save` as a world save fires it: once for each level, in
+    /// the order they are saved, to every mod.
+    #[test]
+    fn each_saved_level_reaches_every_mod() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(Recorder(seen.clone())),
+            Box::new(Recorder(seen.clone())),
+        ];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for dimension in ["minecraft:the_nether", "minecraft:overworld"] {
+            dispatch_level_save(&mut host, &mods, dimension);
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "saved minecraft:the_nether",
+                "saved minecraft:the_nether",
+                "saved minecraft:overworld",
+                "saved minecraft:overworld",
+            ]
+        );
     }
 
     /// Keeps the cod: reads the catch, sets the rod's damage, and cancels a

@@ -3519,7 +3519,7 @@
       "name": "note_play",
       "version": 1,
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_play",
-      "neoforge": "none (NeoForge has no such event; Bukkit's NotePlayEvent)",
+      "neoforge": "near match of NeoForge NoteBlockEvent.Play (cancel only; Bukkit's NotePlayEvent); note_block_play is the counterpart",
       "side": "server",
       "cancellable": true,
       "mod_api": {

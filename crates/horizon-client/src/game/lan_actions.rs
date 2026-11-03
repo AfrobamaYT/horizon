@@ -2498,6 +2498,11 @@ impl Game<'_> {
             S::SetGameRule(p) if host.hub.guests[gi].permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
+                        if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
+                            && let Some(value) = self.ui.rules.get(rule.name)
+                        {
+                            self.game_rule_changed(rule.name, value);
+                        }
                         let guest = &host.hub.guests[gi];
                         self.native_world_game_rule_change(
                             guest.uuid,
