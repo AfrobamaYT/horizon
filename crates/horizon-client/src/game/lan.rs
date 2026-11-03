@@ -409,8 +409,7 @@ fn mob_variant_meta(
     }
 }
 
-/// A mob's synched data as ServerEntity sends it (only the values that differ
-/// from the defaults the client constructs), with vanilla's entry indices:
+/// A mob's synched data as ServerEntity sends it, with vanilla's entry indices:
 /// Entity 0..=7, LivingEntity 8..=14, Mob 15, then the subclasses.
 /// `defaults` gets the defaults of the entries that can go back to theirs.
 fn mob_meta(
@@ -434,6 +433,7 @@ fn mob_meta(
     if shared != 0 {
         meta.push((0, serializer::BYTE, Value::Byte(shared)));
     }
+    mob_shared_state_meta(m, meta, defaults);
     // Entity.DATA_POSE: the pose the species keeps in its own fields (a
     // pose back at standing goes out by the entity's own default).
     let pose = horizon_client::mobs::sync::pose_id(m);
@@ -1066,18 +1066,29 @@ fn unhappy_counter(
     defaults.push((18, serializer::INT, Value::Int(0)));
 }
 
-/// What a client shakes a mob by: Entity.DATA_TICKS_FROZEN (7), whose full
-/// count is `isFullyFrozen`, and Strider.DATA_SUFFOCATING (19, after
-/// AgeableMob's two and DATA_BOOST_TIME).
+/// Entity's synced air, gravity and frozen state.
+fn mob_shared_state_meta(
+    m: &Mob,
+    meta: &mut Vec<(u8, i32, Value)>,
+    defaults: &mut Vec<(u8, i32, Value)>,
+) {
+    meta.push((1, serializer::INT, Value::Int(m.air)));
+    if m.no_gravity {
+        meta.push((5, serializer::BOOLEAN, Value::Bool(true)));
+    }
+    defaults.push((5, serializer::BOOLEAN, Value::Bool(false)));
+    if m.ticks_frozen != 0 {
+        meta.push((7, serializer::INT, Value::Int(m.ticks_frozen)));
+    }
+    defaults.push((7, serializer::INT, Value::Int(0)));
+}
+
+/// Strider.DATA_SUFFOCATING (19, after AgeableMob's two and DATA_BOOST_TIME).
 fn mob_freeze_meta(
     m: &Mob,
     meta: &mut Vec<(u8, i32, Value)>,
     defaults: &mut Vec<(u8, i32, Value)>,
 ) {
-    if m.ticks_frozen > 0 {
-        meta.push((7, serializer::INT, Value::Int(m.ticks_frozen)));
-    }
-    defaults.push((7, serializer::INT, Value::Int(0)));
     if m.kind.id == "minecraft:strider" {
         if m.extra.flag {
             meta.push((19, serializer::BOOLEAN, Value::Bool(true)));
@@ -3054,6 +3065,52 @@ fn equipment_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> 
 #[cfg(test)]
 mod tests {
     use super::{OFFHAND_SLOT, equipment_slot_name, living_flags};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_shared_state_uses_entity_data_indices() {
+        use super::{Value, mob_shared_state_meta, serializer};
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(42, kind, Vec3::ZERO, 0.0);
+            mob.air = -7;
+            mob.no_gravity = true;
+            mob.ticks_frozen = -12;
+            let mut meta = Vec::new();
+            let mut defaults = Vec::new();
+            mob_shared_state_meta(&mob, &mut meta, &mut defaults);
+            assert!(
+                meta.iter()
+                    .any(|v| matches!(v, (1, serializer::INT, Value::Int(-7))))
+            );
+            assert!(
+                meta.iter()
+                    .any(|v| matches!(v, (5, serializer::BOOLEAN, Value::Bool(true))))
+            );
+            assert!(
+                meta.iter()
+                    .any(|v| matches!(v, (7, serializer::INT, Value::Int(-12))))
+            );
+            assert!(
+                defaults
+                    .iter()
+                    .any(|v| matches!(v, (5, serializer::BOOLEAN, Value::Bool(false))))
+            );
+            assert!(
+                defaults
+                    .iter()
+                    .any(|v| matches!(v, (7, serializer::INT, Value::Int(0))))
+            );
+        });
+    }
 
     /// `LivingEntity.startUsingItem` sets flag 1 for the use and flag 2 for
     /// the off hand, so an off-hand use is 3, not 2. A reader takes bit 0 as
