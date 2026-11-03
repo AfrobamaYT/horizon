@@ -891,12 +891,12 @@ impl Game<'_> {
                     "sitting": m.extra.sitting,
                     "temper": m.extra.variant3,
                     "chested": m.extra.chested,
-                    "head": m.extra.head.as_deref(),
-                    "body": m.extra.body.as_deref(),
-                    "warden": horizon_client::mobs::warden::describe(m),
                 });
-                // Set apart from the json! above, which would otherwise pass
-                // the default macro recursion limit.
+                // Set apart: one json! with every key goes past the default macro recursion
+                // limit, and horizon-client can't raise it (#8169).
+                state["head"] = m.extra.head.as_deref().into();
+                state["body"] = m.extra.body.as_deref().into();
+                state["warden"] = serde_json::json!(horizon_client::mobs::warden::describe(m));
                 state["villager"] = serde_json::json!(horizon_client::mobs::villager::ext(m).map(|e| serde_json::json!({
                     "food_level": e.food_level,
                     "inventory": e.inventory.iter().map(|s| format!("{}x{}", s.count, s.item)).collect::<Vec<_>>(),
