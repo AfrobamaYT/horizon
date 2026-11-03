@@ -248,7 +248,17 @@ impl Game<'_> {
             let center = [feet.x, feet.y + bounds.size().y / 2.0, feet.z];
             let r = random.unwrap_or(&mut self.world.random);
             let radius = 3.0 + r.next_float() * 2.0;
-            let _ = self.wind_burst(center, radius, 1.0, false, false);
+            // WindChargedMobEffect: the bearer bursts, a living source.
+            let bearer = if player {
+                Some(self.own_entity_id() as u32)
+            } else {
+                bearer
+            };
+            let cause = super::wind::BurstCause {
+                source: bearer,
+                owner: bearer,
+            };
+            let _ = self.wind_burst(center, radius, 1.0, false, false, cause);
         }
     }
     /// `WeavingMobEffect.spawnCobwebsRandomlyAround`: two or three cobwebs in

@@ -741,7 +741,7 @@ impl Game<'_> {
         }
         // AdvancementRewards.grant
         if a.rewards.experience > 0 {
-            self.give_experience_points(a.rewards.experience);
+            self.give_experience_points(a.rewards.experience, false);
         }
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
         let rewards: Vec<String> = a
