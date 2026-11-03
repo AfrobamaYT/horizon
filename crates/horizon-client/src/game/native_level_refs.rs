@@ -4,7 +4,7 @@
 //! `None` (or `false`) on a client, for a handle of an earlier open, or for a
 //! block in a chunk that isn't loaded.
 use super::Game;
-use horizon_client::mod_api::LevelRef;
+use horizon_client::mod_api::{ChunkRef, ChunkStatus, LevelRef};
 use horizon_client::world::World;
 
 impl Game<'_> {
@@ -22,6 +22,24 @@ impl Game<'_> {
             .into_iter()
             .find(|d| d.id() == level.dimension())?;
         self.levels.parked_world(dim)
+    }
+    /// Find a loaded chunk in an open server level. API @API:chunk_refs@.
+    pub(super) fn native_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
+        self.native_level_world(level)?
+            .chunks
+            .contains_key(&(pos[0], pos[1]))
+            .then_some(ChunkRef { level, pos })
+    }
+    /// Whether this chunk is loaded; false on a client or for a stale handle.
+    /// API @API:chunk_refs@.
+    pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> bool {
+        self.native_chunk(chunk.level(), chunk.pos()).is_some()
+    }
+    /// The status of a loaded chunk. Proto chunks are not exposed here.
+    /// API @API:chunk_refs@.
+    pub(super) fn native_chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus> {
+        self.native_chunk(chunk.level(), chunk.pos())
+            .map(|_| ChunkStatus::Full)
     }
     /// The state at `pos`, if its chunk is loaded and `y` is inside the world.
     fn native_level_state(
