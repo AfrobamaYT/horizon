@@ -132,6 +132,8 @@ API 20 adds buttons, tooltips and item icons on mod screens: `native_screen_clic
 `native_block_property`, `native_insert_item` and `native_cursor`. `native_insert_item` was
 removed with the Parts core work (#41): a mod inserts through the block's item capability, `level.capability(host, &ITEMS, pos, side)`.
 
+`click_menu_button(button)` (a client helper) presses button `button` of the open menu as a click on one of its buttons does (`MultiPlayerGameMode.handleInventoryButtonClick`, `ServerboundContainerButtonClickPacket`); the server's menu decides what it does (`clickMenuButton`, and `menu_button` for a mod's menu). It is for a client mod's own input on a menu's screen where `screen_click` doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It is refused while no menu the server opened is open.
+
 API 21 adds what a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
 click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it (since API
 @API:right_click_block_answer@ with NeoForge's answer: `Fail` stops the click, and the player sees the block as it
