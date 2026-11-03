@@ -298,20 +298,23 @@ changing the player's saved shader selection); other packs are unaffected.
 
 ## A bundle
 
-A bundle is a folder with a `horizon-mixin.toml`. Besides its helpers and modules (horizon-mixins' README) it can
+A mod project keeps its native bundle in `native/`, with the exact filename `horizon-mixin.toml` required by
+horizon-mixins. The launcher stages its contents into the tool's `<mods>/<id>/` folder; the package has no id
+directory level. Besides its helpers and modules (horizon-mixins' README) it can
 have its own crate, data files and a post-build step (horizon-mixins 0.6.0). The test bundle
 [`launcher/tests/fixtures/native-crate-demo`](../launcher/tests/fixtures/native-crate-demo) uses all of them:
 
 ```
 native-crate-demo/
-  horizon-mixin.toml
-  frame.rs                # helper, compiled into the game
-  data/greeting.txt       # the bundle's data: native_data!("crate_demo", "greeting.txt")
-  engine/                 # the mod's own crate
-    Cargo.toml            # [dependencies] crc32fast = "1"
-    data/salt.txt         # the crate's data: include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
-    src/lib.rs
-    src/bin/bake.rs       # the post-build step
+  native/
+    horizon-mixin.toml
+    data/greeting.txt     # native_data!("crate_demo", "greeting.txt")
+    rust/
+      Cargo.toml          # [dependencies] crc32fast = "1"
+      data/salt.txt       # include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
+      src/lib.rs
+      src/frame.rs        # helper, compiled into the game
+      src/bin/bake.rs     # the post-build step
 ```
 
 ```toml
@@ -324,12 +327,12 @@ id = "frame"
 hook = "frame"            # a name from native-hooks.json, instead of `target`
 hook_version = 1
 kind = "HEAD"
-helper = "frame.rs"
+helper = "rust/src/frame.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 
 [[crate]]
 id = "engine"
-path = "engine"           # holds Cargo.toml
+path = "rust"             # holds Cargo.toml; a non-dot path is required
 # dependent = "horizon-client"   (the default: the workspace package that depends on it)
 
 [[post_build]]
@@ -552,22 +555,22 @@ and the recipe fails, as an unknown kind does.
 
 A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
 module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
-`crate::native_data!` inside the lib), since hook points API 41. A mod's crate keeps its own data in its folder and
+`crate::native_data!` inside the lib). A mod's crate keeps its own data in its folder and
 reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
-both (`mixins/<id>/data/…`, `mixins/<id>/<crate>/data/…`).
+both (`native/data/…`, `native/rust/data/…`).
 
 Both are compiled in: neither folder is beside the game when it runs. A file the game reads at run time is one a
 post-build step writes into `HORIZON_NATIVE_DATA_DIR` (below), copying it from `HORIZON_NATIVE_BUNDLE_DATA_DIR` or
 making it; the game finds it with `native_built_data("<mod>")` (None only when the game can't tell its own folder).
 
-**What a native bundle holds.** Under `mixins/<id>/`: `.rs` and `.toml` files, the data folders above, and the
-text files a crate folder carries (`README*`, `LICENSE*`, `COPYING*`, `NOTICE*`, `.gitignore`, in the bundle's
-folder or a crate's), so a crate that compiles its README in builds the same from the registry as from a folder. At
-most 512 files and 64 MiB unpacked; anything else refuses the bundle. A local folder build has no such limits.
+**What a native bundle holds.** `native/horizon-mixin.toml`, `.rs` and `.toml` files under `native/rust/`,
+files under `native/data/` and `native/rust/data/`, and text files (`README*`, `LICENSE*`, `LICENCE*`, `COPYING*`,
+`NOTICE*`, `.gitignore`) in `native/` or `native/rust/`. At most 512 native files and 64 MiB unpacked;
+anything else refuses the archive. Every declared source root is `rust`.
 
 **One `.hmod` for content and code.** A mod's content and its native code ship as one `.hmod`, and what is inside
 decides what happens: only `horizon-mod.toml` with `assets/` and `data/` is a content mod, nothing compiles; with
-`horizon-native.json` and `mixins/<id>/` (a bundle as above) it is a native mod, built into the game. Both may be in
+`horizon-native.json` and `native/` (a bundle as above) it is a native mod, built into the game. Both may be in
 one file: `horizon-mod.toml`, `assets/` and `data/` are its content, checked as a content mod's
 (`horizon_mods::Content`) and left out of the build, and the two manifests name the same mod id. A `.hmod` with
 native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
@@ -1623,7 +1626,7 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hmod`.
   Release packages must contain native code; content-only packages are rejected by this native installer.
 - **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
-  registry file (native source under `mixins/<id>/`, optional content, size limits, nothing run) before it is installed.
+  registry file (native source under `native/`, optional content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
@@ -1726,7 +1729,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
   review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hmod` contains `.rs` and `.toml` files and may contain data files under
-  `mixins/<id>/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
+  `native/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
   The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
   `horizon-native.json`. `revoked.toml` takes a bad release down.
   A project's kind never changes.
@@ -2758,16 +2761,20 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Trait mods (draft)
 
 `cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
-`horizon-mixin.toml`, pinned to that Horizon commit, and an `[api]` crate whose `hooks()` greets each player who
-joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
+`horizon-native.json`, top-level content manifest, assets and data directories, `native/horizon-mixin.toml`,
+pinned to that Horizon commit, and `native/rust/`, whose `hooks()` greets each player who joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
 as it is (`native-build <path>`) and packs it into a `.hmod`.
 
-A bundle declares its trait mod package by its path inside the bundle:
+A bundle declares its trait mod package by its path inside `native/`:
 
 ```toml
 [api]
-path = "engine"
+path = "rust"
 ```
+
+A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest cannot declare both routes.
+`rust/` is required because the tool rejects a dot crate path. `cargo horizon-mod build` packages this project
+without moving its content into the native directory.
 
 The package may use only crates and versions in Horizon's `Cargo.lock`, like mixin crates.
 The folder contains a Rust package with a `horizon-client` dependency. Its library exports
