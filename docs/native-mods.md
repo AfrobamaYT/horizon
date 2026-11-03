@@ -869,7 +869,7 @@ API 100 adds player-use drops to `native_loot_drops`: shears on a sheep, a moosh
 armadillo or a suspicious block, carving a pumpkin, picking sweet berries or cave vines, and a player taking an item frame or
 its item now pass through it too, with `NativeLootDrops::used` set and the player named.
 
-API 101 adds `native_experience_orbs(dimension, min, max)`, the experience orbs in a box; `native_give_experience(uuid, points)`, points given to any player as an orb they touch gives them (Mending first); and `native_give_levels(uuid, levels)`, levels given or, negative, taken.
+API 101 added experience for server mods: reading orbs (`native_experience_orbs`), giving points as an orb does (`native_give_experience`) and giving or taking levels (`native_give_levels`); the `PlayerRef` handle's `give_experience_points` and `give_levels` replace the two gives, and they are removed.
 
 API 102 adds lead drops to `native_loot_drops`: untying a lead or cutting it with shears (`used`), and the lead a mob a
 player killed while leashed drops on its next tick, naming the killer.
@@ -1068,7 +1068,7 @@ API 165 adds `native_physical_window_size()`, the window's width and height in p
 
 API 154 adds a player changing dimension: `native_player_changed_dimension(player, name, from, to)` is heard once per move of a server's player into another level, when the move has ended (a portal's exit found and the player standing there, a command's teleport landed, a respawn in another level placed for good), with `from` and `to` as dimension ids (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`) and the player's state swapped in so that `native_tell` and the other helpers reach them. A move within a level is not heard.
 
-API 155 adds A mod that hears `native_experience_orb_pickup` sets `listened` in `native_experience_orb_pickup_listened` (a HEAD injection); `native_experience_orb_pickup(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `native_give_experience` too. Both run on the integrated and the dedicated server, guests included.
+API 155 adds A mod that hears `native_experience_orb_pickup` sets `listened` in `native_experience_orb_pickup_listened` (a HEAD injection); `native_experience_orb_pickup(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
 
 API 156 adds where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and
 `native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken
@@ -2211,9 +2211,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   in, so `native_acting_player`, `native_tell` and the item helpers reach them.
 - Items: a player's inventory is their [`ENTITY_ITEMS`](#an-entitys-items) handler, from any server hook.
 - Experience: `native_experience_orbs(dimension, min, max)`, the orbs in a box (id, position, `value`, and `count`
-  for merged orbs), read before a mod cancels an orb in `native_entity_join_level`; and `native_give_experience(uuid,
-  points)`, points given to any player as touching an orb gives them: Mending repairs their damaged items first, the
-  rest goes to their experience, with the level-up sound; and `native_give_levels(uuid, levels)`, levels added or,
+  for merged orbs), read before a mod cancels an orb in `native_entity_join_level`; and a player's `give_experience_points(host,
+  points)` and `give_levels(host, levels)` through their `PlayerRef`: points given as touching an orb gives them, Mending
+  repairing their damaged items first, the rest going to their experience with the level-up sound; levels added or,
   negative, taken off (`Player.giveExperienceLevels`, as the anvil and the enchanting table charge; below 0 the level
   and points are 0; no level-up sound). Both return false for a player not here, dead, or swapped out by another
   player's hook, and where the server's player list is busy (some world ticks hold it): give first, and cancel the orb
@@ -2345,6 +2345,20 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   frame's entity, no table). A dispenser's shears and an explosion's frames aren't told. Leads: untying one or cutting it with
   shears is a use (the leashed mob, no table), and a mob a player killed while leashed drops its lead on its next tick as a call
   of its own, naming the killer (`used` false, no table). A lead that snaps or loses its holder names no player and isn't told.
+- **`native_living_drops(entity, kind, player, source, recently_hit, drops, cancel)`**: NeoForge's
+  `LivingDropsEvent`, the whole of what a dying mob, server player or armor stand drops, after `native_loot_drops` and with the
+  rest of `dropAllDeathLoot` in: an enderman's carried block, a copper golem's preserved equipment, and a player's inventory
+  (unless `keepInventory`). Each `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets;
+  item entity state such as no-gravity, owner and lifetime isn't exposed through it. `source` is a `HurtSource` (the damage type,
+  `causing` and `direct` entity ids); the id of a projectile isn't kept, so `direct` is 0 for it. Edit the list or set `cancel`
+  for no drops; experience orbs are separate (`native_living_experience_drop`). An armor stand fires it from `brokenByAnything`
+  with an empty list, and its stand item and equipment pop outside the list, as in vanilla. `native_loot_drops` stays for loot that
+  is not a death (blocks, shearing, leads); for a mob's death it is heard first (it edits the stacks a table rolled), and this hook
+  then fires once on the whole collected list, with nothing spawned until it returns.
+- **`native_get_equipment_drop_chance(entity, kind, slot, source, recently_hit, stack, original_chance, preserved, chance)`**:
+  NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
+  is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
+  own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
 
 ### A block's items
 
@@ -2428,6 +2442,9 @@ a dimension.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
+- `level.pop_resource(host, pos, stack)` drops a stack as a broken block does (`Block.popResource`), `spawn_item(host, x, y, z,
+  stack)` and `spawn_item_with_motion` spawn a plain item entity and give its handle, and `award_experience(host, x, y, z,
+  amount)` splits experience into orbs (`ExperienceOrb.award`), all in the level in place.
 
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags.
 
@@ -3054,7 +3071,8 @@ index holds when it holds that (`capacity`, none where it may not go), and `inse
 `&Transaction` and answer how much moved. There is no `simulate`: a write happens in a transaction
 (`host.transaction(|host, tx| …)`, below), and to try one, abort it. `move_resources(host, &from, &to, filter, max,
 tx)` (NeoForge's `ResourceHandlerUtil.move`) moves what `filter` accepts, up to `max`, index by index out of `from`
-into wherever `to` takes it, each move all or nothing: what `to` won't take stays put. Hoppers use a mod's handler
+into wherever `to` takes it, each move all or nothing: what `to` won't take stays put. It answers how much moved, or
+`Overanswered` (below). Hoppers use a mod's handler
 where one is registered, each move in a transaction of its own. A mod's own capability is a
 `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
@@ -3157,31 +3175,33 @@ host.transaction(|host, tx| {
 
 #### A block's fluids
 
-Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
-millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
-fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
-components. The game's own answer is a mod block's tanks by side (`block_entity_fluids`) and a cauldron, one tank
-of 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity and is answered by
-position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
-discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
-components are dropped. A mod block's saved tanks take no fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a
-handler in a `LevelRef`'s level, as `ITEMS`' are found. `host.transfer_fluids(level, from, from_side, to, to_side, max)` moves
-one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, until a round moves
-nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
-whole, then the source really gives with that request and the target is filled with exactly what came out. A
-handler whose real calls answer as its simulations never loses fluid and is never warned.
+Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered as items are, by a
+`ResourceHandler<FluidResource>` in millibuckets. A `FluidResource` is a fluid id and its data components, without
+an amount, kept as an item stack's are (a potion fluid's contents; water and lava have none), and a tank fills only
+from empty or with the same fluid and the same components. A `FluidStack` is one with an amount, as tanks keep it
+(`resource.to_stack(amount)`, `FluidResource::of(&stack)`). The game's own answer is a mod block's tanks by side
+(`block_entity_fluids`) and a cauldron, one tank of 1000 mB that holds water in thirds and lava only whole; a
+cauldron has no block entity and is answered by position, and a powder snow cauldron holds no fluid. A cauldron
+takes water and lava whatever their components and discards them, as NeoForge's `CauldronFluidContent` does, so
+what comes out of it is plain: the one place a fluid's components are dropped. A mod block's saved tanks take no
+fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a handler in a `LevelRef`'s level, as
+`ITEMS`' are found, and `move_resources` moves fluids as it moves items. A move the target takes only part of is
+undone and tried again with that part, so a cauldron, which gives whole thirds and never more than asked, gives
+what fits: asked for a bucket with room for 500 mB, it gives one level, 334 mB.
 
-A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
-mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
-to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
-broken handler can void.
+Fluid held by an item is `ITEM_FLUIDS` (NeoForge's `Capabilities.Fluid.ITEM`), found where its stack lives, as
+`ITEM_ITEMS` is: `place.capability(host, &ITEM_FLUIDS)` gives a `ResourceHandler<FluidResource>` for the item at
+that `ItemPlace`, and a write rewrites the item there by an exchange of one, so from a stack of more than one the
+changed item splits off (`r.item_capability(&ITEM_FLUIDS, "mymod:canister", …)` answers it for a mod's item). The
+game answers it for vanilla's buckets, as NeoForge's `BucketResourceHandler` does: one tank of 1000 mB, filled and
+drained whole, an empty bucket taking plain water or lava and becoming its full bucket, a full one becoming an empty
+bucket. `move_resources` moves between an item and a block as between two blocks: a full cauldron fills a bucket in a
+player's slot, and two thirds of one fill none.
 
-The game never trusts an answer past what it asked, offered or simulated. An item handler answering more than it
-was asked has its move undone, in its transaction. A fluid handler's real extract must give the fluid, with the
-components, that its simulation showed: another is given back and nothing comes out. A leftover larger than the
-offer counts as the offer, and what an extract gives beyond the request goes back into its tank or, as above, is
-lost with a warning. Either is a mod bug, warned once naming the mod; a broken handler can't make a move overflow,
-duplicate items or panic the game.
+The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
+move undone, in its transaction, and is warned once naming the mod, and `move_resources` returns `Overanswered`
+naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so neither end keeps
+any of it: a broken handler can't make a move overflow, duplicate or lose items or fluid, or panic the game.
 
 `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is

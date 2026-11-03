@@ -569,7 +569,9 @@ impl Game<'_> {
         self.close_ender_chest();
         std::mem::swap(&mut self.ender_items, &mut g.ender_items);
         // The guest's advancements, recipe book and statistics.
-        self.advancement_tree();
+        if g.participates_in_player_simulation() {
+            self.advancement_tree();
+        }
         std::mem::swap(&mut self.adv.progress, &mut g.advancements);
         std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
@@ -1193,7 +1195,7 @@ impl Game<'_> {
     /// of them, not only on the host. A server has no player of its own.
     /// Inside a guest's action (the hub taken) only that player is in place.
     pub(super) fn for_each_player(&mut self, mut f: impl FnMut(&mut Self)) {
-        if self.player.is_some() {
+        if self.player.is_some() && !self.lan_acting_fake {
             f(self);
         }
         let Some(mut host) = self.lan.take() else {
@@ -1234,9 +1236,13 @@ impl Game<'_> {
         kind: &str,
         pos: Option<[i32; 3]>,
     ) -> bool {
-        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+        let Some(guest) = host.hub.guest(conn) else {
             return true;
         };
+        if !guest.participates_in_player_simulation() {
+            return false;
+        }
+        let (uuid, name) = (guest.uuid, guest.name.clone());
         let mut cancel = false;
         let mut hook =
             |game: &mut Self| game.native_container_opened(uuid, &name, kind, pos, &mut cancel);
@@ -3222,7 +3228,9 @@ impl Game<'_> {
                 .flatten();
             self.send_guest_motion(host, conn, sent);
             // The mob now answers to this guest (game/lan_mobs.rs).
-            if let Ok(id) = u32::try_from(id) {
+            if host.hub.guests[gi].participates_in_player_simulation()
+                && let Ok(id) = u32::try_from(id)
+            {
                 host.mob_players.insert(id, conn);
             }
             return;
@@ -3247,7 +3255,9 @@ impl Game<'_> {
             .flatten();
         self.send_guest_motion(host, conn, sent);
         // The mob now answers to this guest (game/lan_mobs.rs).
-        if let Ok(id) = u32::try_from(id) {
+        if host.hub.guests[gi].participates_in_player_simulation()
+            && let Ok(id) = u32::try_from(id)
+        {
             host.mob_players.insert(id, conn);
         }
         host.hub.guests[gi].yaw = old_yaw;
@@ -3936,27 +3946,19 @@ impl Game<'_> {
     /// `ServerPlayer.die` for a guest whose health has run out: the death
     /// message, the loot and experience, the death screen.
     fn guest_die(&mut self, host: &mut LanHost, gi: usize, conn: u32) {
-        if host.hub.guests[gi].health <= 0.0
-            && !host.hub.guests[gi].dead
-            && !horizon_client::mod_api::mods().is_empty()
-        {
+        let dying = host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead;
+        // The killing blow, for the death hooks.
+        let blow = (dying && !horizon_client::mod_api::mods().is_empty())
+            .then(|| self.guest_damage_source(host, conn));
+        if let Some((damage_type, attacker)) = &blow {
             // LivingDeathEvent: a canceled death keeps the player at 1 health.
-            let (damage_type, attacker) =
-                match host.play.get(&conn).and_then(|p| p.death_cause.as_deref()) {
-                    Some("death.attack.genericKill") => ("minecraft:generic_kill", 0),
-                    _ => self
-                        .guest_combat
-                        .get(&conn)
-                        .and_then(|tracker| tracker.last_blow())
-                        .unwrap_or(("minecraft:generic", 0)),
-                };
-            let (damage_type, entity) = (damage_type.to_owned(), host.hub.guests[gi].entity_id);
+            let entity = host.hub.guests[gi].entity_id;
             let mut cancel = false;
             self.native_living_death(
                 entity as u32,
                 "minecraft:player",
-                &damage_type,
-                attacker,
+                damage_type,
+                *attacker,
                 &mut cancel,
             );
             if cancel {
@@ -4043,6 +4045,20 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3, at);
+            let recently_hit = blow.is_some()
+                && self
+                    .guest_combat
+                    .get(&conn)
+                    .is_some_and(|c| c.recently_hit_by_player(self.world.game_time));
+            let dropping = super::creatures::DyingDrops {
+                entity: id as u32,
+                kind: "minecraft:player",
+                player: Some(uuid),
+                source: blow.as_ref().map(|(damage_type, attacker)| {
+                    super::creatures::death_hurt_source(damage_type, *attacker)
+                }),
+                recently_hit,
+            };
             // LivingEntity.die: the death is heard, and a sculk catalyst
             // nearby takes the experience (before the loot is dropped), as it
             // does for a mob.
@@ -4060,7 +4076,7 @@ impl Game<'_> {
             // the `deaths` statistic and the two timers it resets.
             self.as_guest(host, conn, |game| {
                 if let Some(eyes) = drops {
-                    game.drop_inventory(eyes);
+                    game.drop_inventory(eyes, &dropping);
                 }
                 game.score_player_died();
                 game.award_custom_stat("deaths", 1);
@@ -4203,6 +4219,21 @@ impl Game<'_> {
         }
     }
 
+    /// The killing blow of a guest as `LivingDeathEvent` names it: the
+    /// damage type and the causing entity's id (0 for none).
+    fn guest_damage_source(&self, host: &LanHost, conn: u32) -> (String, u32) {
+        let (damage_type, attacker) =
+            match host.play.get(&conn).and_then(|p| p.death_cause.as_deref()) {
+                Some("death.attack.genericKill") => ("minecraft:generic_kill", 0),
+                _ => self
+                    .guest_combat
+                    .get(&conn)
+                    .and_then(|tracker| tracker.last_blow())
+                    .unwrap_or(("minecraft:generic", 0)),
+            };
+        (damage_type.to_owned(), attacker)
+    }
+
     /// `ServerPlayer.die`'s message from a guest's own `CombatTracker`, which
     /// sits in `guest_combat` between turns.
     fn guest_death_message(
@@ -4343,13 +4374,14 @@ impl Game<'_> {
                 }
             }
         };
-        if self.player.is_some() && !self.spectator() {
+        if self.player.is_some() && !self.lan_acting_fake && !self.spectator() {
             count(self.sleeping.is_some(), self.sleep_timer);
         }
         if let Some(host) = self.lan.as_ref() {
             // A native mod's ignored players count only once in bed.
             for g in host.hub.guests.iter().filter(|g| {
                 g.placed
+                    && g.participates_in_player_simulation()
                     && !g.spectator()
                     && (g.bed.is_some() || !host.sleep_ignored.contains(&g.uuid))
             }) {
@@ -5560,6 +5592,27 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
 mod tests {
     use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn fake_body_does_not_count_toward_sleep() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.lan_acting_fake = false;
+            let real = game.sleep_counts();
+            assert_eq!(real.0, 1);
+            game.lan_acting_fake = true;
+            assert_eq!(game.sleep_counts(), (0, 0, 0));
+            game.lan_acting_fake = false;
+            assert_eq!(game.sleep_counts(), real);
+        });
+    }
 
     /// `copyRespawnPosition` copies an Overworld forced point, not none; a
     /// point with a block is left to its block check.

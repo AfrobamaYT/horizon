@@ -113,6 +113,9 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
         pub(super) struct EffectTickChange;
+        pub(super) struct NativeItemDrop;
+        #[derive(Clone, Copy)]
+        pub(super) struct EquipmentSlot;
         #[derive(Clone, Copy)]
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
