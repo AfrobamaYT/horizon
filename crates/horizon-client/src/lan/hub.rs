@@ -747,9 +747,14 @@ impl Hub {
 
     /// `PlayerList.broadcastAll`: send a packet to every placed player.
     pub fn broadcast(&self, packet: &C) {
-        let body = packet.encode();
-        for g in self.guests.iter().filter(|g| g.placed) {
-            g.sender.send(body.clone());
+        let mut body = None;
+        for g in self
+            .guests
+            .iter()
+            .filter(|g| g.placed && g.participates_online())
+        {
+            g.sender
+                .send(body.get_or_insert_with(|| packet.encode()).clone());
         }
     }
     /// MinecraftServer.onGameRuleChanged: every player is told when
@@ -808,9 +813,14 @@ impl Hub {
     /// `PlayerList.broadcastAll(packet, dimension)`: the players in the
     /// level in place.
     pub fn broadcast_level(&self, packet: &C) {
-        let body = packet.encode();
-        for g in self.guests.iter().filter(|g| self.here(g)) {
-            g.sender.send(body.clone());
+        let mut body = None;
+        for g in self
+            .guests
+            .iter()
+            .filter(|g| self.here(g) && g.participates_online())
+        {
+            g.sender
+                .send(body.get_or_insert_with(|| packet.encode()).clone());
         }
     }
     /// `DedicatedServer.sendLowDiskSpaceWarning`: the players with
@@ -822,9 +832,14 @@ impl Hub {
         }
     }
     pub fn broadcast_except(&self, conn: u32, packet: &C) {
-        let body = packet.encode();
-        for g in self.guests.iter().filter(|g| g.placed && g.conn != conn) {
-            g.sender.send(body.clone());
+        let mut body = None;
+        for g in self
+            .guests
+            .iter()
+            .filter(|g| g.placed && g.conn != conn && g.participates_online())
+        {
+            g.sender
+                .send(body.get_or_insert_with(|| packet.encode()).clone());
         }
     }
     /// PlayerList.broadcastSystemMessage.

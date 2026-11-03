@@ -520,6 +520,125 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn connectionless_guest_has_no_transport() {
+        use horizon_client::{
+            lan::{
+                Joined, Lan, NetConfig, PlayerSender,
+                chunks::ChunkEncoder,
+                conn::{Holding, flush_all},
+                data::SyncData,
+                guest::Guest,
+                hub::{Hub, HubConfig},
+            },
+            motion::PlayerMotion,
+        };
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::packets::{
+            configuration::ClientInformation,
+            play::{Clientbound, Distance},
+        };
+        use std::sync::{Arc, atomic::Ordering};
+        with_game(|game| {
+            let sync = Arc::new(SyncData::empty());
+            let net = NetConfig {
+                announce: false,
+                ..NetConfig::lan(0, "test".into(), 2)
+            };
+            let lan = Lan::start_with(sync.clone(), net).unwrap();
+            let real_id = lan.shared.next_id().unwrap();
+            let fake_id = lan.shared.next_id().unwrap();
+            assert_ne!(real_id, fake_id);
+            let encoder = ChunkEncoder::new(
+                [] as [(Arc<str>, bool); 0],
+                &horizon_protocol::registry::Builtin::default(),
+                &[],
+                &[],
+            );
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 10,
+                simulation_distance: 10,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 20,
+                integrated: false,
+                levels: Default::default(),
+            };
+            let mut hub = Hub::new(lan, sync, encoder, config.clone());
+            let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
+            assert!(fake.placed && fake.motion.is_some());
+            assert!(!fake.participates_online() && !fake.participates_in_player_simulation());
+            assert_eq!((fake.game_mode, fake.permission, fake.input), (0, 0, 0));
+            assert!(fake.vehicle.is_none() && fake.bed.is_none() && fake.menu.is_none());
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut real = Guest::new(
+                Joined {
+                    conn: real_id,
+                    uuid: 1,
+                    name: "real".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::default(),
+                    address: ([127, 0, 0, 1], 1).into(),
+                },
+                1,
+                [0.0; 3],
+                10,
+            );
+            real.placed = true;
+            hub.guests.push(real);
+            hub.guests.push(fake);
+            let packet = Clientbound::SetSimulationDistance(Distance { distance: 8 });
+            let hold = Holding::start();
+            hub.send_to(fake_id, &packet);
+            hub.broadcast(&packet);
+            hub.guests[1].sender.send_many([vec![1, 2, 3]]);
+            flush_all(hub.guests.iter().map(|g| &g.sender));
+            drop(hold);
+            assert_eq!(hub.guests[1].sender.pending.load(Ordering::Relaxed), 0);
+            assert!(rx.recv_timeout(std::time::Duration::from_secs(2)).is_ok());
+            game.lan_host(
+                super::super::lan::LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                },
+                NetConfig {
+                    announce: false,
+                    ..NetConfig::lan(0, "swap".into(), 2)
+                },
+                config,
+            )
+            .unwrap();
+            let mut host = game.lan.take().unwrap();
+            host.hub.guests = std::mem::take(&mut hub.guests);
+            game.guest_packets
+                .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
+            game.as_guest(&mut host, fake_id, |game| {
+                game.guest_packets
+                    .push(Clientbound::SetSimulationDistance(Distance {
+                        distance: 12,
+                    }));
+                game.guest_entity_events.push(3);
+                game.guest_cooldowns.push(("minecraft:test".into(), 20));
+            })
+            .unwrap();
+            assert_eq!(game.guest_packets.len(), 1);
+            assert!(game.guest_entity_events.is_empty() && game.guest_cooldowns.is_empty());
+            assert_eq!(host.hub.guests[1].sender.pending.load(Ordering::Relaxed), 0);
+            assert!(rx.try_recv().is_err());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn level_sturdy_uses_gameplay_support() {
         use horizon_client::{
             chunk::Chunk,

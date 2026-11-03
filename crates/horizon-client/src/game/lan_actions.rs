@@ -800,19 +800,25 @@ impl Game<'_> {
         // The guest's swings are theirs: the host's own count stays the host's.
         play.swings += self.swings_started.wrapping_sub(swings);
         self.swings_started = swings;
-        for packet in std::mem::replace(&mut self.guest_packets, packets) {
-            host.hub.send_to(conn, &packet);
+        let outgoing = std::mem::replace(&mut self.guest_packets, packets);
+        if host.hub.guests[i].participates_online() {
+            for packet in outgoing {
+                host.hub.send_to(conn, &packet);
+            }
         }
         // ServerPlayer.connection.send: the guest's own entity events.
         let entity_id = host.hub.guests[i].entity_id;
-        for event in std::mem::replace(&mut self.guest_entity_events, entity_events) {
-            host.hub.send_to(
-                conn,
-                &C::EntityEvent(play::EntityEvent {
-                    id: entity_id,
-                    event,
-                }),
-            );
+        let outgoing_events = std::mem::replace(&mut self.guest_entity_events, entity_events);
+        if host.hub.guests[i].participates_online() {
+            for event in outgoing_events {
+                host.hub.send_to(
+                    conn,
+                    &C::EntityEvent(play::EntityEvent {
+                        id: entity_id,
+                        event,
+                    }),
+                );
+            }
         }
         // LivingEntity.onEquippedItemBroken: `broadcastEntityEvent`, the guest too.
         for (event, at) in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
@@ -828,14 +834,17 @@ impl Game<'_> {
                 .sound(&name, at, volume, pitch, players, Some(conn));
         }
         // ServerItemCooldowns.onCooldownStarted: the guest's own cooldown.
-        for (group, duration) in std::mem::take(&mut self.guest_cooldowns) {
-            host.hub.send_to(
-                conn,
-                &C::Cooldown(play::Cooldown {
-                    group: group.to_string(),
-                    duration,
-                }),
-            );
+        let outgoing_cooldowns = std::mem::take(&mut self.guest_cooldowns);
+        if host.hub.guests[i].participates_online() {
+            for (group, duration) in outgoing_cooldowns {
+                host.hub.send_to(
+                    conn,
+                    &C::Cooldown(play::Cooldown {
+                        group: group.to_string(),
+                        duration,
+                    }),
+                );
+            }
         }
         (
             self.lan_acting,
