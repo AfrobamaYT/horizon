@@ -1612,9 +1612,15 @@ mod tests {
                     .count(),
                 1
             );
-            let mut suggestions = horizon_command::SuggestionsBuilder::new("minecraft:apple[example:", 0);
+            let mut suggestions =
+                horizon_command::SuggestionsBuilder::new("minecraft:apple[example:", 0);
             horizon_command::item::suggest_stack(&mut suggestions, &game.ui.registries);
-            assert!(suggestions.out.iter().any(|entry| entry.text == "example:marker="));
+            assert!(
+                suggestions
+                    .out
+                    .iter()
+                    .any(|entry| entry.text == "example:marker=")
+            );
             assert!(game.run_command("give @s minecraft:apple[example:marker={probe:1}]"));
             let item = game
                 .inventory
