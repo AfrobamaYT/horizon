@@ -547,10 +547,11 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             Ok(bundle.facts())
         }
         Kind::Mod => {
-            if native::holds(path) {
+            let package = Package::read(path)?;
+            if package.is_native() {
                 return Err("it has native code: it is a native-mod".into());
             }
-            let m = Package::read(path)?.manifest;
+            let m = package.manifest;
             crate::Content::read(path, &m)?;
             Ok(Facts {
                 capabilities: m.capabilities,

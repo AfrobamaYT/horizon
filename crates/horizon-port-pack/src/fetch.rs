@@ -239,6 +239,23 @@ pub(crate) fn download(
     store_download(response.into_reader(), sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
 }
 
+/// Download exactly the manifest jar through the Modrinth CDN.
+pub fn download_jar(
+    url: &str,
+    jar: &horizon_mods::manifest::JarRef,
+    dest: &Path,
+) -> Result<(), String> {
+    let response =
+        crate::net::get_from_hosts(url, &["cdn.modrinth.com"])?.ok_or("Modrinth jar not found")?;
+    store::<sha2::Sha512>(
+        response.into_reader(),
+        Some(jar.sha512()),
+        dest,
+        true,
+        "SHA-512",
+    )
+}
+
 /// Hash and copy a jar stream, refusing inputs larger than 512 MiB.
 /// Pass [`io::sink()`] as the writer when only the digest is needed.
 pub fn hash_reader<D: Digest>(
@@ -275,6 +292,19 @@ pub(crate) fn store_download(
     dest: &Path,
     overwrite: bool,
 ) -> Result<(), String> {
+    store::<Sha1>(reader, sha1, dest, overwrite, "SHA-1")
+}
+
+fn store<D: Digest>(
+    reader: impl Read,
+    expected: Option<&str>,
+    dest: &Path,
+    overwrite: bool,
+    algorithm: &str,
+) -> Result<(), String>
+where
+    Output<D>: std::fmt::LowerHex,
+{
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let suffix = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let part = dest.with_file_name(format!(
@@ -287,10 +317,10 @@ pub(crate) fn store_download(
         .open(&part)
         .map_err(|e| e.to_string())?;
     let result = (|| {
-        let hash = hash_reader::<Sha1>(reader, &mut file).map_err(|e| e.to_string())?;
+        let hash = hash_reader::<D>(reader, &mut file).map_err(|e| e.to_string())?;
         let got = format!("{hash:x}");
-        if let Some(want) = sha1.filter(|want| !want.eq_ignore_ascii_case(&got)) {
-            return Err(format!("SHA-1 {got}, the pack says {want}"));
+        if let Some(want) = expected.filter(|want| !want.eq_ignore_ascii_case(&got)) {
+            return Err(format!("{algorithm} {got}, the pack says {want}"));
         }
         file.sync_all().map_err(|e| e.to_string())?;
         drop(file);
@@ -401,6 +431,15 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn jar_hashing_accepts_512_mib_and_refuses_one_extra_byte() {
+        let limit = 512 * 1024 * 1024;
+        assert!(hash_reader::<sha2::Sha512>(io::repeat(0).take(limit), io::sink()).is_ok());
+        let error =
+            hash_reader::<sha2::Sha512>(io::repeat(0).take(limit + 1), io::sink()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
     fn hashing_and_copying_share_the_digest_for_each_algorithm() {
         let mut copied = Vec::new();
         let hash = hash_reader::<Sha1>(&b"abc"[..], &mut copied).unwrap();
@@ -463,6 +502,27 @@ mod tests {
         assert_eq!(fs::read(&dest).unwrap(), b"legacy");
         assert!(store_download(&b"new"[..], None, &dest, false).is_err());
         assert_eq!(fs::read(&dest).unwrap(), b"legacy");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sha512_publication_is_verified_and_atomic_between_downloads() {
+        let root = std::env::temp_dir().join(format!("sha512-store-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("source.jar");
+        let bytes = b"a synthetic jar download";
+        let hash = format!("{:x}", sha2::Sha512::digest(bytes));
+        assert!(store::<sha2::Sha512>(&b"wrong"[..], Some(&hash), &dest, true, "SHA-512").is_err());
+        assert!(!dest.exists());
+        std::thread::scope(|scope| {
+            let save = || store::<sha2::Sha512>(&bytes[..], Some(&hash), &dest, true, "SHA-512");
+            let first = scope.spawn(save);
+            let second = scope.spawn(save);
+            first.join().unwrap().unwrap();
+            second.join().unwrap().unwrap();
+        });
+        assert_eq!(fs::read(&dest).unwrap(), bytes);
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
     }

@@ -190,24 +190,6 @@ pub(super) fn stage(
         .iter()
         .map(|(_, project)| (project.bundle.manifest.id.as_str(), project.package.clone()))
         .collect();
-    let post_builds: Vec<_> = mods
-        .iter()
-        .flat_map(|(_, project)| {
-            let bundle = project.bundle;
-            let package = &packages[bundle.manifest.id.as_str()];
-            bundle
-                .native()
-                .post_build
-                .iter()
-                .map(move |step| super::crates::PostBuild {
-                    mod_id: bundle.manifest.id.clone(),
-                    package: package.clone(),
-                    bin: step.bin.clone(),
-                    args: step.args.clone(),
-                })
-        })
-        .collect();
-    super::crates::write_post_builds(stage, &post_builds)?;
     let mut deps = toml::Table::new();
     for name in ["horizon-client", "horizon-threads", "horizon-mods"] {
         deps.insert(name.into(), path_dep(&format!("../{name}")));
@@ -459,10 +441,6 @@ mod tests {
     #[test]
     fn stages_api_without_a_dependency_cycle() {
         let dir = fixture();
-        let path = dir.join(horizon_mods::manifest::MANIFEST);
-        let text = fs::read_to_string(&path).unwrap()
-            + "[[native.post_build]]\nbin='prepare'\nargs=['--proof']\n";
-        fs::write(path, text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let stage_dir = dir.with_extension("workspace");
         let _ = fs::remove_dir_all(&stage_dir);
@@ -496,15 +474,6 @@ mod tests {
             &resolution
         )
         .unwrap());
-        assert_eq!(
-            super::super::crates::post_builds(&stage_dir).unwrap(),
-            [super::super::crates::PostBuild {
-                mod_id: "example".into(),
-                package: "example-mod".into(),
-                bin: "prepare".into(),
-                args: vec!["--proof".into()],
-            }]
-        );
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         let members = root["workspace"]["members"].as_array().unwrap();
         assert!(members

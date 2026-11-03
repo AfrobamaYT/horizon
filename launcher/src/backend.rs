@@ -1995,6 +1995,11 @@ pub fn game_home() -> PathBuf {
     if let Some(home) = std::env::var_os("HORIZON_HOME").filter(|h| !h.is_empty()) {
         return PathBuf::from(home);
     }
+    default_game_home()
+}
+
+/// The platform default, without the optional HORIZON_HOME override.
+pub(crate) fn default_game_home() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("horizon")
@@ -2221,10 +2226,28 @@ pub fn append_game_args(cmd: &mut Command) {
     cmd.args(game_args());
 }
 
+/// Renderer workarounds a player may have exported to start the launcher itself (a transparent
+/// window on old Mesa drivers): they belong to the launcher's own webview and must not reach the
+/// game, which picks its own backend. Inherited, they left the client on CPU rendering at 2-3 FPS
+/// (#7832).
+pub const LAUNCHER_RENDER_ENV: [&str; 4] = [
+    "LIBGL_ALWAYS_SOFTWARE",
+    "GALLIUM_DRIVER",
+    "WEBKIT_DISABLE_DMABUF_RENDERER",
+    "WEBKIT_DISABLE_COMPOSITING_MODE",
+];
+
+fn strip_launcher_render_env(cmd: &mut Command) {
+    for key in LAUNCHER_RENDER_ENV {
+        cmd.env_remove(key);
+    }
+}
+
 pub fn client_command(tag: &str) -> Command {
     let home = game_home();
     let _ = fs::create_dir_all(&home);
     let mut cmd = Command::new(client_program(tag));
+    strip_launcher_render_env(&mut cmd);
     cmd.current_dir(home).arg("--resources").arg(resources(tag));
     // How the game asks for a renewed session (`account session`) while it runs.
     if let Ok(exe) = std::env::current_exe() {
@@ -3419,6 +3442,7 @@ mod java_tests;
 mod tests {
     use super::*;
     use std::cmp::Ordering::*;
+    use std::ffi::OsStr;
 
     #[test]
     #[cfg(windows)]
@@ -5136,6 +5160,26 @@ pub fn {f}("
         assert_eq!(
             text,
             "Title\n\nSome words and a link (https://x.y).\n\n- one\n- two\n"
+        );
+    }
+
+    #[test]
+    fn the_game_does_not_inherit_the_launchers_renderer_workarounds() {
+        let mut cmd = Command::new("true");
+        cmd.env("GALLIUM_DRIVER", "llvmpipe")
+            .env("LIBGL_ALWAYS_SOFTWARE", "1")
+            .env("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+            .env("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+            .env("PIPEWIRE_PROPS", "kept");
+        strip_launcher_render_env(&mut cmd);
+        let envs = cmd.get_envs().collect::<std::collections::HashMap<_, _>>();
+        for key in LAUNCHER_RENDER_ENV {
+            assert_eq!(envs.get(OsStr::new(key)), Some(&None), "{key} is removed");
+        }
+        // Only the launcher's own workarounds go: the rest of the environment still reaches the game.
+        assert_eq!(
+            envs.get(OsStr::new("PIPEWIRE_PROPS")),
+            Some(&Some(OsStr::new("kept")))
         );
     }
 }

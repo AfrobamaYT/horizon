@@ -1,8 +1,10 @@
 //! The native mods compiled into a game, and their executable-adjacent packages.
-use crate::{Manifest, Package, Side};
+use crate::{
+    Manifest, Side,
+    mod_list::NATIVE_DIR,
+    packages::{self, AdjacentManifest, ReadError},
+};
 use std::path::{Path, PathBuf};
-
-pub const NATIVE_DIR: &str = "horizon-native-mods";
 
 /// Launcher-to-game build contract, not a mod-facing API. Generated from the selected
 /// manifests independently of the mods' hook factories.
@@ -14,18 +16,11 @@ pub struct BuiltMod {
     pub side: Side,
 }
 
-/// A canonical package whose identity matches the compiled mod.
-#[derive(Debug)]
-pub struct NativePackage {
-    pub path: PathBuf,
-    pub manifest: Manifest,
-}
-
 /// Validated once before installing hooks. Vanilla explicitly supplies an empty inventory.
 #[derive(Debug, Default)]
 pub struct Runtime {
     built: &'static [BuiltMod],
-    packages: Vec<NativePackage>,
+    packages: Vec<AdjacentManifest>,
 }
 
 impl Runtime {
@@ -33,7 +28,7 @@ impl Runtime {
         self.built
     }
 
-    pub fn packages(&self) -> &[NativePackage] {
+    pub fn packages(&self) -> &[AdjacentManifest] {
         &self.packages
     }
 
@@ -43,27 +38,25 @@ impl Runtime {
         let mut refused = Vec::new();
         for expected in built {
             let path = root.join(expected.id);
-            match Package::read(&path) {
+            match packages::read_native(&path) {
                 Ok(package) => {
-                    let m = package.manifest;
-                    if m.native.is_none()
-                        || m.id != expected.id
+                    let m = &package.manifest;
+                    if m.id != expected.id
                         || m.version != expected.version
                         || m.side != expected.side
                     {
                         refused.push(PackageError::Identity {
                             expected: *expected,
                             path,
-                            found: Box::new(m),
+                            found: Box::new(package.manifest),
                         });
                     } else {
-                        packages.push(NativePackage { path, manifest: m });
+                        packages.push(package);
                     }
                 }
-                Err(reason) => refused.push(PackageError::Unreadable {
+                Err(source) => refused.push(PackageError::Read {
                     expected: *expected,
-                    path,
-                    reason,
+                    source,
                 }),
             }
         }
@@ -78,10 +71,9 @@ impl Runtime {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PackageError {
-    Unreadable {
+    Read {
         expected: BuiltMod,
-        path: PathBuf,
-        reason: String,
+        source: ReadError,
     },
     Identity {
         expected: BuiltMod,
@@ -100,18 +92,8 @@ impl std::fmt::Display for RuntimeError {
         writeln!(f, "Compiled native mods cannot be loaded:")?;
         for problem in &self.refused {
             match problem {
-                PackageError::Unreadable {
-                    expected,
-                    path,
-                    reason,
-                } => {
-                    writeln!(
-                        f,
-                        "{} {} ({}): {reason}",
-                        expected.id,
-                        expected.version,
-                        path.display()
-                    )?;
+                PackageError::Read { expected, source } => {
+                    writeln!(f, "{} {}: {source}", expected.id, expected.version)?;
                 }
                 PackageError::Identity {
                     expected,
@@ -120,15 +102,14 @@ impl std::fmt::Display for RuntimeError {
                 } => {
                     writeln!(
                         f,
-                        "{} {} ({:?}) requires its code package at {}; found {} {} ({:?}, native: {})",
+                        "{} {} ({:?}) requires its code package at {}; found {} {} ({:?})",
                         expected.id,
                         expected.version,
                         expected.side,
                         path.display(),
                         found.id,
                         found.version,
-                        found.side,
-                        found.native.is_some()
+                        found.side
                     )?;
                 }
             }
@@ -280,7 +261,7 @@ mod tests {
         f.package(BUILT[1], true);
         assert!(matches!(
             &f.load().unwrap_err().refused[..],
-            [PackageError::Identity { .. }]
+            [PackageError::Read { source: ReadError::NotNative { id, .. }, .. }] if id == "machines"
         ));
     }
 
@@ -292,7 +273,7 @@ mod tests {
         f.package(BUILT[1], true);
         assert!(matches!(
             &f.load().unwrap_err().refused[..],
-            [PackageError::Unreadable { .. }]
+            [PackageError::Read { .. }]
         ));
     }
 }

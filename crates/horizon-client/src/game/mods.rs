@@ -69,37 +69,36 @@ pub(super) fn content_root(
     sources: &ModsState,
 ) -> horizon_client::Result<std::path::PathBuf> {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::{Content, Package};
+    use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
-    let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
-    paths.extend(horizon_mods::find(&here.join(mod_list::NATIVE_DIR)));
-    paths.retain(|path| !sources.dev.contains(path));
-    paths.extend(sources.dev.iter().cloned());
-    let content: Vec<_> = paths
-        .into_iter()
-        .filter_map(|path| {
-            let m = Package::read(&path).ok()?.manifest;
-            if m.native.is_some() || sources.native.built().iter().any(|built| built.id == m.id) {
-                return None;
-            }
-            (enabled.contains(&m.id) || sources.dev.contains(&path)).then_some((path, m))
+    let content: Vec<_> = horizon_mods::selection::content_packages(&here, enabled, &sources.dev)
+        .filter(|selected| {
+            !sources
+                .native
+                .built()
+                .iter()
+                .any(|built| built.id == selected.package.manifest.id)
         })
         .collect();
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
     let announce = !horizon_protocol::mod_list::is_set();
-    let mut announced: Vec<_> = sources
-        .native
-        .built()
-        .iter()
-        .map(|m| announced_entry(m.id, m.version, m.side))
-        .collect();
+    let mut announced: Vec<_> = if announce {
+        sources
+            .native
+            .built()
+            .iter()
+            .map(|m| announced_entry(m.id, m.version, m.side))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let native = sources
         .native
         .packages()
         .iter()
         .map(|p| (&p.path, &p.manifest, false));
-    let content = content.iter().map(|(path, m)| (path, m, true));
+    let content = content.iter().map(|p| (&p.path, &p.package.manifest, true));
     for (path, m, content_only) in native.chain(content) {
         if mods.iter().any(|c| c.id == m.id) {
             continue;

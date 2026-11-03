@@ -28,10 +28,11 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
-    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
-    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
-    NativeShake, PhantomSpawnResult, SleepProblem,
+    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
+    NativeConfigFile, NativeConfigKind, NativeDataMapType, NativeExperienceOrb, NativeFalling,
+    NativeHeightmap, NativeHeldItem, NativeHit, NativeMapDecoration, NativeMapInfo,
+    NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
+    SleepProblem,
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
@@ -1119,6 +1120,39 @@ pub enum NativeMinecartKind {
     CommandBlock,
     /// `MinecartSpawner`.
     Spawner,
+}
+
+/// A block in a dimension, vanilla's `GlobalPos`: the dimension's key
+/// (`minecraft:the_nether`) and the block. The dimension is data, so it need
+/// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobalPos {
+    dimension: Identifier,
+    pos: BlockPos,
+}
+
+impl GlobalPos {
+    /// A block in the dimension with key `dimension`.
+    pub fn new(dimension: Identifier, pos: BlockPos) -> Self {
+        Self { dimension, pos }
+    }
+    /// The dimension's key (`minecraft:overworld`).
+    pub fn dimension(&self) -> &Identifier {
+        &self.dimension
+    }
+    /// The block.
+    pub fn pos(&self) -> BlockPos {
+        self.pos
+    }
+}
+
+impl std::hash::Hash for GlobalPos {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(
+            &(self.dimension.namespace(), self.dimension.path(), self.pos),
+            state,
+        );
+    }
 }
 
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
