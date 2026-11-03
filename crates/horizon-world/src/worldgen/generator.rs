@@ -807,6 +807,8 @@ pub struct ProtoChunk {
     /// Entities placed by structures (`ProtoChunk.addEntity`), as NBT with
     /// absolute `Pos`.
     pub entities: Vec<crate::nbt::Compound>,
+    /// Unmodelled root keys retained from a saved proto chunk.
+    pub saved_root: crate::nbt::Compound,
 }
 impl ProtoChunk {
     /// Its own heap bytes by part (`horizon-ctl memory`): packed blocks,
@@ -1631,6 +1633,7 @@ where
                 structure_starts: references,
                 own_starts,
                 entities: Vec::new(),
+                saved_root: Default::default(),
             });
         }
         let volume = DensityVolume::new(
@@ -1788,6 +1791,7 @@ where
             structure_starts: references,
             own_starts,
             entities: Vec::new(),
+            saved_root: Default::default(),
         })
     }
 }

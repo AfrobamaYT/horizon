@@ -2142,6 +2142,34 @@ pub fn tnt_to_nbt(
     }
     tag
 }
+/// `EvokerFangs.addAdditionalSaveData`: always save the live warmup counter.
+/// Known Owner UUIDs use `EntityReference.store` encoding; unresolved
+/// loaded Owner data remains in the raw compound.
+pub fn evoker_fangs_to_nbt(
+    position: Vec3,
+    yaw: f32,
+    warmup: i32,
+    owner: Option<[i32; 4]>,
+    uuid: [i32; 4],
+    raw: Option<&Tag>,
+) -> Tag {
+    let mut tag = Base {
+        id: "minecraft:evoker_fangs",
+        uuid,
+        position,
+        motion: raw.map(motion).unwrap_or(Vec3::ZERO),
+        rotation: [yaw, raw.map(rotation).unwrap_or([0.0; 2])[1]],
+        on_ground: raw.is_some_and(|t| flag(t, "OnGround")),
+        fall_distance: 0.0,
+    }
+    .tag(raw);
+    put(&mut tag, "Warmup", Tag::Int(warmup));
+    if let Some(owner) = owner {
+        put(&mut tag, "Owner", Tag::IntArray(owner.to_vec()));
+    }
+    tag
+}
+
 pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemEntity> {
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
@@ -5850,12 +5878,24 @@ mod held_item_name_tests {
         let mut helmet = crate::items::ItemStack::new("minecraft:iron_helmet", 1);
         helmet.damage = 40;
         helmet.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Hat".into()));
-        crate::mobs::finalize::set_item_stack(&mut mob, crate::mobs::finalize::HEAD, helmet);
+        helmet.data_mut().trim = Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")));
+        assert!(mob.set_equipment_stack(5, Some(helmet.clone())));
+        assert!(mob.set_equipment_stack(0, Some(helmet)));
         let raw = mob_to_nbt(&mob, [1, 2, 3, 4], None, None);
         let loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
         let worn = crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::HEAD).unwrap();
         assert_eq!(worn.damage, 40);
         assert_eq!(worn.custom_name().as_deref(), Some("Hat"));
+        let held =
+            crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::MAINHAND).unwrap();
+        assert_eq!(
+            held.data().unwrap().trim,
+            Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")))
+        );
+        assert_eq!(
+            worn.data().unwrap().trim,
+            Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")))
+        );
         // Replacing the item forgets the old stack.
         let mut loaded = loaded;
         crate::mobs::finalize::set_item(

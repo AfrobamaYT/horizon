@@ -355,15 +355,61 @@ fn saved_proto_chunks_restore_exactly() {
     generator.decorate(&mut worker, &mut region);
     assert!(generator.is_decorated(&region[4]));
     generator.save_protos(&region.iter().collect::<Vec<_>>());
+    let mut seeded = generator.inner.saved_proto(&region[4]).unwrap();
+    let extras = seeded.column.saved.get_or_insert_with(Default::default);
+    let extras = Arc::make_mut(extras);
+    extras
+        .root
+        .insert("example:unknown".into(), horizon_world::nbt::Tag::Int(42));
+    let attachment = horizon_world::nbt::Compound::from_iter([(
+        "example:data".into(),
+        horizon_world::nbt::Tag::Int(9),
+    )]);
+    extras.attachments = horizon_world::attachments::Attachments::from_nbt(attachment.clone());
+    save.save_protos(&[seeded], assets.registry, &generator.biomes)
+        .unwrap();
     save.flush().unwrap();
-    let restored: Vec<Proto> = keys
-        .iter()
-        .map(|&(x, z)| generator.proto(&mut worker, x, z))
-        .collect();
+    let mut restored: [Proto; 9] = std::array::from_fn(|i| {
+        let (x, z) = keys[i];
+        generator.proto(&mut worker, x, z)
+    });
+    // Decoration mutates the checked-out region after the unknown key is restored.
+    generator.decorate(&mut worker, &mut region);
+    generator.decorate(&mut worker, &mut restored);
+    generator.save_protos(&[&restored[4]]);
+    save.flush().unwrap();
+    let proto = save
+        .load_proto(keys[4].0, keys[4].1, assets.registry, &generator.biomes)
+        .unwrap();
+    assert_eq!(
+        proto
+            .column
+            .saved
+            .as_ref()
+            .unwrap()
+            .root
+            .get(&"example:unknown".into()),
+        Some(&horizon_world::nbt::Tag::Int(42))
+    );
+    assert_eq!(
+        proto.column.saved.as_ref().unwrap().attachments.to_nbt(),
+        attachment
+    );
     for (i, (original, restored)) in region.into_iter().zip(restored).enumerate() {
         assert_eq!(generator.is_decorated(&restored), i == 4);
         let (a, b) = (generator.finish(original), generator.finish(restored));
         let (x, z) = keys[i];
+        if i == 4 {
+            save.save(&[Arc::new(b.clone())], assets.registry, &generator.biomes)
+                .unwrap();
+            let loaded = save.load(x, z, assets.registry, &generator.biomes).unwrap();
+            let extras = loaded.saved.unwrap();
+            assert_eq!(
+                extras.root.get(&"example:unknown".into()),
+                Some(&horizon_world::nbt::Tag::Int(42))
+            );
+            assert_eq!(extras.attachments.to_nbt(), attachment);
+        }
         for y in horizon_client::chunk::MIN_Y..horizon_client::chunk::MIN_Y + 384 {
             for lz in 0..16 {
                 for lx in 0..16 {
@@ -388,6 +434,7 @@ fn saved_proto_chunks_restore_exactly() {
             c.saved
                 .as_ref()
                 .map(|s| (s.block_ticks.clone(), s.fluid_ticks.clone()))
+                .unwrap_or_default()
         };
         assert_eq!(ticks(&a), ticks(&b), "chunk {x} {z}");
     }
