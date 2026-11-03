@@ -6,7 +6,7 @@
 use super::Vertex;
 use super::pack_draw::EntitySpan;
 use glam::{DVec3, Mat4};
-use horizon_client_core::subscribers::{Subscribers, enter};
+use horizon_client_core::subscribers::{Domain, Subscribers, enter};
 use std::any::TypeId;
 use std::sync::{
     OnceLock,
@@ -47,7 +47,11 @@ fn new_render_installed(renderers: Box<[&'static dyn RenderHooks]>) -> RenderIns
         .iter()
         .map(|renderer| (&**renderer as &dyn std::any::Any).type_id())
         .collect();
-    let subscribers = Subscribers::new(generated::RENDER_HOOK_COUNT, renderers.len());
+    let subscribers = Subscribers::new(
+        Domain::Render,
+        generated::RENDER_HOOK_COUNT,
+        renderers.len(),
+    );
     RenderInstalled {
         renderers,
         subscribers,
@@ -352,18 +356,60 @@ mod tests {
         );
     }
 
-    /// The no-subscriber return comes before the event is built.
+    thread_local! {
+        static NEEDS_EVENTS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    impl Drop for RenderNeedsEvent<'_> {
+        fn drop(&mut self) {
+            NEEDS_EVENTS_BUILT.set(NEEDS_EVENTS_BUILT.get() + 1);
+        }
+    }
+
+    /// With no renderer, or none left after pruning, dispatch returns before building its event.
     #[test]
-    fn empty_render_dispatch_checks_before_event_construction() {
-        let generated = include_str!(concat!(env!("OUT_DIR"), "/native_render_generated.rs"));
-        let function = generated
-            .split("pub fn dispatch_render_needs(")
-            .nth(1)
-            .and_then(|rest| rest.split("\n}").next())
-            .unwrap();
-        let check = function.find("if !super::render_listened").unwrap();
-        let event = function.find("let mut event").unwrap();
-        assert!(check < event);
+    fn empty_render_dispatch_builds_no_event() {
+        let mut needs = RenderNeeds::default();
+        install_for_test(Box::new([]));
+        NEEDS_EVENTS_BUILT.set(0);
+        native_render_needs(&mut needs);
+        assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
+        static QUIET: Quiet = Quiet;
+        install_for_test(Box::new([&QUIET as &dyn RenderHooks]));
+        native_render_needs(&mut needs);
+        assert_eq!(
+            NEEDS_EVENTS_BUILT.get(),
+            1,
+            "the first call prunes the default"
+        );
+        native_render_needs(&mut needs);
+        native_render_needs(&mut needs);
+        assert_eq!(NEEDS_EVENTS_BUILT.get(), 1);
+    }
+
+    /// A renderer whose override reaches a gameplay default with the same numeric id, as a mod
+    /// implementing both `Hooks` and `RenderHooks` does through an inherited `Hooks` method.
+    struct BothTables(Arc<AtomicUsize>);
+    impl RenderHooks for BothTables {
+        fn render_needs(&self, _event: &mut RenderNeedsEvent<'_>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            horizon_client_core::subscribers::default_called(
+                Domain::Gameplay,
+                generated::RenderHookId::RenderNeeds as usize,
+                self,
+            );
+        }
+    }
+
+    #[test]
+    fn a_gameplay_default_does_not_prune_a_render_override() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let both: &'static BothTables = Box::leak(Box::new(BothTables(calls.clone())));
+        install_for_test(Box::new([both as &dyn RenderHooks]));
+        let mut needs = RenderNeeds::default();
+        for _ in 0..3 {
+            native_render_needs(&mut needs);
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
     }
 
     #[test]

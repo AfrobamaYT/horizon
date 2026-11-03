@@ -200,8 +200,11 @@ mod tests {
             .iter()
             .map(|m| (&**m as &dyn std::any::Any).type_id())
             .collect();
-        let subscribers =
-            horizon_client_core::subscribers::Subscribers::new(HOOK_COUNT, mods.len());
+        let subscribers = horizon_client_core::subscribers::Subscribers::new(
+            horizon_client_core::subscribers::Domain::Gameplay,
+            HOOK_COUNT,
+            mods.len(),
+        );
         // Test dispatch needs the same static lifetime as the real installation.
         MODS.set(Some(Box::leak(Box::new(Installed {
             mods,
