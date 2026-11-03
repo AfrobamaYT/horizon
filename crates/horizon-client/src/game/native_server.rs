@@ -368,6 +368,15 @@ impl Game<'_> {
         Some(self.player_handle_read(player)?.creative())
     }
 
+    /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9. API
+    /// @API:item_places@.
+    pub(super) fn native_player_selected_slot(&self, player: PlayerRef) -> Option<usize> {
+        Some(match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } => self.selected,
+            PlayerRead::Guest(guest) => guest.selected,
+        })
+    }
+
     /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
         Some(self.player_handle_read(player)?.mode() == 3)
