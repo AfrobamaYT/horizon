@@ -221,6 +221,7 @@ mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
 mod native_item_places;
+mod native_level_effects;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
@@ -3145,6 +3146,8 @@ struct Game<'a> {
     /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
     /// when their own state is back in their record.
     save_after_guest_turn: bool,
+    /// Guests whose records are displaced by nested player swaps, outer first.
+    lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -19287,6 +19290,7 @@ impl<'a> Game<'a> {
             lid_openers: HashMap::new(),
             lan_acting: None,
             save_after_guest_turn: false,
+            lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,
