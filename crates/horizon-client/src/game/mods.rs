@@ -199,7 +199,6 @@ fn register_block_entity_types(
                 .map(|block| (block.clone(), kind.id.clone()))
         })
         .collect();
-    crate::mod_api::resolve_block_entity_type_keys(names).map_err(|errors| errors.join("; "))?;
     block_entity_types::install(BlockEntityTypes::new(membership, names.clone()))?;
     Ok(())
 }

@@ -55,17 +55,9 @@ struct State {
 /// Hash the network order and each state's name and properties, not its gameplay facts.
 pub fn identity(root: &Path) -> Result<[u8; 32], IdentityError> {
     // Keep each resource root stable and avoid reparsing its large facts file for every join.
-    type Cached = (Option<Vec<u8>>, [u8; 32]);
-    static IDENTITIES: OnceLock<Mutex<HashMap<PathBuf, Cached>>> = OnceLock::new();
-    let stamp = match std::fs::read(root.join(crate::mod_content::STAMP)) {
-        Ok(stamp) => Some(stamp),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(IdentityError::Read(error)),
-    };
+    static IDENTITIES: OnceLock<Mutex<HashMap<PathBuf, [u8; 32]>>> = OnceLock::new();
     let mut identities = IDENTITIES.get_or_init(Default::default).lock().unwrap();
-    if let Some((cached_stamp, hash)) = identities.get(root)
-        && *cached_stamp == stamp
-    {
+    if let Some(hash) = identities.get(root) {
         return Ok(*hash);
     }
     let bytes = std::fs::read(root.join("facts.json")).map_err(IdentityError::Read)?;
@@ -115,7 +107,7 @@ pub fn identity(root: &Path) -> Result<[u8; 32], IdentityError> {
             hash = hash_entries(hash, "horizon:nbt_component_defaults/v1", &defaults);
         }
     }
-    identities.insert(root.to_owned(), (stamp, hash));
+    identities.insert(root.to_owned(), hash);
     Ok(hash)
 }
 
@@ -232,19 +224,19 @@ mod tests {
     }
 
     #[test]
-    fn block_entity_ids_and_membership_survive_same_path_overlay_rebuilds() {
+    fn block_entity_ids_and_membership_affect_identity() {
         let root = std::env::temp_dir().join(format!(
             "horizon-content-identity-block-entities-{}",
             std::process::id()
         ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("facts.json"),
-            br#"{"states":[["test:press",false,false,"Block{test:press}",{"id":"test:press"}]]}"#,
-        )
-        .unwrap();
-        let build = |stamp: &str, kind: &str, id: u32, membership: &str| {
-            std::fs::write(root.join(crate::mod_content::STAMP), stamp).unwrap();
+        let build = |label: &str, kind: &str, id: u32, membership: &str| {
+            let root = root.join(label);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(
+                root.join("facts.json"),
+                br#"{"states":[["test:press",false,false,"Block{test:press}",{"id":"test:press"}]]}"#,
+            )
+            .unwrap();
             std::fs::write(
                 root.join("registries.json"),
                 format!(
@@ -261,7 +253,7 @@ mod tests {
         };
         let mapping = r#"{"test:press":"test:machine","test:mill":"test:machine"}"#;
         let machine = build("first", "test:machine", 44, mapping);
-        assert_eq!(identity(&root).unwrap(), machine);
+        assert_eq!(identity(&root.join("first")).unwrap(), machine);
         assert_ne!(machine, build("wire", "test:machine", 45, mapping));
         assert_ne!(machine, build("name", "test:other", 44, mapping));
         assert_ne!(

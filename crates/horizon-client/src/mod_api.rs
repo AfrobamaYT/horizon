@@ -2276,7 +2276,6 @@ pub use resource::{
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod block_entity_type;
 pub use block_entity_type::{BlockEntityTypeBuilder, BlockEntityTypeKey};
-pub(crate) use block_entity_type::{block_entity_type_key, resolve_block_entity_type_keys};
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,

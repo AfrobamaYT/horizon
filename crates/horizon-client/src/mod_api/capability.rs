@@ -184,7 +184,7 @@ impl LevelRef {
 impl BlockSide {
     /// The type of the block entity here (`minecraft:chest`, `mymod:press`), which capability
     /// providers are registered by.
-    pub(super) fn kind(self, host: &dyn Host) -> Option<super::BlockEntityTypeKey> {
+    pub(super) fn kind(self, host: &dyn Host) -> Option<&str> {
         let entity = host.block_entity(self.level, self.pos)?;
         entity.kind(host)
     }

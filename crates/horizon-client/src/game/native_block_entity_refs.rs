@@ -5,7 +5,7 @@ use super::{Game, transactions::After};
 use horizon_client::{
     block_entity_nbt,
     containers::BlockEntity,
-    mod_api::{self, BlockEntityRef, BlockEntityTypeKey, LevelRef},
+    mod_api::{BlockEntityRef, LevelRef},
     save,
     world::World,
 };
@@ -32,14 +32,11 @@ impl Game<'_> {
     }
 
     /// The block entity's type (`BlockEntity.getType`).
-    pub(super) fn native_block_entity_kind(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<BlockEntityTypeKey> {
+    pub(super) fn native_block_entity_kind(&self, entity: BlockEntityRef) -> Option<&str> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        mod_api::block_entity_type_key(save::block_entity_id(block_entity, block))
+        Some(save::block_entity_id(block_entity, block))
     }
 
     /// The block entity's position.
@@ -332,10 +329,7 @@ mod tests {
                 compound(&format!("{{id:\"minecraft:furnace\",x:9,{}", &stick[1..]))
             ));
             assert_eq!(slot3(game), Some(3));
-            assert_eq!(
-                chest.kind(game).as_ref().map(BlockEntityTypeKey::id),
-                Some("minecraft:chest")
-            );
+            assert_eq!(chest.kind(game), Some("minecraft:chest"));
             assert_eq!(chest.position(game), Some([0, 64, 0]));
             assert!(!chest.merge_data(game, compound(stick)), "no change");
             assert!(chest.merge_data(game, compound("{Items:[]}")));

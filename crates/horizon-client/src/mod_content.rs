@@ -2840,7 +2840,7 @@ pub const BLOCK_ENTITY_TYPES: &str = "horizon-block-entity-types.json";
 const WARNINGS: &str = "horizon-mod-content-warnings.txt";
 
 /// In a root built by [`resource_root`]: what it was built from.
-pub(crate) const STAMP: &str = "horizon-mod-content.stamp";
+const STAMP: &str = "horizon-mod-content.stamp";
 
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
