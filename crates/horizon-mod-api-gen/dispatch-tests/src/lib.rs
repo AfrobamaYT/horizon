@@ -91,6 +91,11 @@ mod tests {
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
         pub(super) struct NativeCommand;
+        pub(super) struct AdvancementPlayer<'a> {
+            pub(super) uuid: u128,
+            pub(super) entity_id: u32,
+            pub(super) name: &'a str,
+        }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
@@ -217,6 +222,42 @@ mod tests {
         _: &'static str,
     ) -> impl Iterator<Item = &'a P> {
         parts.iter().copied()
+    }
+    #[test]
+    fn advancement_progress_reports_grant_and_revoke_identity() {
+        struct Observer(Arc<Mutex<Vec<bool>>>);
+        impl Hooks for Observer {
+            fn player_advancement_progress(
+                &self,
+                _: &mut dyn Host,
+                event: &mut PlayerAdvancementProgressEvent<'_>,
+            ) {
+                assert_eq!(event.player.uuid, 123);
+                assert_eq!(event.player.entity_id, 42);
+                assert_eq!(event.player.name, "Alex");
+                assert_eq!(event.advancement, "example:advancement");
+                assert_eq!(event.criterion, "criterion");
+                self.0.lock().unwrap().push(event.granted);
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Observer(observed.clone()))];
+        let player = AdvancementPlayer {
+            uuid: 123,
+            entity_id: 42,
+            name: "Alex",
+        };
+        for granted in [true, false] {
+            dispatch_player_advancement_progress(
+                &mut TestHost,
+                &mods,
+                &player,
+                "example:advancement",
+                "criterion",
+                granted,
+            );
+        }
+        assert_eq!(*observed.lock().unwrap(), vec![true, false]);
     }
     struct Mod {
         id: u32,

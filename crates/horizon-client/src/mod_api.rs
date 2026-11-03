@@ -927,6 +927,17 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// A server player whose advancement progress changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdvancementPlayer<'a> {
+    /// Player UUID.
+    pub uuid: u128,
+    /// Server entity ID.
+    pub entity_id: u32,
+    /// Player name.
+    pub name: &'a str,
+}
+
 /// Read-only context for a tool modification.
 #[non_exhaustive]
 pub struct ToolUse {

@@ -46,7 +46,6 @@
 //!
 //! API 340 adds A guest's server handled arm swing (`native_player_arm_swing`).
 //!
-//! API 339 adds A server player earned an advancement criterion (`native_player_advancement_criterion_grant`).
 //!
 //! API 338 adds a boat or minecart about to be destroyed (`native_vehicle_destroy`).
 //!
@@ -882,9 +881,9 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeServerPlayer,
-    RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
+    self, AdvancementPlayer, EffectTickChange, LivingRef, NativeCamera, NativeCommand,
+    NativeDispensed, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
+    NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
@@ -4618,12 +4617,12 @@ impl Game<'_> {
     /// the `minecraft:tick` criteria granted on a network player's first tick
     /// or a reload, which are heard after that tick's rewards and packets. A
     /// grant or revoke that changes nothing is not heard. `granted` is false for a
-    /// revoke. Helpers looking up the guest through `self.lan` may find
-    /// nothing during its packet. 320.
+    /// revoke. The full advancement progress is not yet exposed. Helpers
+    /// looking up the guest through `self.lan` may find nothing during its
+    /// packet. 320.
     pub(super) fn native_player_advancement_progress(
         &mut self,
-        player: u128,
-        name: &str,
+        player: &AdvancementPlayer<'_>,
         advancement: &str,
         criterion: &str,
         granted: bool,
@@ -4632,7 +4631,6 @@ impl Game<'_> {
             self,
             mod_api::mods(),
             player,
-            name,
             advancement,
             criterion,
             granted,
@@ -6489,24 +6487,6 @@ impl Game<'_> {
             book,
             open,
             filtering,
-        );
-    }
-    /// A server player earned one criterion of an advancement, after the
-    /// progress was recorded. 339.
-    pub(super) fn native_player_advancement_criterion_grant(
-        &mut self,
-        player: u128,
-        name: &str,
-        advancement: &str,
-        criterion: &str,
-    ) {
-        mod_api::dispatch_player_advancement_criterion_grant(
-            self,
-            mod_api::mods(),
-            player,
-            name,
-            advancement,
-            criterion,
         );
     }
     /// A server player released a drawn bow with `arrow` selected. The guest's

@@ -610,11 +610,6 @@ impl Game<'_> {
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
                 self.advancement_progress(&a.id, criterion, true);
-                if let (Some(player), Some(name)) =
-                    (self.lan_acting_uuid, self.lan_acting_name.clone())
-                {
-                    self.native_player_advancement_criterion_grant(player, &name, &a.id, criterion);
-                }
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -624,8 +619,17 @@ impl Game<'_> {
     }
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
     fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
-            self.native_player_advancement_progress(player, &name, advancement, criterion, granted);
+        if let (Some(uuid), Some(entity_id), Some(name)) = (
+            self.lan_acting_uuid,
+            self.lan_acting_entity,
+            self.lan_acting_name.clone(),
+        ) {
+            let player = crate::mod_api::AdvancementPlayer {
+                uuid,
+                entity_id,
+                name: &name,
+            };
+            self.native_player_advancement_progress(&player, advancement, criterion, granted);
         }
     }
     /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
@@ -637,8 +641,11 @@ impl Game<'_> {
         for batch in std::mem::take(&mut host.hub.native_advancement_grants) {
             for grant in batch.grants {
                 self.native_player_advancement_progress(
-                    batch.player,
-                    &batch.name,
+                    &crate::mod_api::AdvancementPlayer {
+                        uuid: batch.player,
+                        entity_id: batch.entity_id,
+                        name: &batch.name,
+                    },
                     &grant.advancement,
                     &grant.criterion,
                     true,

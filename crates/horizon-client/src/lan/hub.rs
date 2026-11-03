@@ -206,6 +206,7 @@ pub enum HostEvent {
 /// The criteria `CriteriaTriggers.TICK` granted one player.
 pub struct TickGrants {
     pub player: u128,
+    pub entity_id: u32,
     pub name: String,
     pub grants: Vec<super::advancements::CriterionGrant>,
 }
@@ -2844,6 +2845,7 @@ impl Hub {
                 g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
                 self.native_advancement_grants.push(TickGrants {
                     player: g.uuid,
+                    entity_id: g.entity_id as u32,
                     name: g.name.clone(),
                     grants: first.granted,
                 });
@@ -3012,6 +3014,7 @@ impl Hub {
             }
             self.native_advancement_grants.push(TickGrants {
                 player: g.uuid,
+                entity_id: g.entity_id as u32,
                 name: g.name.clone(),
                 grants: granted,
             });
