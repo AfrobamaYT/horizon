@@ -9866,7 +9866,7 @@ mod tests {
             assert!(error.contains("be_user"), "{error}");
             assert!(error.contains("unknown block entity type"), "{error}");
             assert!(error.contains(id), "{error}");
-            assert!(horizon_client::containers::block_entity_types::current().is_none());
+            assert!(horizon_client::block_entity_types::current().is_none());
             return;
         }
         assert_eq!(keys.shared.get(), keys.own.get());
