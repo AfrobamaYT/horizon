@@ -122,6 +122,19 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// The empty frame a fire is about to fill with a nether portal, for
+/// `portal_spawn` (`BlockEvent.PortalSpawnEvent.getPortalSize`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativePortalShape {
+    /// The portal runs along X (else along Z).
+    pub x_axis: bool,
+    /// Its bottom-left inside block.
+    pub bottom_left: [i32; 3],
+    pub width: i32,
+    pub height: i32,
+}
+
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones

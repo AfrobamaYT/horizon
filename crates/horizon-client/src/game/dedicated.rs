@@ -896,10 +896,10 @@ impl Game<'_> {
         // DedicatedServer.initServer: a legacy `announce-player-achievements`
         // sets the show_advancement_messages rule once, as the file is read.
         if let Some(announce) = props.announce_player_achievements {
-            self.ui.rules.set(
-                "show_advancement_messages",
-                horizon_client::gamerules::Value::Bool(announce),
-            );
+            let value = horizon_client::gamerules::Value::Bool(announce);
+            if self.ui.rules.set("show_advancement_messages", value) {
+                self.game_rule_changed("show_advancement_messages", value);
+            }
         }
         self.settings.render_distance = props.view_distance.clamp(2, 32);
         self.settings.simulation_distance = props.simulation_distance.clamp(2, 32);

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "note_block_play",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_block_play",
+      "neoforge": "NoteBlockEvent.Play",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a note block about to play, with its instrument and note changeable (`native_note_block_play`).",
+  "doc_summary": "`native_note_block_play(dimension, pos, instrument, note, cancel)`, in `NoteBlock.playNote` after `note_play`, once a block above no longer mutes it. `instrument` (the `instrument` property's value) and `note` (0 to 24) can be changed to play another; a name that is not an instrument, or a note out of range, keeps the block's own. Set `cancel` and it doesn't play: no sound, no particle, no `note_block_play` game event. Server-side. Bundles need \"hooks\": @API:note_block_play@."
+}

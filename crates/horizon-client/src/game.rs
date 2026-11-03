@@ -1304,6 +1304,44 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+        use horizon_world::level::data::INSTRUMENTS;
+        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+            return true;
+        }
+        let mut name = INSTRUMENTS[usize::from(*instrument)].to_owned();
+        let mut played = *note;
+        let mut cancel = false;
+        self.native_note_block_play(self.dimension, pos, &mut name, &mut played, &mut cancel);
+        // A name that isn't an instrument, or a note out of 0 to 24, keeps
+        // the block's own.
+        if let Some(i) = INSTRUMENTS.iter().position(|n| *n == name) {
+            *instrument = i as u8;
+        }
+        if (0..=24).contains(&played) {
+            *note = played;
+        }
+        !cancel
+    }
+    fn allow_portal_spawn(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        shape: &horizon_world::level::PortalShape,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+            let b = shape.bottom_left;
+            let shape = horizon_client::mod_api::NativePortalShape {
+                x_axis: shape.x_axis,
+                bottom_left: [b.x, b.y, b.z],
+                width: shape.width,
+                height: shape.height,
+            };
+            self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
+        }
+        !cancel
+    }
     fn allow_bell_ring(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
@@ -13442,7 +13480,10 @@ impl Game<'_> {
                 hit.pos[2] + hit.face[2],
             ];
             if self.can_place_used_fire(target) {
-                if !self.try_light_portal(target)? {
+                // With mods, the fire goes in and `BaseFireBlock.onPlace`
+                // fills the frame, as vanilla's order is, so that
+                // `portal_spawn` is asked once, where vanilla asks it.
+                if !horizon_client::mod_api::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -15435,6 +15476,9 @@ impl Game<'_> {
         self.save_raids();
         if wait {
             self.save.flush()?;
+        }
+        if !horizon_client::mod_api::mods().is_empty() {
+            self.native_level_save(self.dim.id());
         }
         Ok(())
     }

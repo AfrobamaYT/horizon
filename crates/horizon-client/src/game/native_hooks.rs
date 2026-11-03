@@ -886,10 +886,12 @@ use horizon_client::mod_api::{
     NativeLifecycleContext, NativePlayerFood, NativeServerPlayer, RecipeBookCategory,
     ServerTickPhase, ToolUse, WorldPhase,
 };
-use horizon_client::mod_api::{AttachmentResult, Attachments, BlockHit, Holder, Suggestion};
+use horizon_client::mod_api::{
+    AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
+};
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeLootDrops, NativeMinimap, NativeMod,
-    NativePanelEvent, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use horizon_client::{
     atlas_sources::qualified,
@@ -1321,6 +1323,51 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_block_burn(self, mod_api::mods(), dimension, pos, cancel);
+    }
+
+    /// A fire placed at `pos` (`state`) found an empty obsidian frame, `shape`,
+    /// and is about to fill it with a nether portal (`BlockEvent.PortalSpawnEvent`,
+    /// in `BaseFireBlock.onPlace`), in the Overworld or the Nether. Set
+    /// `cancel` and no portal forms: the fire stays where it can survive, as
+    /// without a frame. Server-side. @API:portal_spawn@.
+    #[inline(always)]
+    pub(super) fn native_portal_spawn(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        shape: NativePortalShape,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_portal_spawn(self, mod_api::mods(), dimension, pos, state, shape, cancel);
+    }
+
+    /// The note block at `pos` is about to play (NeoForge's
+    /// `NoteBlockEvent.Play`, in `NoteBlock.playNote`), after `note_play` and
+    /// once a block above no longer mutes it. `instrument` is its
+    /// `instrument` property's value (`harp` ... `custom_head`) and `note` its
+    /// note, 0 to 24; change either to play another (a name that is not an
+    /// instrument, or a note out of range, keeps the block's own). Set
+    /// `cancel` and it doesn't play: no sound, no particle, no
+    /// `note_block_play` game event. Server-side. @API:note_block_play@.
+    #[inline(always)]
+    pub(super) fn native_note_block_play(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        instrument: &mut String,
+        note: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_note_block_play(
+            self,
+            mod_api::mods(),
+            dimension,
+            pos,
+            instrument,
+            note,
+            cancel,
+        );
     }
 
     /// On an authoritative server, a note block at `pos` is about to sound.
@@ -5950,6 +5997,15 @@ impl Game<'_> {
         mod_api::dispatch_spawn_change(self, mod_api::mods(), pos, angle);
     }
 
+    /// A server game rule `rule` (`minecraft:keep_inventory`) was set to
+    /// `value` (`GameRuleChangedEvent`, from `GameRules.set` with a server:
+    /// `/gamerule`, the game rules screen, the management protocol, a test
+    /// environment, `server.properties`). Before `world_game_rule_change`.
+    /// Server-side. @API:game_rule_changed@.
+    pub(super) fn native_game_rule_changed(&mut self, rule: &str, value: GameRuleValue) {
+        mod_api::dispatch_game_rule_changed(self, mod_api::mods(), rule, value);
+    }
+
     /// A server game rule changed to its final `value`. 247.
     pub(super) fn native_world_game_rule_change(
         &mut self,
@@ -6974,6 +7030,14 @@ impl Game<'_> {
     /// 134.
     pub(super) fn native_level_unload(&mut self, dimension: &str) {
         mod_api::dispatch_level_unload(self, mod_api::mods(), dimension);
+    }
+    /// `dimension`'s level was saved (NeoForge's `LevelEvent.Save`, in
+    /// `ServerLevel.save`): its level data, chunks and entities, by the
+    /// autosave, `/save-all`, a pause, a closing level or the server
+    /// stopping; each level of a world save in turn. Server-side.
+    /// @API:level_save@.
+    pub(super) fn native_level_save(&mut self, dimension: &str) {
+        mod_api::dispatch_level_save(self, mod_api::mods(), dimension);
     }
     /// The server's difficulty changed, from `from` to `to` (`peaceful`,
     /// `easy`, `normal`, `hard`; NeoForge's `DifficultyChangeEvent`). It is
@@ -9467,6 +9531,13 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
 
 /// Where the game calls the hook points.
 impl Game<'_> {
+    /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
+    /// (`GameRules.set` with a server).
+    pub(super) fn game_rule_changed(&mut self, name: &str, value: GameRuleValue) {
+        if !mod_api::mods().is_empty() {
+            self.native_game_rule_changed(&["minecraft:", name].concat(), value);
+        }
+    }
     /// The acting player as the hook points name one: the guest whose turn
     /// it is, else the host.
     pub(super) fn native_acting_id(&mut self) -> u128 {

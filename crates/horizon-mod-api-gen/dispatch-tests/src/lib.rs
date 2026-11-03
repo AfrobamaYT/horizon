@@ -38,6 +38,8 @@ mod tests {
         pub(super) struct Compound;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
+        pub(super) struct GameRuleValue;
+        pub(super) struct NativePortalShape;
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,

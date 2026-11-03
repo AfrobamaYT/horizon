@@ -3025,7 +3025,9 @@ impl Game<'_> {
     /// world follows it, and a dedicated server tells the event stream (`MinecraftServer.onGameRuleChanged`
     /// tells the management protocol's clients).
     pub(super) fn set_game_rule(&mut self, rule: &gamerules::Rule, value: Value) {
-        self.ui.rules.set(rule.name, value);
+        if self.ui.rules.set(rule.name, value) {
+            self.game_rule_changed(rule.name, value);
+        }
         self.sync_rules();
         if self.options.dedicated.is_some() {
             let (value_type, json) = match value {
