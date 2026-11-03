@@ -1,5 +1,6 @@
-//! The chunk tickets native mods hold (NeoForge's `TicketController`): one
-//! ticket per (mod, owner, chunk), so two machines in one chunk don't release
+//! The chunk tickets native mods hold through their ticket controllers
+//! (NeoForge's `TicketController`): one ticket per (controller, owner, chunk),
+//! so two machines in one chunk don't release
 //! each other's. `Streaming` keeps the union with `/forceload`'s chunks in its
 //! `forced` set, which is all loading and ticking read.
 use std::collections::{BTreeSet, HashMap};
@@ -17,8 +18,9 @@ pub enum TicketOwner {
 /// One chunk a mod holds loaded for an owner.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ModTicket {
-    /// The holding mod's `[mod] id`.
-    pub mod_id: String,
+    /// The controller that holds it: its slot in the installed controller table
+    /// (`mod_api::TicketController::slot`).
+    pub controller: u32,
     pub owner: TicketOwner,
     pub chunk: (i32, i32),
     /// Whether the chunk joins the spawning chunks (inhabited time, thunder,
@@ -59,17 +61,14 @@ pub struct ModTickets {
 }
 
 impl ModTickets {
-    /// Tickets read from a save: those of a mod `loaded` accepts wait in the
-    /// loaded set for validation, the others are discarded (`TicketController`: a controller that isn't
-    /// registered loses its tickets when the world loads).
-    pub fn from_saved(saved: Vec<ModTicket>, loaded: impl Fn(&str) -> bool) -> Self {
-        let mut tickets = Self::default();
-        for ticket in saved {
-            if loaded(&ticket.mod_id) {
-                tickets.loaded.push(ticket);
-            }
+    /// Tickets read from a save, whose controllers are registered (the save
+    /// drops the others, as NeoForge does): they wait in the loaded set for
+    /// validation and hold nothing yet.
+    pub fn from_saved(saved: Vec<ModTicket>) -> Self {
+        Self {
+            loaded: saved,
+            ..Self::default()
         }
-        tickets
     }
     /// Hold `ticket`: true when it was new.
     pub fn insert(&mut self, ticket: ModTicket) -> bool {
@@ -117,9 +116,9 @@ impl ModTickets {
     pub fn has_loaded(&self) -> bool {
         !self.loaded.is_empty()
     }
-    /// The tickets mod `mod_id` holds, in order.
-    pub fn of_mod<'a>(&'a self, mod_id: &'a str) -> impl Iterator<Item = &'a ModTicket> {
-        self.held.iter().filter(move |t| t.mod_id == mod_id)
+    /// The tickets `controller` holds, in order.
+    pub fn of_controller(&self, controller: u32) -> impl Iterator<Item = &ModTicket> {
+        self.held.iter().filter(move |t| t.controller == controller)
     }
     /// Every ticket to save, the loaded ones not yet validated included.
     pub fn to_save(&self) -> impl Iterator<Item = &ModTicket> {
@@ -127,12 +126,15 @@ impl ModTickets {
     }
 }
 
-/// The tickets a level loaded, as `chunk_tickets_validate` hands them out
-/// (NeoForge's `TicketHelper`). Every call acts as the mod marked as running:
-/// it lists and removes only that mod's own tickets, block owners and entity
-/// owners apart. The tickets of all mods and the removals made are the
-/// game's: a removal goes to a [`TicketRemovals`] queue only the game holds.
+/// The tickets one controller loaded, as `validate_tickets` hands them out
+/// (NeoForge's `TicketHelper`, one for each controller). Every call acts as
+/// the mod marked as running, and only the controller's owning mod sees or
+/// removes anything, block owners and entity owners apart. The removals made
+/// are the game's: a removal goes to a [`TicketRemovals`] queue only the game
+/// holds.
 pub struct TicketValidation {
+    /// The `[mod] id` that owns the controller.
+    owner: &'static str,
     loaded: Vec<ModTicket>,
     removed: Arc<Mutex<Vec<ModTicket>>>,
 }
@@ -157,20 +159,21 @@ impl TicketRemovals {
 }
 
 impl TicketValidation {
-    /// A validation of `loaded` tickets (all mods'), and the queue of what is
-    /// removed. For the game.
+    /// A validation of the `loaded` tickets of one controller, owned by mod
+    /// `owner`, and the queue of what is removed. For the game.
     #[doc(hidden)]
-    pub fn new(loaded: Vec<ModTicket>) -> (Self, TicketRemovals) {
+    pub fn new(owner: &'static str, loaded: Vec<ModTicket>) -> (Self, TicketRemovals) {
         let removed = Arc::new(Mutex::new(Vec::new()));
         (
             Self {
+                owner,
                 loaded,
                 removed: removed.clone(),
             },
             TicketRemovals(removed),
         )
     }
-    /// The calling mod's block tickets: each block position with the chunks it
+    /// The controller's block tickets: each block position with the chunks it
     /// holds without and with natural spawning (`TicketHelper.getBlockTickets`'
     /// `TicketSet`: `nonNaturalSpawning`, `naturalSpawning`), in position order.
     pub fn block_tickets(&self) -> Vec<([i32; 3], TicketSet)> {
@@ -182,7 +185,7 @@ impl TicketValidation {
         }
         grouped.into_iter().collect()
     }
-    /// The calling mod's entity tickets: each entity UUID with the chunks it
+    /// The controller's entity tickets: each entity UUID with the chunks it
     /// holds without and with natural spawning (`TicketHelper.getEntityTickets`),
     /// in UUID order.
     pub fn entity_tickets(&self) -> Vec<(u128, TicketSet)> {
@@ -226,20 +229,19 @@ impl TicketValidation {
         self.remove(TicketOwner::Entity(uuid), Some((chunk, natural_spawning))) > 0
     }
     fn own(&self) -> impl Iterator<Item = (TicketOwner, [i32; 2], bool)> + '_ {
-        let me = crate::crash::current_native_mod();
+        let owned = crate::crash::current_native_mod() == Some(self.owner);
         self.loaded
             .iter()
-            .filter(move |t| me == Some(t.mod_id.as_str()))
+            .filter(move |_| owned)
             .map(|t| (t.owner, [t.chunk.0, t.chunk.1], t.natural_spawning))
     }
     fn remove(&mut self, owner: TicketOwner, kind: Option<([i32; 2], bool)>) -> usize {
-        let Some(me) = crate::crash::current_native_mod() else {
+        if crate::crash::current_native_mod() != Some(self.owner) {
             return 0;
-        };
+        }
         let (gone, kept): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.loaded).into_iter().partition(|t| {
-                t.mod_id == me
-                    && t.owner == owner
+                t.owner == owner
                     && kind.is_none_or(|([x, z], spawning)| {
                         t.chunk == (x, z) && t.natural_spawning == spawning
                     })
@@ -258,9 +260,9 @@ impl TicketValidation {
 mod tests {
     use super::*;
 
-    fn ticket(mod_id: &str, owner: TicketOwner, chunk: (i32, i32)) -> ModTicket {
+    fn ticket(controller: u32, owner: TicketOwner, chunk: (i32, i32)) -> ModTicket {
         ModTicket {
-            mod_id: mod_id.into(),
+            controller,
             owner,
             chunk,
             natural_spawning: false,
@@ -271,17 +273,17 @@ mod tests {
     fn a_chunk_is_held_while_any_ticket_holds_it() {
         let mut tickets = ModTickets::default();
         let (a, b) = (TicketOwner::Block([1, 2, 3]), TicketOwner::Entity(9));
-        assert!(tickets.insert(ticket("m", a, (0, 0))));
-        assert!(!tickets.insert(ticket("m", a, (0, 0))));
-        assert!(tickets.insert(ticket("m", b, (0, 0))));
-        // The same owner under another mod is another ticket.
-        assert!(tickets.insert(ticket("n", a, (0, 0))));
-        assert!(tickets.remove(&ticket("m", a, (0, 0))));
-        assert!(!tickets.remove(&ticket("m", a, (0, 0))));
+        assert!(tickets.insert(ticket(0, a, (0, 0))));
+        assert!(!tickets.insert(ticket(0, a, (0, 0))));
+        assert!(tickets.insert(ticket(0, b, (0, 0))));
+        // The same owner under another controller is another ticket.
+        assert!(tickets.insert(ticket(1, a, (0, 0))));
+        assert!(tickets.remove(&ticket(0, a, (0, 0))));
+        assert!(!tickets.remove(&ticket(0, a, (0, 0))));
         assert!(tickets.holds((0, 0)));
-        assert_eq!(tickets.of_mod("m").count(), 1);
-        assert!(tickets.remove(&ticket("m", b, (0, 0))));
-        assert!(tickets.remove(&ticket("n", a, (0, 0))));
+        assert_eq!(tickets.of_controller(0).count(), 1);
+        assert!(tickets.remove(&ticket(0, b, (0, 0))));
+        assert!(tickets.remove(&ticket(1, a, (0, 0))));
         assert!(!tickets.holds((0, 0)));
         assert_eq!(tickets.chunks().count(), 0);
     }
@@ -292,9 +294,9 @@ mod tests {
         let owner = TicketOwner::Entity(1);
         let spawning = ModTicket {
             natural_spawning: true,
-            ..ticket("m", owner, (2, 2))
+            ..ticket(0, owner, (2, 2))
         };
-        assert!(tickets.insert(ticket("m", owner, (2, 2))));
+        assert!(tickets.insert(ticket(0, owner, (2, 2))));
         assert!(tickets.holds((2, 2)) && !tickets.forces_natural_spawning((2, 2)));
         // The same owner holds both kinds apart.
         assert!(tickets.insert(spawning.clone()));
@@ -304,20 +306,15 @@ mod tests {
     }
 
     #[test]
-    fn tickets_of_mods_not_loaded_are_discarded() {
-        let saved = vec![
-            ticket("here", TicketOwner::Entity(1), (4, 4)),
-            ticket("gone", TicketOwner::Block([0, 0, 0]), (8, 8)),
-        ];
-        let mut tickets = ModTickets::from_saved(saved, |id| id == "here");
-        // Loaded tickets wait for validation and hold nothing yet.
+    fn saved_tickets_wait_for_validation_and_hold_nothing_yet() {
+        let saved = vec![ticket(0, TicketOwner::Entity(1), (4, 4))];
+        let mut tickets = ModTickets::from_saved(saved);
         assert!(tickets.has_loaded() && !tickets.holds((4, 4)));
         assert_eq!(tickets.to_save().count(), 1);
         for ticket in tickets.take_loaded() {
             tickets.insert(ticket);
         }
         assert!(tickets.holds((4, 4)));
-        assert!(!tickets.holds((8, 8)));
     }
 
     fn set(plain: &[[i32; 2]], spawning: &[[i32; 2]]) -> TicketSet {
@@ -336,16 +333,24 @@ mod tests {
     }
 
     #[test]
-    fn validation_shows_and_removes_only_the_callers_tickets() {
+    fn validation_shows_and_removes_the_controllers_tickets_to_its_owner_only() {
         let (block, entity) = (TicketOwner::Block([1, 2, 3]), TicketOwner::Entity(9));
-        let (mut v, removals) = TicketValidation::new(vec![
-            ticket("m", block, (0, 0)),
-            ticket("m", block, (0, 1)),
-            ticket("m", entity, (5, 5)),
-            ticket("n", block, (0, 0)),
-        ]);
+        let (mut v, removals) = TicketValidation::new(
+            "m",
+            vec![
+                ticket(0, block, (0, 0)),
+                ticket(0, block, (0, 1)),
+                ticket(0, entity, (5, 5)),
+            ],
+        );
         assert!(v.block_tickets().is_empty(), "no caller, no tickets");
-        let guard = in_mod("m");
+        {
+            let _other = in_mod("n");
+            assert!(v.block_tickets().is_empty() && v.entity_tickets().is_empty());
+            assert_eq!(v.remove_block_tickets([1, 2, 3]), 0, "not its controller");
+            assert!(!format!("{v:?}").contains("(0, 0)"));
+        }
+        let _owner = in_mod("m");
         assert_eq!(
             v.block_tickets(),
             vec![([1, 2, 3], set(&[[0, 0], [0, 1]], &[]))]
@@ -355,30 +360,7 @@ mod tests {
         assert!(!v.remove_block_ticket([1, 2, 3], [0, 1], false));
         assert_eq!(v.remove_entity_tickets(9), 1);
         assert_eq!(v.remove_block_tickets([1, 2, 3]), 1);
-        drop(guard);
-        let _guard = in_mod("n");
-        assert_eq!(v.remove_block_tickets([1, 2, 3]), 1, "its own, not m's");
-        assert_eq!(removals.into_removed().len(), 4);
-    }
-
-    #[test]
-    fn one_mod_cannot_reach_another_mods_tickets_or_removals() {
-        let owner = TicketOwner::Block([1, 2, 3]);
-        let (mut v, removals) =
-            TicketValidation::new(vec![ticket("a", owner, (0, 0)), ticket("b", owner, (1, 1))]);
-        {
-            let _a = in_mod("a");
-            assert_eq!(v.remove_block_tickets([1, 2, 3]), 1);
-        }
-        let _b = in_mod("b");
-        // b sees only its own, however it asks, and a's removal is not its to see.
-        assert_eq!(v.block_tickets(), vec![([1, 2, 3], set(&[[1, 1]], &[]))]);
-        assert!(!format!("{v:?}").contains("(0, 0)"));
-        assert_eq!(v.remove_block_tickets([1, 2, 3]), 1);
-        assert_eq!(v.remove_block_tickets([1, 2, 3]), 0);
-        let removed = removals.into_removed();
-        assert_eq!(removed.len(), 2);
-        assert_eq!(removed[0].mod_id, "a");
+        assert_eq!(removals.into_removed().len(), 3);
     }
 
     #[test]
@@ -386,10 +368,10 @@ mod tests {
         let owner = TicketOwner::Block([4, 5, 6]);
         let spawning = ModTicket {
             natural_spawning: true,
-            ..ticket("m", owner, (3, 3))
+            ..ticket(0, owner, (3, 3))
         };
-        let both = vec![ticket("m", owner, (3, 3)), spawning];
-        let (mut v, removals) = TicketValidation::new(both.clone());
+        let both = vec![ticket(0, owner, (3, 3)), spawning];
+        let (mut v, removals) = TicketValidation::new("m", both.clone());
         let _m = in_mod("m");
         assert_eq!(
             v.block_tickets(),
@@ -402,23 +384,26 @@ mod tests {
         assert!(v.remove_block_ticket([4, 5, 6], [3, 3], false));
         assert!(v.block_tickets().is_empty());
         // The other order, and the entity side.
-        let (mut v, r2) = TicketValidation::new(both.clone());
+        let (mut v, r2) = TicketValidation::new("m", both.clone());
         assert!(v.remove_block_ticket([4, 5, 6], [3, 3], false));
         assert_eq!(v.block_tickets(), vec![([4, 5, 6], set(&[], &[[3, 3]]))]);
         // Remove-all takes both.
-        let (mut v, r3) = TicketValidation::new(both);
+        let (mut v, r3) = TicketValidation::new("m", both);
         assert_eq!(v.remove_block_tickets([4, 5, 6]), 2);
         assert_eq!(removals.into_removed().len(), 2);
         assert_eq!(r2.into_removed().len(), 1);
         assert_eq!(r3.into_removed().len(), 2);
         let entity = TicketOwner::Entity(7);
-        let (mut v, removals) = TicketValidation::new(vec![
-            ticket("m", entity, (1, 1)),
-            ModTicket {
-                natural_spawning: true,
-                ..ticket("m", entity, (1, 1))
-            },
-        ]);
+        let (mut v, removals) = TicketValidation::new(
+            "m",
+            vec![
+                ticket(0, entity, (1, 1)),
+                ModTicket {
+                    natural_spawning: true,
+                    ..ticket(0, entity, (1, 1))
+                },
+            ],
+        );
         assert!(v.remove_entity_ticket(7, [1, 1], true));
         assert_eq!(v.entity_tickets(), vec![(7, set(&[[1, 1]], &[]))]);
         assert!(removals.into_removed()[0].natural_spawning);

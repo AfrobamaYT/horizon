@@ -33,7 +33,10 @@ impl Game<'_> {
     /// mods' in Horizon's own `mod_chunk_tickets.dat`.
     pub(super) fn save_chunk_tickets(&self) -> Result<()> {
         self.save.save_forced_chunks(self.streaming.commanded())?;
-        self.save.save_mod_tickets(self.streaming.mod_tickets())
+        self.save
+            .save_mod_tickets(self.streaming.mod_tickets(), |slot| {
+                horizon_client::mod_api::TicketController::from_slot(slot).map(|c| c.id())
+            })
     }
     pub(super) fn begin_closing_save(&mut self, quit: bool) -> Result<()> {
         if let Some(save) = &mut self.pending_save {
