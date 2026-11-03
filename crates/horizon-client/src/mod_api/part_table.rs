@@ -610,11 +610,20 @@ mod tests {
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
             r.block_entity_capability(&ITEMS, "test:liar", Arc::new(Liar));
+            r.block_entity_capability(&ITEMS, "test:item_overstates", Arc::new(ItemOverstates));
+            r.block_entity_capability(&ITEMS, "test:item_swaps", Arc::new(ItemSwaps));
             r.item_capability(&ITEM_ITEMS, "test:pouch", Arc::new(Pouch));
             r.item_capability(&ITEM_ITEMS, "test:bag", Arc::new(Bag));
             r.place_provider("test:charms", Arc::new(Charms));
             r.block_entity_capability(&FLUIDS, "test:tank", Arc::new(Tank));
             r.block_entity_capability(&FLUIDS, "test:fluid_liar", Arc::new(FluidLiar));
+            for (id, overstates) in [
+                ("test:gives_more", Overstates::GivesMore),
+                ("test:refuses_more", Overstates::RefusesMore),
+                ("test:gives_lava", Overstates::GivesLava),
+            ] {
+                r.block_entity_capability(&FLUIDS, id, Arc::new(overstates));
+            }
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output *= 2;
@@ -942,6 +951,8 @@ mod tests {
         one_per_insert: bool,
         whole_extract: bool,
         liar: bool,
+        overstates: bool,
+        swaps: bool,
         dropped: Vec<ItemStack>,
     }
     fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
@@ -952,6 +963,8 @@ mod tests {
             one_per_insert: false,
             whole_extract: false,
             liar: false,
+            overstates: false,
+            swaps: false,
             dropped: Vec::new(),
         }
     }
@@ -965,7 +978,12 @@ mod tests {
     }
     impl Host for Shelf {
         fn block_entity_type(&self, _: [i32; 3]) -> Option<String> {
-            self.liar.then(|| "test:liar".into())
+            match (self.liar, self.overstates, self.swaps) {
+                (true, ..) => Some("test:liar".into()),
+                (_, true, _) => Some("test:item_overstates".into()),
+                (.., true) => Some("test:item_swaps".into()),
+                _ => None,
+            }
         }
         fn container_capacity(
             &self,
@@ -1110,6 +1128,120 @@ mod tests {
             _: &ItemStack,
         ) -> u32 {
             u32::MAX
+        }
+    }
+
+    /// A mod's handler for the shelf whose real calls overstate: an extract gives 5 more than
+    /// asked, and an insert keeps nothing and answers 5 more than was offered.
+    struct ItemOverstates;
+    impl ItemHandler for ItemOverstates {
+        fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            host.container_size(at, side).unwrap_or(0)
+        }
+        fn stack(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+        ) -> Option<ItemStack> {
+            host.container_stack(at, side, slot)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: ItemStack,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            if simulate {
+                return host.container_insert(at, side, slot, stack, true);
+            }
+            Some(ItemStack {
+                count: stack.count + 5,
+                ..stack
+            })
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            let more = if simulate { 0 } else { 5 };
+            host.container_extract(at, side, slot, max + more, simulate)
+        }
+        fn capacity(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: &ItemStack,
+        ) -> u32 {
+            host.container_capacity(at, side, slot, stack)
+        }
+    }
+
+    /// A mod's handler for the shelf whose real calls answer in dirt: an extract takes what it was
+    /// asked and gives it as dirt, and an insert keeps nothing and answers the offer as dirt.
+    struct ItemSwaps;
+    impl ItemHandler for ItemSwaps {
+        fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            host.container_size(at, side).unwrap_or(0)
+        }
+        fn stack(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+        ) -> Option<ItemStack> {
+            host.container_stack(at, side, slot)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: ItemStack,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            if simulate {
+                return host.container_insert(at, side, slot, stack, true);
+            }
+            Some(self::stack("minecraft:dirt", stack.count, 0))
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            let out = host.container_extract(at, side, slot, max, simulate)?;
+            match simulate {
+                true => Some(out),
+                false => Some(stack("minecraft:dirt", out.count, 0)),
+            }
+        }
+        fn capacity(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: &ItemStack,
+        ) -> u32 {
+            host.container_capacity(at, side, slot, stack)
         }
     }
 
@@ -1537,6 +1669,66 @@ mod tests {
     }
 
     #[test]
+    fn an_item_handler_answering_more_than_it_was_asked_or_offered_moves_no_more() {
+        game_thread();
+        let apples = |count| stack("minecraft:apple", count, 0);
+        let mut shelf_ = shelf([Some(apples(10)), None, None]);
+        shelf_.whole_extract = true;
+        shelf_.overstates = true;
+        let host: &mut dyn Host = &mut shelf_;
+        let handler = host.capability(&ITEMS, SHELF).unwrap();
+        // Asked for 3, it gives 8: 3 come out, and the 5 more, which its insert won't keep, are
+        // dropped at the shelf.
+        let out = host.extract_checked(&handler, SHELF, None, 0, &apples(3));
+        assert_eq!(out, Some(apples(3)));
+        // Offered 2, it keeps none and answers 7 left: 2 come back, not 7.
+        let rest = host.insert_checked(&handler, SHELF, None, 1, apples(2));
+        assert_eq!(rest, Some(apples(2)));
+        // Offered 2 through a set, the same: the old stack stays and nothing is made.
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(1), apples(2), false, false),
+            Some(apples(2))
+        );
+        assert_eq!(shelf_.slots, [Some(apples(2)), None, None]);
+        assert_eq!(shelf_.dropped, [apples(5)]);
+        assert_eq!(shelf_.items() + 3, 10);
+        assert!(super::super::item_place::warned_about(
+            &super::super::mod_name(0)
+        ));
+    }
+
+    #[test]
+    fn an_item_handler_answering_with_another_item_moves_nothing_and_is_named() {
+        game_thread();
+        let apples = |count| stack("minecraft:apple", count, 0);
+        let dirt = |count| stack("minecraft:dirt", count, 0);
+        let mut shelf_ = shelf([Some(apples(10)), None, None]);
+        shelf_.whole_extract = true;
+        shelf_.swaps = true;
+        let host: &mut dyn Host = &mut shelf_;
+        let handler = host.capability(&ITEMS, SHELF).unwrap();
+        // Simulated, 3 apples; really, 3 dirt: none comes out, and the dirt, which its insert
+        // won't keep, is dropped at the shelf.
+        let simulated = handler.extract(host, SHELF, None, 0, 3, true).unwrap();
+        assert_eq!(simulated, apples(3));
+        assert_eq!(
+            host.extract_checked(&handler, SHELF, None, 0, &simulated),
+            None
+        );
+        // A set into an empty slot whose real insert answers 2 dirt left: the 2 apples come back,
+        // and the slot stays empty.
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(1), apples(2), false, false),
+            Some(apples(2))
+        );
+        assert_eq!(shelf_.slots, [Some(apples(7)), None, None]);
+        assert_eq!(shelf_.dropped, [dirt(3)]);
+        assert!(super::super::item_place::warned_about(
+            &super::super::mod_name(0)
+        ));
+    }
+
+    #[test]
     fn a_change_inside_one_of_two_bags_splits_that_bag_off_whole() {
         game_thread();
         // Two bags in the hand, each holding an empty pouch.
@@ -1690,6 +1882,73 @@ mod tests {
             _: bool,
         ) -> Option<FluidStack> {
             None
+        }
+    }
+
+    /// The game's tank under it, but its real calls misanswer: an extract gives 100 mB more than
+    /// asked (`GivesMore`) or its amount as lava (`GivesLava`), or an insert keeps nothing and
+    /// answers 100 mB more than offered (`RefusesMore`).
+    #[derive(PartialEq)]
+    enum Overstates {
+        GivesMore,
+        RefusesMore,
+        GivesLava,
+    }
+    impl FluidHandler for Overstates {
+        fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            host.fluid_tank_count(at, side).unwrap_or(0)
+        }
+        fn fluid(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+        ) -> Option<FluidStack> {
+            host.fluid_tank(at, side, tank)
+        }
+        fn capacity(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+            fluid: &FluidStack,
+        ) -> u32 {
+            host.fluid_tank_capacity(at, side, tank, fluid)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+            fluid: FluidStack,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            if *self == Self::RefusesMore && !simulate {
+                return Some(fluid.with_amount(fluid.amount + 100));
+            }
+            host.fluid_tank_insert(at, side, tank, fluid, simulate)
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            if simulate {
+                return host.fluid_tank_extract(at, side, tank, max, true);
+            }
+            let more = if *self == Self::GivesMore { 100 } else { 0 };
+            let out = host.fluid_tank_extract(at, side, tank, max + more, false)?;
+            match self {
+                Self::GivesLava => Some(FluidStack::new("minecraft:lava", out.amount)),
+                _ => Some(out),
+            }
         }
     }
 
@@ -1975,6 +2234,63 @@ mod tests {
                 .is_none()
         );
         assert_eq!(world.held(SOURCE), None);
+    }
+
+    #[test]
+    fn a_handler_answering_more_than_it_was_asked_or_offered_moves_no_more_than_agreed() {
+        game_thread();
+        let water = |amount| FluidStack::new("minecraft:water", amount);
+        // A source giving 100 more than asked: the target gets only what both ends agreed on, the
+        // move never passes its max, and the excess goes back into the source.
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water(1000)), true);
+        world.tank(TANK, None, true);
+        world.types.insert(SOURCE, "test:gives_more");
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 300),
+            Some(water(300))
+        );
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (700, 300));
+        // With no room for the excess in the source, the target's room takes it.
+        world.tanks.get_mut(&SOURCE).unwrap().fills = false;
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 300),
+            Some(water(300))
+        );
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (300, 700));
+        // The API 54 drain's excess goes back into the tank it came from.
+        world.tanks.get_mut(&SOURCE).unwrap().fills = true;
+        let host: &mut dyn Host = &mut world;
+        let handler = host.capability(&FLUIDS, SOURCE).unwrap();
+        assert_eq!(
+            host.drain_one_named_fluid(&handler, SOURCE, None, 100),
+            Some(water(100))
+        );
+        assert_eq!(world.amount(SOURCE), 200);
+        // One giving lava from a water tank: the lava is given back, and nothing comes out.
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water(1000)), true);
+        world.types.insert(SOURCE, "test:gives_lava");
+        let host: &mut dyn Host = &mut world;
+        let handler = host.capability(&FLUIDS, SOURCE).unwrap();
+        assert_eq!(
+            host.drain_one_named_fluid(&handler, SOURCE, None, 300),
+            None
+        );
+        assert_eq!(world.amount(SOURCE), 700);
+        // A target that keeps nothing and answers more than it was offered: it all goes back.
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water(1000)), true);
+        world.tank(TANK, None, true);
+        world.types.insert(TANK, "test:refuses_more");
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(host.transfer_fluids(SOURCE, None, TANK, None, 300), None);
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (1000, 0));
+        assert!(super::super::fluid_capability::warned_about(
+            "native mod #0"
+        ));
     }
 
     #[test]

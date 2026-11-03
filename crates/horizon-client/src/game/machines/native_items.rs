@@ -4,7 +4,7 @@
 //! copy, and only on the level in place, which those that read or take name by
 //! its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 use super::{BlockEntity, Game, Kind, View};
-use horizon_client::items::ItemStack;
+use horizon_client::{items::ItemStack, mod_api::Host};
 use horizon_core::geometry::Direction;
 
 /// A slot of a container as a side reaches it (`native_container_slots`).
@@ -83,11 +83,12 @@ impl Game<'_> {
             return Some(stack);
         }
         if let Some(part) = self.item_part_at((pos[0], pos[1], pos[2])) {
-            let slots = part.slots(self, pos, Some(face));
+            let host: &mut dyn Host = self;
+            let slots = part.slots(host, pos, Some(face));
             let mut rest = Some(stack);
             for slot in 0..slots {
                 let Some(stack) = rest.take() else { break };
-                rest = part.insert(self, pos, Some(face), slot, stack, false);
+                rest = host.insert_checked(&part, pos, Some(face), slot, stack);
             }
             return rest;
         }

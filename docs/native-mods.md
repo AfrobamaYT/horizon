@@ -3103,6 +3103,12 @@ mod: what it leaves over in a move goes back into the source tank, else into the
 to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
 broken handler can void.
 
+The game never trusts an answer past what it asked, offered or simulated. A real extract must give the item or
+fluid, with the components, that its simulation showed: another is given back and nothing comes out, and a
+leftover of another item counts as the offered one. A leftover larger than the offer counts as the offer, and what an extract gives beyond the request goes back into its slot or tank, else is
+dropped at the block (items) or, as above, lost with a warning (fluids). Either is a mod bug, warned once naming
+the mod; a broken handler can't make a move overflow, duplicate items or panic the game.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
