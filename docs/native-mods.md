@@ -3431,7 +3431,7 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{self, Hooks, Host, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
@@ -3441,13 +3441,13 @@ impl ServerHost for HostDouble {}
 struct Counter(Arc<AtomicUsize>);
 #[mod_api::horizon_mod]
 impl Hooks for Counter {
-    fn tick(&self, _: &mut dyn ServerHost, _: &mut TickEvent) {
+    fn tick(&self, _: HostSide<'_>, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
 let count = Arc::new(AtomicUsize::new(0));
 let mods = [ModEntry::new("counter", Box::new(Counter(count.clone())))];
-with_mods(mods.into(), || dispatch_tick(&mut HostDouble));
+with_mods(mods.into(), || dispatch_tick(HostSide::Server(&mut HostDouble)));
 assert_eq!(count.load(Ordering::Relaxed), 1);
 ```
 
