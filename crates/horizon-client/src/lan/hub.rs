@@ -1768,7 +1768,7 @@ impl Hub {
         for event in self.lan.poll() {
             match event {
                 NetEvent::Joined(j) => {
-                    if let Some(i) = self
+                    while let Some(i) = self
                         .guests
                         .iter()
                         .position(|g| g.uuid == j.uuid && !g.participates_online())

@@ -1293,9 +1293,23 @@ impl Game<'_> {
         }
     }
 
+    pub(super) fn ban_ip_target(&self, target: &str) -> Option<String> {
+        if target.parse::<std::net::IpAddr>().is_ok() {
+            Some(target.to_owned())
+        } else {
+            self.lan
+                .as_ref()?
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.participates_online() && g.name.eq_ignore_ascii_case(target))
+                .map(|g| g.address.ip().to_string())
+        }
+    }
+
     /// ServerGamePacketListenerImpl.tick: players idle longer than the
     /// timeout are kicked.
-    fn kick_idle(&mut self, minutes: i32) {
+    pub(super) fn kick_idle(&mut self, minutes: i32) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -1304,7 +1318,9 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| host.hub.ticks.saturating_sub(g.last_action_tick) > limit)
+            .filter(|g| {
+                g.participates_online() && host.hub.ticks.saturating_sub(g.last_action_tick) > limit
+            })
             .map(|g| g.conn)
             .collect();
         for conn in idle {
@@ -1632,17 +1648,7 @@ impl Game<'_> {
             }
             "ban-ip" if !rest.is_empty() => {
                 let target = rest[0];
-                let ip = if target.parse::<std::net::IpAddr>().is_ok() {
-                    Some(target.to_owned())
-                } else {
-                    self.lan.as_ref().and_then(|h| {
-                        h.hub
-                            .guests
-                            .iter()
-                            .find(|g| g.name.eq_ignore_ascii_case(target))
-                            .map(|g| g.address.ip().to_string())
-                    })
-                };
+                let ip = self.ban_ip_target(target);
                 let Some(ip) = ip else {
                     self.console_reply(Text::translate("commands.banip.invalid", &[]));
                     return;

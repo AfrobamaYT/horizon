@@ -13,12 +13,12 @@ use horizon_client::mod_api::{NativePlayerExperience, PlayerRef};
 impl Game<'_> {
     /// Whether `player` still names the same player on this server.
     fn native_player_valid(&self, player: PlayerRef) -> bool {
-        self.native_player_ref(player.uuid()) == Some(player)
+        self.player_handle_read(player).is_some()
     }
     /// Runs `f` with `player`'s state in place, when the handle is current
     /// and they are alive (`native_as_player`).
     fn native_player_write(&mut self, player: PlayerRef, f: impl FnOnce(&mut Self)) -> bool {
-        self.native_player_valid(player) && self.native_as_player(player.uuid(), f)
+        self.native_player_valid(player) && self.native_as_player_handle(player, f)
     }
     /// The acting player's food data, inside `native_player_write`.
     fn native_food_mut(&mut self) -> Option<&mut horizon_world::food::FoodData> {
@@ -109,27 +109,13 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<NativePlayerExperience> {
-        if !self.native_player_valid(player) {
-            return None;
-        }
-        let uuid = player.uuid();
-        // As `native_player_ref` finds them: a guest's record holds their
-        // experience except while their state is swapped in.
-        let guest = (self.lan_acting_uuid != Some(uuid))
-            .then(|| {
-                self.lan
-                    .iter()
-                    .flat_map(|h| h.hub.guests.iter())
-                    .find(|g| g.placed && g.uuid == uuid)
-            })
-            .flatten();
-        Some(match guest {
-            Some(g) => NativePlayerExperience {
+        Some(match self.player_handle_read(player)? {
+            super::native_server::PlayerRead::Guest(g) => NativePlayerExperience {
                 level: g.xp_level,
                 progress: g.xp_progress,
                 total: g.xp_total,
             },
-            None => NativePlayerExperience {
+            super::native_server::PlayerRead::Acting { .. } => NativePlayerExperience {
                 level: self.experience.level,
                 progress: self.experience.progress,
                 total: self.experience.total,

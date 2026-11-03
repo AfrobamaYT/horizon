@@ -1058,6 +1058,21 @@ pub(super) mod tests {
             assert!(game.native_fake_player(level, 1234, "other").is_none());
             assert!(game.native_fake_player(level, 1, "real").is_none());
             assert_eq!(game.native_player_is_fake(made), Some(true));
+            assert!(game.native_player_ref(1234).is_none());
+            let mut abilities = game.native_player_abilities(made).unwrap();
+            abilities.may_fly = true;
+            assert!(game.native_player_set_abilities(made, abilities));
+            assert!(game.native_player_abilities(made).unwrap().may_fly);
+            assert!(game.native_player_set_food_level(made, 10));
+            assert!(game.native_player_feed(made, 3, 0.0));
+            assert_eq!(game.native_player_food(made).unwrap().level, 13);
+            assert!(game.native_player_set_experience_levels(made, 7));
+            assert_eq!(game.native_player_experience(made).unwrap().level, 7);
+            assert!(game.native_player_set_item_cooldown(made, "minecraft:stone", 20));
+            assert_eq!(
+                game.native_player_has_item_cooldown(made, "minecraft:stone"),
+                Some(true)
+            );
             assert!(game.native_player_remove_fake(made));
             assert!(!game.native_player_remove_fake(made));
             assert_eq!(game.native_player_is_fake(made), None);
@@ -1097,12 +1112,30 @@ pub(super) mod tests {
             );
             let nether = game.native_level("minecraft:the_nether").unwrap();
             assert!(game.native_fake_player(level, 3456, "other").is_none());
-            assert!(game.native_fake_player(nether, 2345, "parked").is_none());
+            let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
+            assert_ne!(overworld_actor, nether_actor);
+            assert_eq!(
+                game.native_fake_player(nether, 2345, "parked"),
+                Some(nether_actor)
+            );
+            assert!(game.native_player_set_experience_levels(nether_actor, 8));
+            assert!(game.native_player_set_experience_levels(overworld_actor, 3));
+            assert_eq!(
+                game.native_player_experience(nether_actor).unwrap().level,
+                8
+            );
+            assert_eq!(
+                game.native_player_experience(overworld_actor)
+                    .unwrap()
+                    .level,
+                3
+            );
             assert!(
                 game.enter_command_level(super::super::Dim::Overworld)
                     .is_some()
             );
             assert!(game.native_player_remove_fake(overworld_actor));
+            assert!(game.native_player_remove_fake(nether_actor));
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
@@ -1313,6 +1346,17 @@ pub(super) mod tests {
             }
             game.lan = Some(host);
             let fake = game.native_fake_player(level, 5678, "joiner").unwrap();
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            let other_fake = game.native_fake_player(nether, 5678, "joiner").unwrap();
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            let saved_root = game.world_root.clone();
+            let scratch = std::env::current_dir()
+                .unwrap()
+                .join("target/fake-login-save-test");
+            let _ = std::fs::remove_dir_all(&scratch);
+            game.world_root = scratch.clone();
             let shared = &game.lan.as_ref().unwrap().hub.lan.shared;
             let conn = shared.next_id().unwrap();
             let (tx, _rx) = std::sync::mpsc::channel();
@@ -1353,6 +1397,12 @@ pub(super) mod tests {
                 assert_eq!(logouts.load(std::sync::atomic::Ordering::Relaxed), 0);
             });
             assert_eq!(game.native_player_is_fake(fake), None);
+            assert_eq!(game.native_player_is_fake(other_fake), None);
+            assert!(
+                !horizon_client::lan::playerdata::path(&scratch, 5678).exists(),
+                "fake login replacement saved player data"
+            );
+            game.world_root = saved_root;
             let matching: Vec<_> = game
                 .lan
                 .as_ref()
@@ -1364,6 +1414,35 @@ pub(super) mod tests {
                 .collect();
             assert_eq!(matching.len(), 1);
             assert!(matching[0].participates_online());
+            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+                "logout-shutdown-test",
+                Box::new(Logout(logouts.clone())),
+            )]
+            .into();
+            let real_count = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.placed && g.participates_online())
+                .count();
+            crate::mod_api::testing::with_mods(mods, || game.native_players_leaving());
+            assert_eq!(logouts.load(Ordering::Relaxed), real_count);
+            let mut host = game.lan.take().unwrap();
+            host.play.entry(fake_id).or_default();
+            game.award_leave_game_to_all(&mut host);
+            assert!(!host.play.get(&fake_id).unwrap().left_game);
+            assert!(host.play.get(&real_id).unwrap().left_game);
+            host.hub.ticks = 2401;
+            game.lan = Some(host);
+            assert_eq!(game.ban_ip_target("fake"), None);
+            assert_eq!(game.ban_ip_target("real").as_deref(), Some("127.0.0.1"));
+            game.kick_idle(1);
+            let host = game.lan.as_ref().unwrap();
+            assert!(host.hub.guest(fake_id).unwrap().left_reason.is_empty());
+            assert!(!host.hub.guest(real_id).unwrap().left_reason.is_empty());
             let old = game.native_fake_player(level, 6789, "reopen").unwrap();
             game.native_lifecycle_world_closed();
             game.native_lifecycle_open_started();

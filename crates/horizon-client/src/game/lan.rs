@@ -231,7 +231,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| g.placed)
+            .filter(|g| g.placed && g.participates_online())
             .map(|g| (g.conn, g.uuid, g.name.clone()))
             .collect();
         for (conn, player, name) in players {

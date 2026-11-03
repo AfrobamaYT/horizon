@@ -18,19 +18,15 @@ impl Game<'_> {
     /// outside their turn, the game's while theirs is swapped in (as
     /// `native_player_ref` finds the player).
     fn native_cooldowns_of(&self, player: PlayerRef) -> Option<&Cooldowns> {
-        if self.native_player_ref(player.uuid()) != Some(player) {
-            return None;
-        }
-        let uuid = player.uuid();
-        if self.lan_acting_uuid == Some(uuid) {
-            return Some(&self.cooldowns);
-        }
-        let Some(host) = &self.lan else {
-            return Some(&self.cooldowns);
-        };
-        match host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid) {
-            Some(g) => Some(host.play.get(&g.conn).map_or(&EMPTY, |p| &p.cooldowns)),
-            None => Some(&self.cooldowns),
+        match self.player_handle_read(player)? {
+            super::native_server::PlayerRead::Acting { .. } => Some(&self.cooldowns),
+            super::native_server::PlayerRead::Guest(g) => Some(
+                self.lan
+                    .as_ref()?
+                    .play
+                    .get(&g.conn)
+                    .map_or(&EMPTY, |p| &p.cooldowns),
+            ),
         }
     }
 
@@ -93,8 +89,7 @@ impl Game<'_> {
         ticks: i32,
     ) -> bool {
         let group: Arc<str> = group.into();
-        self.native_player_ref(player.uuid()) == Some(player)
-            && self.native_as_player(player.uuid(), |game| game.add_cooldown(group, ticks))
+        self.native_as_player_handle(player, |game| game.add_cooldown(group, ticks))
     }
     /// `ItemCooldowns.removeCooldown(group)`: ends the group's cooldown now,
     /// on the client too (`ServerItemCooldowns.onCooldownEnded`). API
@@ -105,13 +100,12 @@ impl Game<'_> {
         group: &str,
     ) -> bool {
         let group: Arc<str> = group.into();
-        self.native_player_ref(player.uuid()) == Some(player)
-            && self.native_as_player(player.uuid(), |game| {
-                game.cooldowns.remove(&group);
-                if game.lan_acting.is_some() {
-                    game.guest_cooldowns.push((group, 0));
-                }
-            })
+        self.native_as_player_handle(player, |game| {
+            game.cooldowns.remove(&group);
+            if game.lan_acting.is_some() {
+                game.guest_cooldowns.push((group, 0));
+            }
+        })
     }
 }
 

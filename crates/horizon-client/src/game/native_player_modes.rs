@@ -11,19 +11,10 @@ impl Game<'_> {
     /// single-player owner's 4 with commands allowed. API
     /// @API:player_modes@.
     pub(super) fn native_player_permission_level(&self, player: PlayerRef) -> Option<u8> {
-        if self.native_player_ref(player.uuid()) != Some(player) {
-            return None;
-        }
-        let guest = self
-            .lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .find(|g| g.placed && g.uuid == player.uuid());
-        Some(match guest {
-            Some(g) => g.permission,
-            // `IntegratedServer.getProfilePermissions` for the owner.
-            None if self.allow_commands() => 4,
-            None => 0,
+        Some(match self.player_handle_read(player)? {
+            super::native_server::PlayerRead::Guest(g) => g.permission,
+            super::native_server::PlayerRead::Acting { .. } if self.allow_commands() => 4,
+            super::native_server::PlayerRead::Acting { .. } => 0,
         })
     }
     /// `Player.hasInfiniteMaterials`: the `instabuild` ability, which

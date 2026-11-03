@@ -19,13 +19,12 @@ impl Game<'_> {
         if self.lan_acting.is_some() {
             return None;
         }
-        (self.native_player_ref(menu.player.uuid())? == menu.player).then_some(())?;
+        let super::native_server::PlayerRead::Guest(guest) =
+            self.player_handle_read(menu.player)?
+        else {
+            return None;
+        };
         let host = self.lan.as_ref()?;
-        let guest = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && g.uuid == menu.player.uuid())?;
         (guest.menu_generation == menu.generation).then_some(())?;
         if let Some(open) = &guest.menu {
             (open.window == menu.window && open.hidden.is_empty()).then_some(guest)
@@ -50,12 +49,10 @@ impl Game<'_> {
     /// workstations, lecterns, mounts and menus with hidden slots; also refuses
     /// clients, stale players and calls during a player swap. API @API:menu_refs@.
     pub(super) fn native_menu_ref(&self, player: PlayerRef) -> Option<MenuRef> {
-        let host = self.lan.as_ref()?;
-        let guest = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && g.uuid == player.uuid())?;
+        let super::native_server::PlayerRead::Guest(guest) = self.player_handle_read(player)?
+        else {
+            return None;
+        };
         let menu = MenuRef {
             player,
             window: guest.menu.as_ref().map_or(0, |m| m.window),
