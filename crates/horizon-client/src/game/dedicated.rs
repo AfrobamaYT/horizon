@@ -1341,7 +1341,12 @@ impl Game<'_> {
         let entity = self
             .lan
             .as_ref()
-            .and_then(|h| h.hub.guests.iter().find(|g| g.uuid == user.id))
+            .and_then(|h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .find(|g| g.participates_online() && g.uuid == user.id)
+            })
             .map(|g| g.entity_id);
         let mut cancel = false;
         self.native_permissions_changed(
@@ -1965,10 +1970,11 @@ impl Game<'_> {
                 .guests
                 .iter()
                 .filter(|g| {
-                    !l.white.contains(&NameAndId {
-                        id: g.uuid,
-                        name: g.name.clone(),
-                    })
+                    g.participates_online()
+                        && !l.white.contains(&NameAndId {
+                            id: g.uuid,
+                            name: g.name.clone(),
+                        })
                 })
                 .map(|g| g.uuid)
                 .collect()
@@ -2036,7 +2042,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| g.uuid == uuid)
+                .filter(|g| g.participates_online() && g.uuid == uuid)
                 .map(|g| g.conn)
                 .collect();
             for conn in conns {
