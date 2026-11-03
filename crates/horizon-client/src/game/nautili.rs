@@ -77,11 +77,14 @@ impl Game<'_> {
             if !tame && food {
                 // tryToTame: one time in three.
                 self.use_nautilus_food(item);
+                let rolled = self.mobs[index].random.next_int_bound(3).unwrap_or(1) == 0;
+                let acting = self.acting_player_uuid();
+                let (tamer, tamer_entity_id) = (self.native_acting_id(), self.own_entity_id());
+                let tamed = rolled && !self.animal_tame_cancelled(index, tamer, tamer_entity_id);
                 let m = &mut self.mobs[index];
-                let tamed = m.random.next_int_bound(3).unwrap_or(1) == 0;
                 if tamed {
                     m.extra.tame = true;
-                    m.extra.owner = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+                    m.extra.owner = Some(acting);
                     m.persistent = true;
                     m.nav_stop();
                     m.ai.target = None;
@@ -93,6 +96,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
                 return true;
             }

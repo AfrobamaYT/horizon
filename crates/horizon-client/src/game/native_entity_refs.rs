@@ -10,7 +10,10 @@ use super::{
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
 };
-use horizon_client::mod_api::{EntityRef, LevelRef, NativeBlockShapeKind, NativeBlockUpdateFlags};
+use horizon_client::mod_api::{
+    EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
+    NativeSupportType,
+};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
@@ -209,6 +212,39 @@ impl Game<'_> {
         })
     }
 
+    /// Gameplay's cached face support in the current or a parked level. Returns
+    /// None for clients, stale or closed levels, unloaded or out-of-height blocks,
+    /// dynamic-shape states (including moving pistons and shulker boxes), or an
+    /// exporter error. Dynamic support is a follow-up on #29. False means not
+    /// sturdy. API @API:level_shapes@.
+    pub(super) fn native_level_block_face_sturdy(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        face: NativeBlockFace,
+        support: NativeSupportType,
+    ) -> Option<bool> {
+        let state = self.native_level_state(level, pos)?;
+        use horizon_core::geometry::Direction;
+        let direction = match face {
+            NativeBlockFace::Down => Direction::Down,
+            NativeBlockFace::Up => Direction::Up,
+            NativeBlockFace::North => Direction::North,
+            NativeBlockFace::South => Direction::South,
+            NativeBlockFace::West => Direction::West,
+            NativeBlockFace::East => Direction::East,
+        };
+        let b = self.res.behaviours();
+        if !b.has_cached_support(state) {
+            return None;
+        }
+        Some(match support {
+            NativeSupportType::Full => b.is_face_sturdy(state, direction),
+            NativeSupportType::Center => b.is_face_sturdy_center(state, direction),
+            NativeSupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
+        })
+    }
+
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
@@ -293,6 +329,49 @@ pub(super) mod tests {
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
         test(&mut game);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{ChunkStatus, Host, NativeAuthority},
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            game.world
+                .chunks
+                .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
+            let chunk = game.chunk(level, [-2, 3]).unwrap();
+            assert_eq!(chunk.pos(), [-2, 3]);
+            assert_eq!(chunk.level(), level);
+            assert!(chunk.loaded(game));
+            assert_eq!(chunk.status(game), Some(ChunkStatus::Full));
+            assert!(game.chunk(level, [99, 99]).is_none());
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(chunk.status(game), Some(ChunkStatus::Full));
+            assert_eq!(game.chunk(level, [-2, 3]), Some(chunk));
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            game.world.chunks.remove(&(-2, 3));
+            assert!(!chunk.loaded(game));
+            assert_eq!(chunk.status(game), None);
+            game.world
+                .chunks
+                .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
+            game.native_lifecycle
+                .begin_open(NativeAuthority::IntegratedServer);
+            assert!(game.chunk(level, [-2, 3]).is_none());
+            assert!(!chunk.loaded(game));
+            assert_eq!(chunk.status(game), None);
+        });
     }
 
     #[test]
@@ -435,6 +514,89 @@ pub(super) mod tests {
                     [2.0; 3]
                 )
                 .is_none()
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn level_sturdy_uses_gameplay_support() {
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{
+                LevelRef, NativeBlockFace as Face, NativeSupportType as Support, NativeWorldEpoch,
+            },
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let slab = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone_slab")
+                .unwrap();
+            game.world.set(0, 64, 0, slab).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
+                Some(true)
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::North, Support::Full),
+                Some(false)
+            );
+            let wall = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cobblestone_wall")
+                .unwrap();
+            game.world.set(0, 64, 0, wall).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Center),
+                Some(true)
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [16, 64, 0], Face::Down, Support::Full),
+                None
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 10000, 0], Face::Down, Support::Full),
+                None
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Center),
+                Some(true)
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            let shulker = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:shulker_box")
+                .unwrap();
+            game.world.set(0, 64, 0, shulker).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                None
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert_eq!(
+                stale.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
+                None
             );
         });
     }

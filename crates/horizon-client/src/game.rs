@@ -209,7 +209,9 @@ mod native_components;
 mod native_criteria;
 mod native_data_maps;
 mod native_entities;
+mod native_entity_data;
 mod native_entity_motion;
+mod native_entity_moves;
 mod native_entity_refs;
 mod native_explosions;
 mod native_falling;
@@ -12930,7 +12932,11 @@ impl Game<'_> {
         }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
-        let mut hand = powder_snow::HeldSlot { game: self, slot };
+        let mut hand = powder_snow::HeldSlot {
+            game: self,
+            slot,
+            dropper: None,
+        };
         let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
         if result.outcome == Outcome::Pass {
             return Ok(false);

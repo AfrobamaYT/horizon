@@ -76,6 +76,11 @@ pub(super) enum Target {
     /// A simulated lingering, creeper or dragon area-effect cloud.
     Cloud(u32),
 }
+/// `Entity.setXRot`: wrap before clamping the pitch.
+pub(super) fn entity_pitch(pitch: f32) -> f32 {
+    (pitch % 360.0).clamp(-90.0, 90.0)
+}
+
 /// An entity of a type Horizon does not simulate: its compound lives in the
 /// entity memory (`persist.raw`), its position and rotation here.
 #[derive(Clone, Debug)]
@@ -634,14 +639,22 @@ impl Game<'_> {
                 Some(g) => self.player_text(&g.name, g.uuid),
                 None => Text::empty(),
             },
+            // ItemEntity.getName: its CustomName, else the stack's item name
+            // (`getItemName`: `minecraft:item_name`, else the item's own).
             Target::Item(id) => {
-                let item = self
-                    .dropped
-                    .iter()
-                    .find(|i| i.id == id)
-                    .map(|i| i.stack.item.to_string())
-                    .unwrap_or_default();
-                Text::literal(self.pack.names.display_item(&item))
+                if let Some(c) = self.persist_raw(id).and_then(|r| r.get("CustomName")) {
+                    return horizon_client::scoreboard::comp_text(
+                        &horizon_client::scoreboard::tag_to_json(c),
+                    );
+                }
+                let stack = self.dropped.iter().find(|i| i.id == id).map(|i| &i.stack);
+                match stack.and_then(|s| s.item_name()) {
+                    Some(name) => Text::literal(name),
+                    None => {
+                        let item = stack.map(|s| s.item.to_string()).unwrap_or_default();
+                        Text::literal(self.pack.names.display_item(&item))
+                    }
+                }
             }
             // FallingBlockEntity.getTypeName: `entity.minecraft.falling_block_type`
             // with the block's name.
@@ -1464,7 +1477,12 @@ impl Game<'_> {
         self.feedback(message);
         Ok(targets.len() as i32)
     }
-    fn teleport_to(&mut self, t: Target, pos: [f64; 3], rotation: Option<[f32; 2]>) {
+    pub(in crate::game) fn teleport_to(
+        &mut self,
+        t: Target,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) {
         // An entity in another level is teleported in the level that holds it.
         let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation));
     }
@@ -1497,7 +1515,7 @@ impl Game<'_> {
                 self.previous_position = v;
                 if let Some([yaw, pitch]) = rotation {
                     self.yaw = yaw;
-                    self.pitch = pitch.clamp(-90.0, 90.0);
+                    self.pitch = entity_pitch(pitch);
                 }
                 // A server player's teleport is told to the mods once their
                 // move is in the hub (`leave_guest`).
@@ -1528,7 +1546,7 @@ impl Game<'_> {
                         m.yaw = yaw;
                         m.body_yaw = yaw;
                         m.head_yaw = yaw;
-                        m.head_pitch = pitch.clamp(-90.0, 90.0);
+                        m.head_pitch = entity_pitch(pitch);
                         m.previous_yaw = m.yaw;
                         m.previous_head_pitch = m.head_pitch;
                     }
@@ -1584,7 +1602,7 @@ impl Game<'_> {
                     o.position = v;
                     if let Some([yaw, pitch]) = rotation {
                         o.yaw = yaw;
-                        o.pitch = pitch;
+                        o.pitch = entity_pitch(pitch);
                     }
                 }
             }

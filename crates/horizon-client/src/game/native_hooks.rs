@@ -890,8 +890,9 @@ use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
 };
 pub(crate) use horizon_client::mod_api::{
-    NativeBlockRim, NativeColoredLight, NativeLootDrops, NativeMinimap, NativeMod,
-    NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
+    NativeMinimap, NativeMod, NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView,
+    NativeStack, NativeZoom,
 };
 use horizon_client::{
     atlas_sources::qualified,
@@ -5702,6 +5703,32 @@ impl Game<'_> {
         mod_api::dispatch_entity_tame(self, mod_api::mods(), entity, kind, owner);
     }
 
+    /// The player `tamer` (UUID) and `tamer_entity_id` is about to tame the
+    /// mob `entity` of `kind` (`AnimalTameEvent`): its taming roll succeeded
+    /// (a wolf's bone, a cat's fish, a parrot's seeds or a nautilus's food;
+    /// a horse, donkey, mule or llama the player rides). Set `cancel` for the
+    /// attempt to fail instead, as a failed roll does: smoke for a pet, and
+    /// a horse bucks its rider off. Before `entity_tame`. Server-side.
+    /// @API:animal_tame@.
+    pub(super) fn native_animal_tame(
+        &mut self,
+        tamer: u128,
+        tamer_entity_id: i32,
+        entity: u32,
+        kind: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_animal_tame(
+            self,
+            mod_api::mods(),
+            tamer,
+            tamer_entity_id,
+            entity,
+            kind,
+            cancel,
+        );
+    }
+
     /// Two mobs completed a breeding action. `child` is absent when vanilla
     /// lays an egg instead of creating a baby. 213.
     pub(super) fn native_entity_breed(&mut self, parent: u32, partner: u32, child: Option<u32>) {
@@ -6334,6 +6361,48 @@ impl Game<'_> {
     /// `item` is the projectile's held item. 346.
     pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
         mod_api::dispatch_player_launch_projectile(self, mod_api::mods(), player, name, item);
+    }
+    /// A server explosion is about to happen (`ExplosionEvent.Start`, in
+    /// `ServerLevel.explode` before `ServerExplosion.explode`): every one,
+    /// TNT, creepers, beds and anchors, fireballs, withers, end crystals and
+    /// wind bursts. Set `cancel` and nothing of it happens: no blocks, no
+    /// damage or knockback, no sound, particles or game event. Before
+    /// `explosion_prime`, which a cancel skips. Server-side.
+    /// @API:explosion_start@.
+    pub(super) fn native_explosion_start(
+        &mut self,
+        explosion: &NativeExplosionStart<'_>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_explosion_start(self, mod_api::mods(), explosion, cancel);
+    }
+    /// A server player `player` (UUID) and `player_entity_id` reeled in a
+    /// catch (`ItemFishedEvent`, in `FishingHook.retrieve` after the fishing
+    /// loot rolled): `fished` holds the bobber and the items, and
+    /// `rod_damage` the damage the rod takes (vanilla's 1, or 2 with the
+    /// bobber on the ground), which the mods may set (`damageRodBy`, not
+    /// negative). Set `cancel` and the player receives nothing: no items,
+    /// experience or statistic, and no `fishing_rod_hooked` trigger; the
+    /// bobber is gone and the rod
+    /// still takes `rod_damage`. After `player_fish`'s reel-in. Server-side.
+    /// @API:item_fished@.
+    pub(super) fn native_item_fished(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        fished: &NativeItemFished<'_>,
+        rod_damage: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_item_fished(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            fished,
+            rod_damage,
+            cancel,
+        );
     }
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
@@ -7858,13 +7927,6 @@ impl Game<'_> {
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
     /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
-    /// `attacker` is the attacking entity's network id (the recorded attack scope, or `causing`),
-    /// `weapon` what it holds in its main hand (a player's selected stack, a mob's main hand; none
-    /// when unknown, recorded only while a native mod is loaded) with its enchantment levels, and
-    /// `source_position`, `victim_position` and `victim_view` the hit's position, a mob victim's
-    /// position and look vector (none when not known, always for a player or the dragon), so an
-    /// enchantment can tell a blow from behind. There is no host here: read the world from a
-    /// tick hook.
     /// No `self`: the game is in the middle of the hit. API 50.
     pub(super) fn native_living_incoming_damage(
         entity: i32,
@@ -7872,11 +7934,6 @@ impl Game<'_> {
         damage_type: &str,
         causing: i32,
         direct: i32,
-        attacker: i32,
-        weapon: Option<&ItemStack>,
-        source_position: Option<[f64; 3]>,
-        victim_position: Option<[f64; 3]>,
-        victim_view: Option<[f64; 3]>,
         amount: &mut f32,
         canceled: &mut bool,
     ) {
@@ -7887,11 +7944,41 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
-            attacker,
-            weapon,
+            amount,
+            canceled,
+        );
+    }
+    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
+    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
+    /// this has a host and snapshots of the weapon, victim position/view and
+    /// DamageSource position. The acting player's network id is `causing`
+    /// (also the direct entity). Weapon enchantments include their levels.
+    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
+    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
+    pub(super) fn native_living_incoming_damage_v2(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        damage_type: &str,
+        causing: i32,
+        source_position: Option<[f64; 3]>,
+        victim_position: [f64; 3],
+        victim_view: [f64; 3],
+        weapon: Option<&ItemStack>,
+        amount: &mut f32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_incoming_damage_v2(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            damage_type,
+            causing,
             source_position,
             victim_position,
             victim_view,
+            weapon,
             amount,
             canceled,
         );
@@ -7947,11 +8034,7 @@ impl Game<'_> {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
-    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
-    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
-    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
-    /// native mod is loaded. It runs
+    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -7961,9 +8044,6 @@ impl Game<'_> {
         damage_type: &str,
         causing: i32,
         direct: i32,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
         strength: &mut f64,
         x: &mut f64,
         z: &mut f64,
@@ -7976,6 +8056,35 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    pub(super) fn native_living_knockback_v2(
+        entity: i32,
+        kind: &str,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback_v2(
+            mod_api::mods(),
+            entity,
+            kind,
             attacker,
             attacker_main,
             attacker_off,
@@ -8122,7 +8231,7 @@ pub(super) fn shield_block(
 impl Game<'_> {
     /// `health::knockback_from` that, while a native mod listens, also records what the attacker
     /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
+    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
         if mod_api::mods().is_empty() {
@@ -8176,6 +8285,13 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             }
         }
     };
+    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
+    #[allow(clippy::match_like_matches_macro)]
+    let stand = if let Hurting::ArmorStand(..) = &pushed {
+        true
+    } else {
+        false
+    };
     let (entity, kind, source) = hurt_server_args(pushed);
     let HurtSource {
         damage_type,
@@ -8183,22 +8299,33 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         direct,
     } = source;
     let mut canceled = false;
+    if !stand {
+        Game::native_living_knockback(
+            entity,
+            kind,
+            damage_type,
+            causing,
+            direct,
+            &mut knock.strength,
+            &mut knock.x,
+            &mut knock.z,
+            &mut canceled,
+        );
+    }
+    let mut canceled_v2 = false;
     let held = horizon_client::health::knockback_held();
-    Game::native_living_knockback(
+    Game::native_living_knockback_v2(
         entity,
         kind,
-        damage_type,
-        causing,
-        direct,
         attacker,
         held[0].as_ref(),
         held[1].as_ref(),
         &mut knock.strength,
         &mut knock.x,
         &mut knock.z,
-        &mut canceled,
+        &mut canceled_v2,
     );
-    canceled
+    canceled || canceled_v2
 }
 
 pub(super) fn block_contact(
@@ -8237,17 +8364,6 @@ pub(super) fn block_contact(
 /// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether
 /// it canceled the hit. Its one caller.
 pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
-    if mod_api::mods().is_empty() {
-        return false;
-    }
-    let (victim_position, victim_view, source_position) = match &hurting {
-        Hurting::Mob(mob, damage) => (
-            Some([mob.position.x, mob.position.y, mob.position.z]),
-            Some(super::view_vector(mob.head_yaw, mob.head_pitch)),
-            damage.from,
-        ),
-        _ => (None, None, None),
-    };
     let (entity, kind, source) = hurt_server_args(hurting);
     let HurtSource {
         damage_type,
@@ -8255,22 +8371,12 @@ pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
         direct,
     } = source;
     let mut canceled = false;
-    let attacker = match causing {
-        0 => horizon_client::health::knockback_attacker(),
-        causing => causing,
-    };
-    let held = horizon_client::health::knockback_held();
     Game::native_living_incoming_damage(
         entity,
         kind,
         damage_type,
         causing,
         direct,
-        attacker,
-        held[0].as_ref(),
-        source_position,
-        victim_position,
-        victim_view,
         amount,
         &mut canceled,
     );
@@ -9537,6 +9643,34 @@ impl Game<'_> {
         if !mod_api::mods().is_empty() {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value);
         }
+    }
+    /// `AnimalTameEvent` for the mob at `index`, whose taming roll by the
+    /// player `tamer` (`tamer_entity_id`) succeeded: true when a mod cancels
+    /// it, and the taming fails.
+    pub(super) fn animal_tame_cancelled(
+        &mut self,
+        index: usize,
+        tamer: u128,
+        tamer_entity_id: i32,
+    ) -> bool {
+        if mod_api::mods().is_empty() {
+            return false;
+        }
+        let m = &self.mobs[index];
+        let (entity, kind) = (m.id, mob_kind(m));
+        let mut cancel = false;
+        self.native_animal_tame(tamer, tamer_entity_id, entity, &kind, &mut cancel);
+        cancel
+    }
+    /// `entity_tame` for the pet at `index`, just tamed by its owner.
+    pub(super) fn pet_tamed(&mut self, index: usize) {
+        let m = &self.mobs[index];
+        let (entity, kind) = (m.id, mob_kind(m));
+        let owner = m
+            .extra
+            .owner
+            .map(horizon_client::lan::playerdata::ints_uuid);
+        self.native_entity_tame(entity, &kind, owner);
     }
     /// The acting player as the hook points name one: the guest whose turn
     /// it is, else the host.

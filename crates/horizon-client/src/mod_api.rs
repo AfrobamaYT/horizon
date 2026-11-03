@@ -135,6 +135,53 @@ pub struct NativePortalShape {
     pub height: i32,
 }
 
+/// A server explosion about to happen, for `explosion_start`
+/// (`ServerLevel.explode`'s `ServerExplosion`).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeExplosionStart<'a> {
+    /// The level it happens in (`minecraft:overworld`).
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub radius: f32,
+    /// It sets fires (`createFire`).
+    pub fire: bool,
+    pub interaction: NativeBlockInteraction,
+    /// The damage type of its damage source (`minecraft:explosion`,
+    /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`).
+    pub damage_type: &'a str,
+    /// The entity that explodes (`getDirectSourceEntity`): a creeper, a wind
+    /// charge, the bearer of Wind Charged, when Horizon tracks it.
+    pub source: Option<u32>,
+    /// `getIndirectSourceEntity`: a living source itself, a primed TNT's
+    /// owner, or a projectile's living owner (a ghast for its fireball, a
+    /// wither for its skull, the thrower of a wind charge).
+    pub owner: Option<u32>,
+}
+
+/// What an explosion does to blocks (`Explosion.BlockInteraction`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeBlockInteraction {
+    Keep,
+    Destroy,
+    DestroyWithDecay,
+    /// A wind burst: it pushes, and triggers doors, buttons, bells and the like.
+    TriggerBlock,
+}
+
+/// A fishing catch, for `item_fished` (`ItemFishedEvent`).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeItemFished<'a> {
+    /// The bobber's entity id and position.
+    pub hook: u32,
+    pub position: [f64; 3],
+    /// The items the fishing loot table rolled, which the player receives
+    /// (`getDrops`: they can't be changed here; loot tables change them).
+    pub drops: &'a [ItemStack],
+}
+
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones
@@ -497,6 +544,33 @@ impl LevelRef {
     }
 }
 
+/// A chunk position in an open level. A handle may be kept after unloading;
+/// reads resolve it again, returning `false` or `None` when it is no longer loaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ChunkRef {
+    pub(crate) level: LevelRef,
+    pub(crate) pos: [i32; 2],
+}
+
+impl ChunkRef {
+    /// The chunk coordinates, `[x, z]`.
+    pub fn pos(self) -> [i32; 2] {
+        self.pos
+    }
+    /// The level containing the chunk.
+    pub fn level(self) -> LevelRef {
+        self.level
+    }
+}
+
+/// The status of a loaded chunk that Horizon can expose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ChunkStatus {
+    /// A full chunk in a level's live world.
+    Full,
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {
@@ -504,6 +578,27 @@ pub enum NativeBlockShapeKind {
     Outline,
     /// Collision shape (`BlockState.getCollisionShape`).
     Collision,
+}
+
+/// A block face for a level support query.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockFace {
+    Down,
+    Up,
+    North,
+    South,
+    West,
+    East,
+}
+
+/// The support area tested on a block face.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSupportType {
+    Full,
+    Center,
+    Rigid,
 }
 
 /// An online player in one open server world, keyed by UUID.
@@ -917,6 +1012,7 @@ pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
+pub use transaction::TransactionSeal;
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
@@ -1132,6 +1228,85 @@ mod tests {
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
         }
+    }
+
+    struct Backstab;
+
+    impl Hooks for Backstab {
+        fn living_incoming_damage_v2(
+            &self,
+            host: &mut dyn Host,
+            event: &mut LivingIncomingDamageV2Event<'_>,
+        ) -> Flow {
+            assert_eq!(event.causing, 7);
+            assert_eq!(event.kind, "minecraft:zombie");
+            assert_eq!(event.damage_type, "minecraft:player_attack");
+            if event.entity == 0 {
+                return Flow::Cancel;
+            }
+            let from = event.source_position.unwrap();
+            let behind = (0..3)
+                .map(|axis| (from[axis] - event.victim_position[axis]) * event.victim_view[axis])
+                .sum::<f64>()
+                < 0.0;
+            if behind {
+                let weapon = event.weapon.unwrap();
+                let level = weapon.enchantment_level("probe:backstab");
+                assert_eq!(weapon.enchantments().len(), 1);
+                event.amount *= level as f32;
+                let player = host.acting_player().unwrap();
+                host.action_bar(player.uuid, Text::literal("backstab"));
+            }
+            Flow::Continue
+        }
+    }
+
+    #[test]
+    fn damage_v2_exposes_weapon_geometry_and_host_without_changing_v1() {
+        let mods = [Box::new(Backstab) as Box<dyn Hooks>];
+        let mut weapon = stick();
+        weapon.enchant("probe:backstab", 3);
+        for (entity, source_z, expected, canceled_expected) in [
+            (1, -1.0, 12.0, false),
+            (1, 1.0, 4.0, false),
+            (0, -1.0, 4.0, true),
+        ] {
+            let mut host = Reader {
+                block: "minecraft:air",
+                lines: Vec::new(),
+            };
+            let mut amount = 4.0;
+            let mut canceled = false;
+            dispatch_living_incoming_damage_v2(
+                &mut host,
+                &mods,
+                entity,
+                "minecraft:zombie",
+                "minecraft:player_attack",
+                7,
+                Some([0.0, 0.0, source_z]),
+                [0.0; 3],
+                [0.0, 0.0, 1.0],
+                Some(&weapon),
+                &mut amount,
+                &mut canceled,
+            );
+            assert_eq!((amount, canceled), (expected, canceled_expected));
+            assert_eq!(host.lines.len(), usize::from(expected == 12.0));
+        }
+        let mut amount = 4.0;
+        let mut canceled = false;
+        dispatch_living_incoming_damage(
+            &mods,
+            1,
+            "minecraft:zombie",
+            "minecraft:player_attack",
+            7,
+            7,
+            &mut amount,
+            &mut canceled,
+        );
+        assert_eq!((amount, canceled), (4.0, false));
     }
 
     #[test]
@@ -1384,6 +1559,72 @@ mod tests {
         assert_eq!(stand.items[0], Some(awkward));
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
+
+    /// Keeps the cod: reads the catch, sets the rod's damage, and cancels a
+    /// catch with cod in it.
+    struct CodKeeper;
+
+    impl Hooks for CodKeeper {
+        fn item_fished(&self, _host: &mut dyn Host, event: &mut ItemFishedEvent<'_>) -> Flow {
+            event.rod_damage = 4;
+            let cod = event
+                .fished
+                .drops
+                .iter()
+                .any(|s| &*s.item == "minecraft:cod");
+            if cod { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+
+    /// Fails the test if a mod after a cancel is asked.
+    struct Unreached;
+
+    impl Hooks for Unreached {
+        fn item_fished(&self, _host: &mut dyn Host, _event: &mut ItemFishedEvent<'_>) -> Flow {
+            panic!("asked after a cancel");
+        }
+    }
+
+    /// `ItemFishedEvent`: a mod reads the catch and sets the rod's damage,
+    /// which stays whether or not it cancels; a cancel stops later mods.
+    #[test]
+    fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        let mut host = Reader {
+            block: "minecraft:water",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper), Box::new(Unreached)];
+        let ask = |host: &mut Reader, item: &str| {
+            let drops = [ItemStack::new(item, 1)];
+            let fished = NativeItemFished {
+                hook: 9,
+                position: [0.5, 62.0, 0.5],
+                drops: &drops,
+            };
+            let (mut rod_damage, mut cancel) = (1, false);
+            dispatch_item_fished(host, &mods, 7, 3, &fished, &mut rod_damage, &mut cancel);
+            (rod_damage, cancel)
+        };
+        assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper)];
+        let drops = [ItemStack::new("minecraft:salmon", 1)];
+        let fished = NativeItemFished {
+            hook: 9,
+            position: [0.5, 62.0, 0.5],
+            drops: &drops,
+        };
+        let (mut rod_damage, mut cancel) = (2, false);
+        dispatch_item_fished(
+            &mut host,
+            &mods,
+            7,
+            3,
+            &fished,
+            &mut rod_damage,
+            &mut cancel,
+        );
+        assert_eq!((rod_damage, cancel), (4, false));
     }
 
     /// Records what `player_brewed_potion` told it.

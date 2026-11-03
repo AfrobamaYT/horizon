@@ -446,11 +446,17 @@ impl Game<'_> {
                 } else {
                     horizon_client::enchant::level_value(&e["knockback_multiplier"], *level)
                 };
-                bursts.push((radius, knockback));
+                // ExplodeEffect.attribute_to_user: the wielder is the source.
+                bursts.push((radius, knockback, e["attribute_to_user"] == true));
             }
         }
-        for (radius, knockback) in bursts {
-            let _ = self.wind_burst(feet, radius, knockback, false, false);
+        let wielder = self.own_entity_id() as u32;
+        for (radius, knockback, attributed) in bursts {
+            let cause = super::wind::BurstCause {
+                source: attributed.then_some(wielder),
+                owner: attributed.then_some(wielder),
+            };
+            let _ = self.wind_burst(feet, radius, knockback, false, false, cause);
         }
     }
     /// Thorns on worn armor when the mob `attacker` hits the player: the
