@@ -2885,6 +2885,19 @@ impl Mob {
         if amount < 0.0 {
             amount = 0.0;
         }
+        // LivingEntity.applyItemBlocking: no mob raises a blocking item, but a native
+        // mod may block for it.
+        let blocked = if amount > 0.0 {
+            crate::health::shield_block(
+                crate::health::Hurting::Mob(self, &source),
+                amount,
+                crate::health::no_block(amount),
+            )
+            .map_or(0.0, |b| b.blocked_damage)
+        } else {
+            0.0
+        };
+        amount -= blocked;
         // #damages_helmet: falling anvils, blocks and stalactites.
         if matches!(
             source.kind,
@@ -3020,7 +3033,12 @@ impl Mob {
         if drops::is_animal(self.species()) {
             self.extra.in_love = 0;
         }
-        self.last_damage = Some((source, i64::from(self.age)));
+        // A hit blocked whole is not a success: vanilla records the source and runs the
+        // effects' `onMobHurt` only for a success.
+        let success = blocked <= 0.0 || amount > 0.0;
+        if success {
+            self.last_damage = Some((source, i64::from(self.age)));
+        }
         if let Some(who) = source.attacker {
             self.ai.last_hurt_by = Some(who);
             self.ai.last_hurt_by_time = self.age as i32;
@@ -3028,9 +3046,10 @@ impl Mob {
                 self.ai.last_hurt_by_player = 100;
             }
         }
-        // dealDefaultKnockback, unless the damage type is tagged no_knockback;
-        // a source without a position knocks in a random direction.
-        if knock && !source.no_knockback() {
+        // dealDefaultKnockback, unless the damage type is tagged no_knockback or
+        // the hit was blocked whole; a source without a position knocks in a
+        // random direction.
+        if knock && !source.no_knockback() && !(blocked > 0.0 && amount <= 0.0) {
             // dealDefaultKnockback: a projectile knocks the way it travelled
             // (`calculateHorizontalHurtKnockbackDirection`), else from the source's position.
             let (dx, dz) = match self.projectile_motion {
@@ -3079,7 +3098,7 @@ impl Mob {
             self.outbox
                 .push(MobEvent::Sound("entity.iron_golem.damage", at, 1.0, 1.0));
         }
-        if self.has_effect("minecraft:infested") {
+        if success && self.has_effect("minecraft:infested") {
             self.outbox.push(MobEvent::Infested { mob: self.id });
         }
         // Squid.hurtServer: a squid hurt after a living entity hit it squirts ink.
@@ -3095,7 +3114,7 @@ impl Mob {
         if self.species() == Species::GlowSquid {
             aquatic::hurt_server(self);
         }
-        true
+        success
     }
     /// A splash or cloud's harming effect on this mob: the potion's
     /// `indirect_magic` is in `#witch_resistant_to`, so a witch takes 15%.
