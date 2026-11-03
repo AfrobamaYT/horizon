@@ -51,14 +51,18 @@ impl Game<'_> {
         self.native_set_item_entity(self.dim.id(), item.entity().id(), stack)
     }
 
-    /// The signed pickup delay; the legacy internal infinite-delay sentinel
-    /// may exceed the vanilla i32 range. API @API:item_entity_refs@.
-    pub(super) fn native_item_entity_pickup_delay(&self, item: ItemEntityRef) -> Option<i64> {
-        Some(
-            self.dropped
-                .get(self.native_item_entity_index(item)?)?
-                .pickup_delay,
-        )
+    /// The signed pickup delay; the legacy infinite sentinel reads as vanilla's
+    /// 32767. None also covers a stored value outside i32. API @API:item_entity_refs@.
+    pub(super) fn native_item_entity_pickup_delay(&self, item: ItemEntityRef) -> Option<i32> {
+        let delay = self
+            .dropped
+            .get(self.native_item_entity_index(item)?)?
+            .pickup_delay;
+        if delay == i64::from(u32::MAX) {
+            Some(i32::from(i16::MAX))
+        } else {
+            i32::try_from(delay).ok()
+        }
     }
 
     /// `ItemEntity.setPickUpDelay`. API @API:item_entity_refs@.
@@ -178,7 +182,10 @@ mod tests {
             assert_eq!(item.pickup_delay(game), Some(-7));
             assert!(item.set_default_pickup_delay(game));
             assert_eq!(item.pickup_delay(game), Some(10));
+            game.dropped[0].pickup_delay = i64::from(u32::MAX);
+            assert_eq!(item.pickup_delay(game), Some(32767));
             assert!(item.set_never_pickup(game));
+            assert_eq!(game.dropped[0].pickup_delay, 32767);
             assert_eq!(item.pickup_delay(game), Some(32767));
             assert!(item.set_no_pickup_delay(game));
             assert_eq!(item.pickup_delay(game), Some(0));
