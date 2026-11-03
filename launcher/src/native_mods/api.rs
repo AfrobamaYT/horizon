@@ -1,16 +1,7 @@
 //! The launcher's generated executable for trait mods.
-use super::{Bundle, MANIFEST};
+use super::Bundle;
 use std::fs;
 use std::path::Path;
-
-/// Match horizon-mixins crate IDs before using them as folder names.
-pub(super) fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 100
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
 
 pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -20,39 +11,6 @@ pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
 fn write(path: &Path, value: &toml::Table) -> Result<(), String> {
     let text = toml::to_string(value).map_err(|e| format!("{}: {e}", path.display()))?;
     fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Remove launcher-only tables from the incoming copy before horizon-mixins reads it.
-pub(super) fn strip(bundle: &Bundle) -> Result<(), String> {
-    let path = bundle.dir.join(MANIFEST);
-    let mut manifest = read(&path)?;
-    let api = manifest.remove("api");
-    let dependencies = manifest.remove("dependencies");
-    if api.is_some() || dependencies.is_some() {
-        write(&path, &manifest)?;
-    }
-    Ok(())
-}
-
-/// Read and validate the trait package folder at the manifest boundary.
-pub(super) fn folder(dir: &Path) -> Result<String, String> {
-    let manifest = dir.join(MANIFEST);
-    let folder = horizon_mods::index::native::RUST;
-    let relative = Path::new(folder);
-    let source = dir.join(relative);
-    let root = dir
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", dir.display()))?;
-    let resolved = source
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", source.display()))?;
-    if !resolved.starts_with(&root) || !resolved.join("Cargo.toml").is_file() {
-        return Err(format!(
-            "{}: [api] path must be a folder in the bundle with Cargo.toml",
-            manifest.display()
-        ));
-    }
-    Ok(folder.to_owned())
 }
 
 pub(super) const PACKAGE: &str = "horizon-native-game";
@@ -74,11 +32,6 @@ fn main_rs(template: &str, ids: &[&str]) -> String {
     template.replace("/* MOD_ENTRIES */", &entries)
 }
 
-/// API objects in the same order as the generated executable's mod list.
-pub(super) fn with_api(mods: &[Bundle]) -> impl Iterator<Item = &Bundle> {
-    mods.iter().filter(|m| m.api.is_some())
-}
-
 /// Add API packages and the generated executable to the fresh staged workspace.
 pub(super) fn stage(
     stage: &Path,
@@ -86,12 +39,7 @@ pub(super) fn stage(
     declared: &[Vec<super::dependencies::Dependency>],
     resolution: &super::dependencies::Resolution,
 ) -> Result<bool, String> {
-    let mods: Vec<_> = resolution
-        .order
-        .iter()
-        .map(|&i| (i, &bundles[i]))
-        .filter(|(_, b)| b.api.is_some())
-        .collect();
+    let mods: Vec<_> = resolution.order.iter().map(|&i| (i, &bundles[i])).collect();
     if mods.is_empty() {
         return Ok(false);
     }
@@ -100,17 +48,14 @@ pub(super) fn stage(
     })?;
     let mut packages = std::collections::HashMap::new();
     for (_, bundle) in &mods {
-        let path = bundle
-            .dir
-            .join(bundle.api.as_ref().expect("filtered"))
-            .join("Cargo.toml");
+        let path = bundle.dir.join("Cargo.toml");
         let manifest = read(&path)?;
         let name = manifest
             .get("package")
             .and_then(|p| p.get("name"))
             .and_then(toml::Value::as_str)
             .ok_or_else(|| format!("{}: missing package name", path.display()))?;
-        packages.insert(bundle.id.as_str(), name.to_owned());
+        packages.insert(bundle.manifest.id.as_str(), name.to_owned());
     }
     let mut deps = toml::Table::new();
     for name in ["horizon-client", "horizon-threads", "horizon-mods"] {
@@ -126,18 +71,12 @@ pub(super) fn stage(
     }
     let mut members = Vec::new();
     for (i, (index, bundle)) in mods.iter().enumerate() {
-        let relative = format!("native-api/{}", bundle.id);
+        let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
-        let source = bundle.dir.join(bundle.api.as_ref().expect("filtered"));
-        super::sync(&source, &dest)?;
+        super::copy_bundle(bundle, &dest)?;
         let path = dest.join("Cargo.toml");
         let mut manifest = read(&path)?;
-        let package = manifest
-            .get("package")
-            .and_then(|p| p.get("name"))
-            .and_then(toml::Value::as_str)
-            .ok_or_else(|| format!("{}: missing package name", path.display()))?
-            .to_owned();
+        let package = packages[bundle.manifest.id.as_str()].clone();
         let dependencies = manifest
             .get_mut("dependencies")
             .and_then(toml::Value::as_table_mut)
@@ -172,7 +111,7 @@ pub(super) fn stage(
                 package: packages.get(dependency.id.as_str()).map(String::as_str),
             })
             .collect();
-        let enabled = super::dependencies::rewrite(&bundle.id, &mut manifest, &targets)
+        let enabled = super::dependencies::rewrite(&bundle.manifest.id, &mut manifest, &targets)
             .map_err(|e| e.to_string())?;
         write(&path, &manifest)?;
         let mut dep = toml::Table::new();
@@ -238,7 +177,10 @@ pub(super) fn stage(
         )])),
     );
     write(&game.join("Cargo.toml"), &manifest)?;
-    let ids: Vec<_> = mods.iter().map(|(_, bundle)| bundle.id.as_str()).collect();
+    let ids: Vec<_> = mods
+        .iter()
+        .map(|(_, bundle)| bundle.manifest.id.as_str())
+        .collect();
     fs::write(game.join("src/main.rs"), main_rs(&template, &ids)).map_err(|e| e.to_string())?;
     let root = stage.join("Cargo.toml");
     let mut workspace = read(&root)?;
@@ -257,55 +199,30 @@ pub(super) fn stage(
 mod tests {
     use super::*;
 
-    fn fixture(manifest: &str) -> std::path::PathBuf {
+    fn fixture() -> std::path::PathBuf {
         let name = std::thread::current().name().unwrap().replace(':', "-");
         let dir = super::super::tests::dir(&name);
-        fs::create_dir_all(dir.join("rust/src")).unwrap();
-        fs::write(dir.join(MANIFEST), manifest).unwrap();
-        fs::write(dir.join("rust/Cargo.toml"), "[package]\nname = 'example-mod'\nversion = '0.1.0'\nedition = '2024'\n[dependencies]\nhorizon-client = '0.1'\n").unwrap();
-        fs::write(dir.join("rust/src/lib.rs"), "").unwrap();
+        super::super::tests::write_bundle(&dir, "example", "");
+        fs::write(dir.join("Cargo.toml"), "[package]\nname='example-mod'\nversion='9.0.0'\nedition='2024'\n[dependencies]\nhorizon-client='0.1'\n").unwrap();
         dir
     }
 
     #[test]
-    fn validates_the_api_folder() {
-        for (path, valid) in [
-            ("rust", true),
-            ("missing", false),
-            ("../engine", false),
-            ("/engine", false),
-        ] {
-            let dir = fixture(&format!(
-                "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = {path:?}\n"
-            ));
-            assert_eq!(super::super::bundle(&dir, None).is_ok(), valid, "{path}");
-            fs::remove_dir_all(dir).unwrap();
-        }
-    }
-
-    #[test]
-    fn rejects_an_entry_override() {
-        let dir = fixture(
-            "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\nentry = 'other'\n",
-        );
-        assert!(super::super::bundle(&dir, None)
-            .unwrap_err()
-            .contains("accepts only path"));
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn removes_only_the_api_table_for_mixins() {
-        let dir = fixture(
-            "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n[dependencies]\nbase = '^1'\n[[injection]]\nid = 'test'\n",
-        );
-        let bundle = super::super::bundle(&dir, None).unwrap();
-        assert!(bundle.mixins_content);
-        strip(&bundle).unwrap();
-        let value = read(&dir.join(MANIFEST)).unwrap();
+    fn generates_only_tool_contract_tables_without_mutating_package() {
+        let dir = fixture();
+        let path = dir.join(horizon_mods::manifest::MANIFEST);
+        let text = fs::read_to_string(&path).unwrap()
+            + "[[native.injection]]\nid='test'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n";
+        fs::write(&path, &text).unwrap();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+        assert!(bundle.needs_mixins());
+        super::super::package::tool_manifest(&bundle).unwrap();
+        let value = read(&dir.join(super::super::MANIFEST)).unwrap();
         assert!(!value.contains_key("api"));
-        assert!(!value.contains_key("dependencies"));
+        assert!(!value.contains_key("native"));
         assert!(value.contains_key("injection"));
+        assert_eq!(value["mod"]["id"].as_str(), Some("example"));
+        assert_eq!(fs::read_to_string(path).unwrap(), text);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -331,9 +248,10 @@ mod tests {
 
     #[test]
     fn stages_api_without_a_dependency_cycle() {
-        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n");
-        let bundle = super::super::bundle(&dir, None).unwrap();
-        let stage_dir = dir.join("workspace");
+        let dir = fixture();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+        let stage_dir = dir.with_extension("workspace");
+        let _ = fs::remove_dir_all(&stage_dir);
         fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
         fs::write(stage_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         fs::write(
@@ -406,7 +324,7 @@ mod tests {
         let main = || fs::read_to_string(stage_dir.join(GAME).join("src/main.rs")).unwrap();
         assert!(main().contains(r#""example" => mod_0::hooks,"#));
         fs::write(stage_dir.join("crates/horizon-client/Cargo.toml"), "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n").unwrap();
-        let bundle = super::super::bundle(&dir, None).unwrap();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap();
         assert!(main().contains(r#""example" => mod_0::hooks,"#));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
@@ -419,14 +337,15 @@ mod tests {
 
     #[test]
     fn named_source_without_an_entry_template_is_refused_before_staging() {
-        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n");
-        let stage_dir = dir.join("workspace");
+        let dir = fixture();
+        let stage_dir = dir.with_extension("workspace");
+        let _ = fs::remove_dir_all(&stage_dir);
         let source = stage_dir.join("crates/horizon-client/src");
         fs::create_dir_all(&source).unwrap();
         let resolution = super::super::dependencies::Resolution { order: vec![0] };
         for text in ["", "pub struct ModEntry { id: &'static str }"] {
             fs::write(source.join("mod_api.rs"), text).unwrap();
-            let bundle = super::super::bundle(&dir, None).unwrap();
+            let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
             let error = stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap_err();
             assert!(error.contains("Update Horizon and rebuild"), "{error}");
             assert!(!stage_dir.join(GAME).exists());
@@ -444,9 +363,9 @@ mod tests {
 
     #[test]
     fn api_only_skips_mixins() {
-        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n");
-        let bundle = super::super::bundle(&dir, None).unwrap();
-        assert!(!bundle.mixins_content);
+        let dir = fixture();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+        assert!(!bundle.needs_mixins());
         fs::remove_dir_all(dir).unwrap();
     }
 }

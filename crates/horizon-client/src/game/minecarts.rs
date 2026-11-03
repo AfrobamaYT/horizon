@@ -1150,6 +1150,16 @@ impl Game<'_> {
         }
         let v = c.velocity;
         self.move_cart(c, v);
+        // Entity.move's last step: soul sand and honey slow a derailed cart.
+        // The rail paths set the track's velocity again after their move, so
+        // the factor changes nothing there (measured on a rail over soul sand).
+        let factor = crate::motion::block_speed_factor_at(
+            &self.world,
+            &self.motion.blocks,
+            c.position,
+            None,
+        );
+        c.velocity = horizon_world::entity_move::scale_by_block_speed(c.velocity, factor);
         // `comeOffTrack` moves the cart and keeps the delta the move resolved
         // (then scales it by the air drag), so a cart an obstacle stopped here
         // is not moving any more and `MinecartTNT.tick` does not detonate it -
@@ -2028,10 +2038,11 @@ impl Game<'_> {
                 if sneaking || self.riding.is_some() || self.ridden_by_guest(id) || has_mob {
                     return false;
                 }
-                if !self.native_may_board(id) {
-                    return true;
-                }
-                self.riding = Some(id);
+                self.start_riding_target(
+                    super::commands::Target::Player,
+                    super::commands::Target::Cart(id),
+                    false,
+                );
             }
             // AbstractMinecartContainer.interact: no sneak check.
             CartKind::Chest | CartKind::Hopper => self.open_cart_container(i),

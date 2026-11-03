@@ -51,6 +51,36 @@ pub fn check_path(name: &str) -> Result<(), String> {
 /// A vanilla identifier, `minecraft:path`.
 /// `Identifier.isValidNamespace` and `isValidPath` on an id with both parts
 /// given: `[a-z0-9_.-]`, and `/` in the path too.
+/// The shared resource namespace fence for folders and native archives.
+pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), String> {
+    let mut parts = name.splitn(3, '/');
+    let (top, namespace, rest) = (
+        parts.next().unwrap_or(""),
+        parts.next().unwrap_or(""),
+        parts.next().unwrap_or(""),
+    );
+    let id = manifest.id.as_str();
+    let own = namespace == id;
+    let owned = own || manifest.namespaces.iter().any(|n| n == namespace);
+    // Vanilla's own files stay vanilla's; a mod may only add to its
+    // tags and atlases, and to the convention tags mods share.
+    let shared = matches!(namespace, "minecraft" | "c");
+    let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
+    let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
+    if !allowed {
+        return Err(format!(
+            "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
+        ));
+    }
+    if !own && top == "data" && rest.starts_with("horizon/") {
+        return Err(format!(
+            "{name}: blocks, items, mob effects, entity types and menu types are declared in data/{id}/horizon/"
+        ));
+    }
+
+    Ok(())
+}
+
 fn namespaced_id(id: &str) -> bool {
     let ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b);
     id.split_once(':').is_some_and(|(namespace, path)| {
@@ -725,22 +755,7 @@ impl Content {
                 parts.next().unwrap_or(""),
             );
             let own = namespace == id;
-            let owned = own || manifest.namespaces.iter().any(|n| n == namespace);
-            // Vanilla's own files stay vanilla's; a mod may only add to its
-            // tags and atlases, and to the convention tags mods share.
-            let shared = matches!(namespace, "minecraft" | "c");
-            let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
-            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
-            if !allowed {
-                return Err(format!(
-                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
-                ));
-            }
-            if !own && top == "data" && rest.starts_with("horizon/") {
-                return Err(format!(
-                    "{name}: blocks, items, mob effects, entity types and menu types are declared in data/{id}/horizon/"
-                ));
-            }
+            check_namespace(name, manifest)?;
             let Some(decl) = (own && top == "data")
                 .then(|| rest.strip_prefix("horizon/"))
                 .flatten()
@@ -878,10 +893,7 @@ impl Content {
         for (fluid, name) in fluids {
             let file: FluidFile =
                 serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
-            if file.sprite.as_deref().is_some_and(|s| {
-                !s.split_once(':')
-                    .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty())
-            }) {
+            if file.sprite.as_deref().is_some_and(|s| !namespaced_id(s)) {
                 return Err(format!(
                     "{name}: sprite is an atlas sprite id (namespace:path)"
                 ));
@@ -2009,6 +2021,12 @@ capabilities = ["registries"]
         let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", br#"{"sprite":"steam"}"#)];
         let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
         assert!(e.contains("sprite"), "{e}");
+        for sprite in ["ruby:has space", "Ruby:steam", "ruby:"] {
+            let json = format!(r#"{{"sprite":"{sprite}"}}"#);
+            let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", json.as_bytes())];
+            let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
+            assert!(e.contains("sprite"), "{sprite}: {e}");
+        }
     }
 
     #[test]

@@ -522,7 +522,7 @@ pub(super) struct Remote {
     /// only replace the remembered state; then the block takes it.
     predictions: HashMap<[i32; 3], (i32, i32)>,
     /// Open container: (window id, menu name).
-    pub(super) menu: Option<(i32, String)>,
+    pub(super) menu: ClientMenu,
     /// The crafting result slot of the open menu as the server last set it
     /// (`CraftingMenu.slotChangedCraftingGrid`): the client never computes it.
     pub(super) craft_result: Option<ItemStack>,
@@ -1035,7 +1035,7 @@ impl Game<'_> {
             level_load: horizon_client::level_loading::LevelLoadTracker::new(0),
             sent_info: info,
             predictions: HashMap::new(),
-            menu: None,
+            menu: ClientMenu::default(),
             craft_result: None,
             menu_title: None,
             state_id: 0,
@@ -4069,7 +4069,7 @@ impl Game<'_> {
                 if p.event == 55
                     && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
-                    std::mem::swap(&mut m.extra.main_hand, &mut m.extra.off_hand);
+                    m.extra.swap_hands();
                 }
                 // LivingEntity.handleEntityEvent 47 to 52, 65 and 68: an
                 // equipped item broke (onEquippedItemBroken).
@@ -6593,23 +6593,23 @@ impl Game<'_> {
                 // AvatarRenderer.getArmPose: the used item's BLOCK animation
                 // (an item with `blocks_attacks`) raises the arm.
                 let used = if m.extra.using_off_hand {
-                    &m.extra.off_hand
+                    m.extra.off_hand_id()
                 } else {
-                    &m.extra.main_hand
+                    m.extra.main_hand_id()
                 };
                 m.extra.blocking = m.extra.using_item > 0
                     && used
-                        .as_ref()
                         .and_then(|i| world_items!(self).get(i))
                         .is_some_and(|i| i.blocks_attacks.is_some());
             }
             if m.extra.using_item > 0 {
                 if player {
                     let item = if m.extra.using_off_hand {
-                        m.extra.off_hand.clone()
+                        m.extra.slot_stack(horizon_items::equipment::OFFHAND)
                     } else {
-                        m.extra.main_hand.clone()
-                    };
+                        m.extra.slot_stack(horizon_items::equipment::MAINHAND)
+                    }
+                    .map(|s| s.item.clone());
                     if let Some(item) = item {
                         let eye = m.eye_height();
                         let at = [m.position.x, m.position.y, m.position.z];
@@ -6989,7 +6989,7 @@ impl Game<'_> {
             // A server's open menu takes clicks, which it applies itself: what
             // this client predicts for them isn't an edit to send (it would
             // overwrite the server's stacks whenever the prediction is wrong).
-            let in_menu = r.menu.is_some();
+            let in_menu = r.menu.as_ref().is_some();
             let stacks = creative_sync_stacks(&self.inventory, &self.offhand, &self.armor);
             for (i, stack) in stacks.into_iter().enumerate() {
                 if stack != r.synced[i] {
@@ -9216,7 +9216,7 @@ impl Game<'_> {
     /// The server's open menu: its window id and menu type (0, "inventory"
     /// when none is open).
     pub(super) fn remote_menu(&self) -> (i32, String) {
-        match self.remote.as_ref().and_then(|r| r.menu.clone()) {
+        match self.remote.as_ref().and_then(|r| r.menu.as_ref().cloned()) {
             Some((id, name)) => (id, name),
             None => (0, "inventory".to_owned()),
         }
@@ -9407,6 +9407,14 @@ impl Game<'_> {
         self.send(S::ContainerClose(play::ContainerClose { container: id }));
         self.remote_close_local();
     }
+    fn remote_reject_container(&mut self, container: i32) {
+        self.remote_close_local();
+        if self.screen == Screen::Inventory {
+            self.screen = Screen::Playing;
+            self.capture(true);
+        }
+        self.send(S::ContainerClose(play::ContainerClose { container }));
+    }
     fn remote_close_local(&mut self) {
         // `Gui.setScreen` clears the focus of the screen it takes down: the
         // container's keyboard focus must not outlive it (a Tab bound to the
@@ -9414,7 +9422,7 @@ impl Game<'_> {
         self.pad_clear_focus();
         self.recipe_ui.reset_screen();
         if let Some(r) = self.remote.as_mut() {
-            r.menu = None;
+            r.menu.set(None);
             r.menu_title = None;
             r.craft_result = None;
         }
@@ -9444,7 +9452,8 @@ impl Game<'_> {
         text: horizon_client::text::Text,
     ) {
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((container, "minecraft:merchant".to_owned()));
+            r.menu
+                .set(Some((container, "minecraft:merchant".to_owned())));
             r.menu_title = Some(text);
         }
         let session = horizon_client::merchant::Session::new(Vec::new(), true);
@@ -9515,7 +9524,7 @@ impl Game<'_> {
         if menu == "minecraft:lectern" {
             // LecternScreen: the book and page come in the menu's content and data.
             if let Some(r) = self.remote.as_mut() {
-                r.menu = Some((p.container, menu));
+                r.menu.set(Some((p.container, menu)));
             }
             self.remote_open_lectern(target.unwrap_or_default());
             return;
@@ -9589,9 +9598,7 @@ impl Game<'_> {
             ))),
             _ => {
                 // Unsupported menu: tell the server we closed it.
-                self.send(S::ContainerClose(play::ContainerClose {
-                    container: p.container,
-                }));
+                self.remote_reject_container(p.container);
                 self.chat_line(
                     horizon_client::text::Text::literal(format!(
                         "(Horizon cannot show {menu} screens yet)"
@@ -9603,7 +9610,7 @@ impl Game<'_> {
         };
         let title = menu_title(&p.title);
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((p.container, menu.clone()));
+            r.menu.set(Some((p.container, menu.clone())));
             r.menu_title = Some(title);
         }
         self.craft_size = if menu == "minecraft:crafting" { 3 } else { 2 };
@@ -9628,7 +9635,7 @@ impl Game<'_> {
                 self.world.block_entities.remove(&key);
                 self.container = None;
                 if let Some(r) = self.remote.as_mut() {
-                    r.menu = None;
+                    r.menu.set(None);
                     r.menu_title = None;
                 }
                 self.send(S::ContainerClose(play::ContainerClose {
@@ -9645,13 +9652,12 @@ impl Game<'_> {
     fn remote_open_mount(&mut self, p: play::MountScreenOpen) {
         let columns = usize::try_from(p.columns).unwrap_or(0).min(5);
         if !self.open_remote_mount_menu(p.entity as u32, columns) {
-            self.send(S::ContainerClose(play::ContainerClose {
-                container: p.container,
-            }));
+            self.remote_reject_container(p.container);
             return;
         }
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((p.container, format!("{MOUNT_MENU}{columns}")));
+            r.menu
+                .set(Some((p.container, format!("{MOUNT_MENU}{columns}"))));
             r.menu_title = None;
         }
     }
@@ -9953,14 +9959,14 @@ impl Game<'_> {
                 .filter(|m| r.level_players.contains_key(&(m.id as i32)))
                 .map(|m| {
                     let e = &m.extra;
-                    let armor = [&e.head, &e.chest, &e.legs, &e.feet].map(|s| s.as_deref());
+                    let armor = horizon_items::equipment::ARMOR.map(|slot| e.slot_id(slot));
                     serde_json::json!({
                         "id": m.id,
                         "swinging": m.ai.swinging,
                         "using": m.extra.using_item,
                         "armor": armor,
-                        "main_hand": e.main_hand.as_deref(),
-                        "off_hand": e.off_hand.as_deref(),
+                        "main_hand": e.main_hand_id(),
+                        "off_hand": e.off_hand_id(),
                     })
                 })
                 .collect::<Vec<_>>(),
@@ -10487,6 +10493,26 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
     }
 }
 
+#[derive(Default)]
+pub(super) struct ClientMenu {
+    current: Option<(i32, String)>,
+    pub(super) generation: u64,
+}
+
+impl ClientMenu {
+    pub(super) fn set(&mut self, current: Option<(i32, String)>) {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("menu generation exhausted");
+        self.current = current;
+    }
+
+    pub(super) fn as_ref(&self) -> Option<&(i32, String)> {
+        self.current.as_ref()
+    }
+}
+
 impl Remote {
     /// `PlayerInfo.getMessageValidator().updateAndValidate(message)` for `message.sender`.
     fn validate_chat(
@@ -10655,6 +10681,112 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn rejected_menu_packets_retire_the_previous_client_menu() {
+        use super::super::{
+            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+        };
+        use horizon_client::items::ItemStack;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{Clientbound as C, MountScreenOpen, OpenScreen},
+        };
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuTest").unwrap();
+            for packet in [
+                C::OpenScreen(OpenScreen {
+                    container: 7,
+                    menu: -1,
+                    title: Tag::String("unsupported".into()),
+                }),
+                C::MountScreenOpen(MountScreenOpen {
+                    container: 7,
+                    columns: 0,
+                    entity: i32::MAX,
+                }),
+            ] {
+                let remote = game.remote.as_mut().unwrap();
+                remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+                let generation = remote.menu.generation;
+                game.screen = Screen::Inventory;
+                game.carried = Some(ItemStack::new("minecraft:stone", 1));
+                game.handle_packet(packet).unwrap();
+                let remote = game.remote.as_ref().unwrap();
+                assert!(remote.menu.as_ref().is_none());
+                assert_ne!(remote.menu.generation, generation);
+                assert!(game.carried.is_none());
+                assert!(game.screen == Screen::Playing);
+            }
+        });
+    }
+
+    /// `LivingEntity.handleEntityEvent(55)` is `swapHandItems`: the whole
+    /// stacks trade hands, not just their ids.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_hand_swap_event_keeps_whole_stacks() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        use horizon_items::equipment::{MAINHAND, OFFHAND};
+        use horizon_protocol::packets::play::{Clientbound as C, EntityEvent};
+
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.damage = 40;
+            sword.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Biter".into()));
+            let mut shield = ItemStack::new("minecraft:shield", 1);
+            shield.damage = 12;
+            let mut mob = Mob::new(31, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            mob.extra.set_slot_stack(MAINHAND, Some(sword.clone()));
+            mob.extra.set_slot_stack(OFFHAND, Some(shield.clone()));
+            game.mobs.push(mob);
+            let swap = |game: &mut super::super::Game| {
+                game.handle_packet(C::EntityEvent(EntityEvent { id: 31, event: 55 }))
+                    .unwrap();
+            };
+            swap(game);
+            let m = game.mobs.iter().find(|m| m.id == 31).unwrap();
+            assert_eq!(m.extra.slot_stack(MAINHAND), Some(&shield));
+            assert_eq!(m.extra.slot_stack(OFFHAND), Some(&sword));
+            swap(game);
+            let m = game.mobs.iter().find(|m| m.id == 31).unwrap();
+            assert_eq!(m.extra.slot_stack(MAINHAND), Some(&sword));
+            assert_eq!(m.extra.slot_stack(OFFHAND), Some(&shield));
+        });
+    }
+
+    #[test]
+    fn client_menu_generation_changes_on_reused_window_ids() {
+        let mut menu = super::ClientMenu::default();
+        let inventory = menu.generation;
+        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
+        let first = menu.generation;
+        assert_ne!(inventory, first);
+        menu.set(None);
+        let closed = menu.generation;
+        assert_ne!(first, closed);
+        assert!(menu.as_ref().is_none());
+        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
+        assert_ne!(closed, menu.generation);
+        assert_ne!(first, menu.generation);
+        assert_eq!(menu.as_ref().map(|entry| entry.0), Some(7));
+        let before_replacement = menu.generation;
+        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
+        assert_ne!(before_replacement, menu.generation);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_epochs_follow_level_replacement_and_logout() {
         use super::super::{
             execution_role::ExecutionRole, native_entity_refs::tests::with_game,
@@ -10667,7 +10799,10 @@ mod tests {
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
-        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{Clientbound, Respawn, SpawnInfo},
+        };
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -10691,8 +10826,31 @@ mod tests {
             game.enter_remote_dimension(&spawn, false, Reason::Other);
             let joined = game.native_lifecycle.epoch().unwrap();
             let old = EntityRef::new(joined, 12);
-            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+            let open_generation = remote.menu.generation;
+            game.handle_packet(Clientbound::Respawn(Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
             assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+            let remote = game.remote.as_mut().unwrap();
+            assert!(remote.menu.as_ref().is_none());
+            assert_ne!(remote.menu.generation, open_generation);
+            let inventory_generation = remote.menu.generation;
+            game.handle_packet(Clientbound::Respawn(Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+            let remote = game.remote.as_mut().unwrap();
+            assert!(remote.menu.as_ref().is_none());
+            assert_ne!(remote.menu.generation, inventory_generation);
+            remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+            assert_ne!(remote.menu.generation, open_generation);
+            assert_ne!(remote.menu.generation, inventory_generation);
 
             // A different level key replaces the world even with the same
             // dimension type; IDs can be reused but old handles cannot.

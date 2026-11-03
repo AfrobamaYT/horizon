@@ -1,5 +1,5 @@
 //! Reusable, immutable mixin output. API packages are staged after this snapshot.
-use super::{Bundle, Profile, MANIFEST};
+use super::{Bundle, Profile};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -9,19 +9,6 @@ use std::{
 fn field(hash: &mut Sha256, bytes: &[u8]) {
     hash.update((bytes.len() as u64).to_le_bytes());
     hash.update(bytes);
-}
-
-/// Whether a manifest value names a path that overlaps the API package.
-fn overlaps_api(value: &toml::Value, root: &Path, api: &Path) -> bool {
-    match value {
-        toml::Value::String(s) => root
-            .join(s)
-            .canonicalize()
-            .is_ok_and(|p| p.starts_with(api) || api.starts_with(&p)),
-        toml::Value::Array(a) => a.iter().any(|v| overlaps_api(v, root, api)),
-        toml::Value::Table(t) => t.values().any(|v| overlaps_api(v, root, api)),
-        _ => false,
-    }
 }
 
 /// Hash all mixin inputs but not an API crate that mixins do not read.
@@ -34,7 +21,8 @@ pub(super) fn key(
     let mut hash = Sha256::new();
     for part in [
         // Bump when launcher generation or validation changes the snapshot's contents.
-        "trait-injection-v3",
+        "flat-trait-injection-v1",
+        super::STAGING,
         revision,
         mixins,
         // The Cargo profile: `Performance` and `Dev` stage the same source.
@@ -45,27 +33,18 @@ pub(super) fn key(
     }
     for bundle in mods {
         field(&mut hash, b"bundle");
-        field(&mut hash, bundle.id.as_bytes());
-        let api = bundle
-            .api
-            .as_ref()
-            .map(|p| bundle.dir.join(p).canonicalize())
-            .transpose()
-            .map_err(|e| e.to_string())?;
-        let manifest_path = bundle.dir.join(MANIFEST);
-        let mut manifest: toml::Table = fs::read_to_string(&manifest_path)
-            .map_err(|e| e.to_string())?
-            .parse()
-            .map_err(|e| format!("{}: {e}", manifest_path.display()))?;
-        // Mixins also reads data/ implicitly, without a manifest entry.
-        manifest.remove("api");
-        let data = toml::Value::String("data".into());
-        let manifest = toml::Value::Table(manifest);
-        let exclude = api.as_ref().filter(|a| {
-            !overlaps_api(&manifest, &bundle.dir, a) && !overlaps_api(&data, &bundle.dir, a)
-        });
+        field(&mut hash, bundle.manifest.id.as_bytes());
+        // Trait-only edits do not change the patched source. A raw source helper may
+        // include other crate files, so hash that crate conservatively when one is used.
+        let reads_source = bundle
+            .native()
+            .injection
+            .iter()
+            .any(|entry| entry.helper.is_some());
         for (name, path) in super::bundle_files(bundle)? {
-            if exclude.is_some_and(|a| path.starts_with(a)) {
+            if !reads_source
+                && (name == "Cargo.toml" || name == "build.rs" || name.starts_with("src/"))
+            {
                 continue;
             }
             field(&mut hash, b"file");

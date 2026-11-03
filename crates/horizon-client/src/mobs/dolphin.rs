@@ -483,7 +483,7 @@ impl Goal for PlayWithItems {
         0
     }
     fn can_use(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
-        m.extra.main_hand.is_some()
+        m.extra.main_hand_id().is_some()
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         drop_item(m, cx.events);
@@ -553,7 +553,7 @@ mod item_tests {
             "ahead at 0.3: {motion:?}"
         );
         assert_eq!(motion[1], 0.0, "level, so no climb");
-        assert!(m.extra.main_hand.is_none(), "the mouth is empty");
+        assert!(m.extra.main_hand_id().is_none(), "the mouth is empty");
     }
 }
 

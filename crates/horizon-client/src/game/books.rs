@@ -1044,7 +1044,7 @@ impl Game<'_> {
             return false;
         }
         if let Some(r) = self.remote.as_mut() {
-            r.menu = None;
+            r.menu.set(None);
             r.menu_title = None;
         }
         self.book = None;
