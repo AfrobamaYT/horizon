@@ -17,10 +17,10 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
-    NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
-    NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
+    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
+    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
+    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
+    NativeShake, PhantomSpawnResult, SleepProblem,
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
@@ -31,7 +31,7 @@ pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
-pub use crate::menu::StackedOnOther;
+pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
@@ -157,8 +157,9 @@ pub struct NativeLootDrops<'a> {
     /// sheep, a mooshroom, a snow golem or a bogged, a brush on an armadillo or
     /// a suspicious block, shears carving a pumpkin, picking sweet berries or
     /// cave vines, a hit taking an item frame or its item, or untying a lead
-    /// or cutting it with shears. `player` names them; `block` or `entity` says
-    /// what dropped them. API 100. A mob that a player killed while
+    /// or cutting it with shears. `player` names them, or is `None` when a
+    /// dispenser's shears sheared a mooshroom; `block` or `entity` says what
+    /// dropped them. API 100. A mob that a player killed while
     /// leashed drops its lead on its next tick as a call of its own (`entity`
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.
@@ -1311,8 +1312,7 @@ pub enum Flow {
 pub struct BlockHit {
     /// The point clicked, in world coordinates (`getLocation`).
     pub point: [f64; 3],
-    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`), the same
-    /// as the event's `face`.
+    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`).
     pub face: [i32; 3],
     /// The ray started inside the block's shape (`isInside`).
     pub inside: bool,
@@ -1323,6 +1323,74 @@ impl BlockHit {
             point,
             face,
             inside,
+        }
+    }
+}
+
+/// A player's right click on a block, for `right_click_block`
+/// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
+/// `useItemOn` starts, on the clicking client and on the server.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeBlockClick<'a> {
+    /// The side running the click (`getSide`).
+    pub side: LogicalSide,
+    /// The clicking player's level (`getLevel`).
+    pub dimension: LevelDimension,
+    /// The block clicked (`getPos`).
+    pub pos: [i32; 3],
+    /// Where it was clicked (`getHitVec`); `hit.face` is `getFace`.
+    pub hit: BlockHit,
+    /// The hand clicking (`getHand`) and what it holds (`getItemStack`).
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    /// The clicking player's UUID and entity id (`getEntity`).
+    pub player: u128,
+    pub player_entity_id: i32,
+}
+
+/// Vanilla's `InteractionResult`, as a hook answers it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeInteractionResult {
+    /// `SUCCESS`: the action is used and the hand swings on the clicking
+    /// client (`SwingSource.PREDICTED`).
+    Success,
+    /// `SUCCESS_SERVER`: the action is used and the server swings the hand.
+    SuccessServer,
+    /// `CONSUME`: the action is used, with no swing.
+    Consume,
+    /// `FAIL`: nothing happens and the click ends.
+    Fail,
+    /// `PASS`: nothing happens and the click goes on.
+    #[default]
+    Pass,
+    /// `TRY_WITH_EMPTY_HAND`: passes, as `PASS` does here.
+    TryWithEmptyHand,
+}
+impl NativeInteractionResult {
+    /// `consumesAction`: the click is used up.
+    pub fn consumes_action(self) -> bool {
+        matches!(self, Self::Success | Self::SuccessServer | Self::Consume)
+    }
+}
+
+/// NeoForge's `TriState`: force a part of an action off or on, or leave it
+/// to vanilla.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeTriState {
+    False,
+    #[default]
+    Default,
+    True,
+}
+impl NativeTriState {
+    /// Whether the part runs, `vanilla` deciding for `Default`.
+    pub fn or(self, vanilla: bool) -> bool {
+        match self {
+            Self::False => false,
+            Self::Default => vanilla,
+            Self::True => true,
         }
     }
 }
@@ -1419,15 +1487,16 @@ mod item_place;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
-pub use resource::{ItemResource, ResourceHandler};
+pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
-pub(crate) use part_table::{
-    Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
-    providers, resolve_parts,
-};
 pub use part_table::{
-    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
+    Attached, BlockEntityProviders, BlockProvider, ItemProvider, Parts, Registrar,
+    block_entity_providers,
+};
+pub(crate) use part_table::{
+    KnownIds, answered, ask_providers, install_parts, mark_game_thread, parts, place_provider,
+    providers, resolve_parts,
 };
 
 mod generated {
@@ -1568,6 +1637,48 @@ mod tests {
                 Flow::Continue
             }
         }
+    }
+
+    #[test]
+    fn conversion_post_reports_both_entities_once() {
+        struct Observer(Arc<Mutex<Vec<(u32, String, u32, String)>>>);
+        impl Hooks for Observer {
+            fn living_conversion_post(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut LivingConversionPostEvent<'_>,
+            ) {
+                self.0.lock().unwrap().push((
+                    event.entity,
+                    event.kind.to_owned(),
+                    event.converted,
+                    event.converted_kind.to_owned(),
+                ));
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        dispatch_living_conversion_post(
+            &mut host,
+            &mods,
+            12,
+            "minecraft:pig",
+            13,
+            "minecraft:zombified_piglin",
+        );
+        assert_eq!(
+            *observed.lock().unwrap(),
+            [(
+                12,
+                "minecraft:pig".into(),
+                13,
+                "minecraft:zombified_piglin".into()
+            )]
+        );
     }
 
     #[test]
@@ -1911,15 +2022,23 @@ mod tests {
         }
 
         fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
-            let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
-            if event.hand == Hand::Off
+            let click = event.click;
+            let top_half = click.hit.point[1] - f64::from(click.pos[1]) >= 0.5;
+            if click.hand == Hand::Off
                 && top_half
-                && event.player == 7
-                && event.player_entity_id == 41
-                && !event.hit.inside
+                && click.player == 7
+                && click.player_entity_id == 41
+                && !click.hit.inside
             {
+                *event.cancellation_result = NativeInteractionResult::Fail;
                 Flow::Cancel
             } else {
+                // A held stick never uses the block; an empty hand always does.
+                *event.use_block = if click.stack.is_some() {
+                    NativeTriState::False
+                } else {
+                    NativeTriState::True
+                };
                 Flow::Continue
             }
         }
@@ -1948,24 +2067,59 @@ mod tests {
         );
         assert!(!claimed);
         let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
-        for (hand, hit, expected) in [
-            (Hand::Off, top_hit(), true),
-            (Hand::Main, top_hit(), false),
-            (Hand::Off, low, false),
+        let held = stick();
+        for (hand, hit, stack, canceled, answer, use_block) in [
+            (
+                Hand::Off,
+                top_hit(),
+                None,
+                true,
+                NativeInteractionResult::Fail,
+                NativeTriState::Default,
+            ),
+            (
+                Hand::Main,
+                top_hit(),
+                Some(&held),
+                false,
+                NativeInteractionResult::Pass,
+                NativeTriState::False,
+            ),
+            (
+                Hand::Off,
+                low,
+                None,
+                false,
+                NativeInteractionResult::Pass,
+                NativeTriState::True,
+            ),
         ] {
-            let mut canceled = false;
+            let click = NativeBlockClick {
+                side: LogicalSide::Server,
+                dimension: LevelDimension::Overworld,
+                pos: [0; 3],
+                hit,
+                hand,
+                stack,
+                player: 7,
+                player_entity_id: 41,
+            };
+            let (mut block, mut item) = (NativeTriState::Default, NativeTriState::Default);
+            let (mut result, mut was_canceled) = (NativeInteractionResult::Pass, false);
             dispatch_right_click_block(
                 &mut host,
                 &mods,
-                [0; 3],
-                hit.face,
-                hand,
-                hit,
-                7,
-                41,
-                &mut canceled,
+                &click,
+                &mut block,
+                &mut item,
+                &mut result,
+                &mut was_canceled,
             );
-            assert_eq!(canceled, expected, "{hand:?} {hit:?}");
+            assert_eq!(
+                (was_canceled, result, block, item),
+                (canceled, answer, use_block, NativeTriState::Default),
+                "{hand:?} {hit:?}"
+            );
         }
     }
 

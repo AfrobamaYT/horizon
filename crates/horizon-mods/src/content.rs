@@ -3,13 +3,13 @@
 //! effects, entity types and menu types it declares in
 //! `data/<id>/horizon/{block,item,mob_effect,entity_type,menu}/`.
 //!
-//! Content is data, not code: nothing here runs in the sandbox. What a mod
+//! Content is data, not code: nothing here executes. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
 //! manifest lists), plus additions to vanilla tags and to the convention
 //! tags (`c`, which NeoForge and Fabric mods share). Paths are plain, files
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
-use crate::manifest::{Capability, MANIFEST, Manifest};
+use crate::manifest::Manifest;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -652,11 +652,6 @@ impl Content {
     /// Where content may go, and the declarations.
     fn check(&mut self, manifest: &Manifest, declared: &[String]) -> Result<(), String> {
         let id = manifest.id.as_str();
-        if !self.files.is_empty() && !manifest.capabilities.contains(&Capability::Registries) {
-            return Err(format!(
-                "has assets/ or data/ but not capability registries in {MANIFEST}"
-            ));
-        }
         let mut blocks = Vec::new();
         let mut items = Vec::new();
         let mut effects = Vec::new();
@@ -1207,7 +1202,7 @@ capabilities = ["registries"]
     fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
         let dir = scratch(name);
         let path = dir.join("m.hmod");
-        std::fs::write(&path, Package::write_files(manifest, None, files)?).unwrap();
+        std::fs::write(&path, Package::write_files(manifest, files)?).unwrap();
         let package = Package::read(&path);
         let content = package.and_then(|p| Content::read(&path, &p.manifest));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1393,11 +1388,7 @@ capabilities = ["registries"]
         let read = |declared: &[String]| {
             let dir = scratch("declared-remainder");
             let path = dir.join("m.hmod");
-            std::fs::write(
-                &path,
-                Package::write_files(MANIFEST_TEXT, None, files).unwrap(),
-            )
-            .unwrap();
+            std::fs::write(&path, Package::write_files(MANIFEST_TEXT, files).unwrap()).unwrap();
             let package = Package::read(&path).unwrap();
             let content = Content::read_declaring(&path, &package.manifest, declared);
             std::fs::remove_dir_all(&dir).unwrap();
@@ -1680,12 +1671,11 @@ capabilities = ["registries"]
     #[test]
     fn folder_mod_reads_the_same() {
         let dir = scratch("folder");
-        std::fs::write(dir.join(MANIFEST), MANIFEST_TEXT).unwrap();
+        std::fs::write(dir.join(crate::manifest::MANIFEST), MANIFEST_TEXT).unwrap();
         let block = dir.join("data/ruby/horizon/block");
         std::fs::create_dir_all(&block).unwrap();
         std::fs::write(block.join("ruby_block.json"), BLOCK).unwrap();
         let package = Package::read(&dir).unwrap();
-        assert!(package.wasm.is_none());
         let content = Content::read(&dir, &package.manifest).unwrap();
         assert_eq!(content.files, ["data/ruby/horizon/block/ruby_block.json"]);
         assert_eq!(content.file(&content.files[0]).unwrap(), BLOCK);
@@ -2074,32 +2064,6 @@ capabilities = ["registries"]
             Some("mods t_and_t and kaisyn both use the namespace kaisyn; turn one of them off")
         );
         assert_eq!(clash(("t_and_t", &t_and_t), ("ruby", &ruby)), None);
-    }
-
-    #[test]
-    fn content_needs_the_registries_capability() {
-        let code_only = MANIFEST_TEXT
-            .replace("api = \"0.2\"", "api = \"0.1\"")
-            .replace("capabilities = [\"registries\"]", "capabilities = []");
-        // No code and no registries: nothing to load.
-        let e = hmod("empty", &code_only, &[]).unwrap_err();
-        assert!(e.contains("mod.wasm: missing"), "{e}");
-        // Registries on API 0.1.
-        let old = MANIFEST_TEXT.replace("api = \"0.2\"", "api = \"0.1\"");
-        assert!(Manifest::parse(&old).unwrap_err().contains("needs api"));
-        // Content without the capability, in a mod with code.
-        let dir = scratch("no-cap");
-        let path = dir.join("m.hmod");
-        let files: &[(&str, &[u8])] = &[("assets/ruby/lang/en_us.json", b"{}")];
-        std::fs::write(
-            &path,
-            Package::write_files(&code_only, Some(b"\0asm"), files).unwrap(),
-        )
-        .unwrap();
-        let package = Package::read(&path).unwrap();
-        let e = Content::read(&path, &package.manifest).err().unwrap();
-        assert!(e.contains("not capability registries"), "{e}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
