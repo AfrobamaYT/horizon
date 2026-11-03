@@ -1,9 +1,9 @@
 //! A player's food and experience for native server mods, through a
 //! `PlayerRef` (docs/native-mods.md): the `FoodData` and `Player` reads the
-//! handle's `food()` doesn't give, and the writes. Reads return None and
-//! writes false for a stale handle, a player who isn't online here, and,
-//! inside another player's turn, for anyone but that player. Writes also
-//! refuse a dead player. What changes reaches the player's client as any
+//! handle's `food()` doesn't give, and the writes. Reads return None for a
+//! stale handle or a player who isn't online here, as `food()` does. Writes
+//! return false for those, for a dead player, and, inside another player's
+//! turn, for anyone but that player. What changes reaches the player's client as any
 //! change to their food or experience does.
 use super::Game;
 use horizon_client::entities::Experience;
