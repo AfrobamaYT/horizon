@@ -3409,13 +3409,16 @@ pub(crate) mod tests {
     }
     impl EnergyHandler for ModBattery {
         fn amount(&self, host: &mut dyn Host) -> u32 {
-            host.energy_amount(self.at).unwrap_or(0)
+            crate::mod_api::backend_of(host)
+                .and_then(|backend| backend.energy_amount(self.at))
+                .unwrap_or(0)
         }
         fn capacity(&self, host: &mut dyn Host) -> u32 {
-            host.energy_capacity(self.at)
+            crate::mod_api::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
         }
         fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
-            let went = host.energy_insert(self.at, amount, tx);
+            let went = crate::mod_api::backend_mut_of(host)
+                .map_or(0, |backend| backend.energy_insert(self.at, amount, tx));
             match self.lie {
                 Lie::TakesMore => went + 100,
                 Lie::GivesMore => went,
@@ -3426,7 +3429,9 @@ pub(crate) mod tests {
                 Lie::GivesMore => 100,
                 Lie::TakesMore => 0,
             };
-            host.energy_extract(self.at, amount + more, tx)
+            crate::mod_api::backend_mut_of(host).map_or(0, |backend| {
+                backend.energy_extract(self.at, amount + more, tx)
+            })
         }
     }
 
@@ -3449,9 +3454,6 @@ pub(crate) mod tests {
         }
     }
     impl Host for EnergyWorld {
-        fn level_in_place(&self, level: LevelRef) -> bool {
-            level == here()
-        }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
@@ -3460,6 +3462,17 @@ pub(crate) mod tests {
         }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
+        }
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
+        }
+    }
+    impl Backend for EnergyWorld {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
         }
         fn block_entity_kind(
             &self,
@@ -3473,6 +3486,8 @@ pub(crate) mod tests {
         fn energy_capacity(&self, _: BlockSide) -> u32 {
             1000
         }
+    }
+    impl BackendMut for EnergyWorld {
         fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
             let Some((held, limit)) = self.batteries.get_mut(&at.pos) else {
                 return 0;
@@ -3538,7 +3553,7 @@ pub(crate) mod tests {
                 let second = move_energy(host, &source, &tank, 200, tx)?;
                 Ok(first + second)
             });
-            let owner = mod_name(0);
+            let owner = "doubler".to_owned();
             assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
             assert_eq!(
                 world.amounts(&[SOURCE, OTHER, TANK]),
