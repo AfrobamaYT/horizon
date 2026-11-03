@@ -9450,7 +9450,9 @@ mod tests {
         const EMPTY: &str = "be_test:blank";
         const PLAIN: &str = "be_test:plain_banner";
         struct Press;
+        #[mod_api::horizon_part]
         impl BlockPart for Press {}
+        #[mod_api::horizon_part]
         impl BlockEntityPart for Press {
             fn block_entity(
                 &self,

@@ -2550,9 +2550,9 @@ pub use part_table::{
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook, has_scoped_hook,
-    install_parts,
-    mark_game_thread, parts, place_provider, providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
+    has_scoped_hook, install_parts, mark_game_thread, parts, place_provider, providers,
+    resolve_parts,
 };
 
 mod generated {

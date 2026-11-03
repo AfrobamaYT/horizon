@@ -60,6 +60,20 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
                 .into();
         }
     };
+    if part.is_some()
+        && let Some(item) = implementation
+            .items
+            .iter()
+            .find(|item| matches!(item, ImplItem::Macro(_)))
+    {
+        let ty = &implementation.self_ty;
+        return syn::Error::new_spanned(
+            item,
+            format!("macros in impl {trait_path} for {ty} are not supported by horizon_part; write hook methods explicitly", trait_path = quote!(#trait_path), ty = quote!(#ty)),
+        )
+        .into_compile_error()
+        .into();
+    }
     let mut methods = Vec::new();
     let mut cfgs = Vec::new();
     for item in &implementation.items {
@@ -101,6 +115,17 @@ pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 /// Mark a part implementation and derive the scoped hooks it overrides.
+///
+/// Hook methods must be written explicitly, not generated inside the impl:
+///
+/// ```compile_fail
+/// use horizon_mod_api_macros::horizon_part;
+/// trait BlockPart { fn tick(&self) {} }
+/// struct Block;
+/// macro_rules! hook { () => { fn tick(&self) {} }; }
+/// #[horizon_part]
+/// impl BlockPart for Block { hook!(); }
+/// ```
 #[proc_macro_attribute]
 pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), false)
