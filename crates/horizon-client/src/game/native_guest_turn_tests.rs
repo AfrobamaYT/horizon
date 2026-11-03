@@ -82,6 +82,51 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
     });
 }
 
+/// The body/saddle store and existing armor/offhand move with nested turns.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn nested_guest_turns_restore_each_equipment_store() {
+    use horizon_client::items::ItemStack;
+    use horizon_items::equipment::{BODY, SADDLE};
+
+    with_guests(|game| {
+        let stack = |id| Some(ItemStack::new(id, 1));
+        game.armor[0] = stack("minecraft:iron_helmet");
+        game.offhand = stack("minecraft:torch");
+        game.equipment[BODY] = stack("minecraft:iron_horse_armor");
+        for (conn, body, saddle) in [
+            (12, "minecraft:golden_horse_armor", "minecraft:saddle"),
+            (
+                13,
+                "minecraft:diamond_horse_armor",
+                "minecraft:leather_horse_armor",
+            ),
+        ] {
+            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
+            guest.equipment[BODY] = stack(body);
+            guest.equipment[SADDLE] = stack(saddle);
+        }
+        game.as_guest(12, |game| {
+            assert_eq!(game.equipment[BODY], stack("minecraft:golden_horse_armor"));
+            game.as_guest(13, |game| {
+                assert_eq!(game.equipment[BODY], stack("minecraft:diamond_horse_armor"));
+                game.equipment[SADDLE] = stack("minecraft:saddle");
+            })
+            .unwrap();
+            assert_eq!(game.equipment[BODY], stack("minecraft:golden_horse_armor"));
+            assert_eq!(game.equipment[SADDLE], stack("minecraft:saddle"));
+        })
+        .unwrap();
+        assert_eq!(game.armor[0], stack("minecraft:iron_helmet"));
+        assert_eq!(game.offhand, stack("minecraft:torch"));
+        assert_eq!(game.equipment[BODY], stack("minecraft:iron_horse_armor"));
+        assert_eq!(
+            game.lan.as_ref().unwrap().hub.guest(13).unwrap().equipment[SADDLE],
+            stack("minecraft:saddle")
+        );
+    });
+}
+
 /// A merchant's live session belongs to B even while A is acting.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
