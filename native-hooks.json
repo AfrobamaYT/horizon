@@ -153,10 +153,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_carried_stack", "side": "server"
     },
     {
-      "name": "set_block",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block", "side": "server"
-    },
-    {
       "name": "edit_blocks",
       "target": "horizon_client::game::native_world_edit::Game<'_>::native_edit_blocks", "side": "server"
     },
@@ -606,15 +602,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_key",
       "mod_api": {
         "contract": "listen"
-      }
-    },
-    {
-      "name": "wheel", "side": "client",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_wheel",
-      "mod_api": {
-        "contract": "cancel",
-        "out": "claimed"
       }
     },
     {
@@ -2936,16 +2923,6 @@
       }
     },
     {
-      "name": "game_event",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_game_event",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "hopper_inventory_search",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_hopper_inventory_search",
@@ -3502,26 +3479,6 @@
       }
     },
     {
-      "name": "world_game_rule_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_game_rule_change",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "player_advancement_criterion_grant",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_criterion_grant",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerAdvancementCriterionGrant)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "player_advancement_done",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
@@ -3664,17 +3621,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_elytra_boost",
       "neoforge": "none (NeoForge has no such event)",
       "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "player_exp_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_change",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerExpChangeEvent)",
-      "side": "server",
-      "cancellable": false,
       "mod_api": {
         "contract": "listen"
       }
@@ -4055,17 +4001,6 @@
       "side": "server",
       "mod_api": {
         "contract": "listen"
-      }
-    },
-    {
-      "name": "prepare_grindstone",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_grindstone",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "replace",
-        "out": "result"
       }
     },
     {

@@ -40,9 +40,11 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
+        pub(super) struct GameRuleActor<'a>(pub(super) &'a str);
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
         pub(super) struct NativeNoteBlockChange;
+        pub(super) struct NativeHandRender<'a>(pub &'a ());
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
@@ -92,6 +94,11 @@ mod tests {
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
         pub(super) struct NativeCommand;
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativeProgressType {
+            Grant,
+            Revoke,
+        }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
@@ -221,6 +228,42 @@ mod tests {
         _: &'static str,
     ) -> impl Iterator<Item = &'a P> {
         parts.iter().copied()
+    }
+    #[test]
+    fn advancement_progress_reports_grant_and_revoke_identity() {
+        struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
+        impl Hooks for Observer {
+            fn player_advancement_progress(
+                &self,
+                _: &mut dyn Host,
+                event: &mut PlayerAdvancementProgressEvent<'_>,
+            ) {
+                assert_eq!(event.player, 123);
+                assert_eq!(event.player_entity_id, 42);
+                assert_eq!(event.name, "Alex");
+                assert_eq!(event.advancement, "example:advancement");
+                assert_eq!(event.criterion, "criterion");
+                self.0.lock().unwrap().push(event.progress_type);
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Observer(observed.clone()))];
+        for progress_type in [NativeProgressType::Grant, NativeProgressType::Revoke] {
+            dispatch_player_advancement_progress(
+                &mut TestHost,
+                &mods,
+                123,
+                42,
+                "Alex",
+                "example:advancement",
+                "criterion",
+                progress_type,
+            );
+        }
+        assert_eq!(
+            *observed.lock().unwrap(),
+            vec![NativeProgressType::Grant, NativeProgressType::Revoke]
+        );
     }
     struct Mod {
         id: u32,

@@ -208,6 +208,7 @@ pub enum HostEvent {
 /// The criteria `CriteriaTriggers.TICK` granted one player.
 pub struct TickGrants {
     pub player: u128,
+    pub entity_id: i32,
     pub name: String,
     pub grants: Vec<super::advancements::CriterionGrant>,
 }
@@ -2859,11 +2860,14 @@ impl Hub {
                     g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                 }
                 g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
-                self.native_advancement_grants.push(TickGrants {
-                    player: g.uuid,
-                    name: g.name.clone(),
-                    grants: first.granted,
-                });
+                if self.mods_loaded {
+                    self.native_advancement_grants.push(TickGrants {
+                        player: g.uuid,
+                        entity_id: g.entity_id,
+                        name: g.name.clone(),
+                        grants: first.granted,
+                    });
+                }
                 g.advancements_visible = sync.advancements.visibility(&g.advancements);
                 g.advancements_changed.clear();
             } else {
@@ -3027,11 +3031,14 @@ impl Hub {
             ) {
                 g.send(&raw(ids::RECIPE_BOOK_ADD, add));
             }
-            self.native_advancement_grants.push(TickGrants {
-                player: g.uuid,
-                name: g.name.clone(),
-                grants: granted,
-            });
+            if self.mods_loaded {
+                self.native_advancement_grants.push(TickGrants {
+                    player: g.uuid,
+                    entity_id: g.entity_id,
+                    name: g.name.clone(),
+                    grants: granted,
+                });
+            }
         }
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));
