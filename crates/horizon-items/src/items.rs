@@ -374,6 +374,9 @@ pub struct Items {
     /// Block tag name (without '#') -> member block names.
     pub block_tags: HashMap<String, HashSet<String>>,
     pub item_tags: HashMap<String, HashSet<String>>,
+    /// Fluid tag name -> member fluid names (`minecraft:water` holds `minecraft:water` and
+    /// `minecraft:flowing_water`).
+    pub fluid_tags: HashMap<String, HashSet<String>>,
     /// Item tags in vanilla's order (`TagLoader`: file order, nested tags in
     /// place, first occurrence kept), the order `TagSlotDisplay` resolves.
     pub item_tag_order: HashMap<String, Vec<String>>,
@@ -948,6 +951,7 @@ impl Items {
             registry_order,
             block_tags: load_tags(root, "block", overlay)?,
             item_tags: load_tags(root, "item", overlay)?,
+            fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
             loot,
             songs: load_songs(root),
@@ -983,6 +987,7 @@ impl Items {
             registry_order: Vec::new(),
             block_tags: load_tags(root, "block", overlay)?,
             item_tags: load_tags(root, "item", overlay)?,
+            fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
             loot: Default::default(),
             songs: HashMap::new(),
@@ -998,6 +1003,7 @@ impl Items {
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: HashMap::new(),
+            fluid_tags: HashMap::new(),
             item_tag_order: item_tags
                 .iter()
                 .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
@@ -1012,6 +1018,10 @@ impl Items {
     /// Whether `block` is in the block tag `tag` (`minecraft:fire`, no `#`).
     pub fn block_in_tag(&self, tag: &str, block: &str) -> bool {
         self.block_tags.get(tag).is_some_and(|s| s.contains(block))
+    }
+    /// Whether `fluid` is in the fluid tag `tag` (`minecraft:water`, no `#`): `FluidState.is(TagKey)`.
+    pub fn fluid_in_tag(&self, tag: &str, fluid: &str) -> bool {
+        self.fluid_tags.get(tag).is_some_and(|s| s.contains(fluid))
     }
     /// Whether an item belongs to a loaded item tag.
     pub fn item_in_tag(&self, tag: &str, item: &str) -> bool {
