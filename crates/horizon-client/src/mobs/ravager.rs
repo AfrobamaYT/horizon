@@ -129,15 +129,15 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             }
         }
         if m.on_ground {
-            if crate::native_client_hooks::has_mods() {
-                // The jump follows only when the game broke no leaves.
+            if !destroyed {
+                m.ai.jumping = true;
+            } else if w.ask_mods {
+                // The jump follows only when the game kept every leaf.
                 events.push(MobEvent::IfBroke {
                     mob: m.id,
                     effects: Vec::new(),
                     otherwise: vec![MobEvent::Jump { mob: m.id }],
                 });
-            } else if !destroyed {
-                m.ai.jumping = true;
             }
         }
     }
@@ -345,4 +345,74 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     p.xrot("left_hind_leg", (pos * 0.6662 + PI).mcos() * leg);
     p.xrot("right_front_leg", (pos * 0.6662 + PI).mcos() * leg);
     p.xrot("left_front_leg", (pos * 0.6662).mcos() * leg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    #[test]
+    fn modded_collision_without_leaves_jumps_without_if_broke() {
+        assert!(super::super::world::with_test_world(&[], |world, types| {
+            let mut world = world.clone();
+            world.ask_mods = true;
+            let mut mob = Mob::new(
+                1,
+                Arc::new(types.types.get("minecraft:ravager").unwrap().clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            mob.horizontal_collision = true;
+            mob.on_ground = true;
+            let mut events = Vec::new();
+            ai_step(&mut mob, &world, &mut events);
+            assert!(mob.ai.jumping);
+            assert!(!events.iter().any(|e| matches!(e, MobEvent::IfBroke { .. })));
+        }));
+    }
+
+    #[test]
+    fn modded_collision_with_leaves_defers_jump() {
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            world
+                .chunks
+                .insert((0, 0), Arc::new(crate::chunk::Chunk::empty(0, 0)));
+            world
+                .set(
+                    0,
+                    64,
+                    0,
+                    registry.default_state("minecraft:oak_leaves").unwrap(),
+                )
+                .unwrap();
+        };
+        assert!(super::super::world::with_built_test_world(
+            &[],
+            build,
+            |world, types| {
+                let mut world = world.clone();
+                world.ask_mods = true;
+                let mut mob = Mob::new(
+                    1,
+                    Arc::new(types.types.get("minecraft:ravager").unwrap().clone()),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                mob.horizontal_collision = true;
+                mob.on_ground = true;
+                let mut events = Vec::new();
+                ai_step(&mut mob, &world, &mut events);
+                assert!(!mob.ai.jumping);
+                assert!(
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::BreakBlock { .. }))
+                );
+                assert!(events.iter().any(|e| matches!(e, MobEvent::IfBroke { otherwise, .. } if matches!(otherwise.as_slice(), [MobEvent::Jump { mob: 1 }]))));
+            }
+        ));
+    }
 }
