@@ -290,7 +290,9 @@ impl Game<'_> {
     pub(super) fn drop_after_commit(&mut self, uuid: u128, stack: ItemStack) {
         match self.transactions.last_mut() {
             Some(level) => level.after.push(After::PlayerDrop(uuid, stack)),
-            None => self.drop_plain(stack),
+            None => {
+                self.drop_plain(stack);
+            }
         }
     }
     /// Sets the block at `pos` to `state`. In a transaction, stored only, keeping the old
@@ -324,7 +326,9 @@ impl Game<'_> {
             }
             After::PlayerDrop(uuid, stack) => {
                 // A player who left meanwhile drops nothing; their inventory had changed for good.
-                self.native_as_player(uuid, |g| g.drop_plain(stack));
+                self.native_as_player(uuid, |g| {
+                    g.drop_plain(stack);
+                });
             }
             After::Spawn(at, stack) => self.spawn_item(stack, at, [0.0; 3], 10),
             After::Emptied(id) => {
@@ -573,7 +577,11 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed() {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let Some(root) = super::super::native_entity_refs::tests::declared_part_root(
+            "game::transactions::tests::an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed",
+        ) else {
+            return;
+        };
         let settings = Settings::default();
         let loaded = load_resources(
             root.clone(),
@@ -941,7 +949,6 @@ mod tests {
         // A hopper moving into a mod's part: a truthful part (a pipe into the chest east of
         // it) takes the item; a part answering more than it was offered has its move undone,
         // so the item stays in the hopper and the chest it wrote is as it was.
-        let _mods = horizon_client::mod_api::part_tests::game_thread();
         let hopper = horizon_world::chunk::BlockState {
             name: "minecraft:hopper".to_owned(),
             properties: [("facing".to_owned(), "east".to_owned())]
@@ -957,18 +964,18 @@ mod tests {
             .unwrap();
         assert!(game.native_level_set_block(level, [0, 64, 4], hopper, flags));
         assert!(game.native_level_set_block(level, [2, 64, 4], chest, flags));
-        let part = |id: &str| {
-            BlockEntity::Mod(Box::new(horizon_client::containers::ModBlockEntity::new(
-                id.into(),
-                Default::default(),
-            )))
-        };
         let slots = |game: &Game<'_>, pos| match game.world.block_entities.get(&pos) {
             Some(BlockEntity::Chest(items)) => items.iter().flatten().map(|s| s.count).sum::<u32>(),
             _ => panic!("no container at {pos:?}"),
         };
         for (id, moved) in [("test:pipe", 1), ("test:greedy", 0)] {
-            game.world.block_entities.insert((1, 64, 4), part(id));
+            let state = game.pack.assets.registry.default_state(id).unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [1, 64, 4],
+                state,
+                horizon_client::mod_api::NativeBlockUpdateFlags::NONE
+            ));
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))
             {
                 items[0] = Some(sticks(2));
@@ -992,7 +999,7 @@ mod mod_capability_tests {
     use crate::mod_api::ServerHost;
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
-    use horizon_client::mod_api::part_tests::{CHEMICALS, ChemTank, Chemical, game_thread};
+    use horizon_client::mod_api::part_tests::{CHEMICALS, ChemTank, Chemical};
     use horizon_client::mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};
     use horizon_world::nbt::{Compound, Tag};
     use std::sync::Arc;
@@ -1004,19 +1011,12 @@ mod mod_capability_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_chemical_moves_between_two_mods_parts_and_an_abort_puts_it_back() {
-        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-        if run_fresh_cases(
+        use super::super::native_entity_refs::tests::{declared_part_root, with_game_at};
+        let Some(root) = declared_part_root(
             "game::transactions::mod_capability_tests::a_chemical_moves_between_two_mods_parts_and_an_abort_puts_it_back",
-            "HORIZON_CHEMICAL_DECLARATIONS_CHILD",
-            &["valid"],
-        ) {
+        ) else {
             return;
-        }
-        let _mods = game_thread();
-        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root =
-            super::super::mods::content_root(&base, &Default::default(), &Default::default())
-                .unwrap();
+        };
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world

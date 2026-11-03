@@ -1,12 +1,14 @@
 //! Living entities for native server mods, through a `LivingRef`
 //! (docs/native-mods.md, "Entity and level handles", #7387): the equipment
-//! of mobs, players and armor stands. Reads return `None`, writes false, for
-//! a stale handle or on a client.
+//! of mobs, players and armor stands, throwing a stack, and whether a mob
+//! is tamed. Reads return `None`, writes false, for a stale handle or on a
+//! client.
 use super::Game;
 use super::commands::{Target, items::Owner};
 use crate::mobs::Who;
 use horizon_client::first_person::Hand;
 use horizon_client::items::ItemStack;
+use horizon_client::mobs::Mob;
 use horizon_client::mod_api::{EntityRef, EquipmentSlot, LivingRef};
 
 /// A player's armour slots (`armor`, head first) by equipment slot.
@@ -493,6 +495,103 @@ impl Game<'_> {
             at,
             ctx,
         );
+    }
+    /// Throws `stack`, which the mod holds, from the eyes (`LivingEntity.drop`,
+    /// `ServerPlayer.drop`), never through a slot: along the view with a
+    /// main-hand swing, or with `throw_randomly` scattered with none, as a
+    /// death's drops. `include_thrower_name` sets the thrower, and a player's
+    /// throw along the view then counts in its stats and fires `item_dropped`.
+    /// None for an empty stack, a stand or the dragon, a stale handle, or an
+    /// item a mod kept out. API @API:living_refs@.
+    pub(super) fn native_living_drop(
+        &mut self,
+        living: LivingRef,
+        stack: ItemStack,
+        throw_randomly: bool,
+        include_thrower_name: bool,
+    ) -> Option<EntityRef> {
+        let target = self.native_living_target(living)?;
+        let stack = equipment_stack(Some(stack))?;
+        let mut item = None;
+        match target {
+            Target::Mob(id) => {
+                if !throw_randomly {
+                    self.native_living_swing(living, Hand::Main, true);
+                }
+                item = self.native_mob_drop(id, stack, throw_randomly, include_thrower_name);
+            }
+            Target::Player | Target::Guest(_) => {
+                self.native_as_living_player(target, |g| {
+                    item = g.native_player_drop(stack, throw_randomly, include_thrower_name);
+                });
+            }
+            _ => {}
+        }
+        Some(EntityRef::new(living.entity().epoch(), item?))
+    }
+    /// `TamableAnimal.isTame`, `AbstractHorse.isTamed`: None for a kind that
+    /// can't be tamed or a stale handle. API @API:living_refs@.
+    pub(super) fn native_living_is_tamed(&self, living: LivingRef) -> Option<bool> {
+        self.native_tamable(living).map(|m| m.extra.tame)
+    }
+    /// The owner's UUID (`OwnableEntity.getOwnerReference`): None for a wild
+    /// mob, a kind that can't be tamed, or a stale handle. API @API:living_refs@.
+    pub(super) fn native_living_owner(&self, living: LivingRef) -> Option<u128> {
+        let owner = self.native_tamable(living)?.extra.owner?;
+        Some(horizon_client::lan::playerdata::ints_uuid(owner))
+    }
+    /// The mob a handle names, when it is a `TamableAnimal` or an `AbstractHorse`.
+    fn native_tamable(&self, living: LivingRef) -> Option<&Mob> {
+        let Target::Mob(id) = self.native_living_target(living)? else {
+            return None;
+        };
+        self.mobs.iter().find(|m| m.id == id && m.is_tamable())
+    }
+    /// Runs `f` as the player `target` names: the one acting now, or a guest
+    /// in the level in place through `as_guest` (`native_as_player`). False
+    /// when it didn't run.
+    fn native_as_living_player(&mut self, target: Target, f: impl FnOnce(&mut Self)) -> bool {
+        let uuid = match target {
+            Target::Guest(conn) => match self.command_guest(conn) {
+                Some(g) if g.dimension == self.dim.id() => g.uuid,
+                _ => return false,
+            },
+            _ => self.native_acting_id(),
+        };
+        self.native_as_player(uuid, f)
+    }
+    /// The acting player's half of `native_living_drop`: the id of the item entity.
+    fn native_player_drop(
+        &mut self,
+        stack: ItemStack,
+        randomly: bool,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
+        if randomly {
+            let eye = self.eye_position()?;
+            self.throw_from_eyes(stack, eye, true, thrown_from_hand)
+        } else if thrown_from_hand {
+            self.player_drop(stack)
+        } else {
+            self.drop_plain(stack)
+        }
+    }
+    /// A mob's half of `native_living_drop`: the id of the item entity.
+    fn native_mob_drop(
+        &mut self,
+        id: u32,
+        stack: ItemStack,
+        randomly: bool,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
+        let m = self.mobs.iter_mut().find(|m| m.id == id)?;
+        let v = horizon_client::entities::drop_motion(&mut m.random, m.yaw, m.head_pitch, randomly);
+        let at = [m.position.x, m.eye_y() - f64::from(0.3f32), m.position.z];
+        let thrower = thrown_from_hand.then(|| self.uuid_for(id));
+        self.spawn_item(stack, at, v, 40);
+        let item = self.just_spawned_item()?;
+        item.thrower = thrower;
+        Some(item.id)
     }
 }
 
@@ -1234,6 +1333,159 @@ mod tests {
             at(EquipmentSlot::Saddle).as_deref(),
             Some("minecraft:saddle")
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_wolf_throws_and_reads_tamed_and_owner() {
+        use super::super::{
+            Audio, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+        };
+        use horizon_client::{chunk::Chunk, entities::ArmorStand, mod_api::NativeAuthority};
+        use horizon_core::geometry::Vec3;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        let chunk = std::sync::Arc::new(Chunk::empty(0, 0));
+        game.world.chunks.insert((0, 0), chunk);
+        game.native_lifecycle
+            .begin_open(NativeAuthority::IntegratedServer);
+        let id = game
+            .spawn_mob("minecraft:wolf", [2.5, 64.0, 2.5], true)
+            .unwrap();
+        let wolf = game.native_living(game.native_entity(id).unwrap()).unwrap();
+        assert_eq!(game.native_living_is_tamed(wolf), Some(false));
+        assert_eq!(game.native_living_owner(wolf), None);
+        let m = game.mobs.iter_mut().find(|m| m.id == id).unwrap();
+        (m.extra.tame, m.extra.owner) = (true, Some([1, 2, 3, 4]));
+        assert_eq!(game.native_living_is_tamed(wolf), Some(true));
+        assert_eq!(
+            game.native_living_owner(wolf),
+            Some(0x1_0000_0002_0000_0003_0000_0004)
+        );
+
+        let bone = ItemStack::new("minecraft:bone", 1);
+        assert!(
+            game.native_living_drop(wolf, ItemStack::new("minecraft:air", 1), false, true)
+                .is_none()
+        );
+        let item = game
+            .native_living_drop(wolf, bone.clone(), false, true)
+            .unwrap();
+        assert_eq!(
+            game.native_entity_kind(item).as_deref(),
+            Some("minecraft:item")
+        );
+        let wolf_uuid = game.uuid_for(id);
+        let thrown = game.dropped.last().unwrap();
+        let eye = game.mobs.iter().find(|m| m.id == id).unwrap().eye_y();
+        assert_eq!(thrown.position.y, eye - f64::from(0.3f32));
+        assert_eq!((thrown.pickup_delay, thrown.thrower), (40, Some(wolf_uuid)));
+        // The drop swung: one tick on, that swing goes on.
+        let m = game.mobs.iter_mut().find(|m| m.id == id).unwrap();
+        assert!(m.ai.swinging);
+        m.ai.swing_time = 1;
+        assert!(!game.native_living_swing(wolf, Hand::Main, true));
+        let scattered = game.native_living_drop(wolf, bone, true, false).unwrap();
+        assert_ne!(scattered, item);
+        assert_eq!(game.dropped.last().unwrap().velocity.y, f64::from(0.2f32));
+        assert_eq!(game.dropped.last().unwrap().thrower, None);
+
+        game.armor_stands
+            .push(ArmorStand::new(90, Vec3::new(0.5, 64.0, 0.5), 0.0));
+        let stand = game.native_living(game.native_entity(90).unwrap()).unwrap();
+        assert_eq!(game.native_living_is_tamed(stand), None);
+        let apple = ItemStack::new("minecraft:apple", 1);
+        assert!(
+            game.native_living_drop(stand, apple, false, false)
+                .is_none()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_mod_drop_matches_drop_key_motion() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.yaw = 37.0;
+            game.pitch = -21.0;
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            let item = ItemStack::new("minecraft:apple", 1);
+            game.inventory[game.selected] = Some(item.clone());
+            game.drop_held(true);
+            let key_velocity = game.dropped.last().unwrap().velocity;
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(42);
+            let player = game.native_living(game.native_entity(42).unwrap()).unwrap();
+            let id = game
+                .native_living_drop(player, item, false, true)
+                .unwrap()
+                .id();
+            let mod_velocity = game
+                .dropped
+                .iter()
+                .find(|entity| entity.id == id)
+                .unwrap()
+                .velocity;
+            assert_eq!(key_velocity, mod_velocity);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_stand_drop_does_not_swing() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.armor_stands
+                .push(horizon_client::entities::ArmorStand::new(
+                    90,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                ));
+            let stand = game.native_living(game.native_entity(90).unwrap()).unwrap();
+            let before = game.swings_started;
+            assert!(
+                game.native_living_drop(stand, ItemStack::new("minecraft:apple", 1), false, false)
+                    .is_none()
+            );
+            assert_eq!(game.swings_started, before);
+            assert!(game.dropped.is_empty());
+        });
     }
 
     #[test]
