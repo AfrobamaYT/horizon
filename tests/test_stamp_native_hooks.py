@@ -95,12 +95,14 @@ class StampTests(unittest.TestCase):
         fragment = json.loads(path.read_text())
         contract = {"kind": "listen", "receiver": "game"}
         fragment["hooks"][0].update(
-            {"side": "server", "cancellable": True, "mod_api": contract, "other": 1})
+            {"neoforge": "SomeEvent", "fabric": ["SomeCallback", "OtherCallback"], "paper": "SomePaperEvent",
+             "side": "server", "cancellable": True, "mod_api": contract, "other": 1})
         path.write_text(json.dumps(fragment))
         self.assertFalse(stamp.stamp(False))
         hooks = json.loads((self.root / stamp.CATALOG).read_text())["hooks"]
         self.assertEqual(hooks, [{"name": "served", "version": 1, "target": "target::served",
-                                  "side": "server", "cancellable": True, "mod_api": contract}])
+                                  "neoforge": "SomeEvent", "fabric": ["SomeCallback", "OtherCallback"],
+                                  "paper": "SomePaperEvent", "side": "server", "cancellable": True, "mod_api": contract}])
 
     def test_markers_are_stamped_in_hand_written_api_types(self):
         self.git("add", ".")

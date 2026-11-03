@@ -54,7 +54,7 @@ def stamp(check):
             names.add(hook["name"])
             entry = {"name": hook["name"], "version": 1, "target": hook["target"]}
             # The catalog's optional facts about a hook travel with it.
-            entry.update({k: hook[k] for k in ("neoforge", "side", "cancellable", "mod_api") if k in hook})
+            entry.update({k: hook[k] for k in ("neoforge", "fabric", "paper", "side", "cancellable", "mod_api") if k in hook})
             catalog["hooks"].append(entry)
         for helper in fragment.get("helpers", []):
             if helper["name"] in helper_names:

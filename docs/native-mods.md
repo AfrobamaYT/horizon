@@ -1869,6 +1869,16 @@ Install and prepare the base release in that scratch launcher home first, then t
 - A list of every native build, to delete the ones no instance needs.
 - A prebuilt horizon-mixins from its CI instead of building it on the player's computer.
 
+## Counterparts
+
+A hook's optional `neoforge` catalog key names its NeoForge 26.3 counterpart;
+that counterpart sets the hook's name, side and cancellation contract. The optional
+`fabric` and `paper` keys name Fabric and Paper events at the same moment with the
+same contract. Each key is a string or a list of strings; omission is valid. One
+hook serves each matching moment; near matches with different timing, side or
+cancellation are gaps, not counterparts. A hook with none of these keys names the
+mod mixin or use it replaces in its design or PR.
+
 ## Named hook catalog (draft)
 
 `native-hooks.json` maps stable hook names and contract versions to the current
