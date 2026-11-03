@@ -880,8 +880,14 @@ struct Hit {
     pos: [i32; 3],
     face: [i32; 3],
     point: [f64; 3],
+    /// The ray started inside the block (`BlockHitResult.isInside`).
+    inside: bool,
 }
 impl Hit {
+    /// The hit as block-use hooks hear it (`UseOnContext`'s hit result).
+    fn native(&self) -> horizon_client::mod_api::BlockHit {
+        horizon_client::mod_api::BlockHit::new(self.point, self.face, self.inside)
+    }
     /// The block the clicked face leads to (`pos.relative(direction)`).
     fn beside(&self) -> [i32; 3] {
         [
@@ -3578,6 +3584,8 @@ impl Game<'_> {
                             origin[1] + dir[1] * t,
                             origin[2] + dir[2] * t,
                         ],
+                        // No face entered: the eyes are in the shape.
+                        inside: face == [0; 3],
                     });
                 }
             }
@@ -6360,7 +6368,20 @@ impl Game<'_> {
         // canceled click does nothing (a guest's block is sent back).
         if let Some(hit) = block_hit {
             let mut canceled = false;
-            self.native_right_click_block(hit.pos, hit.face, &mut canceled);
+            let player = self.native_acting_id();
+            let player_entity_id = self
+                .lan_acting_entity
+                .map_or_else(|| self.own_entity_id(), |id| id as i32);
+            let (hand, at) = (self.hand, hit.native());
+            self.native_right_click_block(
+                hit.pos,
+                hit.face,
+                hand,
+                at,
+                player,
+                player_entity_id,
+                &mut canceled,
+            );
             if canceled {
                 // Nothing was used, so nothing consumed the action.
                 self.use_failed = true;
@@ -6573,7 +6594,21 @@ impl Game<'_> {
         let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut claimed = false;
         if let Some(hit) = block_hit {
-            self.native_use_item_on(&stack, hit.pos, hit.face, &mut claimed);
+            let player = self.native_acting_id();
+            let player_entity_id = self
+                .lan_acting_entity
+                .map_or_else(|| self.own_entity_id(), |id| id as i32);
+            let (hand, at) = (self.hand, hit.native());
+            self.native_use_item_on(
+                &stack,
+                hit.pos,
+                hit.face,
+                hand,
+                at,
+                player,
+                player_entity_id,
+                &mut claimed,
+            );
         }
         if !claimed && !on_block {
             self.native_use_item(&stack, &mut claimed);
@@ -12721,6 +12756,7 @@ impl Game<'_> {
                             pos: b,
                             face,
                             point: p,
+                            inside: false,
                         });
                     }
                     let above = self.world.block(b[0], b[1] + 1, b[2]);
@@ -12732,6 +12768,8 @@ impl Game<'_> {
                             pos: b,
                             face,
                             point,
+                            // A start in the shape hits at the eyes.
+                            inside: point == origin,
                         });
                     }
                 } else if !first && !self.res.facts().is_air(state) && f.fluid == Fluid::None {
@@ -12739,6 +12777,7 @@ impl Game<'_> {
                         pos: b,
                         face,
                         point: p,
+                        inside: false,
                     });
                 }
                 last = b;

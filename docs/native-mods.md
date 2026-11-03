@@ -377,7 +377,8 @@ An injection names `hook` and `hook_version` instead of `target`, and horizon-mi
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A
 contract is never changed, its `mod_api` entry (the trait method's contract) included: an incompatible change adds
-a version. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
+a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
+binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
@@ -2319,10 +2320,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (0 to 20) or set `cancel` to leave it at `from`, saturation included. It is heard once for what one turn of the
   player changed, not for the full bar a respawn gives, the food a player joins with, or the host of a LAN world. The
   player's state is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- **`native_right_click_block(pos, face, canceled)`** (API 21): a player's right click on a block, before the block's
-  own use and the item's (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both,
-  without a swing; the player's client is sent the block back. With `native_destroy_block` it keeps players out of
-  claimed land.
+- **`native_right_click_block(pos, face, hand, hit, player, player_entity_id, canceled)`** (API 21; `hand`, `hit`, `player` and `player_entity_id` since
+  API @API:block_use_context@): a player's right click on a block, before the block's own use and the item's
+  (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both, without a swing; the
+  player's client is sent the block back. With `native_destroy_block` it keeps players out of claimed land.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_move(dimension, piston,
   direction, push, destroy, canceled)`** (API 22, on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.
@@ -3141,7 +3142,8 @@ impl Host for Stone {
 }
 let mods = [Box::new(MyMod) as Box<dyn Hooks>];
 let mut claimed = false;
-dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], &mut claimed);
+let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
+dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], Hand::Main, hit, 7, &mut claimed);
 assert!(claimed);
 ```
 

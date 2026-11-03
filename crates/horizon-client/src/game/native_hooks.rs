@@ -886,7 +886,7 @@ use horizon_client::mod_api::{
     NativeLifecycleContext, NativePlayerFood, NativeServerPlayer, RecipeBookCategory,
     ServerTickPhase, ToolUse, WorldPhase,
 };
-use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
+use horizon_client::mod_api::{AttachmentResult, Attachments, BlockHit, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeLootDrops, NativeMinimap, NativeMod,
     NativePanelEvent, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
@@ -6399,15 +6399,33 @@ impl Game<'_> {
     /// `ItemStack.useOn` starts. Set `claimed` to take the use: the hand
     /// swings and neither the item's `useOn` nor its `use` runs.
     /// Server-side, for every player of the world (the helpers read the
-    /// acting one); an item on cooldown is never used. API 13.
+    /// acting one); an item on cooldown is never used. API 13. `hand`, `hit`
+    /// (`UseOnContext.getClickLocation`, `getClickedFace`, `isInside`) and
+    /// `player` (the acting player's UUID) and `player_entity_id` (the server's
+    /// entity id), since API @API:block_use_context@.
     pub(super) fn native_use_item_on(
         &mut self,
         stack: &ItemStack,
         pos: [i32; 3],
         face: [i32; 3],
+        hand: Hand,
+        hit: BlockHit,
+        player: u128,
+        player_entity_id: i32,
         claimed: &mut bool,
     ) {
-        mod_api::dispatch_use_item_on(self, mod_api::mods(), stack, pos, face, claimed);
+        mod_api::dispatch_use_item_on(
+            self,
+            mod_api::mods(),
+            stack,
+            pos,
+            face,
+            hand,
+            hit,
+            player,
+            player_entity_id,
+            claimed,
+        );
     }
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
     /// including vanilla items, on the authoritative server (not droppers).
@@ -6732,14 +6750,31 @@ impl Game<'_> {
     /// `native_use_item_on`. Set `canceled` to stop the click: neither the
     /// block nor the item acts, the hand doesn't swing, and a guest sees the
     /// block as it is. Server-side, for every player of the world
-    /// (`native_acting_player` says who), once per hand. API 21.
+    /// (`native_acting_player` says who), once per hand. API 21. `hand`,
+    /// `hit` (the packet's `BlockHitResult`), `player` (the acting player's
+    /// UUID) and `player_entity_id` (the server's entity id), since API
+    /// @API:block_use_context@.
     pub(super) fn native_right_click_block(
         &mut self,
         pos: [i32; 3],
         face: [i32; 3],
+        hand: Hand,
+        hit: BlockHit,
+        player: u128,
+        player_entity_id: i32,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_right_click_block(self, mod_api::mods(), pos, face, canceled);
+        mod_api::dispatch_right_click_block(
+            self,
+            mod_api::mods(),
+            pos,
+            face,
+            hand,
+            hit,
+            player,
+            player_entity_id,
+            canceled,
+        );
     }
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
     /// about to break `blocks`: `ServerExplosion.explode` with its `toBlow`,

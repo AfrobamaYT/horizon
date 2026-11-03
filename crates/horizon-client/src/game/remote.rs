@@ -7462,7 +7462,7 @@ impl Game<'_> {
                 pos: hit.pos,
                 face: i32::from(face_direction(hit.face)),
                 cursor,
-                inside: hit.face == [0; 3],
+                inside: hit.inside,
                 world_border: false,
                 sequence: seq,
             }));

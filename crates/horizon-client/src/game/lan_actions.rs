@@ -2069,6 +2069,7 @@ impl Game<'_> {
                         f64::from(p.pos[1]) + f64::from(p.cursor[1]),
                         f64::from(p.pos[2]) + f64::from(p.cursor[2]),
                     ],
+                    inside: p.inside,
                 };
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
                 // handleUseItemOn: above or below the world nothing is used and
@@ -3729,6 +3730,7 @@ impl Game<'_> {
                                 f64::from(pos[1]) + 0.5,
                                 f64::from(pos[2]) + 0.5,
                             ],
+                            inside: false,
                         });
                     }
                     let _ = g.tick_mining();
