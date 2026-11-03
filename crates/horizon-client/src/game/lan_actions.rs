@@ -3616,6 +3616,14 @@ impl Game<'_> {
                     .set_game_mode(conn, SPECTATOR, &self.world, Some(self.collision));
             }
         }
+        // PlayerList.respawn: `copyRespawnPosition` of a player with no respawn
+        // point sets none. One with a point is told when its block is found.
+        if own.is_none() {
+            let g = &host.hub.guests[i];
+            let (uuid, id, name) = (g.uuid, g.entity_id, g.name.clone());
+            let mut cancel = false;
+            self.native_player_set_spawn(uuid, id, &name, level.id(), None, false, &mut cancel);
+        }
         if let Some(config) = elsewhere {
             self.respawn_trip(conn, config);
         } else if in_frame_bed.is_none() && host.hub.guests[i].spawn.is_none() {

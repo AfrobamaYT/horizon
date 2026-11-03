@@ -4807,18 +4807,20 @@ impl Game<'_> {
             cancel,
         );
     }
-    /// NeoForge's `PlayerSetSpawnEvent`: a server player's respawn point is about to change
-    /// (`ServerPlayer.setRespawnPosition`): a bed, a respawn anchor, `/spawnpoint`, or
-    /// the point being forgotten because its block is gone. `pos` is the new block
-    /// position, none when the point is cleared (then `dimension` is the old point's).
-    /// `forced` is `/spawnpoint`'s forced flag. Set `cancel` and the point stays as it
-    /// was. The same four places fire `native_player_spawn_point_set` first, which also names
-    /// the cause but not `forced` or the clearing. The player's state is not swapped in,
-    /// so helpers that look them up through `self.lan` may find nothing while a guest
-    /// packet is handled. Server-side. @API:player_set_spawn@.
+    /// NeoForge's `PlayerSetSpawnEvent`: a server player's respawn point is about to be
+    /// set (`ServerPlayer.setRespawnPosition`), once for each call vanilla makes: every sleep
+    /// in a bed (the same bed too, which refreshes its angle), an anchor that is a new
+    /// point, `/spawnpoint`, and the copy to the new player when a player respawns and their
+    /// respawn block was found (`pos` is none for a player with no point). A respawn block
+    /// that is gone makes no call. `pos` is the block position and `dimension` its level;
+    /// `forced` is `/spawnpoint`'s flag. Set `cancel` and the point stays as it was (the
+    /// respawned player is left with none). Where it also fires `native_player_spawn_point_set`
+    /// fires first, and that one hears only a change, with its cause. `player_entity_id` is
+    /// the server's entity id for the player. Server-side. @API:player_set_spawn@.
     pub(super) fn native_player_set_spawn(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         dimension: &str,
         pos: Option<[i32; 3]>,
@@ -4829,6 +4831,7 @@ impl Game<'_> {
             self,
             mod_api::mods(),
             player,
+            player_entity_id,
             name,
             dimension,
             pos,
@@ -8274,7 +8277,7 @@ impl Game<'_> {
     }
     /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
     /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
-    /// `death_protection` item `item` in its `hand` (`main_hand` or `off_hand`;
+    /// `death_protection` item `item` in its `hand` (main or off;
     /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
     /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
     /// source that bypasses invulnerability never reaches it. `native_player_totem` still
@@ -8285,7 +8288,7 @@ impl Game<'_> {
         entity: i32,
         kind: &str,
         source: &HurtSource<'_>,
-        hand: &str,
+        hand: Hand,
         item: &str,
         cancel: &mut bool,
     ) {
@@ -8496,7 +8499,7 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
-    let hand = if off_hand { "off_hand" } else { "main_hand" };
+    let hand = if off_hand { Hand::Off } else { Hand::Main };
     let mut cancel = false;
     Game::native_living_use_totem(
         entity,
