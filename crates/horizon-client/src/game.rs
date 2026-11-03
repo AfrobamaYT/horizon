@@ -2007,7 +2007,13 @@ impl LevelAccess for GameLevel<'_> {
         for (k, v) in [("x", pos.x), ("y", pos.y), ("z", pos.z)] {
             nbt.insert(k.into(), Tag::Int(v));
         }
-        if let Some((key, entity)) = horizon_client::save::decode_block_entity(&Tag::Compound(nbt))
+        let block = self.world.block(pos.x, pos.y, pos.z);
+        let Some(block) = self.registry.state(block) else {
+            return;
+        };
+        let name = &block.name;
+        if let Some((key, entity)) =
+            horizon_client::save::decode_block_entity_for_block(&Tag::Compound(nbt), name)
         {
             self.world.block_entities.insert(key, entity);
         }
@@ -6662,24 +6668,14 @@ impl Game<'_> {
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
+            let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
             let mut block_answer = None;
             if !horizon_client::mod_api::mods().is_empty() {
-                let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-                if !horizon_client::mod_api::parts("use_item_on")
-                    .block_state(state)
-                    .is_empty()
-                {
-                    let click = self.block_click(hit, self.hand, held.as_ref());
-                    self.native_use_item_on(state, &click, &mut block_answer);
-                }
+                let click = self.block_click(hit, self.hand, held.as_ref());
+                self.native_use_item_on(state, &click, &mut block_answer);
             }
             let mut chains_sign = false;
             if block_answer.is_none() {
-                // FenceBlock.useWithoutItem binds the player's mobs after its default
-                // useItemOn returned TRY_WITH_EMPTY_HAND.
-                if self.hand == Hand::Main && self.interact_knot() {
-                    return Ok(true);
-                }
                 if self.use_on_cauldron(hit.pos)? {
                     self.swing_arm();
                     return Ok(true);
@@ -6702,19 +6698,9 @@ impl Game<'_> {
                     self.swing_arm();
                     return Ok(true);
                 }
-                if self.use_jukebox(hit.pos, held.as_ref()) {
-                    self.swing_arm();
-                    return Ok(true);
-                }
                 if let Some(swings) = self.use_shelf(hit) {
                     let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
                     self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
-                    if swings {
-                        self.swing_arm();
-                    }
-                    return Ok(true);
-                }
-                if let Some(swings) = self.use_chiseled_bookshelf(hit, held.as_ref()) {
                     if swings {
                         self.swing_arm();
                     }
@@ -6725,10 +6711,6 @@ impl Game<'_> {
                     return Ok(true);
                 }
                 if self.use_vault(hit.pos, held.as_ref())? {
-                    self.swing_arm();
-                    return Ok(true);
-                }
-                if self.use_decorated_pot(hit.pos, held.as_ref()) {
                     self.swing_arm();
                     return Ok(true);
                 }
@@ -6744,10 +6726,7 @@ impl Game<'_> {
                     self.swing_arm();
                     return Ok(true);
                 }
-                if self.use_redstone_ore(hit.pos, held.as_ref())? {
-                    self.swing_arm();
-                    return Ok(true);
-                }
+                block_answer = self.use_redstone_ore(hit.pos, held.as_ref())?;
                 match self.use_respawn_anchor(hit.pos, held.as_ref())? {
                     respawn_anchor::AnchorUse::Charged => {
                         self.swing_arm();
@@ -6780,23 +6759,12 @@ impl Game<'_> {
                 )
                 && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
             }
-            // These game-owned behaviours combine both methods. The item override
-            // skipped their useItemOn; TRY_WITH_EMPTY_HAND still runs their empty use.
-            if block_answer == Some(Answer::TryWithEmptyHand) && self.hand == Hand::Main {
-                if self.interact_knot() {
-                    self.trigger_default_block_use(hit.pos);
-                    return Ok(true);
-                }
-                if self.use_jukebox(hit.pos, None) || self.use_decorated_pot(hit.pos, None) {
-                    self.swing_arm();
-                    return Ok(true);
-                }
-                if let Some(swings) = self.use_chiseled_bookshelf(hit, None) {
-                    if swings {
-                        self.swing_arm();
-                    }
-                    return Ok(true);
-                }
+            if block_answer.is_none() {
+                use horizon_world::level::UseBranch::ItemOn;
+                block_answer = self
+                    .use_jukebox(hit.pos, state, held.as_ref(), ItemOn)
+                    .or_else(|| self.use_decorated_pot(hit.pos, state, held.as_ref(), ItemOn))
+                    .or_else(|| self.use_chiseled_bookshelf(hit, state, held.as_ref(), ItemOn));
             }
             // TRY_WITH_EMPTY_HAND: only the main hand's turn uses the block
             // itself (useWithoutItem). The block's item behaviour hears both hands.
@@ -6811,45 +6779,71 @@ impl Game<'_> {
                     _ => Direction::East,
                 };
                 let player = self.use_context();
-                let at = Vec3::new(hit.point[0], hit.point[1], hit.point[2]);
+                let block_hit = horizon_core::geometry::BlockHit {
+                    block: BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+                    direction: face,
+                    location: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+                    inside: hit.inside,
+                };
                 let item = held.as_ref().map(|s| s.item.to_string());
-                let cake = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-                let adds_candle =
-                    self.with_level(|b, _, _| b.cake_candle_state(cake, item.as_deref()).is_some());
+                let adds_candle = self
+                    .with_level(|b, _, _| b.cake_candle_state(state, item.as_deref()).is_some());
                 let pots_flower = self
-                    .with_level(|b, _, _| b.potted_flower_state(cake, item.as_deref()).is_some());
-                let (result, branch) = match block_answer {
-                    Some(answer) => match native_hooks::block_use_result(answer) {
-                        Some(result) => (result, horizon_world::level::UseBranch::ItemOn),
-                        None if self.hand == Hand::Main => (
-                            self.with_level(|b, level, ticks| {
-                                b.use_without_item(
-                                    level,
-                                    ticks,
-                                    BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                                    face,
-                                    at,
-                                    player,
-                                )
-                            }),
-                            horizon_world::level::UseBranch::WithoutItem,
-                        ),
-                        None => (
-                            horizon_world::level::InteractionResult::Pass,
-                            horizon_world::level::UseBranch::ItemOn,
-                        ),
-                    },
+                    .with_level(|b, _, _| b.potted_flower_state(state, item.as_deref()).is_some());
+                use horizon_world::level::{InteractionResult, UseBranch};
+                let item_result = match block_answer {
+                    Some(answer) => native_hooks::block_use_result(answer),
                     None => self.with_level(|b, level, ticks| {
-                        b.use_item_on_branch(
-                            level,
-                            ticks,
-                            BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                            face,
-                            at,
-                            player,
-                            item.as_deref(),
-                        )
+                        b.block_use_item_on(level, ticks, state, block_hit, player, item.as_deref())
                     }),
+                };
+                let mut empty_template_ran = false;
+                let (result, branch) = if let Some(result) = item_result {
+                    (result, UseBranch::ItemOn)
+                } else if self.hand == Hand::Main {
+                    let mut empty_answer = None;
+                    if !horizon_client::mod_api::mods().is_empty() {
+                        let empty_held = self.held().cloned();
+                        let click = self.block_click(hit, self.hand, empty_held.as_ref());
+                        self.native_use_without_item(state, &click, &mut empty_answer);
+                    }
+                    if empty_answer.is_none()
+                        && self
+                            .res
+                            .behaviours()
+                            .data(state)
+                            .is(horizon_world::level::classes::Class::Fence)
+                        && self.use_knot(hit.pos, false)
+                    {
+                        self.trigger_default_block_use(hit.pos);
+                        return Ok(true);
+                    }
+                    let answer = empty_answer.or_else(|| {
+                        self.use_jukebox(hit.pos, state, None, UseBranch::WithoutItem)
+                            .or_else(|| {
+                                self.use_decorated_pot(hit.pos, state, None, UseBranch::WithoutItem)
+                            })
+                            .or_else(|| {
+                                self.use_chiseled_bookshelf(
+                                    hit,
+                                    state,
+                                    None,
+                                    UseBranch::WithoutItem,
+                                )
+                            })
+                    });
+                    let result = if let Some(answer) = answer {
+                        native_hooks::block_use_result(answer).unwrap_or(InteractionResult::Pass)
+                    } else {
+                        empty_template_ran = true;
+                        let player = self.use_context();
+                        self.with_level(|b, level, ticks| {
+                            b.use_without_item(level, ticks, state, block_hit, player)
+                        })
+                    };
+                    (result, UseBranch::WithoutItem)
+                } else {
+                    (InteractionResult::Pass, UseBranch::ItemOn)
                 };
                 self.process_level_events()?;
                 // CakeBlock.useItemOn: the candle is used up and counted.
@@ -6878,10 +6872,8 @@ impl Game<'_> {
                         );
                     }
                 }
-                // NoteBlock.useWithoutItem (tuned) and BellBlock.onHit (rung).
-                if (block_answer.is_none()
-                    || branch == horizon_world::level::UseBranch::WithoutItem)
-                    && result == horizon_world::level::InteractionResult::Success
+                // These effects belong to the vanilla method, not its Part replacement.
+                if empty_template_ran && result == horizon_world::level::InteractionResult::Success
                 {
                     let name = self
                         .res
@@ -7327,13 +7319,14 @@ impl Game<'_> {
                                     self.apply_effect_action(a);
                                 }
                             } else {
-                                self.add_player_effect(
-                                    horizon_client::effects::EffectInstance::new(
-                                        def.id,
-                                        eff.duration,
-                                        eff.amplifier,
-                                    ),
+                                let mut instance = horizon_client::effects::EffectInstance::new(
+                                    def.id,
+                                    eff.duration,
+                                    eff.amplifier,
                                 );
+                                instance.ambient = eff.ambient;
+                                instance.visible = eff.show_particles;
+                                self.add_player_effect(instance);
                             }
                         }
                     }
@@ -10252,6 +10245,8 @@ impl Game<'_> {
             maps: level_maps
                 .as_ref()
                 .map(|m| m as &dyn horizon_client::menu::Maps),
+            limited_crafting: self.limited_crafting(),
+            known_recipes: Some(&self.level.recipe_book),
         };
         menu.creative = creative;
         menu.selected = self.selected;
@@ -21109,6 +21104,7 @@ fn build_renderer(
     renderer
         .hud
         .set_text_shader(&renderer.device, atlas.text_shader.as_deref());
+    renderer.set_lines_shader(atlas.lines_shader.as_deref());
     let cit_glints = pack.item_renderer.cit.as_ref().map(|c| &c.glint_textures);
     renderer
         .hud

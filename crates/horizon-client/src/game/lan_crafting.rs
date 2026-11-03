@@ -113,6 +113,14 @@ fn place_back(menu: &mut Menu, env: &Env, stacks: Vec<ItemStack>) {
 }
 
 impl Game<'_> {
+    /// `LocalPlayer.doLimitedCrafting`: whether limited crafting is active.
+    pub fn limited_crafting(&self) -> bool {
+        self.remote.as_ref().map_or_else(
+            || self.ui.rules.bool("limited_crafting"),
+            |r| r.do_limited_crafting,
+        )
+    }
+
     pub(super) fn menu_env(&self) -> Env<'_> {
         Env {
             player: self
@@ -134,6 +142,8 @@ impl Game<'_> {
             names: &self.pack.names,
             trade: None,
             maps: None,
+            limited_crafting: self.limited_crafting(),
+            known_recipes: Some(&self.level.recipe_book),
         }
     }
 
@@ -164,6 +174,8 @@ impl Game<'_> {
             player_entity_id: Some(host.hub.guests[gi].entity_id),
             side: horizon_client::menu::LogicalSide::Server,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
+            limited_crafting: host.hub.limited_crafting,
+            known_recipes: Some(&host.hub.guests[gi].recipe_book),
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);

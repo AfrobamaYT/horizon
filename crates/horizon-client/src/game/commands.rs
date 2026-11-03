@@ -2614,7 +2614,8 @@ impl Game<'_> {
                 }
             }
         }
-        let Some((_, mut new)) = horizon_client::save::decode_block_entity(&tag) else {
+        let Some((_, mut new)) = horizon_client::save::decode_block_entity_for_block(&tag, &name)
+        else {
             return false;
         };
         let rolled = self.take_loot_table(key, &tag, &mut new);
