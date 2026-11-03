@@ -27,6 +27,7 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::menu::StackedOnOther;
 pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
@@ -39,6 +40,7 @@ pub use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 pub use horizon_world::consumable::UseAnimation;
+pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
@@ -388,6 +390,36 @@ impl EntityRef {
     }
 }
 
+/// A living entity of the open world: a mob, a player, an armor stand or the
+/// dragon (vanilla's `LivingEntity`). `host.living(entity)` makes one from an
+/// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
+/// entity's methods work on it too. Stale handles read as `None`, as an
+/// `EntityRef`'s do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LivingRef(EntityRef);
+
+impl LivingRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl From<LivingRef> for EntityRef {
+    fn from(living: LivingRef) -> Self {
+        living.0
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -410,6 +442,62 @@ impl LevelRef {
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
     }
+}
+
+/// An online player in one open server world, keyed by UUID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlayerRef {
+    pub(crate) entity: EntityRef,
+    pub(crate) uuid: u128,
+}
+
+impl PlayerRef {
+    /// The same player as an entity handle.
+    pub fn entity(self) -> EntityRef {
+        self.entity
+    }
+    /// The player's UUID.
+    pub fn uuid(self) -> u128 {
+        self.uuid
+    }
+}
+
+impl From<PlayerRef> for EntityRef {
+    fn from(player: PlayerRef) -> Self {
+        player.entity
+    }
+}
+
+/// A player's food data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerFood {
+    /// Food level.
+    pub level: i32,
+    /// Food saturation.
+    pub saturation: f32,
+    /// Food exhaustion.
+    pub exhaustion: f32,
+}
+
+/// A player's server-side abilities.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerAbilities {
+    /// Whether ordinary damage is ignored.
+    pub invulnerable: bool,
+    /// Whether the player is flying.
+    pub flying: bool,
+    /// Whether the player may fly.
+    pub may_fly: bool,
+    /// Whether items are used without consumption.
+    pub instabuild: bool,
+    /// Whether the player may build.
+    pub may_build: bool,
+    /// Flying speed.
+    pub fly_speed: f32,
+    /// Walking speed. Horizon currently keeps no per-player value; this is 0.1.
+    pub walk_speed: f32,
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).

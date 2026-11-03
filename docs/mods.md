@@ -203,6 +203,16 @@ gets its own damage and durability, or a tool its mining speed:
     "!minecraft:repairable": {} } }
 ```
 
+An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
+
+```json
+{ "template": "minecraft:wheat_seeds", "block": "ruby:crop" }
+```
+
+This uses the block's placement state and survival rules and consumes the item outside creative mode. Add seeds to
+`minecraft:villager_plantable_seeds` for farmers to plant them. The mapping does not change what the block drops or
+what Pick Block gives.
+
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
 JSON values become NBT values. Values must fit the network NBT limits and
@@ -385,6 +395,18 @@ NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every remova
 feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
 (registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
 Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
+
+A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
+a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
+[Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
+not its positional temperature. Each range takes `min`, `max`, or both, inclusive; an omitted bound is unbounded. At
+least one field and one bound per range are required. Unknown keys, non-numbers and inverted bounds stop the content
+load. Climate sets apply only to `biomes`, not `features`.
+
+```json
+{ "type": "neoforge:and", "values": ["#minecraft:is_overworld",
+  { "type": "horizon:climate", "temperature": { "min": 0.8 }, "downfall": { "max": 0.5 } }] }
+```
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",

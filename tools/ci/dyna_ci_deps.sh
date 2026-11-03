@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Install and cache the Ubuntu runner's build dependencies without root.
 set -euo pipefail
-prefix="$DYNA_CI_CACHE/apt-prefix"
+prefix="$DYNA_CI_BUILD/apt-prefix"
 aptroot="$HOME/dyna-ci-apt"
 hash=$(sha256sum "$0" | cut -d ' ' -f1)
 if [ ! -f "$prefix/.dyna-hash" ] || [ "$(< "$prefix/.dyna-hash")" != "$hash" ]; then
-  stage="$DYNA_CI_CACHE/apt-prefix.new"
+  stage="$DYNA_CI_BUILD/apt-prefix.new"
   rm -rf "$stage" "$aptroot"
   mkdir -p "$aptroot/lists/partial" "$aptroot/archives/partial" "$stage"
   : > "$aptroot/status"
@@ -33,12 +33,12 @@ fi
 arch=x86_64-linux-gnu
 {
   echo "$prefix/usr/bin"
-  echo "$DYNA_CI_CACHE/cargo/bin"
+  echo "$DYNA_CI_BUILD/cargo/bin"
 } >> "$GITHUB_PATH"
 {
-  echo "CARGO_TARGET_DIR=$DYNA_CI_CACHE/target"
-  echo "CARGO_HOME=$DYNA_CI_CACHE/cargo"
-  echo "RUSTUP_HOME=$DYNA_CI_CACHE/rustup"
+  echo "CARGO_TARGET_DIR=$DYNA_CI_BUILD/target"
+  echo "CARGO_HOME=$DYNA_CI_BUILD/cargo"
+  echo "RUSTUP_HOME=$DYNA_CI_BUILD/rustup"
   echo "PKG_CONFIG_SYSROOT_DIR=$prefix"
   echo "PKG_CONFIG_PATH=$prefix/usr/lib/$arch/pkgconfig:$prefix/usr/share/pkgconfig"
   echo "LIBRARY_PATH=$prefix/usr/lib/$arch:$prefix/lib/$arch"
