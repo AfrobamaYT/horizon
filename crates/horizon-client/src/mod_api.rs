@@ -2507,6 +2507,17 @@ pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&m
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
+/// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BonemealSource {
+    /// Bone meal used through `BoneMealItem.growCrop`: by a player, a
+    /// dispenser or a villager.
+    Interaction,
+    /// A mob growing the block itself.
+    Mob,
+}
+
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.

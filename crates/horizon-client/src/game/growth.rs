@@ -13,6 +13,24 @@ impl Game<'_> {
     pub(super) fn install_live_features(&self) {
         install_live_features(&self.res, &self.pack, &self.options);
     }
+    /// `BonemealEvent` for the acting hand's bone meal `stack` on `pos`:
+    /// the event's answer, and the stack as the mods left it, which goes
+    /// back in the hand (`useItemOn` puts a creative player's count back).
+    pub(super) fn held_bonemeal(
+        &mut self,
+        pos: BlockPos,
+        stack: &ItemStack,
+    ) -> (Option<bool>, ItemStack) {
+        let mut held = stack.clone();
+        let crop = self.bonemeal(pos, true, &mut held);
+        if held != *stack {
+            if self.creative {
+                held.count = stack.count;
+            }
+            *self.held_mut() = (held.count > 0).then(|| held.clone());
+        }
+        (crop, held)
+    }
     /// `BoneMealItem.useOn` for the targeted block.
     pub(super) fn use_bone_meal(&mut self, stack: &ItemStack) -> Result<bool> {
         if &*stack.item != "minecraft:bone_meal" {
@@ -30,11 +48,15 @@ impl Game<'_> {
             _ => Direction::East,
         };
         let pos = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let used = self.with_level(|b, level, ticks| b.use_bone_meal(level, ticks, pos, face));
+        let (crop, held) = self.held_bonemeal(pos, stack);
+        let used =
+            self.with_level(|b, level, ticks| b.use_bone_meal(level, ticks, pos, face, crop));
+        // A canceled `BonemealEvent` that succeeded uses none of the meal.
+        let consumed = used && crop != Some(true);
         // ItemStack.causeUseVibration at the player, after the meal is used
         // up (shrunk even in creative): an emptied stack has no use effects.
         if used
-            && stack.count > 1
+            && held.count > u32::from(consumed)
             && let Some(p) = self.player.as_ref().map(|p| p.position)
         {
             let ctx = self.player_context(None);
@@ -45,7 +67,9 @@ impl Game<'_> {
             self.swing_arm();
             // ItemStack.useOn: an item interaction counts as a use.
             self.award_stat("used", &stack.item, 1);
-            self.consume_held();
+            if consumed {
+                self.consume_held();
+            }
         }
         Ok(used)
     }
@@ -120,5 +144,156 @@ pub(super) fn install_live_features(
             log::warn!("Horizon: the worldgen bundle has no features; saplings will not grow")
         }
         Err(e) => log::warn!("Horizon: live features unavailable: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use horizon_client::items::ItemStack;
+    use horizon_client::mod_api::{self, BonemealEvent, BonemealSource, Flow, Hooks, HostSide};
+    use horizon_core::{geometry::Direction, position::BlockPos};
+    use std::sync::Mutex;
+
+    /// What each `bonemeal` listener heard: the player, the target check
+    /// and the source.
+    static HEARD: Mutex<Vec<(Option<u128>, bool, BonemealSource)>> = Mutex::new(Vec::new());
+
+    /// Sets the stack's count to `count`, then cancels with `successful`.
+    struct Meal {
+        count: Option<u32>,
+        cancel: Option<bool>,
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Meal {
+        fn bonemeal(&self, _: HostSide, event: &mut BonemealEvent<'_>) -> Flow {
+            HEARD
+                .lock()
+                .unwrap()
+                .push((event.player, event.valid_bonemeal_target, event.source));
+            if let Some(count) = self.count {
+                event.stack.count = count;
+            }
+            let Some(successful) = self.cancel else {
+                return Flow::Continue;
+            };
+            event.successful = successful;
+            Flow::Cancel
+        }
+    }
+
+    const CROP: BlockPos = BlockPos { x: 0, y: 64, z: 0 };
+
+    /// A dispenser at (0, 64, 1) facing young wheat, with `meal` listening:
+    /// what the slot holds after one dispense, and the wheat's age.
+    fn dispense(meal: Meal, target: &str) -> (Option<ItemStack>, i32) {
+        HEARD.lock().unwrap().clear();
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("meal", Box::new(meal))].into();
+        let mut out = None;
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                let registry = game.pack.assets.registry;
+                let farmland = registry.default_state("minecraft:farmland").unwrap();
+                game.world.set(0, 63, 0, farmland).unwrap();
+                let block = registry.default_state(target).unwrap();
+                game.world.set(CROP.x, CROP.y, CROP.z, block).unwrap();
+                let left = game
+                    .dispense_item(
+                        (0, 64, 1),
+                        Direction::North,
+                        ItemStack::new("minecraft:bone_meal", 3),
+                    )
+                    .unwrap();
+                let b = game.res.behaviours();
+                let state = game.world.block(CROP.x, CROP.y, CROP.z);
+                out = Some((left, b.table.int(state, b.props.age)));
+            });
+        });
+        out.unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn a_successful_cancel_keeps_the_meal_and_grows_nothing() {
+        let (left, age) = dispense(
+            Meal {
+                count: None,
+                cancel: Some(true),
+            },
+            "minecraft:wheat",
+        );
+        assert_eq!(left.map(|s| s.count), Some(3));
+        assert_eq!(age, 0);
+        // A dispenser has no player; the young wheat is a target.
+        assert_eq!(
+            *HEARD.lock().unwrap(),
+            [(None, true, BonemealSource::Interaction)]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn an_unsuccessful_cancel_fails_and_an_untouched_use_grows_the_edited_stack() {
+        let (left, age) = dispense(
+            Meal {
+                count: None,
+                cancel: Some(false),
+            },
+            "minecraft:wheat",
+        );
+        assert_eq!((left.map(|s| s.count), age), (Some(3), 0));
+        // Left to vanilla, growCrop uses one of the stack the mod edited.
+        let (left, age) = dispense(
+            Meal {
+                count: Some(5),
+                cancel: None,
+            },
+            "minecraft:wheat",
+        );
+        assert_eq!(left.map(|s| s.count), Some(4));
+        assert!(age > 0, "the wheat grew");
+        // Stone is no target, and the dispense fails with the meal kept.
+        let (left, _) = dispense(
+            Meal {
+                count: None,
+                cancel: None,
+            },
+            "minecraft:stone",
+        );
+        assert_eq!(left.map(|s| s.count), Some(3));
+        assert_eq!(
+            *HEARD.lock().unwrap(),
+            [(None, false, BonemealSource::Interaction)]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn the_hand_keeps_the_mods_stack_and_a_creative_count() {
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "meal",
+            Box::new(Meal {
+                count: Some(1),
+                cancel: Some(true),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let stack = ItemStack::new("minecraft:bone_meal", 3);
+                *game.held_mut() = Some(stack.clone());
+                assert_eq!(game.held_bonemeal(CROP, &stack).0, Some(true));
+                assert_eq!(game.held().map(|s| s.count), Some(1));
+                game.creative = true;
+                *game.held_mut() = Some(stack.clone());
+                let (crop, held) = game.held_bonemeal(CROP, &stack);
+                assert_eq!((crop, held.count), (Some(true), 3));
+                assert_eq!(game.held().map(|s| s.count), Some(3));
+            });
+        });
     }
 }
