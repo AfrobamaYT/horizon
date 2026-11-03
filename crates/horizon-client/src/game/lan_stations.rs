@@ -188,10 +188,8 @@ impl Game<'_> {
                             .enumerate()
                             .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
                 });
-            // AnvilUpdateEvent, after createResult made vanilla's result
-            // (a rename that changes nothing else too): before PrepareAnvil,
-            // which follows createResult too. A cancelled take's undo is no
-            // createResult.
+            // AnvilUpdateEvent after createResult; a cancelled take's undo
+            // is no createResult.
             let anvil_created =
                 gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
             if anvil_created
@@ -209,28 +207,18 @@ impl Game<'_> {
                 );
                 gs.menu.anvil_updated(update, cancel);
             }
-            if anvil_created {
+            if recomputed && gs.kind == StationKind::Grindstone && gs.menu.grind_hook {
                 let guest = &host.hub.guests[gi];
-                let (uuid, name) = (guest.uuid, guest.name.clone());
-                let mut result = gs.menu.slot(2).cloned();
-                self.native_prepare_anvil(uuid, &name, gs.pos, &mut result, &mut gs.menu.data[0]);
-                let env = self.menu_env();
-                gs.menu.set_slot(&env, 2, result);
-            }
-            if recomputed && gs.kind == StationKind::Grindstone {
-                let guest = &host.hub.guests[gi];
-                let (uuid, name, entity_id) = (guest.uuid, guest.name.clone(), guest.entity_id);
-                // GrindstoneEvent.OnPlaceItem, inside createResult: before PrepareGrindstone.
-                if gs.menu.grind_hook {
-                    let mut place = gs.menu.grindstone_place();
-                    let mut cancel = false;
-                    self.native_grindstone_place(uuid, entity_id, gs.pos, &mut place, &mut cancel);
-                    gs.menu.grindstone_placed(place, cancel);
-                }
-                let mut result = gs.menu.slot(2).cloned();
-                self.native_prepare_grindstone(uuid, &name, gs.pos, &mut result);
-                let env = self.menu_env();
-                gs.menu.set_slot(&env, 2, result);
+                let mut place = gs.menu.grindstone_place();
+                let mut cancel = false;
+                self.native_grindstone_place(
+                    guest.uuid,
+                    guest.entity_id,
+                    gs.pos,
+                    &mut place,
+                    &mut cancel,
+                );
+                gs.menu.grindstone_placed(place, cancel);
             }
             if recomputed && gs.kind == StationKind::Smithing {
                 let guest = &host.hub.guests[gi];
