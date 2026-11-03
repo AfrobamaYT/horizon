@@ -4318,6 +4318,38 @@ fn push_seen_with_hurt(
 mod tests {
     use super::*;
     #[test]
+    fn a_dragon_save_keeps_equipment_only_while_something_is_equipped() {
+        use horizon_client::items::ItemStack;
+        use horizon_items::equipment::{BODY, SADDLE};
+        let mut d = Dragon::new(Vec3::ZERO, 0.0, 0);
+        // An old save has no `equipment` key: the dragon loads empty and saves none.
+        let old = d.to_nbt([0; 4], None);
+        assert!(old.get("equipment").is_none());
+        assert!(Dragon::from_nbt(&old, 0).unwrap().equipment.is_empty());
+        // Body and saddle round-trip with their name and damage.
+        let mut body = ItemStack::new("minecraft:diamond_horse_armor", 1);
+        body.damage = 6;
+        body.data_mut().custom_name = Some(Tag::String("Plate".into()));
+        d.equipment[BODY] = Some(body);
+        d.equipment[SADDLE] = Some(ItemStack::new("minecraft:saddle", 1));
+        let saved = d.to_nbt([0; 4], None);
+        assert_eq!(Dragon::from_nbt(&saved, 0).unwrap().equipment, d.equipment);
+        // Saving over a raw save that holds a stale key removes it once emptied.
+        d.equipment.take_all().for_each(drop);
+        assert!(d.to_nbt([0; 4], Some(&saved)).get("equipment").is_none());
+    }
+
+    fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
+        (
+            Aabb::new(
+                Vec3::new(feet[0] - 0.3, feet[1], feet[2] - 0.3),
+                Vec3::new(feet[0] + 0.3, feet[1] + 1.8, feet[2] + 0.3),
+            ),
+            Vec3::new(feet[0], feet[1], feet[2]),
+        )
+    }
+
+    #[test]
     fn breath_lifetime_excludes_the_wait() {
         assert!(!breath_expired(219, 200));
         assert!(breath_expired(220, 200));
