@@ -2354,6 +2354,7 @@ impl Game<'_> {
                     // counter, and the crystal is shown with its base.
                     self.next_entity += 1;
                     self.crystals.push(super::dragon::Crystal {
+                        join: Default::default(),
                         id: self.next_entity,
                         position: Vec3::new(pos[0], pos[1], pos[2]),
                         show_bottom: true,
