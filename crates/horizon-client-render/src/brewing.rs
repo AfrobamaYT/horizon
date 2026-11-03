@@ -170,14 +170,14 @@ impl Brewing {
             path.strip_prefix("brewing/")
                 .is_some_and(|name| !name.contains('/'))
         });
+        for (id, _) in &mut sources {
+            if !id.contains(':') {
+                *id = format!("minecraft:{id}");
+            }
+        }
         sources.sort_by(|a, b| a.0.cmp(&b.0));
         let mut recipes = Vec::new();
         for (id, v) in sources {
-            let id = if id.contains(':') {
-                id
-            } else {
-                format!("minecraft:{id}")
-            };
             if v["type"] != "minecraft:brewing" {
                 continue;
             }
@@ -394,14 +394,17 @@ mod tests {
     #[test]
     fn content_brewing_recipe_is_loaded() {
         let root = content_brewing_root("loaded", "");
+        std::fs::create_dir_all(root.join("data/minecraft/recipe/brewing")).unwrap();
+        std::fs::write(
+            root.join("data/minecraft/recipe/brewing/test.json"),
+            br#"{"type":"minecraft:brewing","output":{"id":"minecraft:emerald"}}"#,
+        )
+        .unwrap();
         let items = Items::for_tests(Default::default());
         let recipes = Brewing::load(&root, &items, &PackOverlay::NONE);
-        assert!(
-            recipes
-                .recipes
-                .iter()
-                .any(|r| r.id == "example:brewing/test" && &*r.output.item == "minecraft:diamond")
-        );
+        assert_eq!(recipes.recipes[0].id, "example:brewing/test");
+        assert_eq!(&*recipes.recipes[0].output.item, "minecraft:diamond");
+        assert_eq!(recipes.recipes[1].id, "minecraft:brewing/test");
         std::fs::remove_dir_all(root).unwrap();
     }
 
