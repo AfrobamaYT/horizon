@@ -38,16 +38,15 @@ fn uuid_words(uuid: u128) -> [i32; 4] {
 impl Game<'_> {
     /// A trading screen the guest's interaction opened (it opened as a
     /// station while the guest acted): handed to the guest.
-    pub(super) fn lan_open_merchant(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        mut state: MerchantState,
-    ) {
-        let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+    pub(super) fn lan_open_merchant(&mut self, conn: u32, mut state: MerchantState) {
+        let Some(uuid) = self
+            .lan
+            .as_deref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
+            .map(|g| uuid_words(g.uuid))
+        else {
             return;
         };
-        let uuid = uuid_words(host.hub.guests[gi].uuid);
         if let Some(id) = state.mob
             && state.session.villager
         {
@@ -57,13 +56,17 @@ impl Game<'_> {
             state.session.update_special_prices();
         }
         let title = self.merchant_display_name(&state);
-        if !self.guest_may_open(host, conn, "minecraft:merchant", None) {
+        if !self.guest_may_open(conn, "minecraft:merchant", None) {
             self.merchant_closed(&mut state);
             return;
         }
         // ServerPlayer.openMenu closes the menu that was open.
-        self.guest_close_all(host, conn);
-        let Some(window) = host.hub.open_merchant_window(conn, title) else {
+        self.guest_close_all(conn);
+        let Some(window) = self
+            .lan
+            .as_deref_mut()
+            .and_then(|host| host.hub.open_merchant_window(conn, title))
+        else {
             self.merchant_closed(&mut state);
             return;
         };
@@ -75,9 +78,11 @@ impl Game<'_> {
             sent: Vec::new(),
             sent_level: 0,
         };
-        self.lan_send_offers(host, conn, &mut gm, true);
-        self.lan_send_merchant_content(host, conn, &mut gm);
-        host.play.entry(conn).or_default().merchant = Some(gm);
+        self.lan_send_offers(conn, &mut gm, true);
+        self.lan_send_merchant_content(conn, &mut gm);
+        if let Some(host) = self.lan.as_deref_mut() {
+            host.play.entry(conn).or_default().merchant = Some(gm);
+        }
     }
     /// `Entity.getDisplayName` of the merchant, the screen's title: its name
     /// (custom, else the profession's) with the show_entity hover event and
@@ -135,93 +140,101 @@ impl Game<'_> {
     /// The screen title: the custom name, else the profession (the client
     /// adds the level itself).
     /// `ServerPlayer.sendMerchantOffers`, when the offers changed.
-    fn lan_send_offers(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        gm: &mut GuestMerchant,
-        force: bool,
-    ) {
+    fn lan_send_offers(&mut self, conn: u32, gm: &mut GuestMerchant, force: bool) {
         let s = &gm.merchant.session;
         if !force && s.offers == gm.sent && s.level == gm.sent_level {
             return;
         }
-        let offers: Vec<play::NetOffer> = s
-            .offers
-            .iter()
-            .filter_map(|o| {
-                let cost = |st: &ItemStack, hub: &mut horizon_client::lan::hub::Hub| {
-                    hub.stack(&Some(st.clone())).map(play::NetCost::from)
-                };
-                Some(play::NetOffer {
-                    cost_a: cost(&o.base_cost_a.stack, &mut host.hub)?,
-                    result: host.hub.stack(&Some(o.result.clone()))?,
-                    cost_b: match &o.cost_b {
-                        Some(b) => Some(cost(&b.stack, &mut host.hub)?),
-                        None => None,
-                    },
-                    out_of_stock: o.out_of_stock(),
-                    uses: o.uses,
-                    max_uses: o.max_uses,
-                    xp: o.xp,
-                    special_price: o.special_price_diff,
-                    price_multiplier: o.price_multiplier,
-                    demand: o.demand,
+        if let Some(host) = self.lan.as_deref_mut() {
+            let offers: Vec<play::NetOffer> = s
+                .offers
+                .iter()
+                .filter_map(|o| {
+                    let cost = |st: &ItemStack, hub: &mut horizon_client::lan::hub::Hub| {
+                        hub.stack(&Some(st.clone())).map(play::NetCost::from)
+                    };
+                    Some(play::NetOffer {
+                        cost_a: cost(&o.base_cost_a.stack, &mut host.hub)?,
+                        result: host.hub.stack(&Some(o.result.clone()))?,
+                        cost_b: match &o.cost_b {
+                            Some(b) => Some(cost(&b.stack, &mut host.hub)?),
+                            None => None,
+                        },
+                        out_of_stock: o.out_of_stock(),
+                        uses: o.uses,
+                        max_uses: o.max_uses,
+                        xp: o.xp,
+                        special_price: o.special_price_diff,
+                        price_multiplier: o.price_multiplier,
+                        demand: o.demand,
+                    })
                 })
-            })
-            .collect();
-        host.hub.send_to(
-            conn,
-            &C::MerchantOffers(play::MerchantOffers {
-                container: gm.window,
-                offers,
-                level: s.level,
-                xp: s.xp,
-                show_progress: s.villager,
-                can_restock: s.villager,
-            }),
-        );
-        gm.sent = s.offers.clone();
-        gm.sent_level = s.level;
+                .collect();
+            host.hub.send_to(
+                conn,
+                &C::MerchantOffers(play::MerchantOffers {
+                    container: gm.window,
+                    offers,
+                    level: s.level,
+                    xp: s.xp,
+                    show_progress: s.villager,
+                    can_restock: s.villager,
+                }),
+            );
+            gm.sent = s.offers.clone();
+            gm.sent_level = s.level;
+        }
     }
-    fn lan_send_merchant_content(&mut self, host: &mut LanHost, conn: u32, gm: &mut GuestMerchant) {
-        let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
-            return;
-        };
-        let mut items: Vec<Option<ItemStack>> = gm.slots.to_vec();
-        let g = &host.hub.guests[gi];
-        items.extend((9..36).chain(0..9).map(|i| g.inventory[i].clone()));
-        let carried = g.carried.clone();
-        let net: Vec<_> = items.iter().map(|s| host.hub.stack(s)).collect();
-        let carried = host.hub.stack(&carried);
-        gm.state = (gm.state + 1) & 0x7FFF;
-        host.hub.send_to(
-            conn,
-            &C::ContainerSetContent(play::ContainerSetContent {
-                container: gm.window,
-                state: gm.state,
-                items: net,
-                carried,
-            }),
-        );
+    fn lan_send_merchant_content(&mut self, conn: u32, gm: &mut GuestMerchant) {
+        if let Some(host) = self.lan.as_deref_mut() {
+            let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+                return;
+            };
+            let mut items: Vec<Option<ItemStack>> = gm.slots.to_vec();
+            let g = &host.hub.guests[gi];
+            items.extend((9..36).chain(0..9).map(|i| g.inventory[i].clone()));
+            let carried = g.carried.clone();
+            let net: Vec<_> = items.iter().map(|s| host.hub.stack(s)).collect();
+            let carried = host.hub.stack(&carried);
+            gm.state = (gm.state + 1) & 0x7FFF;
+            host.hub.send_to(
+                conn,
+                &C::ContainerSetContent(play::ContainerSetContent {
+                    container: gm.window,
+                    state: gm.state,
+                    items: net,
+                    carried,
+                }),
+            );
+        }
     }
     /// Runs `op` on the guest's merchant menu (their inventory copied in and
     /// back), then syncs the client. False when the guest has no such window.
     fn lan_merchant_op(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         window: Option<i32>,
         op: impl FnOnce(&mut Menu, &Env),
     ) -> bool {
-        let Some(mut gm) = host.play.get_mut(&conn).and_then(|p| p.merchant.take()) else {
+        let Some(mut gm) = self
+            .lan
+            .as_deref_mut()
+            .and_then(|host| host.play.get_mut(&conn))
+            .and_then(|p| p.merchant.take())
+        else {
             return false;
         };
         if window.is_some_and(|w| w != gm.window) {
-            host.play.entry(conn).or_default().merchant = Some(gm);
+            if let Some(host) = self.lan.as_deref_mut() {
+                host.play.entry(conn).or_default().merchant = Some(gm);
+            }
             return false;
         }
-        let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+        let Some(gi) = self
+            .lan
+            .as_deref()
+            .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn))
+        else {
             return false;
         };
         let mut session = gm.merchant.session.clone();
@@ -239,9 +252,15 @@ impl Game<'_> {
             enchantments: &self.stations().enchantments,
             maps: Some(&maps),
         };
+        let Some((player_uuid, player_entity_id)) = self.lan.as_deref().map(|host| {
+            let g = &host.hub.guests[gi];
+            (g.uuid, g.entity_id)
+        }) else {
+            return false;
+        };
         let env = Env {
-            player: Some(host.hub.guests[gi].uuid),
-            player_entity_id: Some(host.hub.guests[gi].entity_id),
+            player: Some(player_uuid),
+            player_entity_id: Some(player_entity_id),
             side: horizon_client::menu::LogicalSide::Server,
             items: self.items(),
             recipes: self.recipes(),
@@ -254,7 +273,7 @@ impl Game<'_> {
             maps: None,
         };
         let mut menu = Menu::new(Kind::Merchant);
-        {
+        if let Some(host) = self.lan.as_deref() {
             let g = &host.hub.guests[gi];
             for i in 0..36 {
                 menu.set_player_item(i, g.inventory[i].clone());
@@ -277,7 +296,7 @@ impl Game<'_> {
             menu.slot(1).cloned(),
             menu.slot(2).cloned(),
         ];
-        {
+        if let Some(host) = self.lan.as_deref_mut() {
             let g = &mut host.hub.guests[gi];
             for i in 0..36 {
                 g.inventory[i] = menu.player_item(i).cloned();
@@ -290,27 +309,32 @@ impl Game<'_> {
         gm.merchant.session = session;
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
-            if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
-                let g = &host.hub.guests[gi];
+            if let Some(g) = self
+                .lan
+                .as_deref()
+                .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
+            {
                 if let Some(entity_id) = gm.merchant.mob {
                     self.native_player_trade(g.uuid, &g.name, entity_id);
                 }
             }
-            self.as_guest(host, conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
+            if let Some(mut host) = self.lan.take() {
+                self.as_guest(&mut host, conn, |g| {
+                    g.merchant_traded(gm.merchant.mob, &traded)
+                });
+                self.lan = Some(host);
+            }
         }
-        self.drop_guest_items(host, gi, dropped);
-        self.lan_send_offers(host, conn, &mut gm, false);
-        self.lan_send_merchant_content(host, conn, &mut gm);
-        host.play.entry(conn).or_default().merchant = Some(gm);
+        self.drop_guest_items(gi, dropped);
+        self.lan_send_offers(conn, &mut gm, false);
+        self.lan_send_merchant_content(conn, &mut gm);
+        if let Some(host) = self.lan.as_deref_mut() {
+            host.play.entry(conn).or_default().merchant = Some(gm);
+        }
         true
     }
     /// A container click on the guest's trading window.
-    pub(super) fn lan_merchant_click(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        p: &play::ContainerClick,
-    ) -> bool {
+    pub(super) fn lan_merchant_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
         let input = match p.input {
             0 => Input::Pickup,
             1 => Input::QuickMove,
@@ -321,25 +345,28 @@ impl Game<'_> {
             _ => Input::PickupAll,
         };
         let (slot, button) = (i32::from(p.slot), i32::from(p.button));
-        self.lan_merchant_op(host, conn, Some(p.container), |menu, env| {
+        self.lan_merchant_op(conn, Some(p.container), |menu, env| {
             let _ = menu.click(env, slot, button, input);
         })
     }
     /// ServerboundSelectTradePacket: the selection hint, then tryMoveItems.
-    pub(super) fn lan_select_trade(&mut self, host: &mut LanHost, conn: u32, index: i32) {
+    pub(super) fn lan_select_trade(&mut self, conn: u32, index: i32) {
         let Ok(index) = usize::try_from(index) else {
             return;
         };
-        let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn) else {
+        let Some((uuid, name)) = self
+            .lan
+            .as_deref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
+            .map(|guest| (guest.uuid, guest.name.clone()))
+        else {
             return;
         };
-        let (uuid, name) = (guest.uuid, guest.name.clone());
-        if self.lan_merchant_op(host, conn, None, |menu, env| {
-            menu.merchant_select(env, index)
-        }) {
-            let villager = host
-                .play
-                .get(&conn)
+        if self.lan_merchant_op(conn, None, |menu, env| menu.merchant_select(env, index)) {
+            let villager = self
+                .lan
+                .as_deref()
+                .and_then(|host| host.play.get(&conn))
                 .and_then(|p| p.merchant.as_ref())
                 .and_then(|m| m.merchant.mob);
             self.native_trade_select(uuid, &name, villager, index);
@@ -347,23 +374,22 @@ impl Game<'_> {
     }
     /// The guest closed the trading window (or it is closed for them):
     /// MerchantMenu.removed, then the villager gets its state back.
-    pub(super) fn lan_merchant_closed(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        window: Option<i32>,
-    ) -> bool {
-        if !self.lan_merchant_op(host, conn, window, |menu, env| menu.merchant_close(env)) {
+    pub(super) fn lan_merchant_closed(&mut self, conn: u32, window: Option<i32>) -> bool {
+        if !self.lan_merchant_op(conn, window, |menu, env| menu.merchant_close(env)) {
             return false;
         }
-        let Some(mut gm) = host.play.get_mut(&conn).and_then(|p| p.merchant.take()) else {
+        let Some(mut gm) = self
+            .lan
+            .as_deref_mut()
+            .and_then(|host| host.play.get_mut(&conn))
+            .and_then(|p| p.merchant.take())
+        else {
             return false;
         };
-        let uuid = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.conn == conn)
+        let uuid = self
+            .lan
+            .as_deref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
             .map(|g| uuid_words(g.uuid));
         if std::mem::take(&mut gm.merchant.session.last_traded)
             && let (Some(id), Some(uuid)) = (gm.merchant.mob, uuid)
@@ -387,59 +413,83 @@ impl Game<'_> {
     }
     /// `Villager.customServerAiStep` for the guests' trading villagers: the
     /// TRADE reputation event, then the prices follow.
-    pub(super) fn lan_merchant_tick(&mut self, host: &mut LanHost) {
+    pub(super) fn lan_merchant_tick(&mut self) {
         // `AbstractVillager.stillValid`: the trade screen closes once the trader
         // is gone or dead, or the guest is more than 4 blocks past its reach.
-        let far: Vec<(u32, i32)> = host
-            .play
-            .iter()
-            .filter_map(|(conn, p)| {
-                let gm = p.merchant.as_ref()?;
-                let id = gm.merchant.mob?;
-                let g = host
-                    .hub
-                    .guests
+        let far: Vec<(u32, i32)> = self
+            .lan
+            .as_deref()
+            .map(|host| {
+                host.play
                     .iter()
-                    .find(|g| g.conn == *conn && host.hub.here(g))?;
-                (!self.lan_merchant_valid(g, id)).then_some((*conn, gm.window))
+                    .filter_map(|(conn, p)| {
+                        let gm = p.merchant.as_ref()?;
+                        let id = gm.merchant.mob?;
+                        let g = host
+                            .hub
+                            .guests
+                            .iter()
+                            .find(|g| g.conn == *conn && host.hub.here(g))?;
+                        (!self.lan_merchant_valid(g, id)).then_some((*conn, gm.window))
+                    })
+                    .collect()
             })
-            .collect();
+            .unwrap_or_default();
         for (conn, window) in far {
-            if self.lan_merchant_closed(host, conn, Some(window)) {
+            if self.lan_merchant_closed(conn, Some(window))
+                && let Some(host) = self.lan.as_deref_mut()
+            {
                 host.hub.send_to(
                     conn,
                     &C::ContainerClose(play::ContainerClose { container: window }),
                 );
             }
         }
-        let conns: Vec<u32> = host
-            .play
-            .iter()
-            .filter(|(_, p)| {
-                p.merchant
-                    .as_ref()
-                    .is_some_and(|m| m.merchant.session.villager && m.merchant.session.last_traded)
+        let conns: Vec<u32> = self
+            .lan
+            .as_deref()
+            .map(|host| {
+                host.play
+                    .iter()
+                    .filter(|(_, p)| {
+                        p.merchant.as_ref().is_some_and(|m| {
+                            m.merchant.session.villager && m.merchant.session.last_traded
+                        })
+                    })
+                    .map(|(c, _)| *c)
+                    .collect()
             })
-            .map(|(c, _)| *c)
-            .collect();
+            .unwrap_or_default();
         for conn in conns {
-            let Some(uuid) = host
-                .hub
-                .guests
-                .iter()
-                .find(|g| g.conn == conn && host.hub.here(g))
+            let Some(uuid) = self
+                .lan
+                .as_deref()
+                .and_then(|host| {
+                    host.hub
+                        .guests
+                        .iter()
+                        .find(|g| g.conn == conn && host.hub.here(g))
+                })
                 .map(|g| uuid_words(g.uuid))
             else {
                 continue;
             };
-            let Some(gm) = host.play.get_mut(&conn).and_then(|p| p.merchant.as_mut()) else {
+            let Some(id) = self
+                .lan
+                .as_deref_mut()
+                .and_then(|host| host.play.get_mut(&conn))
+                .and_then(|p| p.merchant.as_mut())
+                .map(|gm| {
+                    gm.merchant.session.last_traded = false;
+                    gm.merchant.mob
+                })
+                .flatten()
+            else {
                 continue;
             };
-            gm.merchant.session.last_traded = false;
-            let Some(id) = gm.merchant.mob else { continue };
             self.villager_traded_by(id, uuid);
             let reputation = self.villager_reputation_of(id, uuid);
-            self.lan_merchant_op(host, conn, None, |menu, env| {
+            self.lan_merchant_op(conn, None, |menu, env| {
                 if let Some(s) = menu.merchant.as_mut() {
                     s.reputation = reputation;
                     s.update_special_prices();
@@ -450,19 +500,14 @@ impl Game<'_> {
     }
     /// Takes a station a guest's action opened: a trading screen or a
     /// workstation menu goes to the guest (game/lan_stations.rs).
-    pub(super) fn lan_station_opened(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        station: super::stations::Station,
-    ) {
+    pub(super) fn lan_station_opened(&mut self, conn: u32, station: super::stations::Station) {
         let mut station = station;
         if station.kind == StationKind::Merchant
             && let Some(m) = station.merchant.take()
         {
-            self.lan_open_merchant(host, conn, *m);
+            self.lan_open_merchant(conn, *m);
             return;
         }
-        self.lan_open_station(host, conn, &station);
+        self.lan_open_station(conn, &station);
     }
 }

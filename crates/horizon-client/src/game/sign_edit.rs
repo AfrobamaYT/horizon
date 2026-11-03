@@ -381,19 +381,21 @@ impl Game<'_> {
     }
     /// `ServerPlayer.openTextEdit` for the guest whose action opened a sign:
     /// the block, then the editor, on its client, and the guest may write on it.
-    pub(super) fn lan_open_sign_editor(&mut self, host: &mut LanHost, conn: u32, edit: SignEditor) {
+    pub(super) fn lan_open_sign_editor(&mut self, conn: u32, edit: SignEditor) {
         let pos = [edit.pos.0, edit.pos.1, edit.pos.2];
         let state = self.world.block(pos[0], pos[1], pos[2]).0 as i32;
-        host.hub
-            .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
-        host.hub.send_to(
-            conn,
-            &C::OpenSignEditor(play::OpenSignEditor {
-                pos,
-                front: edit.front,
-            }),
-        );
-        host.play.entry(conn).or_default().sign_editing = Some(pos);
+        if let Some(host) = self.lan.as_deref_mut() {
+            host.hub
+                .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
+            host.hub.send_to(
+                conn,
+                &C::OpenSignEditor(play::OpenSignEditor {
+                    pos,
+                    front: edit.front,
+                }),
+            );
+            host.play.entry(conn).or_default().sign_editing = Some(pos);
+        }
     }
     /// `ServerGamePacketListenerImpl.handleSignUpdate`: the lines, formatting
     /// codes stripped, go on the sign the guest may write on unless it is
@@ -444,14 +446,18 @@ impl Game<'_> {
         // Everything vanilla checks has passed: the mods hear what is about to
         // go on the sign, with the player's state swapped in, and may rewrite
         // or refuse it.
-        if let Some((uuid, name, dimension)) = host
-            .hub
-            .guest(conn)
+        if let Some((uuid, name, dimension)) = self
+            .lan
+            .as_deref()
+            .and_then(|host| host.hub.guest(conn))
             .map(|g| (g.uuid, g.name.clone(), g.dimension.clone()))
         {
             let mut lines = p.lines.to_vec();
             let mut cancel = false;
-            self.as_guest_messaged(host, conn, |game| {
+            let Some(mut host) = self.lan.take() else {
+                return;
+            };
+            self.as_guest_messaged(&mut host, conn, |game| {
                 game.native_sign_changed(
                     uuid,
                     &name,
@@ -462,10 +468,15 @@ impl Game<'_> {
                     &mut cancel,
                 );
             });
+            self.lan = Some(host);
             if cancel {
                 // The sign keeps its text: the editor closes, and the player's
                 // client, which shows what it sent, gets the sign as it is.
-                if let Some(play) = host.play.get_mut(&conn) {
+                if let Some(play) = self
+                    .lan
+                    .as_deref_mut()
+                    .and_then(|host| host.play.get_mut(&conn))
+                {
                     play.sign_editing = None;
                 }
                 self.mark_block_entity_updated(key);
@@ -476,9 +487,14 @@ impl Game<'_> {
                 *line = new;
             }
         }
-        let Some(play) = host.play.get_mut(&conn) else {
+        if self
+            .lan
+            .as_deref()
+            .and_then(|host| host.play.get(&conn))
+            .is_none()
+        {
             return;
-        };
+        }
         // A hook may have broken the sign.
         let Some(BlockEntity::Sign(sign)) = self.world.block_entities.get_mut(&key) else {
             return;
@@ -494,7 +510,13 @@ impl Game<'_> {
         for (line, new) in side.lines.iter_mut().zip(&p.lines) {
             *line = horizon_client::clipboard::strip_formatting(new);
         }
-        play.sign_editing = None;
+        if let Some(play) = self
+            .lan
+            .as_deref_mut()
+            .and_then(|host| host.play.get_mut(&conn))
+        {
+            play.sign_editing = None;
+        }
         self.mark_block_entity_updated(key);
     }
     /// `ClientPacketListener.handleOpenSignEditor`: the editor on a sign this
