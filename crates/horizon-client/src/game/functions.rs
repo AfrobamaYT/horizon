@@ -181,13 +181,12 @@ impl Game<'_> {
         self.rebuild_store(enabled_features);
         self.fns.loaded = true;
         self.fns.load_pending = true;
-        // An explicit reload (`/reload`, `/datapack`) reloads the content
-        // tables with the functions, as `ReloadableServerResources` does;
-        // the lazy first load ran after the world already built them.
+        // An explicit reload (`/reload`, `/datapack`) also rebuilds the
+        // content tables, as `ReloadableServerResources` does; on world open
+        // `finish_open_world` builds them right after this.
         if run_load {
             self.reload_world_tables();
         }
-        let _ = run_load;
         if self.fns.schedule.is_empty() {
             self.load_schedule();
         }
