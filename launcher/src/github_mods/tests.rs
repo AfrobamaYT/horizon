@@ -305,6 +305,9 @@ fn an_unpacked_hmod_keeps_its_pins_and_hook_points_and_ships_only_sources() {
     );
     let mut archive = zip::ZipArchive::new(fs::File::open(&packed.file).unwrap()).unwrap();
     assert!(archive.by_name("assets/zoom/lang/en_us.json").is_ok());
+    write(&root.join("assets/minecraft/lang/en_us.json"), "{}");
+    assert!(checked(&pack(bundle).unwrap(), &root.join("invalid")).is_err());
+    fs::remove_dir_all(root.join("assets/minecraft")).unwrap();
     assert_eq!(
         (
             read.manifest.horizon.as_str(),

@@ -75,17 +75,10 @@ pub(super) fn content_root(
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::{Capability, Content, Package};
     let here = std::env::current_dir().unwrap_or_default();
-    let mut paths: Vec<_> = horizon_mods::find(&here.join(mod_list::DIR))
-        .into_iter()
-        .map(|path| (path, false))
-        .collect();
-    paths.extend(
-        horizon_mods::find(&here.join(mod_list::NATIVE_DIR))
-            .into_iter()
-            .map(|path| (path, true)),
-    );
-    paths.retain(|(path, _)| !dev.contains(path));
-    paths.extend(dev.iter().cloned().map(|path| (path, false)));
+    let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
+    paths.extend(horizon_mods::find(&here.join(mod_list::NATIVE_DIR)));
+    paths.retain(|path| !dev.contains(path));
+    paths.extend(dev.iter().cloned());
     let built = std::env::current_exe()
         .ok()
         .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
@@ -96,12 +89,13 @@ pub(super) fn content_root(
     // The first load's list stays (`set_local`): a reload does not hash the files again.
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
-    for (path, native) in &paths {
+    for path in &paths {
         let Ok(package) = Package::read(path) else {
             continue;
         };
         let m = &package.manifest;
-        let on = content_enabled(&m.id, *native, enabled, &built) || dev.contains(path);
+        let native = horizon_mods::index::native::holds(path);
+        let on = content_enabled(&m.id, native, enabled, &built) || dev.contains(path);
         if !on
             || !m.capabilities.contains(&Capability::Registries)
             || mods.iter().any(|c| c.id == m.id)

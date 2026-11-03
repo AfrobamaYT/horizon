@@ -386,12 +386,13 @@ fn checked(bytes: &[u8], dir: &Path) -> Result<Packed, String> {
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = dir.join(format!("{}.hmod", &sum[..16]));
     fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
-    let bundle = format::Bundle::read(&file).inspect_err(|_| {
-        let _ = fs::remove_file(&file);
-    })?;
+    let facts = horizon_mods::index::inspect(&horizon_mods::index::Kind::NativeMod, &file)
+        .inspect_err(|_| {
+            let _ = fs::remove_file(&file);
+        })?;
     Ok(Packed {
-        id: bundle.manifest.id,
-        version: bundle.manifest.version,
+        id: facts.id.expect("native bundle has an id"),
+        version: facts.version.expect("native bundle has a version"),
         file,
         sha256: sum,
     })
