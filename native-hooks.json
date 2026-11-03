@@ -3479,16 +3479,6 @@
       }
     },
     {
-      "name": "world_game_rule_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_game_rule_change",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "player_advancement_done",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
