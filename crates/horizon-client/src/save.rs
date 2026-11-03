@@ -2588,8 +2588,7 @@ impl SaveDir {
         };
         tickets.iter().filter_map(mod_ticket_from_nbt).collect()
     }
-    /// Save the tickets of mods, the dormant ones of mods not loaded too;
-    /// nothing while there are none and never were.
+    /// Save the tickets of mods; nothing while there are none and never were.
     pub fn save_mod_tickets(&self, tickets: &ModTickets) -> Result<()> {
         let path = self.mod_tickets_path();
         let list: Vec<Tag> = tickets.to_save().map(mod_ticket_to_nbt).collect();

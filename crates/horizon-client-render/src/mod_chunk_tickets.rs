@@ -22,24 +22,22 @@ pub struct ModTicket {
     pub chunk: (i32, i32),
 }
 
-/// The tickets of one level. `dormant` ones belong to mods this run doesn't
-/// load: they are kept for the next save and force nothing.
+/// The tickets of one level.
 #[derive(Debug, Default)]
 pub struct ModTickets {
     held: BTreeSet<ModTicket>,
     per_chunk: HashMap<(i32, i32), u32>,
-    dormant: Vec<ModTicket>,
 }
 
 impl ModTickets {
-    /// Tickets read from a save: those of a mod `loaded` accepts are held.
+    /// Tickets read from a save: those of a mod `loaded` accepts are held, the
+    /// others are discarded (`TicketController`: a controller that isn't
+    /// registered loses its tickets when the world loads).
     pub fn from_saved(saved: Vec<ModTicket>, loaded: impl Fn(&str) -> bool) -> Self {
         let mut tickets = Self::default();
         for ticket in saved {
             if loaded(&ticket.mod_id) {
                 tickets.insert(ticket);
-            } else {
-                tickets.dormant.push(ticket);
             }
         }
         tickets
@@ -76,13 +74,9 @@ impl ModTickets {
     pub fn of_mod<'a>(&'a self, mod_id: &'a str) -> impl Iterator<Item = &'a ModTicket> {
         self.held.iter().filter(move |t| t.mod_id == mod_id)
     }
-    /// Every ticket to save: the held and the dormant.
+    /// Every ticket to save.
     pub fn to_save(&self) -> impl Iterator<Item = &ModTicket> {
-        self.held.iter().chain(&self.dormant)
-    }
-    /// The saved tickets of mods this run doesn't load.
-    pub fn dormant(&self) -> &[ModTicket] {
-        &self.dormant
+        self.held.iter()
     }
 }
 
@@ -118,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn tickets_of_mods_not_loaded_are_kept_and_hold_nothing() {
+    fn tickets_of_mods_not_loaded_are_discarded() {
         let saved = vec![
             ticket("here", TicketOwner::Entity(1), (4, 4)),
             ticket("gone", TicketOwner::Block([0, 0, 0]), (8, 8)),
@@ -126,7 +120,6 @@ mod tests {
         let tickets = ModTickets::from_saved(saved, |id| id == "here");
         assert!(tickets.holds((4, 4)));
         assert!(!tickets.holds((8, 8)));
-        assert_eq!(tickets.to_save().count(), 2);
-        assert_eq!(tickets.dormant().len(), 1);
+        assert_eq!(tickets.to_save().count(), 1);
     }
 }

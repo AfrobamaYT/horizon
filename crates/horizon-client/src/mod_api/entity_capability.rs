@@ -2,8 +2,8 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource, ProvidedBy,
-    ResourceHandler, Tag, Transaction, backend_of,
+    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource,
+    PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, Tag, Transaction, backend_of,
 };
 use std::marker::PhantomData;
 
@@ -277,10 +277,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
             return 0;
         };
         // `ArmorSlot.mayPickup`: bound armour stays on outside creative.
-        let bound = resource
-            .to_stack(1)
-            .enchantment_level("minecraft:binding_curse")
-            > 0;
+        let bound = resource.has_enchantment_effect(host, PREVENT_ARMOR_CHANGE);
         if (MAIN..OFF_HAND).contains(&index) && bound {
             let player = host.player(self.player);
             if player.and_then(|player| player.has_infinite_materials(host)) != Some(true) {

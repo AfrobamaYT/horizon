@@ -2613,7 +2613,7 @@ impl Streaming {
         self.forced.extend(self.mod_tickets.chunks());
     }
     /// The level's saved forced state: `/forceload`'s chunks, and the mods'
-    /// tickets with the dormant ones of mods `loaded` refuses.
+    /// tickets of the mods `loaded` accepts (the rest are discarded).
     pub fn load_forced(
         &mut self,
         commanded: HashSet<(i32, i32)>,
