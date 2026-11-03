@@ -218,6 +218,8 @@ pub(super) struct GuestSwap {
         Option<u8>,
         Option<u32>,
     ),
+    /// Whether the outer turn is a fake player.
+    acting_fake: bool,
     /// That turn's `known_movement`.
     known_movement: Vec3,
     /// The packets queued for that guest.
@@ -582,6 +584,7 @@ impl Game<'_> {
             self.lan_acting_permission.replace(g.permission),
             self.lan_acting_entity.replace(g.entity_id as u32),
         );
+        let acting_fake = std::mem::replace(&mut self.lan_acting_fake, !g.participates_online());
         let packets = std::mem::take(&mut self.guest_packets);
         let entity_events = std::mem::take(&mut self.guest_entity_events);
         let cooldown_events = std::mem::take(&mut self.guest_cooldowns);
@@ -662,6 +665,7 @@ impl Game<'_> {
             marks,
             death_cause,
             acting,
+            acting_fake,
             known_movement,
             packets,
             entity_events,
@@ -765,6 +769,7 @@ impl Game<'_> {
             death_cause,
             combat,
             acting,
+            acting_fake,
             known_movement,
             packets,
             entity_events,
@@ -876,6 +881,7 @@ impl Game<'_> {
             self.lan_acting_permission,
             self.lan_acting_entity,
         ) = acting;
+        self.lan_acting_fake = acting_fake;
         self.known_movement = known_movement;
         play.death_cause = std::mem::replace(&mut self.ui.death_cause, death_cause);
         // An ender chest the guest opened: the menu shows their inventory
@@ -1028,6 +1034,8 @@ impl Game<'_> {
                 }));
             }
             let teleported = std::mem::take(&mut m.teleported);
+            let teleported_delta = m.teleported_delta;
+            m.teleported_delta = [false; 3];
             let moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
             g.motion = Some(Box::new(m));
             // Entity.teleportTo takes a rider out of its vehicle.
@@ -1048,7 +1056,13 @@ impl Game<'_> {
                 }));
             }
             if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
-                host.hub.teleport(i, Some(at));
+                // A command's teleport carries its relative axes as the
+                // packet's DELTA flags; any other move is absolute.
+                if teleported {
+                    host.hub.teleport_command(i, at, teleported_delta);
+                } else {
+                    host.hub.teleport(i, Some(at));
+                }
             }
         }
         let g = &mut host.hub.guests[i];

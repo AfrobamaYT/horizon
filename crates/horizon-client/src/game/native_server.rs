@@ -531,9 +531,7 @@ impl Game<'_> {
             return Vec::new();
         };
         host.hub
-            .guests
-            .iter()
-            .filter(|g| g.placed)
+            .online_players()
             .map(|g| NativeServerPlayer {
                 uuid: g.uuid,
                 name: g.name.clone(),

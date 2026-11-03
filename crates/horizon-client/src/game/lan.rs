@@ -2891,7 +2891,7 @@ impl Game<'_> {
     }
 
     /// Keep the chunks around every guest loaded.
-    fn lan_update_streaming(&mut self, host: &LanHost) {
+    pub(super) fn lan_update_streaming(&mut self, host: &LanHost) {
         // DistanceManager.PlayerTicketTracker: every chunk within the server's
         // view distance (Chebyshev) of a player holds a PLAYER_LOADING ticket
         // at the entity-ticking level (31), whatever the player asked for;
