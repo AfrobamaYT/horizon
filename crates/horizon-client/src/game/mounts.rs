@@ -587,53 +587,70 @@ impl Game<'_> {
             }
         }
     }
+    /// `AbstractHorse.tameWithName`: the acting player owns `mob`, then gets
+    /// the `tame_animal` trigger.
+    fn tame_mount(&mut self, mob: u32) {
+        // RunAroundLikeCrazyGoal.tick: tameWithName by the player on its
+        // back, unless AnimalTameEvent is cancelled, which fails the roll
+        // instead. Inside a guest's turn the acting ids are the guest's.
+        if let Some(index) = self.mobs.iter().position(|m| m.id == mob)
+            && self.animal_tame_cancelled(index, self.native_acting_id(), self.own_entity_id())
+        {
+            let m = &mut self.mobs[index];
+            let mut events = Vec::new();
+            horizon_client::mobs::equine::refuse_rider(m, &mut events);
+            if let Err(e) = self.handle_mob_events(events) {
+                log::warn!("failed horse taming: {e}");
+            }
+            return;
+        }
+        let owner = self.acting_player_uuid();
+        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+            // `asks_animal_tame` left the flag for this handler to set.
+            m.extra.tame = true;
+            m.extra.owner = Some(owner);
+            m.persistent = true;
+            // AbstractHorse.tameWithName: entity event 7, spawnTamingParticles(true).
+            self.mob_event_particles(mob, 7);
+        }
+        if let Some(view) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == mob)
+            .map(|m| self.mob_entity(m))
+        {
+            self.trigger_entity("minecraft:tame_animal", "entity", &view);
+        }
+        if let Some(kind) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == mob)
+            .map(|m| m.kind.id.clone())
+        {
+            let owner = horizon_client::lan::playerdata::ints_uuid(owner);
+            self.native_entity_tame(mob, &kind, Some(owner));
+        }
+    }
     pub(super) fn mount_event(&mut self, e: &MobEvent) {
         match *e {
             MobEvent::Tamed { mob } => {
-                // RunAroundLikeCrazyGoal.tick: tameWithName by the player on
-                // its back, unless AnimalTameEvent is cancelled, which fails
-                // the roll instead.
-                let tamer = self.mount_tamer(mob);
-                if let Some(index) = self.mobs.iter().position(|m| m.id == mob)
-                    && let Some((uuid, entity_id)) = tamer
-                    && self.animal_tame_cancelled(index, uuid, entity_id)
+                // tameWithName(player): the rider, a server's player in its turn.
+                let rider = self.lan.as_ref().and_then(|h| {
+                    h.hub
+                        .guests
+                        .iter()
+                        .find(|g| g.vehicle == Some(mob))
+                        .map(|g| g.conn)
+                });
+                if let Some(conn) = rider
+                    && let Some(mut host) = self.lan.take()
                 {
-                    let m = &mut self.mobs[index];
-                    let mut events = Vec::new();
-                    horizon_client::mobs::equine::refuse_rider(m, &mut events);
-                    if let Err(e) = self.handle_mob_events(events) {
-                        log::warn!("failed horse taming: {e}");
-                    }
-                    return;
+                    self.as_guest(&mut host, conn, |g| g.tame_mount(mob));
+                    self.lan = Some(host);
+                } else {
+                    self.tame_mount(mob);
                 }
-                let owner = tamer
-                    .map(|(uuid, _)| horizon_client::lan::playerdata::uuid_ints(uuid))
-                    .or(self.level.player_uuid)
-                    .or(Some([0, 0, 0, 1]));
-                if let Some(view) = self
-                    .mobs
-                    .iter()
-                    .find(|m| m.id == mob)
-                    .map(|m| self.mob_entity(m))
-                {
-                    self.trigger_entity("minecraft:tame_animal", "entity", &view);
-                }
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                    m.extra.tame = true;
-                    m.extra.owner = owner;
-                    m.persistent = true;
-                    // AbstractHorse.tameWithName: entity event 7, spawnTamingParticles(true).
-                    self.mob_event_particles(mob, 7);
-                }
-                if let Some(kind) = self
-                    .mobs
-                    .iter()
-                    .find(|m| m.id == mob)
-                    .map(|m| m.kind.id.clone())
-                {
-                    let owner = owner.map(horizon_client::lan::playerdata::ints_uuid);
-                    self.native_entity_tame(mob, &kind, owner);
-                }
+            }                }
             }
             MobEvent::Buck { mob } => {
                 if self.riding == Some(mob) {
