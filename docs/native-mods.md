@@ -3284,8 +3284,8 @@ The builder qualifies the type ID with the registering mod's namespace. It owns 
 and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound).
 Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
 refused at load. Refused native block, item or block entity declarations stop startup, as does unreadable
-known-components input; the game does not fall back to vanilla content. An explicitly declared mod template block uses its declared type; undeclared template
-blocks retain their vanilla behavior. Adding mod blocks to vanilla types is not supported by this builder.
+known-components input; the game does not fall back to vanilla content. An explicitly declared mod
+template block uses its declared type; undeclared template blocks retain their vanilla behavior. Adding mod blocks to vanilla types is not supported by this builder.
 The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `pre_remove_side_effects`,
 `menu_button`, `menu_quick_move`) find it by that declared type; the others (`block_entity`, `screen`, the
 block hooks) by block. The factory is a `BlockEntityPart` method, not a global `Hooks` method.
@@ -3470,8 +3470,8 @@ player's slot, and two thirds of one fill none.
 
 Energy is the capability `ENERGY` (NeoForge's `Capabilities.Energy.BLOCK`), answered by an `EnergyHandler`: an
 amount and a capacity, with no resource, and `insert` and `extract` written in a transaction as a
-`ResourceHandler`'s are. `r.block_entity_capability(&ENERGY, &battery, …)` (with a declared or looked-up type key) registers a provider, asked as
-`ITEMS`' are, and `level.capability(host, &ENERGY, pos, side)` finds one. The game's own answer is a mod block
+`ResourceHandler`'s are. `r.block_entity_capability(&ENERGY, &battery, …)` (with a declared or looked-up
+type key) registers a provider, asked as `ITEMS`' are, and `level.capability(host, &ENERGY, pos, side)` finds one. The game's own answer is a mod block
 entity's `block_entity_energy` buffer, as NeoForge's `SimpleEnergyHandler`: a fill through the sides it comes
 through, up to the buffer's room and its limit per insert, and a drain by the sides it leaves by, up to the limit per
 extract; a side that reaches neither finds no handler. `move_energy(host, &from, &to, max, tx)` moves between two
