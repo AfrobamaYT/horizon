@@ -48,6 +48,10 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
     }
 }
 
+fn equipment_stack(stack: Option<ItemStack>) -> Option<ItemStack> {
+    stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air")
+}
+
 impl Game<'_> {
     /// What a living handle names now: a player, a mob, an armor stand or the dragon.
     fn native_living_target(&self, living: LivingRef) -> Option<Target> {
@@ -67,9 +71,59 @@ impl Game<'_> {
         let living = LivingRef::new(entity);
         self.native_living_target(living).map(|_| living)
     }
-    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
-    /// None when it is empty, the entity has no such slot (a player has no
-    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    /// The effective value of an attribute on a living entity. None for an
+    /// unknown or absent attribute, an unavailable entity, or on a client.
+    /// Mobs, armor stands and the dragon return None until they have live
+    /// attribute maps. API @API:living_refs@.
+    pub(super) fn native_living_attribute_value(
+        &mut self,
+        living: LivingRef,
+        id: &str,
+    ) -> Option<f64> {
+        self.native_living_attribute(
+            living,
+            id,
+            horizon_world::attribute_map::ValueKind::Computed,
+        )
+    }
+
+    /// The base value of an attribute, before modifiers. Mobs, armor stands
+    /// and the dragon return None until they have live attribute maps.
+    /// API @API:living_refs@.
+    pub(super) fn native_living_attribute_base(
+        &mut self,
+        living: LivingRef,
+        id: &str,
+    ) -> Option<f64> {
+        self.native_living_attribute(living, id, horizon_world::attribute_map::ValueKind::Base)
+    }
+
+    fn native_living_attribute(
+        &mut self,
+        living: LivingRef,
+        name: &str,
+        kind: horizon_world::attribute_map::ValueKind,
+    ) -> Option<f64> {
+        let player = match self.native_living_target(living)? {
+            Target::Player => self.player.as_mut()?,
+            Target::Guest(conn) => self
+                .lan
+                .as_mut()?
+                .hub
+                .guest_mut(conn)?
+                .motion
+                .as_deref_mut()?,
+            _ => return None,
+        };
+        let key = player.attributes.key(name)?;
+        player.attributes.value(Some(key), kind).ok()
+    }
+
+    /// The stack in `slot` (`LivingEntity.getItemBySlot`). Players, guests,
+    /// mobs and armor stands store main hand, off hand, head, chest, legs and
+    /// feet. All mobs also store body and saddle. Dragon equipment and player
+    /// or armor-stand body and saddle storage are not yet modeled. None means
+    /// empty, unsupported or stale. API @API:living_refs@.
     pub(super) fn native_living_equipment(
         &self,
         living: LivingRef,
@@ -113,12 +167,12 @@ impl Game<'_> {
         };
         self.native_living_equipment(living, slot)
     }
-    /// Puts `stack` (None: empties it) in equipment slot `slot`
-    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
-    /// when the entity has no such slot: a player has no body or saddle
-    /// slot, a horse no head slot, a zombie no body slot, the dragon none.
-    /// Horizon keeps no mob saddle here yet, and a mob holds one item outside
-    /// its main hand, as `/item` does. API @API:living_refs@.
+    /// Puts `stack` in `slot` (`LivingEntity.setItemSlot`); None, air or a
+    /// zero count empties it. Players, guests, mobs and armor stands store
+    /// main hand, off hand, head, chest, legs and feet. All mobs also store
+    /// body and saddle. Dragon equipment and player or armor-stand body and
+    /// saddle storage are not yet modeled. False means unsupported or stale.
+    /// API @API:living_refs@.
     pub(super) fn native_living_set_equipment(
         &mut self,
         living: LivingRef,
@@ -128,22 +182,68 @@ impl Game<'_> {
         let Some(t) = self.native_living_target(living) else {
             return false;
         };
-        // A mob keeps one of its head and body slots: the body for a horse's
-        // armour or a llama's carpet, the head for the rest.
+        let stack = equipment_stack(stack);
         if let Target::Mob(id) = t {
-            let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
+            let equippable = stack.as_ref().and_then(|s| {
+                let name = horizon_client::item_sync::equippable_slot(s, self.items())?;
+                let equip_slot = super::dispenser::Slot::from_name(&name)?;
+                let patched = s.data().and_then(|d| d.other("minecraft:equippable"));
+                let sound = if let Some(component) = patched {
+                    match component.get("equip_sound") {
+                        Some(horizon_world::nbt::Tag::String(sound)) => {
+                            Some(sound.to_string_lossy())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    self.items()
+                        .get(&s.item)
+                        .and_then(|i| i.equip_sound.clone())
+                }
+                .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into());
+                Some((equip_slot, sound))
+            });
+            let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
                 return false;
             };
-            let body = horizon_client::mobs::drops::head_is_body(m.species());
-            if matches!(
-                (slot, body),
-                (EquipmentSlot::Head, true) | (EquipmentSlot::Body, false)
-            ) {
+            let old = if (slot as usize) <= 5 {
+                horizon_client::mobs::finalize::item_stack(mob, slot as usize)
+            } else {
+                mob.equipment_stacks()[slot as usize].clone()
+            };
+            let changed = match (&old, &stack) {
+                (None, None) => false,
+                (Some(a), Some(b)) => !a.same_item_same_components(b),
+                _ => true,
+            };
+            if !mob.set_equipment_stack(slot as usize, stack) {
                 return false;
             }
+            if changed && !mob.first_tick {
+                let at = mob.position;
+                let sound = equippable.as_ref().and_then(|(equip_slot, sound)| {
+                    (!mob.silent && *equip_slot as usize == slot as usize)
+                        .then(|| {
+                            super::dispenser::equip_sound(mob, *equip_slot, Some(sound.clone()))
+                        })
+                        .flatten()
+                });
+                if let Some(sound) = sound {
+                    self.audio.play(&sound, Some([at.x, at.y, at.z]), 1.0, 1.0);
+                }
+                let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
+                self.post_game_event(
+                    if equippable.is_some() {
+                        "minecraft:equip"
+                    } else {
+                        "minecraft:unequip"
+                    },
+                    [at.x, at.y, at.z],
+                    ctx,
+                );
+            }
+            return true;
         }
-        // ItemStack.isEmpty: air or a zero count empties the slot, as `/item` does.
-        let stack = stack.filter(|s| &*s.item != "minecraft:air" && s.count > 0);
         match self
             .slots_named(&Owner::Entity(t), slot_name(slot))
             .as_slice()
@@ -157,6 +257,198 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_equipment_writes_emit_vanilla_equip_events() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            game.audio.capture = Some(Vec::new());
+            super::super::dispense_fixture::start_recording();
+            let helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Head, None));
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            game.mobs[0].first_tick = false;
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Head, Some(helmet)));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            game.mobs[0].silent = true;
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Head,
+                Some(ItemStack::new("minecraft:diamond_helmet", 1))
+            ));
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Head, None));
+            game.mobs[0].silent = false;
+            // Equippable, but its head slot does not match chest: event, no sound.
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Chest,
+                Some(ItemStack::new("minecraft:iron_helmet", 1))
+            ));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            let events = super::super::dispense_fixture::stop_recording();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| e.ends_with("minecraft:equip"))
+                    .count(),
+                3
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| e.ends_with("minecraft:unequip"))
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_equipment_writes_keep_full_stacks() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for (id, kind) in [
+                (12, "minecraft:zombie"),
+                (13, "minecraft:horse"),
+                (14, "minecraft:pillager"),
+            ] {
+                let kind = game.res.mob_types().get(kind).unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            let zombie = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            let horse = game.native_living(game.native_entity(13).unwrap()).unwrap();
+            let captain = game.native_living(game.native_entity(14).unwrap()).unwrap();
+            let mut helmet = ItemStack::new("minecraft:iron_helmet", 2);
+            helmet.damage = 7;
+            helmet.data_mut().enchantments = vec![("minecraft:protection".into(), 3)];
+            assert!(zombie.set_equipment(game, EquipmentSlot::Head, Some(helmet.clone())));
+            assert_eq!(
+                zombie.equipment(game, EquipmentSlot::Head),
+                Some(helmet.clone())
+            );
+            assert_eq!(game.mobs[0].extra.armor[0], Some(helmet.clone()));
+            let mut shield = ItemStack::new("minecraft:shield", 2);
+            shield.damage = 11;
+            assert!(game.native_living_set_equipment(
+                zombie,
+                EquipmentSlot::OffHand,
+                Some(shield.clone())
+            ));
+            assert_eq!(
+                game.native_living_equipment(zombie, EquipmentSlot::OffHand),
+                Some(shield)
+            );
+            assert!(game.native_living_set_equipment(
+                horse,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            let mut body = ItemStack::new("minecraft:diamond_horse_armor", 3);
+            body.damage = 9;
+            body.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("armor".into()));
+            assert!(game.native_living_set_equipment(
+                horse,
+                EquipmentSlot::Body,
+                Some(body.clone())
+            ));
+            assert_eq!(
+                game.native_living_equipment(horse, EquipmentSlot::Head),
+                Some(helmet.clone())
+            );
+            assert_eq!(
+                game.native_living_equipment(horse, EquipmentSlot::Body),
+                Some(body)
+            );
+            for slot in [
+                EquipmentSlot::MainHand,
+                EquipmentSlot::Chest,
+                EquipmentSlot::Legs,
+                EquipmentSlot::Feet,
+            ] {
+                let stack = ItemStack::new("minecraft:stone", 4);
+                assert!(game.native_living_set_equipment(zombie, slot, Some(stack.clone())));
+                assert_eq!(game.native_living_equipment(zombie, slot), Some(stack));
+                assert!(game.native_living_set_equipment(
+                    zombie,
+                    slot,
+                    Some(ItemStack::new("minecraft:stone", 0))
+                ));
+                assert_eq!(game.native_living_equipment(zombie, slot), None);
+            }
+            let mut saddle = ItemStack::new("minecraft:saddle", 3);
+            saddle.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("saddle".into()));
+            assert!(game.native_living_set_equipment(
+                horse,
+                EquipmentSlot::Saddle,
+                Some(saddle.clone())
+            ));
+            assert_eq!(
+                game.native_living_equipment(horse, EquipmentSlot::Saddle),
+                Some(saddle)
+            );
+            horizon_client::mobs::raider::set_patrol_leader(&mut game.mobs[2], true);
+            horizon_client::mobs::raider::wear_banner(&mut game.mobs[2]);
+            assert!(horizon_client::mobs::raider::is_captain(&game.mobs[2]));
+            assert!(game.native_living_set_equipment(
+                captain,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert_eq!(
+                game.native_living_equipment(captain, EquipmentSlot::Head),
+                Some(helmet)
+            );
+            assert!(!horizon_client::mobs::raider::is_captain(&game.mobs[2]));
+            assert!(game.native_living_set_equipment(
+                horse,
+                EquipmentSlot::Body,
+                Some(ItemStack::new("minecraft:air", 1))
+            ));
+            assert_eq!(
+                game.native_living_equipment(horse, EquipmentSlot::Body),
+                None
+            );
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let dragon = game.native_living(game.native_entity(15).unwrap()).unwrap();
+            assert!(!game.native_living_set_equipment(
+                dragon,
+                EquipmentSlot::Saddle,
+                Some(ItemStack::new("minecraft:saddle", 1))
+            ));
+        });
+    }
+
+    #[test]
+    fn air_and_zero_count_are_empty_on_write() {
+        assert!(equipment_stack(Some(ItemStack::new("minecraft:air", 1))).is_none());
+        assert!(equipment_stack(Some(ItemStack::new("minecraft:stone", 0))).is_none());
+        assert!(equipment_stack(Some(ItemStack::new("minecraft:stone", 1))).is_some());
+    }
 
     #[test]
     fn a_players_slots_come_from_its_inventory_armour_and_off_hand() {

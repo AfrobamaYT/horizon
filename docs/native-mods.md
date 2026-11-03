@@ -377,13 +377,14 @@ An injection names `hook` and `hook_version` instead of `target`, and horizon-mi
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A
 contract is never changed, its `mod_api` entry (the trait method's contract) included: an incompatible change adds
-a version. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
+a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
+binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
 ### Host-aware weapon damage (API next)
 
-`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; v1 keeps its signature and firing point.
+`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; upstream v1 keeps its signature and firing point. **Fork migration:** mods that read the extra damage or knockback fields previously added to the fork's v1 hooks must move to the corresponding v2 hooks. Those fork-only fields are no longer present on v1.
 It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
 and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
 levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
@@ -738,7 +739,7 @@ A mob is its `Entity.getId`; a player is None, with their state swapped in (`nat
 never reach them. Bundles that use them need `"hooks": 56`.
 
 API 57 adds chunks and players coming and going, on the server: `native_chunk_load` (with whether the chunk is new), `native_chunk_unload`, and
-`native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Bundles that use them need `"hooks": 57`.
+`native_player_logged_in` and `native_player_logged_out`, which come in pairs however a player leaves, the server stopping included. Changes made to the departing chunk in `native_chunk_unload` aren't saved: as in vanilla, the chunk is saved before it unloads. Bundles that use them need `"hooks": 57`.
 
 API 58 adds [the renderer's hook points](#render-hook-points): `native_world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
 `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack. Bundles that use them need `"hooks": 58`.
@@ -1868,6 +1869,16 @@ Install and prepare the base release in that scratch launcher home first, then t
 - A list of every native build, to delete the ones no instance needs.
 - A prebuilt horizon-mixins from its CI instead of building it on the player's computer.
 
+## Counterparts
+
+A hook's optional `neoforge` catalog key names its NeoForge 26.3 counterpart;
+that counterpart sets the hook's name, side and cancellation contract. The optional
+`fabric` and `paper` keys name Fabric and Paper events at the same moment with the
+same contract. Each key is a string or a list of strings; omission is valid. One
+hook serves each matching moment; near matches with different timing, side or
+cancellation are gaps, not counterparts. A hook with none of these keys names the
+mod mixin or use it replaces in its design or PR.
+
 ## Named hook catalog (draft)
 
 `native-hooks.json` maps stable hook names and contract versions to the current
@@ -2323,10 +2334,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (0 to 20) or set `cancel` to leave it at `from`, saturation included. It is heard once for what one turn of the
   player changed, not for the full bar a respawn gives, the food a player joins with, or the host of a LAN world. The
   player's state is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- **`native_right_click_block(pos, face, canceled)`** (API 21): a player's right click on a block, before the block's
-  own use and the item's (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both,
-  without a swing; the player's client is sent the block back. With `native_destroy_block` it keeps players out of
-  claimed land.
+- **`native_right_click_block(pos, face, hand, hit, player, player_entity_id, canceled)`** (API 21; `hand`, `hit`, `player` and `player_entity_id` since
+  API @API:block_use_context@): a player's right click on a block, before the block's own use and the item's
+  (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both, without a swing; the
+  player's client is sent the block back. With `native_destroy_block` it keeps players out of claimed land.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_move(dimension, piston,
   direction, push, destroy, canceled)`** (API 22, on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.
@@ -2368,7 +2379,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or
   snow, or add a snow layer at `pos`. `from` and `to` are block state IDs. Set `cancel` to keep the old state.
 - **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
-  sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
+  sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged. It is a
+  near match of NeoForge's `NoteBlockEvent.Play` (cancel only) and is asked first; `note_block_play` is the counterpart,
+  and a cancel here skips it.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to
   stop the ring and its raider reveal.
 - **`native_cauldron_level_changed(dimension, player, pos, from_level, to_level, reason, cancel)`** (on `GameLevel`):
@@ -2475,18 +2488,20 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
-- `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
-  whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
-  `view_vector` and `distance_to_sqr(host, pos)` read and move it.
 - `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
   alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
   read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
+- `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
+  `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
+  where the level has no weather), `is_raining` and `is_thundering` read its world settings.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a horse has no head
-  slot, a zombie no body slot; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
-  body slot keep only the item, not the stack's count and components.
+  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
+  preserve complete stacks for all mob slots.
+- `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
+  whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
+  `view_vector` and `distance_to_sqr(host, pos)` read and move it.
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
   `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
@@ -2494,9 +2509,17 @@ a dimension.
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+- `host.block_entity(level, pos)` finds a block entity in a loaded chunk, including in parked levels;
+  `kind`, `position`, `level` and `data` read it. A removed or temporarily taken-out entity reads `None`;
+  a replacement at the same position resolves to the new entity, unlike vanilla's object identity.
+- `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
+  `None` for a client, a stale handle, or a closed level; parked levels can be read.
+- `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
+
+`level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags. Bundles need `"hooks": ["level_block_writes"]`.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
-(`entity`, `level`) also becomes a method of that handle.
+(`entity`, `level`, `block_entity`) also becomes a method of that handle.
 
 ### Mobs drawn by a mod
 
@@ -3049,6 +3072,131 @@ hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in i
 A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
 leaves `hooks` out.
 
+### Parts
+
+A part is code a trait mod attaches to one block, block entity, item or mod menu type, its own or vanilla's
+([the spec](https://github.com/arismoko/horizon/issues/41)). A mod attaches its parts once, at startup, in
+`Hooks::register`:
+
+```rust
+struct Gauge;
+impl BlockPart for Gauge {
+    fn has_analog_output(&self, _: &dyn LevelHost, event: &mut HasAnalogOutputEvent) {
+        event.output = true;
+    }
+    fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+        event.output = 15;
+    }
+}
+
+impl Hooks for MyMod {
+    fn register(&self, r: &mut Registrar) {
+        r.block_part("minecraft:stone", Gauge);
+    }
+}
+```
+
+A hook whose catalog entry has a `scope` (`block`, `block_entity`, `item`, `menu`) and a `key`, the argument
+naming the thing it is about, has a method on that scope's trait: `BlockPart`, `BlockEntityPart` (a
+`BlockPart` too), `ItemPart` and `MenuPart`, with the same signature as on `Hooks`. The game asks every mod's
+`Hooks` method first, then the parts attached to that thing, in dispatch order, through the hook's contract: a
+`Cancel` or a replacement from a mod skips the parts. A part's kind is its type: the same kind twice on one
+thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
+adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
+
+A block entity part names its block entity type and the blocks that hold one, as vanilla's
+`BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
+The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
+find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
+block hooks) by block.
+
+`r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
+every member of a tag (its name without `#`). Each game resolves them against its own tags when its world
+opens, again on `/reload`, and when a client joins a server, so the window's game and its server thread each
+answer from the tags they play with; a block that leaves the tag is no longer asked. A mod's parts on one
+thing run in the order it registered them, by key or by tag. A part a tag gives a thing
+that already has that kind of part warns, naming both mods, and the earlier mod's part stays. A tag that
+doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
+doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
+does) can't see tag parts, and warns once.
+
+A capability is answered by providers, registered by block entity type as NeoForge's
+`RegisterCapabilitiesEvent` registers them: `r.block_entity_capability(&ITEMS, "mymod:pipe", |host, at|
+Some(Box::new(PipeItems)))` gives a handler for the block entity and side `at` (a `BlockSide`), or none to
+leave it to the next provider. Providers add up: `host.capability(&ITEMS, pos, side)` asks those registered
+with `r.block_entity_capability_before_game` first, then the game's own (a block entity's slots by side, by the
+rules hoppers follow, and a mod block entity's `block_entity_container`), then the others, each in registration
+order, and the first to answer wins. That order is the fork's choice, the game first and `_before_game` to go ahead
+of it: NeoForge 26.3's javadoc doesn't state one between mods' providers and the game's. It returns a `Capability`, the handler and who answered. A handler holds
+no borrow: each call is given the host, so it may call a
+neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
+`insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
+mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
+
+An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
+block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
+(`ItemPlace::Mod`, read and written by the `PlaceProvider` it registers with `r.place_provider`).
+`r.item_capability(&ITEM_ITEMS, "mymod:backpack", |host, place| Some(Box::new(Backpack)))` answers
+`ITEM_ITEMS` for an item with a `StackItemHandler`, and `r.item_capability_before_game` ahead of the game's
+own over `item_container`; `host.item_capability(&ITEM_ITEMS, &place)` asks them in the same order. A handler keeps its contents in the stack, and reads and writes it only with
+`host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one, simulate)`. A write plans with
+`simulate` first, then commits: the old stack must come out whole and the new one go in whole, or it refuses and
+hands the stack back with nothing moved. An occupied slot can't be asked whether the new stack fits until it is
+empty: its `capacity` (NeoForge's `isValid` and `getCapacityAsLong`, how many if the slot were empty) is asked
+first, as a hint; then the old stack comes out, the empty slot is asked with a simulated insert, and where that
+falls short the old stack goes back and the write is refused, with no warning. So a handler's `simulate` must
+answer exactly as its real call does, as NeoForge's must, and pass it on to `set_place_stack`; one whose real call
+disagrees is a mod bug: what it leaves out goes back, else is dropped at the block, and the game warns once,
+naming the mod. With `one_by_one`, a changed item is split off a
+bigger stack: from a player's hand as vanilla's filled bucket (into the inventory, else dropped with no thrower,
+and in creative the hand is kept), from a block entity's or an item's slot into that container's other slots.
+A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and
+the other stays as it was.
+
+Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
+millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
+fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
+components. The game's own answer is a mod block's tanks by side (`block_entity_fluids`) and a cauldron, one tank
+of 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity and is answered by
+position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
+discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
+components are dropped. A mod block's saved tanks take no fluid with components. `host.transfer_fluids(from, from_side, to, to_side, max)` moves
+one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, until a round moves
+nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
+whole, then the source really gives with that request and the target is filled with exactly what came out. A
+handler whose real calls answer as its simulations never loses fluid and is never warned.
+`native_fluid_insert`, `native_fluid_extract`, `native_fluid_tanks` and `native_move_fluids` use a mod's handler
+where one is registered; they name a fluid by its id, so they leave fluids with components alone.
+
+A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
+mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
+to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
+broken handler can void.
+
+The game never trusts an answer past what it asked, offered or simulated. A real extract must give the item or
+fluid, with the components, that its simulation showed: another is given back and nothing comes out, and a
+leftover of another item counts as the offered one. A leftover larger than the offer counts as the offer, and what an extract gives beyond the request goes back into its slot or tank, else is
+dropped at the block (items) or, as above, lost with a warning (fluids). Either is a mod bug, warned once naming
+the mod; a broken handler can't make a move overflow, duplicate items or panic the game.
+
+`host.transaction(|host| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose `Err`
+aborts, nested in the open transaction if any. Inside, a capability write applies at once, so later steps see it,
+and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
+compound and attachments, a hopper's cooldown, a cauldron's block state, a player's inventory (slots, armour, off
+hand and cursor, whether the player is the host or a guest), and an entity's inventory (a chest or hopper minecart,
+a chest boat, a chested donkey, mule or llama). A nested commit hands its changes to
+the transaction around it, and only the outermost commit makes them final. Then the world is told of each change
+once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox starting or stopping, a cauldron's
+block update, and an item dropped at a block, thrown by a player (what a filled bucket's split no longer fits) or
+by an entity. An abort puts every storage back quietly, so nothing outside saw the
+change. A panic unwinding out of the closure aborts that transaction as it passes, and the one around it stays open. `host.transaction` is the only way to open one: the raw `transaction_open` and `transaction_close` helpers take a `TransactionSeal` that only it makes. A handler keeps no journal of its own:
+its state is the game's, so the game's journal covers it. An item entity's stack isn't covered: what a transaction
+changes there is final at once.
+
+`ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
+`Capabilities.Item.ENTITY`), read and written through `place_stack` and `set_place_stack` like any other place.
+Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
@@ -3068,7 +3216,8 @@ impl Host for Stone {
 }
 let mods = [Box::new(MyMod) as Box<dyn Hooks>];
 let mut claimed = false;
-dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], &mut claimed);
+let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
+dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], Hand::Main, hit, 7, &mut claimed);
 assert!(claimed);
 ```
 
@@ -3077,14 +3226,21 @@ assert!(claimed);
 A new hook needs its fragment in `tools/native-hook-fragments/` with its `mod_api` entry (for example
 `{"contract": "cancel", "out": "cancel"}`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
-The generator adds the hook's trait method and replaces the placeholder with the `dispatch_<hook>` call.
-Every hook needs a `mod_api` entry: the check fails naming any hook without one. A body that is neither the
+That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
+that source change and the fragment. The `horizon-mod-api-gen` build dependency generates the hook traits,
+`Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
+builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration
+is needed after a merge. Every hook needs a `mod_api` entry: the build fails naming any hook without one. A hook that stands in for a
+method a vanilla block, block entity, item or menu overrides also gets a `scope` and a `key`
+(`{"contract": "collect", "out": "output", "scope": "block", "key": "state"}`): the key is a
+`BlockStateId` (with a level host to name its block), an `&ItemStack`, a `ModBlockEntity` or an id `&str`, and
+the generator also puts the method on that scope's part trait ([Parts](#parts)). A body that is neither the
 placeholder nor already calls the dispatch is an error, and the generator never changes it. Hooks that are
 free functions outside `Game` are wired by hand: those crates can't see the mod list, so each calls a callback
 the executable installs once, such as `NativeLoadHooks` in `horizon-world` and `NativeClientHooks` in the
-client library (`menu_slot_rules`, `living_breathe`, `ingredient`). `cargo run -p xtask -- mod-api --check`
-and the `generated_output_is_current` test report a placeholder still to fill instead of filling it. Mixin
-injections go at the head of the body, before the dispatch, so they still run first.
+client library (`menu_slot_rules`, `living_breathe`, `ingredient`). A build reports a placeholder still to
+fill instead of changing hand-written source; run `cargo run -p xtask -- mod-api` to fill it. Mixin injections
+go at the head of the body, before the dispatch, so they still run first.
 
 ### Server attachments
 
@@ -3175,6 +3331,9 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
 receiver and documentation; a helper without `self` (`config_dir`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
+A helper's `receiver` also exposes it on that handle. Receivers come from public
+`*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
+Adding a handle requires no separate generator registration.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,

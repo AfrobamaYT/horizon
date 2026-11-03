@@ -94,6 +94,22 @@ impl BlockLandingWorld for MobLanding<'_, '_> {
     fn entity_dimensions(&self) -> (f32, f32) {
         (self.mob.width(), self.mob.height())
     }
+    fn cancel_farmland_trample(
+        &mut self,
+        position: BlockPos,
+        state: BlockStateId,
+        distance: f64,
+    ) -> bool {
+        let mut cancel = false;
+        crate::landing::native_farmland_trample(
+            self.mob.id,
+            [position.x, position.y, position.z],
+            state.0,
+            distance,
+            &mut cancel,
+        );
+        cancel
+    }
     // A mob never sneaks, so nothing suppresses a slime block's bounce.
     fn suppressing_bounce(&mut self) -> Result<bool, String> {
         Ok(false)

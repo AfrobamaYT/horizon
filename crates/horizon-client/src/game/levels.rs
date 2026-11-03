@@ -132,6 +132,10 @@ impl Levels {
         self.parked.get(&dim).map(|level| &level.world)
     }
 
+    pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
+        self.parked.get(&dim).map(|level| &level.anims)
+    }
+
     /// The worlds of the levels not in place.
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
@@ -667,10 +671,11 @@ impl Game<'_> {
         let back = self.dim;
         for dim in closing {
             self.enter_level(None, dim)?;
-            // Its chunks leave with it: the mods hear before its last save.
-            let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
-            self.native_chunks_changed(&chunks);
+            // Vanilla saves the level's chunks before their unload hooks.
+            self.native_chunks_loaded();
             self.save_level(true)?;
+            let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
+            self.native_chunks_unloaded(&chunks);
             // Its entities' attachments are saved with them; they leave memory too.
             for uuid in self.persist.uuids.values() {
                 self.entity_attachments.remove(uuid);

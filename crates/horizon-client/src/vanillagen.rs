@@ -437,10 +437,21 @@ impl VanillaTerrain {
             })
             .collect();
         let fluid_ticks = chunk.terrain.fluid_ticks().pack(0).to_vec();
-        if !block_ticks.is_empty() || !fluid_ticks.is_empty() {
+        if !block_ticks.is_empty() || !fluid_ticks.is_empty() || !chunk.saved_root.is_empty() {
+            let attachments = horizon_world::attachments::attachment_compound(
+                chunk
+                    .saved_root
+                    .get(&horizon_world::attachments::ATTACHMENTS_KEY.into()),
+            )
+            .ok()
+            .flatten()
+            .map(|data| horizon_world::attachments::Attachments::from_nbt(data.clone()))
+            .unwrap_or_default();
             out.saved = Some(Arc::new(crate::save::ChunkExtras {
                 block_ticks,
                 fluid_ticks,
+                root: chunk.saved_root.clone(),
+                attachments,
                 ..Default::default()
             }));
         }
@@ -984,6 +995,10 @@ impl ChunkGenerator for VanillaTerrain {
                 })
             }))
         };
+        chunk.saved_root = column
+            .saved
+            .as_deref()
+            .map_or_else(Default::default, |e| e.root.clone());
         if let Some(extras) = column.saved.as_deref() {
             *chunk.terrain.block_ticks_mut() = ticks(&extras.block_ticks, &|k| {
                 self.tick_states.get(k as usize).copied()

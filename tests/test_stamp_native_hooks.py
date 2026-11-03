@@ -95,23 +95,44 @@ class StampTests(unittest.TestCase):
         fragment = json.loads(path.read_text())
         contract = {"kind": "listen", "receiver": "game"}
         fragment["hooks"][0].update(
-            {"side": "server", "cancellable": True, "mod_api": contract, "other": 1})
+            {"neoforge": "SomeEvent", "fabric": ["SomeCallback", "OtherCallback"], "paper": "SomePaperEvent",
+             "side": "server", "cancellable": True, "mod_api": contract, "other": 1})
         path.write_text(json.dumps(fragment))
         self.assertFalse(stamp.stamp(False))
         hooks = json.loads((self.root / stamp.CATALOG).read_text())["hooks"]
         self.assertEqual(hooks, [{"name": "served", "version": 1, "target": "target::served",
-                                  "side": "server", "cancellable": True, "mod_api": contract}])
+                                  "neoforge": "SomeEvent", "fabric": ["SomeCallback", "OtherCallback"],
+                                  "paper": "SomePaperEvent", "side": "server", "cancellable": True, "mod_api": contract}])
 
-    def test_markers_are_stamped_in_the_mod_api_files(self):
+    def test_markers_are_stamped_in_hand_written_api_types(self):
         self.git("add", ".")
         self.git("commit", "-qm", "base")
         self.fragment("drops")
-        for path in stamp.MOD_API:
-            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
-            (self.root / path).write_text("/// Since API @API:drops@.\n")
+        path = self.root / stamp.MOD_API
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("/// Since API @API:drops@.\n")
         self.assertFalse(stamp.stamp(False))
-        for path in stamp.MOD_API:
-            self.assertEqual((self.root / path).read_text(), "/// Since API 8.\n")
+        self.assertEqual(path.read_text(), "/// Since API 8.\n")
+
+    def test_stamping_leaves_stale_generated_copies_alone(self):
+        # Old checkouts may still have these files; only the generator's inputs are stamped now.
+        generated = (
+            "crates/horizon-client/src/mod_api/generated.rs",
+            "crates/horizon-client/src/mod_api/generated_host.rs",
+            "crates/horizon-client/src/game/mod_api_host_generated.rs",
+            "crates/horizon-client-render/src/gfx/native_render/generated.rs",
+        )
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.fragment("drops")
+        for name in generated:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("/// Since API @API:drops@.\n")
+        self.assertFalse(stamp.stamp(False))
+        self.assertIn("NATIVE_HOOKS_API: u32 = 8;", (self.root / stamp.SOURCE).read_text())
+        for name in generated:
+            self.assertEqual((self.root / name).read_text(), "/// Since API @API:drops@.\n")
 
     def test_duplicate_fails_before_writes(self):
         self.git("add", ".")
@@ -129,7 +150,7 @@ class StampTests(unittest.TestCase):
         repo = self.original
         fragments = [p.relative_to(repo) for p in (repo / stamp.FRAGMENTS).glob("*.json")]
         comments = {Path(c) for p in fragments for c in json.loads((repo / p).read_text()).get("comments", [])}
-        stamped = [stamp.SOURCE, stamp.DOCS, *stamp.MOD_API, *comments]
+        stamped = [stamp.SOURCE, stamp.DOCS, stamp.MOD_API, *comments]
         for path in [stamp.CATALOG, *stamped, *fragments]:
             if (repo / path).exists():
                 (self.root / path).parent.mkdir(parents=True, exist_ok=True)

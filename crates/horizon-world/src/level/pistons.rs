@@ -145,7 +145,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if data.is(super::classes::Class::PistonBase) {
             self.piston_trigger_event(pos, state, a, b)
         } else if data.is(super::classes::Class::Note) {
-            self.note_trigger_event(pos, state);
+            self.note_trigger_event(pos, state, a, b);
             true
         } else if data.is(super::classes::Class::Bell) {
             // BellBlockEntity.triggerEvent handles event 1; the caller

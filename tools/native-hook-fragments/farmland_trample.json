@@ -1,0 +1,20 @@
+{
+  "hooks": [
+    {
+      "name": "farmland_trample",
+      "target": "horizon_client_lib::landing::native_farmland_trample",
+      "neoforge": "BlockEvent.FarmlandTrampleEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "Farmland trampled by a living entity (`native_farmland_trample`).",
+  "doc_summary": "`native_farmland_trample(entity, pos, state, distance, cancel)` runs before farmland is converted by a landing. Set `cancel` to prevent conversion. Bundles need \"hooks\": @API:farmland_trample@.",
+  "comments": [
+    "crates/horizon-client/src/landing.rs"
+  ]
+}

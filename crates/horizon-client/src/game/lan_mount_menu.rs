@@ -56,8 +56,8 @@ impl Game<'_> {
         let mut menu = Menu::new(Kind::Mount(columns));
         menu.mount = Some(self.mobs[index].kind.id.to_string());
         let (saddle, body, items) = self.mount_contents(index);
-        menu.set_slot(&env, 0, saddle);
-        menu.set_slot(&env, 1, body.flatten());
+        menu.load_slot(0, saddle);
+        menu.load_slot(1, body.flatten());
         for (k, item) in items.into_iter().take(columns * 3).enumerate() {
             menu.set_slot(&env, 2 + k, item);
         }
@@ -228,5 +228,35 @@ impl Game<'_> {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn horse_inventory_click_keeps_complete_body_stack() {
+        use horizon_client::{items::ItemStack, menu::Input, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+            let mut mob = Mob::new(12, kind, Vec3::ZERO, 0.0);
+            mob.extra.tame = true;
+            let mut armor = ItemStack::new("minecraft:iron_horse_armor", 3);
+            armor.damage = 7;
+            armor
+                .data_mut()
+                .enchantments
+                .push(("minecraft:unbreaking".into(), 2));
+            mob.extra.set_body_stack(Some(armor.clone()));
+            game.mobs.push(mob);
+            game.open_mount_menu(0);
+            let mut menu = game.mount_engine_menu(0, 0);
+            assert_eq!(menu.slot(1), Some(&armor));
+            let env = game.menu_env();
+            let _ = menu.click(&env, 2, 0, Input::Pickup);
+            game.lan_mount_store(0, 0, &menu);
+            assert_eq!(game.mobs[0].equipment_stacks()[6], Some(armor));
+        });
     }
 }

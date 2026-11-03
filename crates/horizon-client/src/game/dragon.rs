@@ -440,7 +440,7 @@ const ADJACENCY: [u32; 24] = [
     8257536,
 ];
 impl Dragon {
-    fn new(position: Vec3, yaw: f32, seed: i64) -> Self {
+    pub(super) fn new(position: Vec3, yaw: f32, seed: i64) -> Self {
         Self {
             id: 0,
             position,
@@ -567,6 +567,14 @@ impl Dragon {
         }
         if damage < 0.0 {
             damage = 0.0;
+        }
+        // LivingEntity.applyItemBlocking: the dragon raises nothing, but a native
+        // mod may block for it.
+        if damage > 0.0 {
+            let hurting = horizon_client::health::Hurting::Dragon(self.id as i32, source);
+            let block = horizon_client::health::no_block(damage);
+            damage -= horizon_client::health::shield_block(hurting, damage, block)
+                .map_or(0.0, |b| b.blocked_damage);
         }
         if !damage.is_finite() {
             damage = f32::MAX;
@@ -1383,10 +1391,11 @@ impl Game<'_> {
             .into_iter()
             .find(|(part, _)| *part == id)
             .map(|(_, b)| b);
-        let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         // The sweep and the sounds read the charge, which the hit then spends.
+        let sweep = self.sweep_before_hit("minecraft:ender_dragon", false);
+        let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
-            self.attack_effects(area, None, false, super::mace::Spared::Nothing, None);
+            self.attack_effects(area, sweep, None, false, super::mace::Spared::Nothing, None);
         }
         self.attack_ticks = 0;
         true

@@ -45,6 +45,10 @@ impl Game<'_> {
             });
             return Ok(());
         }
+        if self.integrated.is_some() {
+            // Minecraft.disconnect: the client logs out before its server halts.
+            self.client_logging_out();
+        }
         if let Some(integrated) = &self.integrated {
             integrated.request_stop();
             self.pending_save = Some(ClosingSave {
@@ -58,6 +62,7 @@ impl Game<'_> {
             if !quit {
                 return self.leave_server(None);
             }
+            self.client_logging_out();
             if let Some(mut remote) = self.remote.take() {
                 remote.session.disconnect();
             }
@@ -154,6 +159,7 @@ impl Game<'_> {
                     let started = Instant::now();
                     for _ in 0..SNAPSHOTS_PER_FRAME {
                         let Some(&key) = keys.front() else { break };
+                        self.native_full_chunk_saves(&[key]);
                         let chunks = self.with_entities(self.world.chunks.get(&key));
                         self.save.save_later(
                             &chunks,

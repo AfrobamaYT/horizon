@@ -228,8 +228,8 @@ fn equine(s: Species) -> bool {
             | Species::TraderLlama
     )
 }
-/// Mobs whose body slot Horizon keeps in `extra.head` (no helmet slot is drawn).
-pub(super) fn body_in_head(s: Species) -> bool {
+/// Mobs with species-specific body equipment.
+pub(super) fn body_equipment_species(s: Species) -> bool {
     equine(s)
         || matches!(s, Species::Wolf | Species::HappyGhast | Species::SulfurCube)
         || horizon_client::mobs::nautilus::is_nautilus(s)
@@ -237,15 +237,14 @@ pub(super) fn body_in_head(s: Species) -> bool {
 /// What a mob holds in a slot.
 pub(super) fn mob_slot_item(m: &Mob, slot: Slot) -> Option<Arc<str>> {
     let x = &m.extra;
-    let body = body_in_head(m.species());
     match slot {
         Slot::MainHand => x.main_hand.clone(),
         Slot::OffHand => x.off_hand.clone(),
         Slot::Feet => x.feet.clone(),
         Slot::Legs => x.legs.clone(),
         Slot::Chest => x.chest.clone(),
-        Slot::Head => x.head.clone().filter(|_| !body),
-        Slot::Body => x.head.clone().filter(|_| body),
+        Slot::Head => x.head.clone(),
+        Slot::Body => x.body.clone(),
         Slot::Saddle => m.saddle_item().map(|s| s.item),
     }
 }
@@ -287,7 +286,7 @@ fn mob_can_dispenser_equip(m: &Mob, slot: Slot) -> bool {
     }
 }
 /// `getEquipSound`: the saddle overrides of pigs, striders, horses, camels and nautili.
-fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
+pub(super) fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
     if slot != Slot::Saddle {
         return default;
     }
@@ -309,17 +308,7 @@ fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
     })
 }
 pub(super) fn mob_set_slot(m: &mut Mob, slot: Slot, stack: ItemStack) {
-    let item: Arc<str> = stack.item.clone();
-    let x = &mut m.extra;
-    match slot {
-        Slot::MainHand => x.set_main_hand(Some(item)),
-        Slot::OffHand => x.off_hand = Some(item),
-        Slot::Feet => x.feet = Some(item),
-        Slot::Legs => x.legs = Some(item),
-        Slot::Chest => x.chest = Some(item),
-        Slot::Head | Slot::Body => x.head = Some(item),
-        Slot::Saddle => m.set_saddle(Some(stack)),
-    }
+    m.set_equipment_stack(slot as usize, Some(stack));
 }
 
 impl Game<'_> {
@@ -1858,6 +1847,7 @@ impl Game<'_> {
             &mut mob.extra.main_hand,
             &mut mob.extra.off_hand,
             &mut mob.extra.head,
+            &mut mob.extra.body,
             &mut mob.extra.chest,
             &mut mob.extra.legs,
             &mut mob.extra.feet,
@@ -1896,8 +1886,8 @@ impl Game<'_> {
                     // passenger attachment, and nothing is swallowed for 5 s.
                     let height = f64::from(m.height());
                     let id = m.id;
-                    if let Some(body) = self.mobs[i].extra.head.take() {
-                        self.spawn_at_location(at, height, ItemStack::new(&body, 1));
+                    if let Some(body) = self.mobs[i].take_body_equipment() {
+                        self.spawn_at_location(at, height, body);
                     }
                     // setItemSlot(BODY, EMPTY): an unequip.
                     let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
@@ -2141,16 +2131,19 @@ impl Game<'_> {
             .collect();
         for i in cubes {
             let m = &self.mobs[i];
-            if m.is_baby() || m.extra.head.as_deref() == Some(&*stack.item) {
+            if m.is_baby() || m.extra.body.as_deref() == Some(&*stack.item) {
                 continue;
             }
             let (at, height) = (m.position, f64::from(m.height()));
             // The swallowed block comes out on top (the passenger attachment).
-            if let Some(old) = self.mobs[i].extra.head.take() {
-                self.spawn_at_location(at, height, ItemStack::new(&old, 1));
+            if let Some(old) = self.mobs[i].take_body_equipment() {
+                self.spawn_at_location(at, height, old);
             }
             let m = &mut self.mobs[i];
-            m.extra.head = Some(stack.item.clone());
+            m.extra.set_body_stack(Some(ItemStack {
+                count: 1,
+                ..stack.clone()
+            }));
             m.persistent = true;
             let (at, id) = (m.position, m.id);
             // setItemSlot: a body item without `equippable` posts UNEQUIP.
@@ -2275,6 +2268,37 @@ pub(super) fn tipped_effect(stack: &ItemStack) -> Option<(&'static str, i32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sulfur_cube_dispenser_replacement_drops_the_full_old_stack() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:sulfur_cube")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(
+                12,
+                kind,
+                horizon_core::geometry::Vec3::new(0.5, 0.0, 0.5),
+                0.0,
+            );
+            let mut old = ItemStack::new("minecraft:stone", 3);
+            old.damage = 7;
+            old.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            mob.extra.set_body_stack(Some(old.clone()));
+            game.mobs.push(mob);
+            let incoming = ItemStack::new("minecraft:dirt", 5);
+            assert!(game.sulfur_cube_swallow((0, 0, 0), &incoming));
+            assert!(game.dropped.iter().any(|drop| drop.stack == old));
+            assert_eq!(
+                game.mobs[0].equipment_stacks()[6],
+                Some(ItemStack::new("minecraft:dirt", 1))
+            );
+        });
+    }
 
     #[test]
     fn mod_dispenser_answers_preserve_fallback_and_own_consumption() {

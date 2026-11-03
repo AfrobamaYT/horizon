@@ -151,7 +151,7 @@ impl Game<'_> {
             Some(team) => team.formatted_name(Text::literal(name)),
             None => Text::literal(name),
         };
-        shown.with_component_fields(vec![
+        let mut shown = shown.with_component_fields(vec![
             (
                 "click_event".into(),
                 serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")}),
@@ -162,7 +162,9 @@ impl Game<'_> {
                     "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
             ),
             ("insertion".into(), name.into()),
-        ])
+        ]);
+        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut shown);
+        shown
     }
 
     /// Run `f` for the player `t` (None for anything else): in place, or

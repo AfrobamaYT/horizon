@@ -71,6 +71,10 @@ impl LevelShape {
             logical_height,
         })
     }
+    pub fn with_ceiling(mut self, has_ceiling: bool) -> Self {
+        self.has_ceiling = has_ceiling;
+        self
+    }
     /// One above the highest block (`getMaxY() + 1`).
     pub fn max_y(self) -> i32 {
         self.min_y + self.height

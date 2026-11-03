@@ -2479,13 +2479,8 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
-            // Ready.spawn snaps the newcomer to the respawn data's yaw and
-            // pitch, which for a player without a bed or anchor is the world
-            // spawn's angle (`setworldspawn <pos> <rotation>`).
-            (g.yaw, g.pitch) = (
-                self.level.world_spawn_angle[0],
-                self.level.world_spawn_angle[1],
-            );
+            // Ready.spawn uses the world spawn's yaw and pitch.
+            [g.yaw, g.pitch] = self.level.world_spawn_angle;
             g.head_yaw = g.yaw;
             g.health = 20.0;
             g.food = 20;

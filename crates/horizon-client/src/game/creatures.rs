@@ -481,12 +481,8 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        let body = horizon_client::mobs::drops::head_is_body(m.species());
-        let slot = if body {
-            EquipmentSlot::Body
-        } else {
-            EquipmentSlot::Head
-        };
+        let slot = m.sun_protection_slot();
+        let body = slot == EquipmentSlot::Body;
         let Some(mut stack) = m.item_by_slot(slot) else {
             return;
         };
@@ -518,8 +514,7 @@ impl Game<'_> {
         match (body, broke) {
             (true, false) => m.extra.body_damage = stack.damage as i32,
             (true, true) => {
-                m.extra.head = None;
-                m.extra.body_damage = 0;
+                m.extra.set_body_stack(None);
             }
             (false, false) => m.extra.armor[0] = Some(stack),
             (false, true) => {
@@ -597,8 +592,7 @@ impl Game<'_> {
                 return;
             };
             if lost >= max {
-                m.extra.head = None;
-                m.extra.body_damage = 0;
+                m.extra.set_body_stack(None);
                 true
             } else {
                 m.extra.body_damage = lost as i32;
@@ -846,6 +840,7 @@ impl Game<'_> {
             } else {
                 None
             },
+            ask_taming: self.remote.is_none() && !horizon_client::mod_api::mods().is_empty(),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -952,14 +947,16 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() {
+        if round.listening() || !horizon_client::mod_api::mods().is_empty() {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
                 let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
                 if self.world.loaded(x, z) && ticking(x, z) {
                     let (id, kind) = (m.id, super::native_ticks::TickKind::Mob(m.kind.clone()));
-                    self.native_tick_pre_batch(&mut round, id, kind);
+                    if self.native_tick_pre_batch(&mut round, id, kind) {
+                        self.sync_sleeping_mob(i);
+                    }
                 }
                 i += 1;
             }
@@ -1274,7 +1271,8 @@ impl Game<'_> {
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
-        // would drop, whoever killed the mob.
+        // would drop, whoever killed the mob. Experience the catalyst takes is
+        // never dropped, so living_experience_drop does not hear of it.
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
         let consumed =
@@ -1481,6 +1479,26 @@ impl Game<'_> {
             None => None,
         }
     }
+    /// `LivingEntity.dropExperience`: the experience a dying mob or player is worth once
+    /// the mods have had their say; 0 when they cancel it.
+    pub(super) fn living_experience_drop(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        attacker: Option<u128>,
+        original: i32,
+    ) -> i32 {
+        let (mut amount, mut cancel) = (original, false);
+        self.native_living_experience_drop(
+            entity,
+            kind,
+            attacker,
+            original,
+            &mut amount,
+            &mut cancel,
+        );
+        if cancel { 0 } else { amount.max(0) }
+    }
     fn drop_death_loot(
         &mut self,
         m: &mut Mob,
@@ -1628,8 +1646,11 @@ impl Game<'_> {
                         self.spawn_item(item, pos, dispenser::new_item_motion(), 10);
                     }
                 }
-                drops::Drop::Orb(value) if !consumed => self.spawn_orbs(pos, value as u32),
-                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Orb(_) => {}
+                drops::Drop::Experience(reward) if !consumed => {
+                    let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
+                    self.spawn_orbs(pos, amount as u32);
+                }
+                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
     }
@@ -5504,6 +5525,7 @@ impl Game<'_> {
             .as_ref()
             .map(|p| [p.position.x, p.position.y, p.position.z]);
         let acting = self.acting_player_uuid();
+        let (acting_id, acting_entity_id) = (self.native_acting_id(), self.own_entity_id());
         let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft)
             || self.keys.contains(&winit::keyboard::KeyCode::ShiftRight);
         let held_damage = held.as_ref().map_or(0, |h| h.damage as i32);
@@ -5657,15 +5679,11 @@ impl Game<'_> {
                 if item == "minecraft:shears"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.head.is_some()
+                    && m.extra.body.is_some()
                     && !sneaking =>
             {
-                let mut stack = ItemStack::new("minecraft:wolf_armor", 1);
-                stack.damage = m.extra.body_damage.max(0) as u32;
-                stack.extra = m.extra.body_extra.take();
-                armor_drop = Some(stack);
-                m.extra.head = None;
-                m.extra.body_damage = 0;
+                armor_drop = m.equipment_stacks()[6].clone();
+                m.extra.set_body_stack(None);
                 eat = Some(("item.armor.unequip_wolf", 1.0, 1.0));
                 self.damage_held_tool();
             }
@@ -5688,10 +5706,11 @@ impl Game<'_> {
                 if item == "minecraft:wolf_armor"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.head.is_none()
+                    && m.extra.body.is_none()
                     && !m.is_baby() =>
             {
-                m.extra.head = Some(item.as_str().into());
+                m.extra.body = Some(item.as_str().into());
+                m.extra.body_count = 0;
                 m.extra.body_damage = held_damage;
                 m.extra.body_extra = held_extra;
                 consume = true;
@@ -5704,7 +5723,7 @@ impl Game<'_> {
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
                     && m.extra.sitting
-                    && m.extra.head.is_some()
+                    && m.extra.body.is_some()
                     && m.extra.body_damage > 0 =>
             {
                 m.extra.body_damage = (m.extra.body_damage
@@ -5758,7 +5777,10 @@ impl Game<'_> {
                     && !horizon_client::mobs::tame::angry(m) =>
             {
                 consume = true;
-                let tamed = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let rolled = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let tamed =
+                    rolled && !self.animal_tame_cancelled(index, acting_id, acting_entity_id);
+                let m = &mut self.mobs[index];
                 if tamed {
                     horizon_client::mobs::tame::set_tame(m, true);
                     m.extra.owner = Some(acting);
@@ -5772,6 +5794,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
                 let m = &self.mobs[index];
                 self.world.modified.insert((
@@ -5851,7 +5874,10 @@ impl Game<'_> {
             Species::Cat if !m.extra.tame && is_food => {
                 consume = true;
                 m.persistent = true;
-                let tamed = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let rolled = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let tamed =
+                    rolled && !self.animal_tame_cancelled(index, acting_id, acting_entity_id);
+                let m = &mut self.mobs[index];
                 if tamed {
                     m.extra.tame = true;
                     m.extra.owner = Some(acting);
@@ -5863,6 +5889,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
                 let m = &self.mobs[index];
                 self.world.modified.insert((
@@ -5926,7 +5953,10 @@ impl Game<'_> {
                     let pitch = 1.0 + (m.random.next_float() - m.random.next_float()) * 0.2;
                     eat = Some(("entity.parrot.eat", 1.0, pitch));
                 }
-                let tamed = m.random.next_int_bound(10).unwrap_or(1) == 0;
+                let rolled = m.random.next_int_bound(10).unwrap_or(1) == 0;
+                let tamed =
+                    rolled && !self.animal_tame_cancelled(index, acting_id, acting_entity_id);
+                let m = &mut self.mobs[index];
                 if tamed {
                     m.extra.tame = true;
                     m.extra.owner = Some(acting);
@@ -5936,6 +5966,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
             }
             // Dolphin.mobInteract: a fish makes a baby grow by a tenth and an
@@ -7749,6 +7780,7 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            ask_taming: false,
             border: None,
         };
         let pw = ProjWorld {

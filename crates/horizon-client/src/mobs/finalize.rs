@@ -975,9 +975,18 @@ pub fn stored_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
     let mut stack = if slot == MAINHAND {
         m.extra.main_hand_stack()?.clone()
     } else {
-        gear::gear(m)?.stacks[index]
-            .clone()
-            .filter(|s| s.item == id)?
+        let armor = match slot {
+            HEAD => m.extra.armor[0].as_ref(),
+            CHEST => m.extra.armor[1].as_ref(),
+            LEGS => m.extra.armor[2].as_ref(),
+            FEET => m.extra.armor[3].as_ref(),
+            _ => None,
+        };
+        armor.filter(|s| s.item == id).cloned().or_else(|| {
+            gear::gear(m)?.stacks[index]
+                .clone()
+                .filter(|s| s.item == id)
+        })?
     };
     if let Some(g) = gear::gear(m) {
         if !g.slots[index].is_empty() {
@@ -995,6 +1004,9 @@ pub fn item_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
     stored_stack(m, slot).or_else(|| {
         let mut stack = crate::items::ItemStack::new(&item(m, slot)?, 1);
         stack.set_crafting_enchantments(slot_enchantments(m, slot));
+        if let Some(trim) = gear::gear(m).and_then(|g| g.trims[gear_slot(slot)].clone()) {
+            stack.data_mut().trim = Some(trim);
+        }
         Some(stack)
     })
 }
@@ -1003,6 +1015,13 @@ pub fn item_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
 pub fn set_item_stack(m: &mut Mob, slot: usize, stack: crate::items::ItemStack) {
     set_item(m, slot, &stack.item);
     set_slot_enchantments(m, slot, stack.enchantments().to_vec());
+    if slot <= HEAD {
+        gear::set_trim(
+            m,
+            gear_slot(slot),
+            stack.data().and_then(|d| d.trim.clone()),
+        );
+    }
     if slot == MAINHAND {
         m.extra.set_main_hand_stack(Some(stack));
     } else if slot <= HEAD {
@@ -1025,6 +1044,15 @@ pub fn set_item(m: &mut Mob, slot: usize, id: &str) {
             return;
         }
         _ => return,
+    }
+    if let Some(index) = match slot {
+        HEAD => Some(0),
+        CHEST => Some(1),
+        LEGS => Some(2),
+        FEET => Some(3),
+        _ => None,
+    } {
+        m.extra.armor[index] = None;
     }
     gear::set(m, gear_slot(slot), Vec::new());
 }

@@ -15,8 +15,9 @@ the API histories or `native-hooks.json`. Helper-only additions use an empty
 }
 ```
 
-A hook may also carry the catalog's optional `neoforge`, `side` and
-`cancellable` keys; the tool copies them into `native-hooks.json`.
+A hook may also carry the catalog's optional `neoforge`, `fabric`, `paper`, `side` and
+`cancellable` keys; the tool copies them into `native-hooks.json`. Counterpart
+keys take a string or list of strings and may be omitted.
 
 Name this file `example.json`. The tool replaces `@API:example@` in the
 listed comment files and in `native_hooks.rs`; omit `comments` if unnecessary.

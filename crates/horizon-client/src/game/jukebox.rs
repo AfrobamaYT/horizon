@@ -92,12 +92,17 @@ impl Game<'_> {
     /// below taking the disc): the song stops, the block loses its record,
     /// and the neighbours and comparators hear it.
     pub(super) fn jukebox_taken(&mut self, pos: [i32; 3]) {
+        if self.jukebox(pos).is_some_and(|j| j.record().is_some()) {
+            return;
+        }
+        self.jukebox_stopped(pos);
+    }
+    /// The song of the jukebox at `pos` stops and the block loses its record, whatever its slot
+    /// holds now: `jukebox_taken`, and a disc swapped for another in one transaction.
+    pub(super) fn jukebox_stopped(&mut self, pos: [i32; 3]) {
         if let Some(BlockEntity::Jukebox(j)) =
             self.world.block_entities.get_mut(&(pos[0], pos[1], pos[2]))
         {
-            if j.record().is_some() {
-                return;
-            }
             j.playing = false;
             j.ticks = 0;
         }

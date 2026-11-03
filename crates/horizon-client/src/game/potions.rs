@@ -18,7 +18,8 @@ use horizon_client::{
     hud_layout, hud_overlays, inventory_effects,
     items::ItemStack,
     mesher::Vertex,
-    mobs::{Damage, DamageKind, Who},
+    mobs::{Damage, DamageKind, Mob, Who},
+    mod_api::{EffectTickChange, EntityRef, LivingRef, NativePlayerFood},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
     text::Text,
@@ -247,7 +248,17 @@ impl Game<'_> {
             let center = [feet.x, feet.y + bounds.size().y / 2.0, feet.z];
             let r = random.unwrap_or(&mut self.world.random);
             let radius = 3.0 + r.next_float() * 2.0;
-            let _ = self.wind_burst(center, radius, 1.0, false, false);
+            // WindChargedMobEffect: the bearer bursts, a living source.
+            let bearer = if player {
+                Some(self.own_entity_id() as u32)
+            } else {
+                bearer
+            };
+            let cause = super::wind::BurstCause {
+                source: bearer,
+                owner: bearer,
+            };
+            let _ = self.wind_burst(center, radius, 1.0, false, false, cause);
         }
     }
     /// `WeavingMobEffect.spawnCobwebsRandomlyAround`: two or three cobwebs in
@@ -888,13 +899,58 @@ impl Game<'_> {
             .is_some_and(|p| p.health.absorption() <= 0.0);
         let mut effects = std::mem::take(&mut self.potions.effects);
         let (actions, raid_omen_added) = effects.tick_with(
-            &mut |e, t| {
+            &mut |e, t, actions, dispatch| {
+                for action in actions.drain(..) {
+                    self.apply_effect_action(action);
+                }
+                if !dispatch {
+                    return OmenTick::Continue;
+                }
                 if !brewing::is_mod_effect(e.id) {
                     self.omen_tick(e)
-                } else if self.mod_effect_tick(e.id, None, t, e.amplifier) {
-                    OmenTick::Continue
                 } else {
-                    OmenTick::Remove
+                    let Some(player) = self.player.as_mut() else {
+                        return OmenTick::Remove;
+                    };
+                    let Some(epoch) = self.native_lifecycle.epoch() else {
+                        return OmenTick::Continue;
+                    };
+                    let holder = LivingRef::new(EntityRef::new(epoch, player.entity_id as u32));
+                    let health = player.health.health();
+                    let max_health =
+                        player.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
+                    let food = &player.health.food;
+                    let food = Some(NativePlayerFood {
+                        level: food.food,
+                        saturation: food.saturation,
+                        exhaustion: food.exhaustion,
+                    });
+                    let (keep, changes) = self.mod_effect_tick(
+                        e.id,
+                        None,
+                        t,
+                        e.amplifier,
+                        holder,
+                        health,
+                        max_health,
+                        food,
+                    );
+                    actions.extend(changes.into_iter().map(|change| match change {
+                        EffectTickChange::Heal(amount) => EffectAction::Heal(amount),
+                        EffectTickChange::Hurt(source, amount) => EffectAction::Hurt(
+                            super::creatures::damage_type(source.mob_kind(), false),
+                            amount,
+                        ),
+                        EffectTickChange::AddExhaustion(amount) => EffectAction::Exhaust(amount),
+                        EffectTickChange::Eat(nutrition, saturation) => {
+                            EffectAction::Eat(nutrition, saturation)
+                        }
+                    }));
+                    if keep {
+                        OmenTick::Continue
+                    } else {
+                        OmenTick::Remove
+                    }
                 }
             },
             absorption_empty,
@@ -979,14 +1035,30 @@ impl Game<'_> {
         entity: Option<i32>,
         tick_count: i32,
         amplifier: i32,
-    ) -> bool {
+        holder: LivingRef,
+        health: f32,
+        max_health: f32,
+        food: Option<NativePlayerFood>,
+    ) -> (bool, Vec<EffectTickChange>) {
         let mut apply = false;
         self.native_should_apply_effect_tick_this_tick(effect, tick_count, amplifier, &mut apply);
         let mut keep = true;
+        let mut changes = Vec::new();
         if apply {
-            self.native_apply_effect_tick(effect, self.dim.id(), entity, amplifier, &mut keep);
+            self.native_apply_effect_tick(
+                effect,
+                self.dim.id(),
+                entity,
+                amplifier,
+                holder,
+                health,
+                max_health,
+                food,
+                &mut changes,
+                &mut keep,
+            );
         }
-        keep
+        (keep, changes)
     }
     /// The effects' attribute modifiers, armor protection and status flags
     /// on `self.player`.
@@ -1819,8 +1891,37 @@ impl Game<'_> {
 
 /// A mob's content mod effects tick in its own tick (`ai::tick_effects`).
 impl horizon_client::mobs::ModEffectTicks for Game<'_> {
-    fn tick_mod_effect(&self, effect: &str, mob: u32, tick_count: i32, amplifier: i32) -> bool {
-        self.mod_effect_tick(effect, Some(mob as i32), tick_count, amplifier)
+    fn tick_mod_effect(
+        &self,
+        effect: &str,
+        mob: &mut Mob,
+        tick_count: i32,
+        amplifier: i32,
+    ) -> bool {
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return true;
+        };
+        let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
+        let (keep, changes) = self.mod_effect_tick(
+            effect,
+            Some(mob.id as i32),
+            tick_count,
+            amplifier,
+            holder,
+            mob.health,
+            mob.attrs.max_health,
+            None,
+        );
+        for change in changes {
+            match change {
+                EffectTickChange::Heal(amount) => mob.heal(amount),
+                EffectTickChange::Hurt(source, amount) => {
+                    mob.damage(amount, Damage::of(source.mob_kind()));
+                }
+                _ => {}
+            }
+        }
+        keep
     }
 }
 
@@ -1839,7 +1940,149 @@ fn client_tick_effects(effects: &mut PlayerEffects, darkness: &mut (f32, f32)) {
 mod tests {
     use super::super::sculk::darkness_blend_added;
     use super::*;
-    use horizon_client::screen_effects::nausea_blend_added;
+    use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
+
+    fn effect_test_mod() {
+        use horizon_client::mod_api::*;
+        struct TestMod;
+        impl Hooks for TestMod {
+            fn should_apply_effect_tick_this_tick(
+                &self,
+                _: &dyn Host,
+                event: &mut ShouldApplyEffectTickThisTickEvent<'_>,
+            ) {
+                event.apply = true;
+            }
+            fn apply_effect_tick(&self, _: &dyn Host, event: &mut ApplyEffectTickEvent<'_>) {
+                match event.amplifier {
+                    0 => {
+                        event.heal(10.0);
+                        event.eat(4, 0.5);
+                        event.add_exhaustion(1.5);
+                    }
+                    1 => event.hurt(NativeEffectDamage::Magic, 3.0),
+                    3 if event.health > 1.0 => event.hurt(NativeEffectDamage::Magic, 1.0),
+                    3 => {}
+                    _ => event.hurt(NativeEffectDamage::Wither, 100.0),
+                }
+            }
+        }
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            crate::mod_api::MODS
+                .set(std::sync::Arc::from([Box::new(TestMod) as Box<dyn Hooks>]))
+                .unwrap_or_else(|_| panic!("mods already installed"));
+            brewing::register_mod_effects([("test:effect".into(), 0, brewing::Category::Neutral)]);
+            let _ =
+                horizon_client::health::HURT_SERVER.set(super::super::native_hooks::hurt_server);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_heals_and_feeds_player() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let player = game.player.as_mut().unwrap();
+            player.set_health(18.0, false).unwrap();
+            player.health.food.food = 14;
+            player.health.food.saturation = 2.0;
+            let id = brewing::effect("test:effect").unwrap().id;
+            game.potions.effects.add(EffectInstance::new(id, 10, 0));
+            game.tick_mob_effects();
+            let player = game.player.as_ref().unwrap();
+            assert_eq!(player.health.health(), 20.0);
+            assert_eq!(player.health.food.food, 18);
+            assert_eq!(player.health.food.saturation, 6.0);
+            assert_eq!(player.health.food.exhaustion, 1.5);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_magic_respects_player_hit_frames() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let id = brewing::effect("test:effect").unwrap().id;
+            game.potions.effects.add(EffectInstance::new(id, 10, 1));
+            game.tick_mob_effects();
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 17.0);
+            game.tick_mob_effects();
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 17.0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_kills_mob_through_death_and_drops() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            use horizon_client::chunk::Chunk;
+            use std::sync::Arc;
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(12, kind, Vec3::new(1.0, 64.0, 1.0), 0.0);
+            mob.extra.main_hand = Some(Arc::from("minecraft:iron_sword"));
+            mob.extra.drop_chances = Some(Box::new([2.0; 8]));
+            mob.add_effect(brewing::effect("test:effect").unwrap().id, 10, 2);
+            game.mobs.push(mob);
+            game.tick_creature_entities().unwrap();
+            assert!(!game.mobs[0].alive());
+            assert!(
+                game.dropped
+                    .iter()
+                    .any(|item| &*item.stack.item == "minecraft:iron_sword")
+            );
+            for _ in 0..20 {
+                game.tick_creature_entities().unwrap();
+            }
+            assert!(game.mobs.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_sees_prior_regeneration() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player
+                .as_mut()
+                .unwrap()
+                .set_health(1.0, false)
+                .unwrap();
+            game.potions
+                .effects
+                .add(EffectInstance::new("regeneration", 50, 0));
+            let id = brewing::effect("test:effect").unwrap().id;
+            game.potions.effects.add(EffectInstance::new(id, 10, 3));
+            game.tick_mob_effects();
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 1.0);
+        });
+    }
+
+    #[test]
+    fn effect_damage_sources_retain_their_ids() {
+        use horizon_client::mod_api::NativeEffectDamage;
+        for (source, expected) in [
+            (NativeEffectDamage::Magic, "minecraft:magic"),
+            (NativeEffectDamage::Wither, "minecraft:wither"),
+        ] {
+            assert_eq!(
+                super::super::creatures::source_damage_type(Damage::of(source.mob_kind())),
+                expected
+            );
+        }
+    }
 
     /// #5876: a potion thrown straight up from inside its thrower's box does
     /// not hit them while it climbs out, then hits them on the way down;

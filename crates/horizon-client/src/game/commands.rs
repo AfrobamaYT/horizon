@@ -78,6 +78,11 @@ pub(super) enum Target {
     /// A simulated lingering, creeper or dragon area-effect cloud.
     Cloud(u32),
 }
+/// `Entity.setXRot`: wrap before clamping the pitch.
+pub(super) fn entity_pitch(pitch: f32) -> f32 {
+    (pitch % 360.0).clamp(-90.0, 90.0)
+}
+
 /// An entity of a type Horizon does not simulate: its compound lives in the
 /// entity memory (`persist.raw`), its position and rotation here.
 #[derive(Clone, Debug)]
@@ -394,22 +399,13 @@ impl Game<'_> {
     /// Player.getDisplayName: the name (team-formatted), suggesting a
     /// `/tell`, showing the player on hover, inserting the name.
     pub(super) fn player_display_name(&self) -> Text {
-        let name = self.acting_player_name().to_owned();
-        let Some(uuid) = self.lan_acting_uuid else {
-            return self.target_name(Target::Player);
-        };
-        self.target_name(Target::Player).with_component_fields(vec![
-            (
-                "click_event".into(),
-                serde_json::json!({"action": "suggest_command", "command": format!("/tell {name} ")}),
-            ),
-            (
-                "hover_event".into(),
-                serde_json::json!({"action": "show_entity", "id": "minecraft:player",
-                    "uuid": horizon_protocol::crypto::uuid_string(uuid), "name": name}),
-            ),
-            ("insertion".into(), name.into()),
-        ])
+        let name = self.acting_player_name();
+        if let Some(uuid) = self.lan_acting_uuid {
+            return self.player_text(name, uuid);
+        }
+        let mut displayname = self.target_name(Target::Player);
+        horizon_client::lan::hub::native_player_name_format(&Text::literal(name), &mut displayname);
+        displayname
     }
     fn source_position(&self) -> [f64; 3] {
         if let Some(s) = &self.command_source {
@@ -1501,7 +1497,12 @@ impl Game<'_> {
         self.feedback(message);
         Ok(targets.len() as i32)
     }
-    fn teleport_to(&mut self, t: Target, pos: [f64; 3], rotation: Option<[f32; 2]>) {
+    pub(in crate::game) fn teleport_to(
+        &mut self,
+        t: Target,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) {
         // An entity in another level is teleported in the level that holds it.
         let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation));
     }
@@ -1534,7 +1535,7 @@ impl Game<'_> {
                 self.previous_position = v;
                 if let Some([yaw, pitch]) = rotation {
                     self.yaw = yaw;
-                    self.pitch = pitch.clamp(-90.0, 90.0);
+                    self.pitch = entity_pitch(pitch);
                 }
                 // A server player's teleport is told to the mods once their
                 // move is in the hub (`leave_guest`).
@@ -1565,7 +1566,7 @@ impl Game<'_> {
                         m.yaw = yaw;
                         m.body_yaw = yaw;
                         m.head_yaw = yaw;
-                        m.head_pitch = pitch.clamp(-90.0, 90.0);
+                        m.head_pitch = entity_pitch(pitch);
                         m.previous_yaw = m.yaw;
                         m.previous_head_pitch = m.head_pitch;
                     }
@@ -1629,7 +1630,7 @@ impl Game<'_> {
                     o.position = v;
                     if let Some([yaw, pitch]) = rotation {
                         o.yaw = yaw;
-                        o.pitch = pitch;
+                        o.pitch = entity_pitch(pitch);
                     }
                 }
             }
@@ -2675,15 +2676,14 @@ impl Game<'_> {
     /// The loot table and seed a container still holding its roll saves
     /// (`RolledLoot::restore`), in place of its items.
     pub(super) fn restore_loot_table(
-        &self,
+        world: &horizon_client::world::World,
         key: (i32, i32, i32),
         tag: &mut horizon_world::nbt::Tag,
     ) {
         let horizon_world::nbt::Tag::Compound(map) = tag else {
             return;
         };
-        let rolled = self
-            .world
+        let rolled = world
             .chunks
             .get(&(key.0 >> 4, key.2 >> 4))
             .and_then(|c| c.saved.as_ref())
@@ -2873,29 +2873,6 @@ impl Game<'_> {
         self.feedback(Text::tr("commands.clone.success", &[&count]));
         Ok(count)
     }
-    /// Player.giveExperiencePoints including negative amounts.
-    /// The caller reports the level change to the mods.
-    fn give_points(&mut self, amount: i32) {
-        let e = &mut self.experience;
-        e.progress += amount as f32 / horizon_client::entities::Experience::needed(e.level) as f32;
-        e.total = e.total.saturating_add(amount).clamp(0, i32::MAX);
-        while e.progress < 0.0 {
-            let f = e.progress * horizon_client::entities::Experience::needed(e.level) as f32;
-            if e.level > 0 {
-                e.level -= 1;
-                e.progress = 1.0 + f / horizon_client::entities::Experience::needed(e.level) as f32;
-            } else {
-                e.level = 0;
-                e.progress = 0.0;
-            }
-        }
-        while e.progress >= 1.0 {
-            e.progress =
-                (e.progress - 1.0) * horizon_client::entities::Experience::needed(e.level) as f32;
-            e.level += 1;
-            e.progress /= horizon_client::entities::Experience::needed(e.level) as f32;
-        }
-    }
     /// AdvancementCommands.perform / performCriterion.
     fn cmd_advancement(&mut self, ctx: &Context) -> R<i32> {
         let targets = self.entities(ctx, "targets", true)?;
@@ -3060,17 +3037,19 @@ impl Game<'_> {
     /// ExperienceCommand's add and set on the player in place: false when
     /// the points to set do not fit the level.
     fn change_experience(&mut self, add: bool, levels: bool, amount: i32) -> bool {
-        let old_level = self.experience.level;
         if add {
             if levels {
                 // Player.giveExperienceLevels handles the strict negative
                 // boundary and emits the level-change hook itself.
                 self.give_levels(amount);
                 return true;
-            } else if let Some(amount) = self.xp_change(amount) {
-                self.give_points(amount);
+            } else {
+                self.give_experience_points(amount, true);
             }
-        } else if levels {
+            return true;
+        }
+        let old_level = self.experience.level;
+        if levels {
             self.experience.level = amount;
         } else {
             let needed = horizon_client::entities::Experience::needed(self.experience.level);
@@ -3086,7 +3065,9 @@ impl Game<'_> {
     /// world follows it, and a dedicated server tells the event stream (`MinecraftServer.onGameRuleChanged`
     /// tells the management protocol's clients).
     pub(super) fn set_game_rule(&mut self, rule: &gamerules::Rule, value: Value) {
-        self.ui.rules.set(rule.name, value);
+        if self.ui.rules.set(rule.name, value) {
+            self.game_rule_changed(rule.name, value);
+        }
         self.sync_rules();
         if self.options.dedicated.is_some() {
             let (value_type, json) = match value {

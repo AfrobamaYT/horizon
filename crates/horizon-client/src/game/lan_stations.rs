@@ -81,7 +81,10 @@ impl Game<'_> {
         };
         let mut menu = Box::new(Menu::new(kind));
         // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
-        menu.anvil_hook = kind == Kind::Anvil && !horizon_client::mod_api::mods().is_empty();
+        let hooked = !horizon_client::mod_api::mods().is_empty();
+        menu.anvil_hook = kind == Kind::Anvil && hooked;
+        // Likewise GrindstoneMenu's result onTake.
+        menu.grind_hook = kind == Kind::Grindstone && hooked;
         if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
             && kind == Kind::Enchanting
         {
@@ -165,6 +168,17 @@ impl Game<'_> {
                     self.drop_guest_items(host, gi, dropped);
                 }
             }
+            // GrindstoneEvent.OnTakeItem: the taken result's onTake waits for the mods.
+            let mut ground_xp = None;
+            if let Some(mut take) = gs.menu.grind_take.take() {
+                let guest = &host.hub.guests[gi];
+                let (uuid, entity_id) = (guest.uuid, guest.entity_id);
+                let mut cancel = false;
+                self.native_grindstone_take(uuid, entity_id, gs.pos, &mut take, &mut cancel);
+                cancelled |= cancel;
+                let env = self.menu_env();
+                ground_xp = gs.menu.grindstone_taken(&env, take, cancel);
+            }
             // A cancelled take runs no createResult: the inputs are untouched.
             let recomputed = !cancelled
                 && before.is_some_and(|(slots, cost)| {
@@ -174,7 +188,28 @@ impl Game<'_> {
                             .enumerate()
                             .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
                 });
-            if recomputed && gs.kind == StationKind::Anvil {
+            // AnvilUpdateEvent, after createResult made vanilla's result
+            // (a rename that changes nothing else too): before PrepareAnvil,
+            // which follows createResult too. A cancelled take's undo is no
+            // createResult.
+            let anvil_created =
+                gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
+            if anvil_created
+                && !horizon_client::mod_api::mods().is_empty()
+                && let Some(mut update) = gs.menu.anvil_update()
+            {
+                let guest = &host.hub.guests[gi];
+                let mut cancel = false;
+                self.native_anvil_update(
+                    guest.uuid,
+                    guest.entity_id,
+                    gs.pos,
+                    &mut update,
+                    &mut cancel,
+                );
+                gs.menu.anvil_updated(update, cancel);
+            }
+            if anvil_created {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(2).cloned();
@@ -184,7 +219,14 @@ impl Game<'_> {
             }
             if recomputed && gs.kind == StationKind::Grindstone {
                 let guest = &host.hub.guests[gi];
-                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let (uuid, name, entity_id) = (guest.uuid, guest.name.clone(), guest.entity_id);
+                // GrindstoneEvent.OnPlaceItem, inside createResult: before PrepareGrindstone.
+                if gs.menu.grind_hook {
+                    let mut place = gs.menu.grindstone_place();
+                    let mut cancel = false;
+                    self.native_grindstone_place(uuid, entity_id, gs.pos, &mut place, &mut cancel);
+                    gs.menu.grindstone_placed(place, cancel);
+                }
                 let mut result = gs.menu.slot(2).cloned();
                 self.native_prepare_grindstone(uuid, &name, gs.pos, &mut result);
                 let env = self.menu_env();
@@ -201,6 +243,9 @@ impl Game<'_> {
             self.lan_station_sounds(&mut gs);
             if let Some(amount) = gs.menu.ground.take() {
                 self.grindstone_taken(gs.pos, amount);
+            }
+            if let Some(xp) = ground_xp {
+                self.grindstone_award(gs.pos, xp.unsigned_abs());
             }
             self.lan_station_combined(host, conn, &mut gs, anvil_craft.as_ref());
             if let Some(button) = gs.menu.enchant_button.take() {
@@ -371,14 +416,52 @@ impl Game<'_> {
     fn lan_enchant_offers(&mut self, host: &LanHost, gi: usize, gs: &mut GuestStation) {
         let seed = host.hub.guests[gi].xp_seed;
         let bookcases = self.count_bookshelves(gs.pos);
-        let offers = horizon_client::stations::enchant_offers(
-            &self.stations().enchantments,
-            self.items(),
-            seed,
-            bookcases,
-            gs.menu.slot(0),
-        );
         let guest = &host.hub.guests[gi];
+        let offers = if horizon_client::mod_api::mods().is_empty() {
+            horizon_client::stations::enchant_offers(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                bookcases,
+                gs.menu.slot(0),
+            )
+        } else {
+            // EnchantmentLevelSetEvent for each row as getEnchantmentCost drew
+            // it; the offers are then made with the levels the mods left.
+            let mut drawn = [None; 3];
+            horizon_client::stations::enchant_offers_leveled(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                bookcases,
+                gs.menu.slot(0),
+                |row, cost| *drawn[row].insert(cost),
+            );
+            let mut levels = drawn.map(|cost| cost.unwrap_or(0));
+            if let Some(item) = gs.menu.slot(0) {
+                for (row, original) in drawn.iter().enumerate() {
+                    if let Some(original_level) = *original {
+                        let offer = horizon_client::stations::EnchantmentRow {
+                            player: guest.uuid,
+                            player_entity_id: guest.entity_id,
+                            row: row as i32,
+                            power: bookcases,
+                            item,
+                            original_level,
+                        };
+                        self.native_enchantment_level_set(gs.pos, &offer, &mut levels[row]);
+                    }
+                }
+            }
+            horizon_client::stations::enchant_offers_leveled(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                bookcases,
+                gs.menu.slot(0),
+                |row, _| levels[row],
+            )
+        };
         let mut costs = offers.costs;
         self.native_prepare_item_enchant(guest.uuid, &guest.name, gs.pos, &mut costs);
         let mut clues = offers.clues;
@@ -416,8 +499,14 @@ impl Game<'_> {
             return;
         };
         let g = &host.hub.guests[gi];
-        let (seed, creative, conn, uuid, name) =
-            (g.xp_seed, g.creative(), g.conn, g.uuid, g.name.clone());
+        let (seed, creative, conn, uuid, entity_id, name) = (
+            g.xp_seed,
+            g.creative(),
+            g.conn,
+            g.uuid,
+            g.entity_id,
+            g.name.clone(),
+        );
         let Some(enchanted) = horizon_client::stations::apply_enchantment(
             &self.stations().enchantments,
             self.items(),
@@ -430,10 +519,24 @@ impl Game<'_> {
         };
         let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
+        // The enchantments the item got, for PlayerEnchantItemEvent.
+        let given = (!horizon_client::mod_api::mods().is_empty()).then(|| {
+            horizon_client::stations::enchantment_list(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                button,
+                gs.menu.data[button],
+                &item.item,
+            )
+        });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
         self.as_guest(host, conn, |game| {
-            game.give_levels(-need);
+            game.enchantment_performed(need);
             game.award_custom_stat("enchant_item", 1);
+            if let Some(given) = &given {
+                game.native_player_enchant_item(uuid, entity_id, &enchanted, given);
+            }
             // CriteriaTriggers.ENCHANTED_ITEM, with the levels it cost.
             game.trigger_enchanted_item(&enchanted, need);
         });
