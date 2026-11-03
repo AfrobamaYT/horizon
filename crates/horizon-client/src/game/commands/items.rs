@@ -678,7 +678,6 @@ impl Game<'_> {
     }
     /// `/item modify (entity|block) <target> <slot> <modifier>`.
     pub(super) fn cmd_item_modify(&mut self, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks(None);
         let targets = self.owner_of(ctx, "target", true)?;
         let Some(Arg::Str(slot_name)) = ctx.get("slot").cloned() else {
             return Ok(0);
