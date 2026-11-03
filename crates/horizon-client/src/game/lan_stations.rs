@@ -712,13 +712,13 @@ impl Game<'_> {
                 // As that player: `native_acting_player` and `native_acting_id`
                 // answer for the one who pressed.
                 self.as_guest(conn, |game| game.mod_menu_button(context, &mut carried));
-                if let Some(host) = self.lan.as_mut() {
-                    if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
-                        let net = host.hub.stack(&carried);
-                        if let Some(g) = host.hub.guest_mut(conn) {
-                            g.carried = carried;
-                            g.send(&C::SetCursorItem(play::SetCursorItem { item: net }));
-                        }
+                if let Some(host) = self.lan.as_mut()
+                    && host.hub.guest(conn).is_some_and(|g| g.carried != carried)
+                {
+                    let net = host.hub.stack(&carried);
+                    if let Some(g) = host.hub.guest_mut(conn) {
+                        g.carried = carried;
+                        g.send(&C::SetCursorItem(play::SetCursorItem { item: net }));
                     }
                 }
             }
@@ -825,8 +825,7 @@ impl Game<'_> {
                 let carried = self
                     .lan
                     .as_mut()
-                    .map(|host| host.hub.guests[gi].carried.take())
-                    .flatten();
+                    .and_then(|host| host.hub.guests[gi].carried.take());
                 if let Some(carried) = carried {
                     self.lan_place_back(gi, vec![carried]);
                 }
@@ -943,23 +942,23 @@ impl Game<'_> {
             updated = Some(menu.beacon_update(env, power(0), power(1)));
         });
         // handleSetBeaconPacket: effects the beacon can't give, or no payment, disconnect.
-        if updated == Some(false) {
-            if let Some(host) = self.lan.as_mut() {
-                let name = host
-                    .hub
-                    .guests
-                    .iter()
-                    .find(|g| g.conn == conn)
-                    .map(|g| g.name.clone());
-                eprintln!(
-                    "Player {} tried to set invalid beacon effects",
-                    name.unwrap_or_default()
-                );
-                host.hub.kick(
-                    conn,
-                    horizon_protocol::text::translatable("multiplayer.disconnect.generic", &[]),
-                );
-            }
+        if updated == Some(false)
+            && let Some(host) = self.lan.as_mut()
+        {
+            let name = host
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.conn == conn)
+                .map(|g| g.name.clone());
+            eprintln!(
+                "Player {} tried to set invalid beacon effects",
+                name.unwrap_or_default()
+            );
+            host.hub.kick(
+                conn,
+                horizon_protocol::text::translatable("multiplayer.disconnect.generic", &[]),
+            );
         }
         if updated != Some(true) {
             return;

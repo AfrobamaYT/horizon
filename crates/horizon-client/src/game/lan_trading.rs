@@ -474,11 +474,10 @@ impl Game<'_> {
                 .as_mut()
                 .and_then(|host| host.play.get_mut(&conn))
                 .and_then(|p| p.merchant.as_mut())
-                .map(|gm| {
+                .and_then(|gm| {
                     gm.merchant.session.last_traded = false;
                     gm.merchant.mob
                 })
-                .flatten()
             else {
                 continue;
             };
