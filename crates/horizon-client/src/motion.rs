@@ -1231,8 +1231,12 @@ impl MotionWorld<'_, '_, '_> {
         // The resident scene accepts the resolved local movement directly.
         // Vanilla dispatches this separately from travel, on packet acceptance.
         self.check_movement_statistics(previous.vector_to(self.player.position))?;
-        self.player
-            .food_tick(&self.resources.health, self.scene.health_rules)
+        let rules = self.scene.health_rules;
+        self.player.food_tick(
+            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+            &self.resources.health,
+            rules,
+        )
     }
     pub fn controlled_simulation_tick(&mut self, keys: crate::sprint::Keys) -> Result<()> {
         self.controlled_simulation_tick_with_sprint_window(keys, 7)
@@ -1463,7 +1467,13 @@ impl MotionWorld<'_, '_, '_> {
             crate::health::HealthEvent::FreezeDamage(1.0),
         ));
         let rules = self.scene.health_rules;
-        self.player.hurt(&self.resources.health, rules, id, 1.0)?;
+        self.player.hurt(
+            &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+            &self.resources.health,
+            rules,
+            id,
+            1.0,
+        )?;
         Ok(())
     }
     /// `Entity.applyEffectsFromBlocks` for the blocks Horizon's player reacts
@@ -1957,7 +1967,13 @@ impl MotionWorld<'_, '_, '_> {
                 crate::health::HealthEvent::SweetBerryBushDamage(1.0),
             ));
             let rules = self.scene.health_rules;
-            self.player.hurt(&self.resources.health, rules, id, 1.0)?;
+            self.player.hurt(
+                &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+                &self.resources.health,
+                rules,
+                id,
+                1.0,
+            )?;
         }
         Ok(())
     }
@@ -2099,7 +2115,13 @@ impl MotionWorld<'_, '_, '_> {
                     .id("minecraft:fly_into_wall")
                     .ok_or("missing fly_into_wall damage type")?;
                 let rules = self.scene.health_rules;
-                self.player.hurt(&self.resources.health, rules, id, dmg)?;
+                self.player.hurt(
+                    &mut crate::health::DamageLevel::of(self.scene, self.assets.registry),
+                    &self.resources.health,
+                    rules,
+                    id,
+                    dmg,
+                )?;
                 if self.player.server_copy {
                     self.player.wall_hit_events = Some(first..self.player.events.len());
                 }

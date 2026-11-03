@@ -6,6 +6,7 @@ use super::{
     Game,
     entity::{Blast, Entity, EntityHandle, with_entity, with_entity_mut},
 };
+use horizon_client::health::DamageLevel;
 use horizon_client::{
     Result,
     blocks::Fluid,
@@ -205,6 +206,7 @@ struct Hit {
 
 /// Apply blast damage when the mob's team and wither immunity allow it.
 fn hurt_mob(
+    level: &mut DamageLevel<'_>,
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
@@ -213,7 +215,7 @@ fn hurt_mob(
     let shielded =
         cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
     if hurtable && !shielded {
-        m.damage(amount, source);
+        m.damage(level, amount, source);
     }
 }
 
@@ -494,6 +496,7 @@ impl Game<'_> {
         if let Some((id, name)) = attacker.filter(|_| !creative && !spectator && hurtable) {
             self.note_named_attacker(damage_type, *id, name.clone());
         }
+        let rules = self.world.health_rules;
         if let Some(p) = self.player.as_mut()
             && let Some(id) = self.motion.health.damage.id(damage_type)
         {
@@ -502,8 +505,9 @@ impl Game<'_> {
                 && !spectator
                 && hurtable
                 && let Ok(o) = p.hurt_caused_by(
+                    crate::game::entity::damage_level_of!(self),
                     &self.motion.health,
-                    self.world.health_rules,
+                    rules,
                     id,
                     amount,
                     blocking,
@@ -708,7 +712,13 @@ impl Game<'_> {
                         // `EXPLOSION_KNOCKBACK_RESISTANCE`, not `KNOCKBACK_RESISTANCE`:
                         // its base is 0 for every mob type, so iron golems and
                         // ravagers are pushed.
-                        hurt_mob(m, hurtable, cause, (amount, source));
+                        hurt_mob(
+                            crate::game::entity::damage_level_of!(self),
+                            m,
+                            hurtable,
+                            cause,
+                            (amount, source),
+                        );
                     }
                     // 5 health, destroyed by the explosion damage (nether stars resist).
                     EntityHandle::Item(i) => {

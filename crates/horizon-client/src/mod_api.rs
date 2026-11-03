@@ -39,7 +39,7 @@ pub use crate::gfx::native_render::{
     BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
     WorldDrawnEvent, render_hook_ids, wgpu,
 };
-pub use crate::health::{HurtSource, ShieldBlock};
+pub use crate::health::{DamageContainer, HurtSource, Reduction, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;

@@ -14,6 +14,7 @@ use super::{
         village_sections,
     },
 };
+use crate::health::DamageLevel;
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
@@ -250,6 +251,7 @@ pub fn drowned_move_control(m: &mut Mob, w: &super::MobWorld) {
 pub fn drowned_travel(
     m: &mut Mob,
     w: &super::MobWorld,
+    level: &mut DamageLevel<'_>,
     input: Vec3,
     events: &mut Vec<MobEvent>,
 ) -> bool {
@@ -258,7 +260,7 @@ pub fn drowned_travel(
         return false;
     }
     m.move_relative(0.01, input);
-    m.do_move(w, events);
+    m.do_move(w, level, events);
     m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
     true
 }

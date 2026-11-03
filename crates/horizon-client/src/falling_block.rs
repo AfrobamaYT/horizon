@@ -1,5 +1,6 @@
 //! FallingBlockEntity's impact damage, anvil wear, saved impact settings and
 //! the blocks it moves through (cobwebs, bubble columns).
+use crate::health::DamageLevel;
 use crate::motion::BubbleColumn;
 use crate::{
     mobs::{Damage as MobDamage, DamageKind, Mob},
@@ -223,11 +224,17 @@ fn inside_blocks(
         check(to, to, 1);
     }
 }
-pub fn hurt_mobs(mobs: &mut [Mob], position: Vec3, amount: f32) {
-    hurt_mobs_with_kind(mobs, position, amount, DamageKind::FallingBlock);
+pub fn hurt_mobs(level: &mut DamageLevel<'_>, mobs: &mut [Mob], position: Vec3, amount: f32) {
+    hurt_mobs_with_kind(level, mobs, position, amount, DamageKind::FallingBlock);
 }
 
-pub fn hurt_mobs_with_kind(mobs: &mut [Mob], position: Vec3, amount: f32, kind: DamageKind) {
+pub fn hurt_mobs_with_kind(
+    level: &mut DamageLevel<'_>,
+    mobs: &mut [Mob],
+    position: Vec3,
+    amount: f32,
+    kind: DamageKind,
+) {
     if amount <= 0.0 {
         return;
     }
@@ -241,7 +248,7 @@ pub fn hurt_mobs_with_kind(mobs: &mut [Mob], position: Vec3, amount: f32, kind: 
         .iter_mut()
         .filter(|m| m.alive() && bounds.intersects(m.bounds()))
     {
-        mob.damage(amount, source);
+        mob.damage(level, amount, source);
     }
 }
 

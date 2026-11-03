@@ -12,6 +12,7 @@ use super::{
     nav::NavKind,
 };
 use crate::blocks::Fluid;
+use crate::health::DamageLevel;
 use crate::particles::ParticleType;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -256,7 +257,7 @@ pub fn set_age_locked_data(m: &mut Mob) {
     m.extra.age_lock_particle_timer = 40;
 }
 /// Species aiStep additions.
-pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+pub fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     use Species as S;
     match m.species() {
         S::Squid => squid_ai_step(m),
@@ -354,7 +355,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 if m.extra.counter <= 0 {
                     // `Dolphin.tick` hurts with `damageSources().dryOut()`: the
                     // death message names dehydration, not drowning.
-                    m.damage(1.0, super::Damage::of(super::DamageKind::DryOut));
+                    m.damage(level, 1.0, super::Damage::of(super::DamageKind::DryOut));
                 }
                 if m.on_ground {
                     let (a, b) = (m.random.next_float(), m.random.next_float());
@@ -575,18 +576,24 @@ fn squid_step(m: &mut Mob, client: bool) {
     }
 }
 /// Species travel overrides. Returns true when handled.
-pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) -> bool {
+pub fn travel(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    input: Vec3,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     use Species as S;
     match m.species() {
         // Squid.travel: move by the current velocity only.
         S::Squid | S::GlowSquid => {
-            m.do_move(w, events);
+            m.do_move(w, level, events);
             true
         }
         // Axolotl.travelInWater: no fish sinking or generic water gravity.
         S::Axolotl if m.fluids.in_water => {
             m.move_relative(m.ai.speed, input);
-            m.do_move(w, events);
+            m.do_move(w, level, events);
             m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
             true
         }
@@ -600,7 +607,7 @@ pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>
                 0.01
             };
             m.move_relative(speed, input);
-            m.do_move(w, events);
+            m.do_move(w, level, events);
             m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
             if m.ai.target.is_none() {
                 // `Vec3.add(0.0, -0.005, 0.0)`: adding 0.0 turns a -0.0 into 0.0.

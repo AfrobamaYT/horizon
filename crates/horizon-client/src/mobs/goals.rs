@@ -4,7 +4,7 @@ use super::{Mob, MobEvent, MobWorld, Seen, Species, Who, world::TargetInfo};
 use horizon_core::{
     geometry::{Aabb, Vec3},
     jmath,
-    random::{LegacyRandom, RandomSource},
+    random::RandomSource,
 };
 use std::sync::Arc;
 
@@ -14,11 +14,11 @@ pub const JUMP: u8 = 4;
 pub const TARGET: u8 = 8;
 
 /// What goals may read and emit during a tick.
-pub struct Cx<'a, 'w> {
+pub struct Cx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
-    /// The level's random (`level.getRandom()`), for the draws vanilla's
-    /// behaviours make from it rather than from the mob's own.
-    pub lr: &'a mut LegacyRandom,
+    /// The level: its random (`level.getRandom()`), for the draws vanilla's
+    /// behaviours make from it rather than from the mob's own, and the damage hooks.
+    pub level: &'a mut crate::health::DamageLevel<'l>,
     pub events: &'a mut Vec<MobEvent>,
 }
 pub trait Goal: std::fmt::Debug {
@@ -2689,7 +2689,7 @@ impl Goal for BreathAir {
         );
         m.move_relative(0.02, input);
         let mut ev = Vec::new();
-        m.do_move(cx.w, &mut ev);
+        m.do_move(cx.w, cx.level, &mut ev);
         cx.events.extend(ev);
     }
 }
@@ -2852,10 +2852,7 @@ impl MoveToBlock {
 mod breeding_variant_tests {
     use super::*;
     use crate::mobs::{BreedExperience, world::with_test_world};
-    use horizon_core::{
-        geometry::Vec3,
-        random::{LegacyRandom, RandomSource},
-    };
+    use horizon_core::{geometry::Vec3, random::RandomSource};
     use std::sync::Arc;
 
     #[test]

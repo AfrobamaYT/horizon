@@ -50,7 +50,7 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{DamageSteps, HurtSource, Hurting, Knock, ShieldBlock},
+    health::{DamageContainer, DamageLevel, HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
     items::ItemStack,
     keybinds,
@@ -6688,62 +6688,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_living_use_totem(entity, kind, source, hand, item, cancel);
     }
-    /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
-    /// type `kind` (`minecraft:player`, `minecraft:zombie`) has taken `original` damage from
-    /// `source` (named as `native_living_incoming_damage` names it) down by `armor` (armor and
-    /// toughness) and `magic` (enchantment protection, Resistance) to `new_damage`, which is above 0,
-    /// and the absorption hearts have not taken their share yet. Change `new_damage` and the
-    /// absorption and the health follow it; 0 or less takes no health. A value that is not a
-    /// number is put back as it was. It fires for players and mobs; a wolf whose armor takes the
-    /// hit, the ender dragon and armor stands do not fire it. No `self`, as
-    /// `native_living_shield_block`: the game is in the middle of the hit.
-    pub(super) fn native_living_damage_pre(
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        original: f32,
-        armor: f32,
-        magic: f32,
-        new_damage: &mut f32,
-    ) {
-        mod_api::dispatch_living_damage_pre(
-            mod_api::mods(),
-            entity,
-            kind,
-            source,
-            original,
-            armor,
-            magic,
-            new_damage,
-        );
-    }
-    /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has just
-    /// lost `damage` (not 0) from `source` after `native_living_damage_pre`, the absorption hearts
-    /// having taken `absorbed` of it first. `original`, `armor` and `magic` are
-    /// `native_living_damage_pre`'s. It only listens, and fires where the pre hook does. No
-    /// `self`, as `native_living_damage_pre`.
-    pub(super) fn native_living_damage_post(
-        entity: i32,
-        kind: &str,
-        source: &HurtSource<'_>,
-        original: f32,
-        armor: f32,
-        magic: f32,
-        absorbed: f32,
-        damage: f32,
-    ) {
-        mod_api::dispatch_living_damage_post(
-            mod_api::mods(),
-            entity,
-            kind,
-            source,
-            original,
-            armor,
-            magic,
-            absorbed,
-            damage,
-        );
-    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -6934,39 +6878,72 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
     cancel
 }
 
+/// The level a hit lands in, as its damage hooks' level host: its blocks, its random and its
+/// own attachments. Not `GameLevel`, which a hit can't build: a mob's hit lands in the mob
+/// tick, where the world is read by every mob and its random is lent out, and building one
+/// per hit would allocate its entity boxes.
+pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
+
+impl HitLevel<'_> {
+    /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
+    /// type `kind` (`minecraft:player`, `minecraft:zombie`) by `source` (named as
+    /// `native_living_incoming_damage` names it) has taken every reduction of the hit:
+    /// `container` holds the damage it started with, what it is now (`new_damage`, which may be
+    /// 0) and each reduction (armor, enchantments, mob effects, absorption). Change its
+    /// `new_damage` and the health takes that; set its post-attack invulnerability ticks and the
+    /// entity keeps them instead of vanilla's. A value that is not a number is put back as it
+    /// was. It fires for players, mobs and the ender dragon; a wolf whose armor takes the hit and
+    /// armor stands do not fire it. The level is the hit's: its blocks, random and own
+    /// attachments; the hurt entity is in the middle of its hit.
+    pub(super) fn native_living_damage_pre(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        container: &mut DamageContainer,
+    ) {
+        mod_api::dispatch_living_damage_pre(self, entity, kind, source, container);
+    }
+    /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has
+    /// just lost the hit `container` describes, with its final values (health damage, the
+    /// reductions, the post-attack invulnerability ticks). It only listens, and fires where
+    /// `native_living_damage_pre` does once the health took more than 0. It can't write the
+    /// entity or the world's blocks: the level host gives the hit's random and level attachments.
+    pub(super) fn native_living_damage_post(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        container: &DamageContainer,
+    ) {
+        mod_api::dispatch_living_damage_post(self, entity, kind, source, container);
+    }
+}
+
 /// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
-pub(super) fn damage_pre(hurting: Hurting<'_>, steps: DamageSteps, damage: &mut f32) {
-    if mod_api::mods().is_empty() {
+pub(super) fn damage_pre(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    container: &mut DamageContainer,
+) {
+    if !mod_api::listened(mod_api::HookId::LivingDamagePre) {
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
-    Game::native_living_damage_pre(
-        entity,
-        kind,
-        &source,
-        steps.original,
-        steps.armor,
-        steps.magic,
-        damage,
-    );
+    HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
 }
 
 /// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
-pub(super) fn damage_post(hurting: Hurting<'_>, steps: DamageSteps, absorbed: f32, damage: f32) {
-    if mod_api::mods().is_empty() {
+pub(super) fn damage_post(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    container: &DamageContainer,
+) {
+    if !mod_api::listened(mod_api::HookId::LivingDamagePost) {
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
-    Game::native_living_damage_post(
-        entity,
-        kind,
-        &source,
-        steps.original,
-        steps.armor,
-        steps.magic,
-        absorbed,
-        damage,
-    );
+    HitLevel(level).native_living_damage_post(entity, kind, &source, container);
 }
 
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
@@ -9417,7 +9394,7 @@ fn mod_menu(name: &str) -> Option<(&'static str, usize)> {
 
 /// `state` with its property `key` set to `value`; none when the block has
 /// no such property or value.
-fn with_property(
+pub(super) fn with_property(
     registry: &BlockRegistry,
     state: BlockStateId,
     key: &str,

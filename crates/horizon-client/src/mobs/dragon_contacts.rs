@@ -1,6 +1,7 @@
 //! `EnderDragon.knockBack` and `hurt` for living mobs.
 //! The dragon lives outside the normal mob array; its contacts must still reach them.
 // Contact rules compared with the installed vanilla Java 26.3 EnderDragon.
+use crate::health::DamageLevel;
 use crate::mobs::{Damage, DamageKind, Mob, Who};
 use horizon_core::geometry::{Aabb, Vec3};
 
@@ -16,7 +17,7 @@ pub struct Frame {
 
 /// Wings push even while perched and even when teams forbid damage.
 /// The normal mob damage handler owns armor, invulnerability frames and last-attacker bookkeeping.
-pub fn contact(m: &mut Mob, f: &Frame, teams_allow: bool) {
+pub fn contact(level: &mut DamageLevel<'_>, m: &mut Mob, f: &Frame, teams_allow: bool) {
     if f.recently_hurt || m.removed || m.id == f.dragon_id {
         return;
     }
@@ -38,14 +39,14 @@ pub fn contact(m: &mut Mob, f: &Frame, teams_allow: bool) {
                 && teams_allow
                 && m.ai.last_hurt_by_time < (m.age as i32).saturating_sub(2)
             {
-                m.damage(5.0, source);
+                m.damage(level, 5.0, source);
             }
         }
     }
     if teams_allow {
         for head in &f.heads {
             if head.intersects(bounds) {
-                m.damage(10.0, source);
+                m.damage(level, 10.0, source);
             }
         }
     }

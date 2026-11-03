@@ -669,6 +669,7 @@ impl Game<'_> {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         let from = Some([t.position.x, t.position.y, t.position.z]);
                         let hurt = m.damage_projectile(
+                            crate::game::entity::damage_level_of!(self),
                             damage,
                             Damage {
                                 kind: DamageKind::Arrow,

@@ -2358,7 +2358,12 @@ impl Game<'_> {
                 })
                 .collect();
             for (mob, allowed) in self.mobs.iter_mut().zip(allowed) {
-                horizon_client::mobs::dragon_contacts::contact(mob, &frame, allowed);
+                horizon_client::mobs::dragon_contacts::contact(
+                    crate::game::entity::damage_level_of!(self),
+                    mob,
+                    &frame,
+                    allowed,
+                );
             }
         }
         // checkWalls over head, neck and body.
@@ -2723,7 +2728,14 @@ impl Game<'_> {
         if let Some(p) = self.player.as_mut() {
             push_seen_with_hurt(p, push, |p| {
                 if let Some(id) = id.filter(|_| hurts)
-                    && let Ok(o) = p.hurt_blocking(health, rules, id, 5.0, None)
+                    && let Ok(o) = p.hurt_blocking(
+                        crate::game::entity::damage_level_of!(self),
+                        health,
+                        rules,
+                        id,
+                        5.0,
+                        None,
+                    )
                 {
                     canceled = o.canceled;
                 }

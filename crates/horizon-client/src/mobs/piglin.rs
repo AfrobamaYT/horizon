@@ -472,11 +472,11 @@ fn copy_to_avoid(m: &mut Mob, cx: &mut Cx) {
         && let Some(who) = m.extra.piglin.nemesis
         && let Some(p) = cx.w.target_info(who)
     {
-        let ticks = avoid_duration(cx.lr);
+        let ticks = avoid_duration(cx.level.random());
         remember_avoid(m, who, p.position, ticks);
     }
     if let Some((who, at)) = near_zombified(m, cx.w) {
-        let ticks = avoid_duration(cx.lr);
+        let ticks = avoid_duration(cx.level.random());
         remember_avoid(m, who, at, ticks);
     }
 }
@@ -507,10 +507,14 @@ fn baby_sometimes_ride_baby_hoglin(m: &mut Mob, cx: &mut Cx) {
     if b.ride.is_some() || !m.is_baby() {
         return;
     }
-    if !tick_down_and_check(&mut m.extra.piglin.ride_wait, cx.lr, (200, 800)) {
+    if !tick_down_and_check(&mut m.extra.piglin.ride_wait, cx.level.random(), (200, 800)) {
         return;
     }
-    let ticks = cx.lr.next_int_between_inclusive(200, 600).unwrap_or(200);
+    let ticks = cx
+        .level
+        .random()
+        .next_int_between_inclusive(200, 600)
+        .unwrap_or(200);
     let mut ttl = Ttl::default();
     ttl.set(ticks);
     m.extra.piglin.ride = Some(RideTarget {
@@ -1828,7 +1832,7 @@ fn on_hit_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         return;
     };
     if species_of(cx.w, who) == Some(Species::Piglin) && piglins_outnumber_hoglins(m) {
-        set_avoid_target(m, cx.lr, who, at);
+        set_avoid_target(m, cx.level.random(), who, at);
         broadcast_retreat(m, cx.w, who, at, cx.events);
     }
 }

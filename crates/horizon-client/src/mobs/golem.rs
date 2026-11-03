@@ -113,10 +113,10 @@ fn back_to_village_position(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
 /// a village section (7 in 10 the villager first), and anywhere if neither
 /// is found. The picks draw from the level's random.
 fn village_stroll_position(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
-    if cx.lr.next_float() < 0.3 {
+    if cx.level.random().next_float() < 0.3 {
         return m.land_random_pos(cx.w, 10, 7);
     }
-    let target = if cx.lr.next_float() < 0.7 {
+    let target = if cx.level.random().next_float() < 0.7 {
         towards_villager_who_wants_golem(m, cx).or_else(|| towards_poi(m, cx))
     } else {
         towards_poi(m, cx).or_else(|| towards_villager_who_wants_golem(m, cx))
@@ -141,7 +141,11 @@ fn towards_villager_who_wants_golem(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]
     if villagers.is_empty() {
         return None;
     }
-    let at = villagers[cx.lr.next_int_bound(villagers.len() as i32).unwrap_or(0) as usize];
+    let at = villagers[cx
+        .level
+        .random()
+        .next_int_bound(villagers.len() as i32)
+        .unwrap_or(0) as usize];
     m.land_random_pos_towards(cx.w, 10, 7, [at.x, at.y, at.z])
 }
 /// `GolemRandomStrollInVillageGoal.getPositionTowardsPoi`: a taken point of
@@ -164,7 +168,11 @@ fn towards_poi(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
     if sections.is_empty() {
         return None;
     }
-    let s = sections[cx.lr.next_int_bound(sections.len() as i32).unwrap_or(0) as usize];
+    let s = sections[cx
+        .level
+        .random()
+        .next_int_bound(sections.len() as i32)
+        .unwrap_or(0) as usize];
     let taken = others_tickets(m, cx.w);
     let pois = occupied_pois_in_range(
         cx.w,
@@ -175,7 +183,11 @@ fn towards_poi(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
     if pois.is_empty() {
         return None;
     }
-    let p = pois[cx.lr.next_int_bound(pois.len() as i32).unwrap_or(0) as usize];
+    let p = pois[cx
+        .level
+        .random()
+        .next_int_bound(pois.len() as i32)
+        .unwrap_or(0) as usize];
     m.land_random_pos_towards(
         cx.w,
         10,

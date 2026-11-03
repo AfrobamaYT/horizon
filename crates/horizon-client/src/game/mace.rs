@@ -225,9 +225,8 @@ impl Game<'_> {
             ..Default::default()
         };
         let enchantments = &world_stations!(self).enchantments;
-        let random = &mut self.world.random;
         // CombatRules.getDamageAfterAbsorb: EnchantmentHelper.modifyArmorEffectiveness.
-        let mut breach = |fraction: f32| {
+        let mut breach = |fraction: f32, random: &mut horizon_core::random::LegacyRandom| {
             enchantments.modify_value(
                 held.as_ref(),
                 "minecraft:armor_effectiveness",
@@ -240,7 +239,12 @@ impl Game<'_> {
         // The causing entity's aim, for what turns a blow by where it points
         // (`SulfurCube.knockback`).
         self.mobs[index].attacker_aim = aim;
-        let hurt = self.mobs[index].damage_with(amount, source, Some(&mut breach));
+        let hurt = self.mobs[index].damage_with(
+            crate::game::entity::damage_level_of!(self),
+            amount,
+            source,
+            Some(&mut breach),
+        );
         self.mobs[index].attacker_aim = None;
         if hurt && self.mobs[index].health != old_health {
             self.mob_damage_event(self.mobs[index].id);

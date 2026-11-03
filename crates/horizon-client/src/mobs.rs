@@ -104,7 +104,12 @@ pub use world::{TargetInfo, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
-use crate::{blocks::BlockFacts, mesher::Vertex, world::World};
+use crate::{
+    blocks::BlockFacts,
+    health::{DamageContainer, DamageLevel, Reduction},
+    mesher::Vertex,
+    world::World,
+};
 pub use data::MobData;
 use horizon_core::{
     geometry::{Aabb, Vec3},
@@ -2798,8 +2803,14 @@ pub struct MobWorld<'a> {
 /// `shouldApplyEffectTickThisTick` and `applyEffectTick`, which the game's
 /// native mods answer. False removes the effect.
 pub trait ModEffectTicks {
-    fn tick_mod_effect(&self, effect: &str, mob: &mut Mob, tick_count: i32, amplifier: i32)
-    -> bool;
+    fn tick_mod_effect(
+        &self,
+        level: &mut DamageLevel<'_>,
+        effect: &str,
+        mob: &mut Mob,
+        tick_count: i32,
+        amplifier: i32,
+    ) -> bool;
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
 #[derive(Clone, Debug, Default)]
@@ -2986,15 +2997,15 @@ impl Mob {
     /// The player hit this mob (melee): LivingEntity.hurt with knockback.
     pub fn hurt(
         &mut self,
+        level: &mut DamageLevel<'_>,
         amount: f32,
         from: Option<[f64; 3]>,
-        _random: &mut LegacyRandom,
     ) -> bool {
         let source = match from {
             Some(f) => Damage::player(f),
             None => Damage::of(DamageKind::Generic),
         };
-        self.damage(amount, source)
+        self.damage(level, amount, source)
     }
     /// LivingEntity.hurtServer: invulnerability frames, armor, knockback and
     /// the last-hurt-by bookkeeping goals read.
@@ -3014,9 +3025,15 @@ impl Mob {
             .fold(body, |(a, t), (x, y)| (a + x, t + y))
     }
     /// `damage` of a blow whose causing entity is `aim` (`SulfurCube.knockback` reads it).
-    pub fn damage_aimed(&mut self, amount: f32, source: Damage, aim: Option<Aim>) -> bool {
+    pub fn damage_aimed(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        amount: f32,
+        source: Damage,
+        aim: Option<Aim>,
+    ) -> bool {
         self.attacker_aim = aim;
-        let hurt = self.damage(amount, source);
+        let hurt = self.damage(level, amount, source);
         self.attacker_aim = None;
         hurt
     }
@@ -3024,18 +3041,20 @@ impl Mob {
     /// is `aim`.
     pub fn damage_projectile(
         &mut self,
+        level: &mut DamageLevel<'_>,
         amount: f32,
         source: Damage,
         aim: Option<Aim>,
         motion: [f64; 2],
     ) -> bool {
         self.projectile_motion = Some(motion);
-        let hurt = self.damage_aimed(amount, source, aim);
+        let hurt = self.damage_aimed(level, amount, source, aim);
         self.projectile_motion = None;
         hurt
     }
-    pub fn damage(&mut self, amount: f32, source: Damage) -> bool {
-        self.damage_with(amount, source, None)
+    /// `hurtServer` of `amount` from `source` in `level`.
+    pub fn damage(&mut self, level: &mut DamageLevel<'_>, amount: f32, source: Damage) -> bool {
+        self.damage_with(level, amount, source, None)
     }
     /// `LivingEntity.isInvulnerableTo` and dead or removed: only #bypasses_invulnerability gets
     /// past the flag. The guard every damage hook runs after (`LivingIncomingDamageEvent`).
@@ -3045,12 +3064,14 @@ impl Mob {
             || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
     }
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the
-    /// weapon's armor-effectiveness enchantments (breach) over the armor fraction.
+    /// weapon's armor-effectiveness enchantments (breach) over the armor fraction, with the
+    /// level's random.
     pub fn damage_with(
         &mut self,
+        level: &mut DamageLevel<'_>,
         amount: f32,
         source: Damage,
-        armor_effectiveness: Option<&mut dyn FnMut(f32) -> f32>,
+        armor_effectiveness: Option<&mut dyn FnMut(f32, &mut LegacyRandom) -> f32>,
     ) -> bool {
         axolotl::before_damage(self, amount, &source);
         raider::note_hurt(self);
@@ -3090,7 +3111,9 @@ impl Mob {
         if self.species() == Species::Armadillo {
             amount = armadillo::reduce_damage(self, amount);
         }
-        // LivingEntity.hurtServer, past its guards: a native mod's hook.
+        // LivingEntity.hurtServer, past its guards: the hit's damage sequence starts.
+        let mut container = DamageContainer::new(amount);
+        // A native mod's hook.
         if crate::health::hurt_server_canceled(
             crate::health::Hurting::Mob(self, &source),
             &mut amount,
@@ -3115,6 +3138,7 @@ impl Mob {
             0.0
         };
         amount -= blocked;
+        container.record_block(blocked);
         // #damages_helmet: falling anvils, blocks and stalactites.
         if matches!(
             source.kind,
@@ -3149,17 +3173,20 @@ impl Mob {
                 let effective = (armor - amount / toughness).clamp(armor * 0.2, 20.0);
                 let mut fraction = effective / 25.0;
                 if let Some(modify) = armor_effectiveness {
-                    fraction = modify(fraction).clamp(0.0, 1.0);
+                    fraction = modify(fraction, level.random()).clamp(0.0, 1.0);
                 }
                 amount *= 1.0 - fraction;
             }
         }
         let after_armor = amount;
+        container.record_reduction(Reduction::Armor, entered - after_armor);
         // CombatRules.getDamageAfterMagicAbsorb: enchantment protection.
         let epf = gear::protection(self, source.kind);
         if epf > 0.0 {
             amount *= 1.0 - epf / 25.0;
         }
+        container.record_reduction(Reduction::Enchantments, after_armor - amount);
+        let after_enchantments = amount;
         // LivingEntity.getDamageAfterMagicAbsorb: Resistance takes 20% per level off
         // (`#bypasses_resistance` and `#bypasses_effects` skip it).
         if !source.kind.bypasses_effects()
@@ -3172,10 +3199,9 @@ impl Mob {
         {
             let remainder = 25i32.wrapping_sub(amp.wrapping_add(1).wrapping_mul(5));
             amount = (amount * remainder as f32 / 25.0).max(0.0);
-            if amount <= 0.0 {
-                return false;
-            }
         }
+        container.record_reduction(Reduction::MobEffects, after_enchantments - amount);
+        let after_effects = amount;
         // Witch.getDamageAfterMagicAbsorb: none from its own doing, else
         // 85% less from `#witch_resistant_to`.
         if self.species() == Species::Witch {
@@ -3191,6 +3217,7 @@ impl Mob {
                 amount *= 0.15;
             }
         }
+        container.record_reduction(Reduction::InnateResistance, after_effects - amount);
         // Wolf.actuallyHurt: wolf armor takes the damage instead of the wolf.
         let absorbed = self.wolf_armor_absorbs(&source);
         let mut knock = true;
@@ -3199,42 +3226,35 @@ impl Mob {
             return false;
         }
         let mut dealt = if window {
+            container.record_reduction(Reduction::Invulnerability, self.last_hurt);
             amount - self.last_hurt
         } else {
             amount
         };
-        let steps = crate::health::DamageSteps {
-            original: entered,
-            armor: entered - after_armor,
-            magic: after_armor - amount,
-        };
+        // The cooldown the hit leaves: what is left of it within it, else vanilla's 20.
+        let cooldown = if window { self.invulnerable } else { 20 };
+        container.set_post_attack_invulnerability_ticks(cooldown);
         // Wolf.actuallyHurt keeps a hit its armor takes away from LivingEntity.actuallyHurt.
-        if !absorbed && dealt > 0.0 {
-            crate::health::damage_pre(
-                crate::health::Hurting::Mob(self, &source),
-                steps,
-                &mut dealt,
-            );
+        if !absorbed {
+            container.enter_pre(dealt);
+            level.damage_pre(crate::health::Hurting::Mob(self, &source), &mut container);
+            dealt = container.capture_inflicted();
         }
         let mut through = 0.0;
+        if absorbed {
+            self.hurt_wolf_armor(dealt);
+        } else {
+            through = self.soak_absorption(dealt);
+            container.record_reduction(Reduction::Absorption, dealt - through);
+            self.health -= through;
+        }
+        // NeoForge bubbles what Pre left up to `lastHurt`: vanilla's value plus what Pre
+        // added, so a hit no listener changes keeps vanilla's.
+        self.last_hurt = amount + container.pre_change();
+        self.invulnerable = container.post_attack_invulnerability_ticks();
         if window {
-            if absorbed {
-                self.hurt_wolf_armor(dealt);
-            } else {
-                through = self.soak_absorption(dealt);
-                self.health -= through;
-            }
-            self.last_hurt = amount;
             knock = false;
         } else {
-            self.last_hurt = amount;
-            self.invulnerable = 20;
-            if absorbed {
-                self.hurt_wolf_armor(dealt);
-            } else {
-                through = self.soak_absorption(dealt);
-                self.health -= through;
-            }
             self.hurt_time = 10;
         }
         // LivingEntity.actuallyHurt: a hit that reaches the health is
@@ -3244,12 +3264,8 @@ impl Mob {
             self.record_damage(source, dealt);
         }
         if through != 0.0 {
-            crate::health::damage_post(
-                crate::health::Hurting::Mob(self, &source),
-                steps,
-                dealt - through,
-                through,
-            );
+            container.record_health_damage(through);
+            level.damage_post(crate::health::Hurting::Mob(self, &source), &container);
         }
         // LivingEntity.hurtArmor: `Horse` is the only mob that overrides it, and
         // it hands `doHurtEquipment` the body slot alone. A wolf's armour has
@@ -3486,14 +3502,14 @@ impl Mob {
     pub fn tick(
         &mut self,
         w: &MobWorld,
-        level_random: &mut LegacyRandom,
+        level: &mut DamageLevel<'_>,
         events: &mut Vec<MobEvent>,
     ) -> bool {
         self.track_section();
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
-        ai::tick(self, w, level_random, events)
+        ai::tick(self, w, level, events)
     }
     /// The section the mob is in, noted when it changes (`EntitySection` lists).
     fn track_section(&mut self) {
@@ -3675,10 +3691,18 @@ impl Mob {
     /// `HealOrHarmMobEffect.applyInstantenousEffect`: a harming effect hurts a
     /// living mob (6 << amplifier, magic) and heals an undead one, a healing effect
     /// the reverse (4 << amplifier), both scaled by `scale`.
-    pub fn apply_heal_or_harm(&mut self, harm: bool, inverted: bool, amplifier: i32, scale: f64) {
+    pub fn apply_heal_or_harm(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        harm: bool,
+        inverted: bool,
+        amplifier: i32,
+        scale: f64,
+    ) {
         let amp = amplifier.clamp(0, 30);
         if harm != inverted {
             self.damage(
+                level,
                 (scale * f64::from(6i32 << amp)) as i32 as f32,
                 Damage::of(DamageKind::Magic),
             );

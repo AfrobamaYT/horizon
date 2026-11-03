@@ -8,7 +8,7 @@ use crate::{
     compression::invalid,
     damage_reduction::{self, Bypass, DamageReductionWorld},
     food::FoodData,
-    living_damage::{self, DamageStat, DamageSteps, DamageWorld},
+    living_damage::{self, DamageContainer, DamageStat, DamageWorld, MagicAbsorb},
     player_health::{PlayerAttributeHealth, PlayerFloatIds, PlayerHealthError},
     synced_floats::{DataError, Observer, SyncedFloats},
 };
@@ -64,16 +64,11 @@ pub trait ServerDamageEnvironment<A: HealthAttributes = EntityAttributes>:
     fn record_damage(&mut self, amount: f32) -> Result<(), EnvError<Self>>;
     fn damage_event(&mut self) -> Result<(), EnvError<Self>>;
     /// `DamageWorld::damage_pre`. The default does nothing.
-    fn damage_pre(&mut self, _steps: DamageSteps, _damage: &mut f32) -> Result<(), EnvError<Self>> {
+    fn damage_pre(&mut self, _container: &mut DamageContainer) -> Result<(), EnvError<Self>> {
         Ok(())
     }
     /// `DamageWorld::damage_post`. The default does nothing.
-    fn damage_post(
-        &mut self,
-        _steps: DamageSteps,
-        _absorbed: f32,
-        _dealt: f32,
-    ) -> Result<(), EnvError<Self>> {
+    fn damage_post(&mut self, _container: &DamageContainer) -> Result<(), EnvError<Self>> {
         Ok(())
     }
 }
@@ -121,14 +116,19 @@ impl<'a, A: HealthAttributes, E: ServerDamageEnvironment<A>> ServerPlayerDamage<
         )
         .expect("validated immutable player float schema")
     }
-    pub fn apply(&mut self, damage: f32) -> Result<(), ServerDamageError<EnvError<E>, A::Error>> {
-        living_damage::actually_hurt(self, damage, true)
+    pub fn apply(
+        &mut self,
+        container: &mut DamageContainer,
+        damage: f32,
+    ) -> Result<(), ServerDamageError<EnvError<E>, A::Error>> {
+        living_damage::actually_hurt(self, container, damage, true)
     }
     pub(crate) fn apply_after_immunity_check(
         &mut self,
+        container: &mut DamageContainer,
         damage: f32,
     ) -> Result<(), ServerDamageError<EnvError<E>, A::Error>> {
-        living_damage::actually_hurt_after_immunity_check(self, damage, true)
+        living_damage::actually_hurt_after_immunity_check(self, container, damage, true)
     }
 }
 impl<A: HealthAttributes, E: ServerDamageEnvironment<A>> ArmorWorld
@@ -230,7 +230,7 @@ impl<A: HealthAttributes, E: ServerDamageEnvironment<A>> DamageWorld
     fn after_armor(&mut self, v: f32) -> Result<f32, Self::Error> {
         damage_reduction::after_armor(self, v)
     }
-    fn after_magic(&mut self, v: f32) -> Result<f32, Self::Error> {
+    fn after_magic(&mut self, v: f32) -> Result<MagicAbsorb, Self::Error> {
         damage_reduction::after_magic(self, v)
     }
     fn absorption(&mut self) -> Result<f32, Self::Error> {
@@ -295,19 +295,14 @@ impl<A: HealthAttributes, E: ServerDamageEnvironment<A>> DamageWorld
             .damage_event()
             .map_err(ServerDamageError::Environment)
     }
-    fn damage_pre(&mut self, steps: DamageSteps, damage: &mut f32) -> Result<(), Self::Error> {
+    fn damage_pre(&mut self, container: &mut DamageContainer) -> Result<(), Self::Error> {
         self.environment
-            .damage_pre(steps, damage)
+            .damage_pre(container)
             .map_err(ServerDamageError::Environment)
     }
-    fn damage_post(
-        &mut self,
-        steps: DamageSteps,
-        absorbed: f32,
-        dealt: f32,
-    ) -> Result<(), Self::Error> {
+    fn damage_post(&mut self, container: &DamageContainer) -> Result<(), Self::Error> {
         self.environment
-            .damage_post(steps, absorbed, dealt)
+            .damage_post(container)
             .map_err(ServerDamageError::Environment)
     }
 }

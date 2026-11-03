@@ -7,6 +7,18 @@ pub(super) struct HostParam {
     pub call: &'static str,
 }
 
+/// Whether the hook's host is a level host: a `GameLevel` method, or a hook marked
+/// `"host": "level"` whose receiver is another level (a hit's `HitLevel`).
+pub(super) fn is_level(hook: &CatalogHook) -> bool {
+    hook["host"].as_str() == Some("level") || game_level(hook)
+}
+
+fn game_level(hook: &CatalogHook) -> bool {
+    hook["target"]
+        .as_str()
+        .is_some_and(|target| target.contains("::GameLevel<"))
+}
+
 /// Validate catalog access restrictions against the hook's receiver.
 pub(super) fn validate(
     hook: &CatalogHook,
@@ -16,11 +28,17 @@ pub(super) fn validate(
     ticks: bool,
 ) -> Result<(), String> {
     if let Some(marker) = hook.get("host") {
-        if is_level || hook.side == HelperSide::Client {
-            return Err(format!("{name}: this entry takes no host marker"));
-        }
-        if marker.as_str() != Some("read") {
-            return Err(format!("{name}: invalid host marker"));
+        match marker.as_str() {
+            Some("read") if !is_level && hook.side != HelperSide::Client => {}
+            Some("level")
+                if !game_level(hook)
+                    && hook.side == HelperSide::Server
+                    && mutable == Some(true)
+                    && !ticks => {}
+            Some("read" | "level") => {
+                return Err(format!("{name}: this entry takes no host marker"));
+            }
+            _ => return Err(format!("{name}: invalid host marker")),
         }
     }
     if !is_level
@@ -46,9 +64,7 @@ pub(super) fn host_param(
     mutable: Option<bool>,
     ticks: bool,
 ) -> Option<HostParam> {
-    let is_level = hook["target"]
-        .as_str()
-        .is_some_and(|target| target.contains("::GameLevel<"));
+    let is_level = is_level(hook);
     mutable.map(|mutable| {
         if !is_level {
             let (ty, call) = match hook.side {

@@ -101,9 +101,7 @@ pub(super) fn emit(
                 }
             }
         }
-        let is_level = hook["target"]
-            .as_str()
-            .is_some_and(|target| target.contains("::GameLevel<"));
+        let is_level = host_param::is_level(hook);
         let ticks = is_level
             && args.iter().any(|(name, ty)| {
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
