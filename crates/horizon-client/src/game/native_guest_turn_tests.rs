@@ -243,9 +243,9 @@ fn another_guests_live_merchant_session_is_visible_during_a_turn() {
     });
 }
 
-/// Requires #235's passenger walk as well as #228's host visibility.
+/// Requires the passenger walk (horizon-rust/horizon#8383) as well as #228's host visibility.
 #[test]
-#[ignore = "needs #235's passenger walk"]
+#[ignore = "needs the passenger walk: horizon-rust/horizon#8383"]
 fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
     with_guests(|game| {
         game.lan

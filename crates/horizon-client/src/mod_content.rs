@@ -2759,7 +2759,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
 }
 
 /// The root to load: `base` itself with no content, else the mods' overlay
-/// over it, built in `cache/mod-content`.
+/// over it, built in an immutable, stamp-keyed directory under `cache`.
 ///
 /// The root is built once and kept: later starts with the same build, base
 /// and mod files reuse it. With ATM10's carried mods a build takes about
@@ -2771,8 +2771,8 @@ pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<P
     {
         return Ok(base.to_owned());
     }
-    let out = cache.join("mod-content");
     let stamp = stamp(base, mods)?;
+    let out = cache.join(format!("mod-content-{stamp}"));
     if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();

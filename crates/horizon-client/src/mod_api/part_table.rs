@@ -127,6 +127,11 @@ struct Installed {
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
+#[cfg(test)]
+thread_local! {
+    /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
+    static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
+}
 static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
 static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
 
@@ -135,6 +140,14 @@ thread_local! {
     static GAME_PARTS: RefCell<Option<Rc<Parts>>> = const { RefCell::new(None) };
     /// Whether a `Game` runs on this thread.
     static GAME_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+fn installed() -> Option<&'static Installed> {
+    #[cfg(test)]
+    if let Some(installed) = TEST_PARTS.get() {
+        return Some(installed);
+    }
+    INSTALLED.get()
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
@@ -156,7 +169,7 @@ impl std::ops::Deref for PartsRef {
 /// The parts hook `hook` asks: with no tag parts, the key parts every game shares; otherwise this
 /// thread's game's, or the key parts until its world opens.
 pub(crate) fn parts(hook: &'static str) -> PartsRef {
-    let Some(installed) = INSTALLED.get() else {
+    let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
     };
     if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
@@ -200,7 +213,7 @@ pub(crate) fn resolve_parts(
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
 ) -> Result<(), Vec<String>> {
-    let Some(installed) = INSTALLED.get() else {
+    let Some(installed) = installed() else {
         return Ok(());
     };
     let mut unknown: Vec<String> = unknown_keys(&installed.keys.blocks, known.block, "block")
@@ -369,7 +382,7 @@ pub(crate) fn providers<'h, S: AsRef<str>>(
     host: &'h dyn Host,
     id: impl FnOnce(&'h dyn Host) -> Option<S>,
 ) -> &'static [CapabilityPart] {
-    let table = INSTALLED.get().map(|installed| match by {
+    let table = installed().map(|installed| match by {
         ProvidedBy::BlockEntity => &installed.keys.capabilities,
         ProvidedBy::Item => &installed.keys.item_capabilities,
         ProvidedBy::Entity => &installed.keys.entity_capabilities,
@@ -459,7 +472,7 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
 
 /// The mod's provider of the item places named `provider`, with the mod's index.
 pub(crate) fn place_provider(provider: &str) -> Option<(&'static str, Arc<dyn PlaceProvider>)> {
-    let (owner, provider) = INSTALLED.get()?.keys.place_providers.get(provider)?;
+    let (owner, provider) = installed()?.keys.place_providers.get(provider)?;
     Some((*owner, provider.clone()))
 }
 
@@ -793,6 +806,9 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     } else {
         Installed::default()
     };
+    #[cfg(test)]
+    TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
+    #[cfg(not(test))]
     if INSTALLED.set(installed).is_err() {
         log::warn!("Mod parts already installed; keeping the first table");
     }
@@ -841,6 +857,55 @@ pub(crate) mod tests {
             event.entity.data.push(1);
         }
     }
+    /// The gold a `test:hoard` block entity holds, kept beside it.
+    pub(crate) const HOARD: AttachmentType<u32> = AttachmentType {
+        namespace: "test",
+        name: "hoard",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    /// How many times a `test:hoard` was asked about its removal.
+    pub(crate) static HOARD_ASKED: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
+    /// The block entity of type `test:hoard`, held by block `test:press` as `test:press_entity`
+    /// is: when it is removed it gives back the gold its `HOARD` counts.
+    struct Hoard;
+    impl BlockPart for Hoard {}
+    impl BlockEntityPart for Hoard {
+        /// With data `[1]`, it replaces its own block with granite.
+        fn block_entity_tick(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut BlockEntityTickEvent<'_>,
+        ) {
+            if event.entity.data == [1] {
+                let level = host.level("minecraft:overworld").unwrap();
+                let state = host.block_state_default("minecraft:granite").unwrap();
+                assert!(level.set_block(
+                    host,
+                    event.pos,
+                    state,
+                    NativeBlockUpdateFlags::KNOWN_SHAPE
+                ));
+            }
+        }
+        fn pre_remove_side_effects(
+            &self,
+            level: &mut dyn LevelRandomHost,
+            event: &mut PreRemoveSideEffectsEvent<'_>,
+        ) {
+            HOARD_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let BlockPos { x, y, z } = event.pos;
+            if let Ok(Some(count @ 1..)) = HOARD.get_existing(level, Holder::BlockEntity([x, y, z]))
+            {
+                event
+                    .drops
+                    .push(ItemStack::new("minecraft:gold_ingot", count));
+            }
+        }
+    }
     struct NoHost;
     impl Host for NoHost {}
     impl ServerHost for NoHost {}
@@ -873,6 +938,7 @@ pub(crate) mod tests {
             r.block_part("test:gauge", Gauge);
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
+            r.block_entity_part("test:hoard", &["test:press"], Hoard);
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
             // block entity's are reached does: ahead of the game's.
             r.block_entity_capability_before_game(&ITEMS, "test:pipe", |_, at| {
@@ -2024,6 +2090,7 @@ pub(crate) mod tests {
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
                 super::super::install(mods.clone());
+                install_parts(&mods).unwrap();
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
                 resolved.wait();
@@ -2031,6 +2098,7 @@ pub(crate) mod tests {
             });
             let server = scope.spawn(|| {
                 super::super::install(mods.clone());
+                install_parts(&mods).unwrap();
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
                 resolved.wait();
