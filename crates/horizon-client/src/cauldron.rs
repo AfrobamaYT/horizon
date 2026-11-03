@@ -63,8 +63,11 @@ fn pass() -> Interaction {
     }
 }
 
-/// `ItemUtils.createFilledResult`.
-fn filled(player: &mut dyn Player, new: ItemStack, limit_creative: bool) {
+/// `ItemUtils.createFilledResult`: `new` for one item of the stack in `player`'s hand. In
+/// creative (with `limit_creative`) the hand is kept and `new` added unless the inventory has
+/// it; otherwise one item of the hand is used up, and `new` takes its place when it was the
+/// last, else goes into the inventory, else is dropped.
+pub fn create_filled_result(player: &mut dyn Player, new: ItemStack, limit_creative: bool) {
     let creative = player.creative();
     if limit_creative && creative {
         if !player.contains(&new) {
@@ -189,7 +192,7 @@ pub fn interact(
         if !can_fill {
             return pass();
         }
-        filled(player, ItemStack::new(new, 1), true);
+        create_filled_result(player, ItemStack::new(new, 1), true);
         changed(
             state("minecraft:cauldron", None),
             Some(sound),
@@ -197,7 +200,7 @@ pub fn interact(
         )
     };
     let empty_bucket = |player: &mut dyn Player, block: BlockState, sound| {
-        filled(player, ItemStack::new("minecraft:bucket", 1), true);
+        create_filled_result(player, ItemStack::new("minecraft:bucket", 1), true);
         changed(block, Some(sound), "fill_cauldron")
     };
     match item {
@@ -247,7 +250,7 @@ pub fn interact(
             if !water_potion {
                 return pass();
             }
-            filled(player, ItemStack::new("minecraft:glass_bottle", 1), true);
+            create_filled_result(player, ItemStack::new("minecraft:glass_bottle", 1), true);
             changed(
                 state("minecraft:water_cauldron", Some(1)),
                 Some("minecraft:item.bottle.empty"),
@@ -261,7 +264,7 @@ pub fn interact(
             "minecraft:item.bucket.fill",
         ),
         ("water", "minecraft:glass_bottle") => {
-            filled(
+            create_filled_result(
                 player,
                 ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water"),
                 true,
@@ -276,7 +279,7 @@ pub fn interact(
             if level == 3 || !water_potion {
                 return pass();
             }
-            filled(player, ItemStack::new("minecraft:glass_bottle", 1), true);
+            create_filled_result(player, ItemStack::new("minecraft:glass_bottle", 1), true);
             let mut next = cauldron.clone();
             // BlockState.cycle on a 1..=3 property
             next.properties
@@ -297,7 +300,7 @@ pub fn interact(
             cleaned.count = 1;
             cleaned.data_mut().banner_patterns.pop();
             cleaned.tidy();
-            filled(player, cleaned, false);
+            create_filled_result(player, cleaned, false);
             changed(lowered(cauldron), None, "clean_banner")
         }
         ("water", name)
@@ -306,7 +309,7 @@ pub fn interact(
                 .and_then(|n| n.strip_suffix("_shulker_box"))
                 .is_some_and(|c| COLORS.contains(&c)) =>
         {
-            filled(player, held.transmute("minecraft:shulker_box", 1), false);
+            create_filled_result(player, held.transmute("minecraft:shulker_box", 1), false);
             changed(lowered(cauldron), None, "clean_shulker_box")
         }
         ("lava", "minecraft:bucket") => fill_bucket(
@@ -362,6 +365,68 @@ pub fn outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A player whose inventory is full: `Inventory.add` takes nothing, and in creative clears
+    /// what it can't place, as vanilla's does.
+    struct Full {
+        creative: bool,
+        hand: Option<ItemStack>,
+        dropped: Vec<ItemStack>,
+    }
+    impl Player for Full {
+        fn creative(&self) -> bool {
+            self.creative
+        }
+        fn hand(&mut self) -> &mut Option<ItemStack> {
+            &mut self.hand
+        }
+        fn add(&mut self, stack: &mut ItemStack) -> bool {
+            if self.creative {
+                stack.count = 0;
+                return true;
+            }
+            false
+        }
+        fn contains(&self, _: &ItemStack) -> bool {
+            false
+        }
+        fn drop_stack(&mut self, stack: ItemStack) {
+            self.dropped.push(stack);
+        }
+    }
+
+    #[test]
+    fn a_filled_result_with_a_full_inventory_drops_only_in_survival() {
+        let buckets = |count| Some(ItemStack::new("minecraft:bucket", count));
+        for filled in ["minecraft:water_bucket", "minecraft:lava_bucket"] {
+            let new = ItemStack::new(filled, 1);
+            // Creative: the hand is kept, and the filled bucket the inventory can't take is
+            // discarded, not dropped.
+            let mut p = Full {
+                creative: true,
+                hand: buckets(2),
+                dropped: Vec::new(),
+            };
+            create_filled_result(&mut p, new.clone(), true);
+            assert_eq!((p.hand, p.dropped), (buckets(2), vec![]));
+            // Survival: one bucket is used up, and the filled one is dropped.
+            let mut p = Full {
+                creative: false,
+                hand: buckets(2),
+                dropped: Vec::new(),
+            };
+            create_filled_result(&mut p, new.clone(), true);
+            assert_eq!((p.hand, p.dropped), (buckets(1), vec![new.clone()]));
+            // The last bucket becomes the filled one in the hand.
+            let mut p = Full {
+                creative: false,
+                hand: buckets(1),
+                dropped: Vec::new(),
+            };
+            create_filled_result(&mut p, new.clone(), true);
+            assert_eq!((p.hand, p.dropped), (Some(new), vec![]));
+        }
+    }
 
     #[test]
     fn a_client_sees_the_bucket_taken_without_acting() {
