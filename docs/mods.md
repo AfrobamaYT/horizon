@@ -403,6 +403,12 @@ feature already in the step is not added twice. Configured features use 26.3's `
 (registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
 Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
 
+Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one object or a list with `type`,
+`weight`, `minCount` and `maxCount`) to each entity type's category, converting the count range to 26.3's `count`;
+`remove_spawns` removes `entity_types` from every category. `add_spawn_costs` sets `spawn_costs` from `spawn_cost`
+(`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
+accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
