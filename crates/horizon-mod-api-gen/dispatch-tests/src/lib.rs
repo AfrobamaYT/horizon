@@ -482,12 +482,16 @@ mod tests {
     fn incoming_damage_carries_the_attack_data() {
         struct Backstab;
         impl Hooks for Backstab {
-            fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
-                assert_eq!((event.attacker, event.causing), (7, 0));
+            fn living_incoming_damage_v2(
+                &self,
+                _: &mut dyn Host,
+                event: &mut LivingIncomingDamageV2Event<'_>,
+            ) -> Flow {
+                assert_eq!(event.causing, 7);
                 let (from, at, look) = (
                     event.source_position.unwrap(),
-                    event.victim_position.unwrap(),
-                    event.victim_view.unwrap(),
+                    event.victim_position,
+                    event.victim_view,
                 );
                 let behind = (0..3)
                     .map(|axis| (from[axis] - at[axis]) * look[axis])
@@ -506,18 +510,17 @@ mod tests {
             (-1.0, None, 4.0),
         ] {
             let (mut amount, mut canceled) = (4.0, false);
-            dispatch_living_incoming_damage(
+            dispatch_living_incoming_damage_v2(
+                &mut TestHost,
                 &mods,
                 1,
                 "minecraft:zombie",
                 "minecraft:player_attack",
-                0,
-                0,
                 7,
-                weapon,
                 Some([0.0, 0.0, source_z]),
-                Some([0.0; 3]),
-                Some([0.0, 0.0, 1.0]),
+                [0.0; 3],
+                [0.0, 0.0, 1.0],
+                weapon,
                 &mut amount,
                 &mut canceled,
             );
@@ -529,7 +532,7 @@ mod tests {
     fn dispatch_contracts() {
         struct Weapon;
         impl Hooks for Weapon {
-            fn living_knockback(&self, event: &mut LivingKnockbackEvent<'_>) -> Flow {
+            fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
                 assert_eq!(
                     (event.entity, event.kind, event.attacker),
                     (12, "minecraft:armor_stand", 7)
@@ -543,13 +546,10 @@ mod tests {
         }
         let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
         let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
-        dispatch_living_knockback(
+        dispatch_living_knockback_v2(
             &weapon_mods,
             12,
             "minecraft:armor_stand",
-            "minecraft:player_attack",
-            0,
-            0,
             7,
             None,
             None,
@@ -603,11 +603,6 @@ mod tests {
             "damage",
             0,
             0,
-            0,
-            None,
-            None,
-            None,
-            None,
             &mut amount,
             &mut canceled,
         );
@@ -631,11 +626,6 @@ mod tests {
             "damage",
             0,
             0,
-            0,
-            None,
-            None,
-            None,
-            None,
             &mut amount,
             &mut canceled,
         );
