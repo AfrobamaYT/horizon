@@ -2238,19 +2238,22 @@ impl Game<'_> {
     /// view centre, `calculateStorageRange` (the server's radius, at least
     /// two, plus three) chunks each way.
     pub(super) fn remote_chunk_in_range(&self, x: i32, z: i32) -> bool {
-        self.remote.as_ref().is_none_or(|r| {
-            let range = r.view_distance.max(2) + 3;
-            (x - r.chunk_center.0).abs() <= range && (z - r.chunk_center.1).abs() <= range
-        })
+        self.remote
+            .as_ref()
+            .is_none_or(|r| Self::chunk_inside_remote_range(r.chunk_center, r.view_distance, x, z))
+    }
+    fn chunk_inside_remote_range(center: (i32, i32), distance: i32, x: i32, z: i32) -> bool {
+        let range = distance.max(2) + 3;
+        (x - center.0).abs() <= range && (z - center.1).abs() <= range
     }
     /// The columns a moved or resized storage no longer holds.
-    fn drop_remote_chunks_out_of_range(&mut self) {
+    fn drop_remote_chunks_out_of_range(&mut self, center: (i32, i32), distance: i32) {
         let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
             .world
             .chunks
             .keys()
             .copied()
-            .filter(|&(x, z)| !self.remote_chunk_in_range(x, z))
+            .filter(|&(x, z)| !Self::chunk_inside_remote_range(center, distance, x, z))
             .collect();
         self.forget_remote_columns(&mut gone);
     }
@@ -4844,15 +4847,17 @@ impl Game<'_> {
                 self.streaming.radius = self.render_distance_in_use().min(p.distance + 1).max(2);
                 if let Some(r) = self.remote.as_mut() {
                     r.view_distance = p.distance;
+                    let center = r.chunk_center;
+                    // ClientChunkCache.updateViewRadius: a new storage of that size.
+                    self.drop_remote_chunks_out_of_range(center, p.distance);
                 }
-                // ClientChunkCache.updateViewRadius: a new storage of that size.
-                self.drop_remote_chunks_out_of_range();
             }
             C::SetChunkCacheCenter(p) => {
                 if let Some(r) = self.remote.as_mut() {
                     r.chunk_center = (p.x, p.z);
+                    let distance = r.view_distance;
+                    self.drop_remote_chunks_out_of_range((p.x, p.z), distance);
                 }
-                self.drop_remote_chunks_out_of_range();
             }
             C::BlockEntityData(p) => self.remote_block_entity_data(p.pos, p.kind, &p.tag),
             C::OpenSignEditor(p) => self.remote_open_sign_editor(p),
@@ -10560,23 +10565,47 @@ mod tests {
     fn forgetting_and_closing_remote_columns_clear_their_data() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::{chunk::Chunk, containers::BlockEntity};
-        use std::sync::Arc;
 
         with_game(|game| {
             for x in 0..2 {
-                game.world
-                    .chunks
-                    .insert((x, 0), Arc::new(Chunk::empty(x, 0)));
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
                 game.world
                     .block_entities
                     .insert((x * 16, 64, 0), BlockEntity::Chest(vec![]));
             }
+            // A same-position resend replaces the data without removing the column.
+            game.streaming
+                .replace_remote(&mut game.world, Chunk::empty(0, 0));
+            assert_eq!(game.world.chunks.len(), 2);
+            assert!(game.world.chunks.contains_key(&(0, 0)));
+            assert!(game.streaming.is_lit(0, 0));
             let mut forgotten = [(0, 0)].into_iter().collect();
             game.forget_remote_columns(&mut forgotten);
             assert!(!game.world.chunks.contains_key(&(0, 0)));
             assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
+            assert!(!game.streaming.is_lit(0, 0));
             assert!(game.world.chunks.contains_key(&(1, 0)));
             game.forget_remote_columns(&mut [(0, 0)].into_iter().collect());
+            for x in [7, 13] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+                game.world
+                    .block_entities
+                    .insert((x * 16, 64, 0), BlockEntity::Chest(vec![]));
+            }
+            // Cache-centre packet: move to (15, 0), at radius 10.
+            game.drop_remote_chunks_out_of_range((15, 0), 10);
+            assert!(!game.world.chunks.contains_key(&(1, 0)));
+            assert!(game.world.chunks.contains_key(&(7, 0)));
+            assert!(game.world.chunks.contains_key(&(13, 0)));
+            // Cache-radius packet: shrinking to 2 keeps radius 5 around (15, 0).
+            game.drop_remote_chunks_out_of_range((15, 0), 2);
+            assert!(!game.world.chunks.contains_key(&(7, 0)));
+            assert!(game.world.chunks.contains_key(&(13, 0)));
+            assert!(!game.world.block_entities.contains_key(&(7 * 16, 64, 0)));
+            // A later forget for an evicted column is harmless.
+            game.forget_remote_columns(&mut [(7, 0)].into_iter().collect());
             game.forget_all_remote_columns();
             assert!(game.world.chunks.is_empty());
             assert!(game.world.block_entities.is_empty());
