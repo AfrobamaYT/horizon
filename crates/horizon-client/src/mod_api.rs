@@ -1539,8 +1539,11 @@ impl Installed {
             .iter()
             .map(|entry| (&*entry.hooks as &dyn std::any::Any).type_id())
             .collect();
-        let subscribers =
-            horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
+        let subscribers = horizon_client_core::subscribers::Subscribers::new(
+            horizon_client_core::subscribers::Domain::Gameplay,
+            generated::HOOK_COUNT,
+            mods.len(),
+        );
         Self {
             mods,
             subscribers,
