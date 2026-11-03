@@ -50,6 +50,12 @@ fn slot_name(slot: EquipmentSlot) -> &'static str {
     }
 }
 
+/// `LivingEntity.isAlive`'s health test: above 0, so a NaN health loaded from
+/// a save is not alive either.
+fn alive_at(health: f32) -> bool {
+    health > 0.0
+}
+
 fn equipment_stack(stack: Option<ItemStack>) -> Option<ItemStack> {
     stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air")
 }
@@ -177,11 +183,8 @@ impl Game<'_> {
     /// animation, is not. API @API:living_health@.
     pub(super) fn native_living_alive(&self, living: LivingRef) -> Option<bool> {
         match self.native_living_target(living)? {
-            Target::Player => Some(!self.player.as_ref()?.health.dead_or_dying()),
-            Target::Guest(conn) => Some({
-                let g = self.command_guest(conn)?;
-                !g.dead && g.health > 0.0
-            }),
+            Target::Player => Some(alive_at(self.player.as_ref()?.health.health())),
+            Target::Guest(conn) => Some(alive_at(self.command_guest(conn)?.health)),
             Target::Mob(id) => self
                 .mobs
                 .iter()
@@ -191,12 +194,12 @@ impl Game<'_> {
                 .armor_stands
                 .iter()
                 .find(|a| a.id == id)
-                .map(|a| a.health > 0.0),
+                .map(|a| alive_at(a.health)),
             Target::Dragon(id) => self
                 .dragon
                 .as_ref()
                 .filter(|d| d.id == id)
-                .map(|d| d.health > 0.0),
+                .map(|d| alive_at(d.health)),
             _ => None,
         }
     }
@@ -577,6 +580,14 @@ mod tests {
                 (Some(&body), Some(&saddle))
             );
         });
+    }
+
+    #[test]
+    fn alive_is_health_above_zero_as_in_vanilla() {
+        assert!(alive_at(0.5));
+        assert!(!alive_at(0.0));
+        assert!(!alive_at(-1.0));
+        assert!(!alive_at(f32::NAN));
     }
 
     #[test]
