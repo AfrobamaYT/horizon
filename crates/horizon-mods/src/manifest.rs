@@ -191,6 +191,7 @@ impl Package {
                         return Err("icon.png exceeds 256 KiB".into());
                     }
                     let mut bytes = Vec::new();
+                    drop(entry);
                     zip.by_index(i)
                         .map_err(|e| e.to_string())?
                         .take(crate::icon::MAX_ICON as u64 + 1)
