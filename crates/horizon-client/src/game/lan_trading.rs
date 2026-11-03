@@ -26,36 +26,6 @@ pub(super) struct GuestMerchant {
     sent_xp: i32,
 }
 
-/// What a trade hook reads of the merchant while the hub is out of the game:
-/// the trade as the click left it. Hooks cannot write to it (a merchant edit
-/// inside the trade's own hook is refused).
-pub(super) struct TradeView {
-    pub(super) mob: u32,
-    pub(super) player: u128,
-    pub(super) player_entity: u32,
-    pub(super) offers: Vec<merchant::MerchantOffer>,
-    pub(super) xp: i32,
-    pub(super) level: i32,
-}
-
-impl GuestMerchant {
-    /// The view of this trade for a hook, built only when a mod is loaded.
-    fn view(&self, guest: &horizon_client::lan::guest::Guest) -> Option<TradeView> {
-        if horizon_client::mod_api::mods().is_empty() {
-            return None;
-        }
-        let s = &self.merchant.session;
-        Some(TradeView {
-            mob: self.merchant.mob?,
-            player: guest.uuid,
-            player_entity: u32::try_from(guest.entity_id).ok()?,
-            offers: s.offers.clone(),
-            xp: s.xp,
-            level: s.level,
-        })
-    }
-}
-
 /// A guest's UUID as gossip targets it.
 fn uuid_words(uuid: u128) -> [i32; 4] {
     [
@@ -322,7 +292,6 @@ impl Game<'_> {
         let (session, traded) = self.merchant_apply(session, gm.merchant.mob);
         gm.merchant.session = session;
         if !traded.is_empty() {
-            self.trade_view = host.hub.guests.get(gi).and_then(|g| gm.view(g));
             // The guest's own statistic and advancements.
             if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
                 let g = &host.hub.guests[gi];
@@ -331,7 +300,6 @@ impl Game<'_> {
                 }
             }
             self.as_guest(host, conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
-            self.trade_view = None;
         }
         self.drop_guest_items(host, gi, dropped);
         self.lan_send_offers(host, conn, &mut gm, false);
@@ -372,11 +340,12 @@ impl Game<'_> {
         if self.lan_merchant_op(host, conn, None, |menu, env| {
             menu.merchant_select(env, index)
         }) {
-            let gm = host.play.get(&conn).and_then(|p| p.merchant.as_ref());
-            let villager = gm.and_then(|m| m.merchant.mob);
-            self.trade_view = gm.zip(host.hub.guest(conn)).and_then(|(gm, g)| gm.view(g));
+            let villager = host
+                .play
+                .get(&conn)
+                .and_then(|p| p.merchant.as_ref())
+                .and_then(|m| m.merchant.mob);
             self.native_trade_select(uuid, &name, villager, index);
-            self.trade_view = None;
         }
     }
     /// The guest closed the trading window (or it is closed for them):
@@ -828,44 +797,49 @@ mod tests {
         });
     }
 
+    /// What the `trade_select` observer saw: the villager and offer index it
+    /// was told, and what the merchant handle answered inside the hook.
+    type Seen = Arc<std::sync::Mutex<Vec<(Option<u32>, usize, bool, bool)>>>;
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_trade_hook_reads_the_live_trade_and_cannot_write_it() {
-        with_game(|game| {
-            let (villager, _rx, first) = open_trade(game, 2);
-            let second = offer("minecraft:coal", "minecraft:diamond");
-            assert!(villager.add_offer(game, second.clone()));
-            assert!(villager.set_xp(game, 30));
-            // A hook fires with the hub out of the game and the view set.
-            let host = game.lan.take().unwrap();
-            let gm = host.play[&12].merchant.as_ref().unwrap();
-            let guest = host.hub.guest(12).unwrap();
-            game.trade_view = Some(TradeView {
-                mob: 40,
-                player: guest.uuid,
-                player_entity: guest.entity_id as u32,
-                offers: gm.merchant.session.offers.clone(),
-                xp: gm.merchant.session.xp,
-                level: gm.merchant.session.level,
+    fn a_trade_hook_fired_by_a_real_select_cannot_write_the_open_trade() {
+        use horizon_client::mod_api::{self, Hooks, Host, TradeSelectEvent};
+        struct Observer(Seen);
+        impl Hooks for Observer {
+            fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+                let merchant = event
+                    .villager
+                    .and_then(|id| host.entity(id))
+                    .and_then(|entity| host.merchant(entity));
+                let wrote = merchant.is_some_and(|m| {
+                    m.add_offer(host, offer("minecraft:wheat", "minecraft:emerald"))
+                });
+                let player = merchant.is_some_and(|m| m.trading_player(host).is_some());
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((event.villager, event.index, wrote, player));
+            }
+        }
+        let seen = Seen::default();
+        let mods: mod_api::Mods = vec![Box::new(Observer(seen.clone())) as Box<dyn Hooks>].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let (villager, _rx, first) = open_trade(game, 1);
+                let second = offer("minecraft:coal", "minecraft:diamond");
+                assert!(villager.add_offer(game, second.clone()));
+                let mut host = game.lan.take().unwrap();
+                game.lan_select_trade(&mut host, 12, 1);
+                game.lan = Some(host);
+                // The hook ran for the selected offer and its write was refused:
+                // the trade is mid-click on a copy. (Reads and `trading_player`
+                // inside it wait for the shared `as_guest` host fix.)
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 1);
+                assert_eq!((seen[0].0, seen[0].1, seen[0].2), (Some(40), 1, false));
+                assert_eq!(villager.offers(game), Some(vec![first, second]));
             });
-            assert_eq!(villager.offers(game), Some(vec![first.clone(), second]));
-            assert_eq!(
-                (villager.xp(game), villager.level(game)),
-                (Some(30), Some(2))
-            );
-            let player = villager.trading_player(game).unwrap();
-            assert_eq!(player.uuid(), 12);
-            // The mob alone has the old state, so these reads came from the view.
-            assert_eq!(
-                game.mobs[0].extra.trade.as_ref().unwrap().offers,
-                vec![first]
-            );
-            // Writes inside the trade's own hook are refused.
-            assert!(!villager.add_offer(game, offer("minecraft:wheat", "minecraft:emerald")));
-            assert!(!villager.set_xp(game, 1));
-            assert!(!villager.set_villager_type(game, "minecraft:desert"));
-            game.trade_view = None;
-            game.lan = Some(host);
         });
     }
 }

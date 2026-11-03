@@ -62,9 +62,6 @@ impl Game<'_> {
         read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
     ) -> T {
         let mob = &self.mobs[index];
-        if let Some(view) = self.trade_view.as_ref().filter(|v| v.mob == mob.id) {
-            return read(&view.offers, view.xp, view.level);
-        }
         if let Some(session) = self
             .lan_trade_conn(mob.id)
             .and_then(|conn| self.lan_trade_session(conn))
@@ -206,16 +203,6 @@ impl Game<'_> {
         merchant: MerchantRef,
     ) -> Option<PlayerRef> {
         let index = self.native_merchant_index(merchant)?;
-        if let Some(view) = self
-            .trade_view
-            .as_ref()
-            .filter(|v| v.mob == self.mobs[index].id)
-        {
-            return Some(PlayerRef {
-                entity: EntityRef::new(self.native_lifecycle.epoch()?, view.player_entity),
-                uuid: view.player,
-            });
-        }
         let conn = self.lan_trade_conn(self.mobs[index].id)?;
         self.native_player_ref(self.lan_trade_player(conn)?)
     }
