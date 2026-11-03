@@ -3,26 +3,21 @@
   "helpers": [
     {
       "name": "living_set_health",
+      "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_health",
-      "receiver": "living",
-      "side": "server"
+      "receiver": "living"
     },
     {
       "name": "living_heal",
+      "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_heal",
-      "receiver": "living",
-      "side": "server"
+      "receiver": "living"
     },
     {
       "name": "living_last_attacker",
+      "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_last_attacker",
-      "receiver": "living",
-      "side": "server"
+      "receiver": "living"
     }
-  ],
-  "rust_summary": "a living entity's health writes (`native_living_set_health`,\n`native_living_heal`: `setHealth` and `heal`) and its last attacker\n(`native_living_last_attacker`: `getLastHurtByMob`).",
-  "doc_summary": "A living entity's health writes: `living.set_health(host, health)` (`LivingEntity.setHealth`, cut to the maximum, no hook, never kills; false for a dead or dying entity) and `living.heal(host, amount)` (`LivingEntity.heal`, through `living_heal`). Players, guests and mobs; false for armor stands and the dragon. `living.last_attacker(host)` (`LivingEntity.getLastHurtByMob`) reads who last hurt the entity, within a hundred ticks of the hurt, as an `EntityRef`. Bundles need \"hooks\": @API:living_health_writes@.",
-  "comments": [
-    "crates/horizon-client/src/game/native_living_refs.rs"
   ]
 }

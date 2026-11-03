@@ -190,7 +190,7 @@ impl Game<'_> {
     /// `Damageable#setHealth`), cut to its maximum health. No heal or damage
     /// hook runs. False for a stale handle, a health that isn't finite or
     /// above 0 (a write doesn't kill), a dead or dying entity, an armor stand
-    /// or the dragon. API @API:living_health_writes@.
+    /// or the dragon.
     pub(super) fn native_living_set_health(&mut self, living: LivingRef, health: f32) -> bool {
         if !health.is_finite() || health <= 0.0 {
             return false;
@@ -231,7 +231,7 @@ impl Game<'_> {
     /// `living_heal` hook, which may change or cancel it. A dead or dying
     /// entity isn't healed, and health stops at the maximum. False for a stale
     /// handle, an amount that isn't finite or above 0, an armor stand or the
-    /// dragon. API @API:living_health_writes@.
+    /// dragon.
     pub(super) fn native_living_heal(&mut self, living: LivingRef, amount: f32) -> bool {
         if !amount.is_finite() || amount <= 0.0 {
             return false;
@@ -259,7 +259,7 @@ impl Game<'_> {
     /// `CombatTracker.getKiller`'s credit and a mob's hurt-by memory, as
     /// `armadillo.rs` reads it). None for a stale handle, a window that has
     /// passed, an attacker that is gone, an armor stand, the dragon or a
-    /// client. API @API:living_health_writes@.
+    /// client.
     pub(super) fn native_living_last_attacker(&mut self, living: LivingRef) -> Option<EntityRef> {
         match self.native_living_target(living)? {
             t @ (Target::Player | Target::Guest(_)) => self
