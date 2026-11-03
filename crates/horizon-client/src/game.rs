@@ -1456,6 +1456,20 @@ impl LevelAccess for GameLevel<'_> {
         }
         source
     }
+    fn has_weak_power_hook(&self) -> bool {
+        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+    }
+    fn adjust_should_check_weak_power(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        let mut check = vanilla;
+        self.native_should_check_weak_power(self.dimension, pos, state, direction, &mut check);
+        check
+    }
     fn has_redstone_wire_connection_hook(&self) -> bool {
         self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
     }

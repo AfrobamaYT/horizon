@@ -692,6 +692,20 @@ pub trait LevelAccess {
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// Whether a signal query needs the weak-power block hook.
+    fn has_weak_power_hook(&self) -> bool {
+        false
+    }
+    /// Override `SignalGetter.getSignal`'s conductor check for a block.
+    fn adjust_should_check_weak_power(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// Whether redstone wire connection queries need the level hook.
     fn has_redstone_wire_connection_hook(&self) -> bool {
         false
