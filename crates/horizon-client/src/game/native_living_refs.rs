@@ -264,20 +264,27 @@ impl Game<'_> {
                     // A player's hurt carries no id in `Who`: the hit's
                     // record names the player (`last_hurt_by_player`), the
                     // hub the guest's entity. The acting guest is resolved
-                    // without the hub, which their turn takes out.
+                    // without the hub, which their turn takes out; the
+                    // host's own record is displaced for that turn — the
+                    // guest's body stands in as `player`, so the host's id
+                    // is out of reach (the same None the other players'
+                    // handles read while the hub is out).
                     Who::Player => {
                         let conn = *self.last_hurt_by_player.get(&id)?;
-                        Some(match conn {
-                            None => self.player.as_ref()?.entity_id as u32,
-                            Some(conn) if self.lan_acting == Some(conn) => self.lan_acting_entity?,
-                            Some(conn) => {
+                        match conn {
+                            None if self.lan_acting.is_some() => None,
+                            None => Some(self.player.as_ref()?.entity_id as u32),
+                            Some(conn) if self.lan_acting == Some(conn) => {
+                                Some(self.lan_acting_entity?)
+                            }
+                            Some(conn) => Some(
                                 self.lan
                                     .iter()
                                     .flat_map(|h| h.hub.guests.iter())
                                     .find(|g| g.conn == conn)?
-                                    .entity_id as u32
-                            }
-                        })
+                                    .entity_id as u32,
+                            ),
+                        }
                     }
                 }?;
                 self.native_entity(attacker)
@@ -488,6 +495,43 @@ mod tests {
             assert_eq!(dragon_handle.health(game), None);
             assert_eq!(dragon_handle.max_health(game), None);
             assert_eq!(dragon_handle.alive(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mobs_last_attacker_names_a_mob_the_host_and_none_when_displaced() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(12, pig, Vec3::ZERO, 0.0));
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(15, zombie, Vec3::ZERO, 0.0));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player.as_mut().unwrap().entity_id = 20;
+            // The host's own turn: the uuid is acting, no guest connection.
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let pig_living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            // A mob's hit names the mob's own id.
+            game.mobs[0].ai.last_hurt_by = Some(Who::Mob(15));
+            game.mobs[0].ai.last_hurt_by_time = game.mobs[0].age as i32;
+            assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(15));
+            // The host's hit, read in the host's own turn: the host's handle.
+            game.mobs[0].ai.last_hurt_by = Some(Who::Player);
+            game.last_hurt_by_player.insert(12, None);
+            assert_eq!(pig_living.last_attacker(game).map(|a| a.id()), Some(20));
+            // The same record inside a guest's turn: the host's displaced
+            // body is out of reach, so the attacker reads None.
+            game.lan_acting = Some(7);
+            assert_eq!(pig_living.last_attacker(game), None);
         });
     }
 
