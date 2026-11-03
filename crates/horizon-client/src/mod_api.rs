@@ -5,6 +5,8 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
+mod phase;
+pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod reload_order;
@@ -2900,7 +2902,11 @@ mod tests {
     struct Broken;
     #[mod_api::__subscriptions]
     impl Hooks for Broken {
-        fn component_types(&self, _event: &mut ComponentTypesEvent<'_>) {
+        fn component_types(
+            &self,
+            _context: &RegistrationContext<'_>,
+            _event: &mut ComponentTypesEvent<'_>,
+        ) {
             panic!("a broken mod");
         }
     }
@@ -3180,7 +3186,10 @@ mod tests {
     #[test]
     fn dispatch_before_installation_is_empty() {
         let mut components = Vec::new();
-        dispatch_component_types(&mut components);
+        dispatch_component_types(
+            &RegistrationContext::new(RegistrationPhase::Components),
+            &mut components,
+        );
         assert!(mods().is_empty());
         assert!(components.is_empty());
     }
@@ -3208,7 +3217,10 @@ mod tests {
             }
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(&mut Vec::new())
+            dispatch_component_types(
+                &RegistrationContext::new(RegistrationPhase::Components),
+                &mut Vec::new(),
+            )
         }));
         // Once the dispatch has unwound, the thread is in no mod.
         let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
