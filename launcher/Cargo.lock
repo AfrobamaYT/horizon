@@ -2763,6 +2763,7 @@ dependencies = [
  "log",
  "minisign-verify",
  "png 0.18.1",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

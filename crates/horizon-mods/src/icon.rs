@@ -13,16 +13,26 @@ impl Icon {
         if bytes.len() > MAX_ICON {
             return Err("icon.png exceeds 256 KiB".into());
         }
-        let decoder = png::Decoder::new(std::io::Cursor::new(&bytes));
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(&bytes));
+        decoder.set_limits(png::Limits { bytes: 4 << 20 });
         let mut reader = decoder.read_info().map_err(|e| format!("icon.png: {e}"))?;
         let (width, height) = (reader.info().width, reader.info().height);
         if width == 0 || width != height || width > MAX_DIMENSION {
             return Err("icon.png must be square and at most 512×512".into());
         }
         let mut pixels = vec![0; reader.output_buffer_size().ok_or("icon.png is too large")?];
-        reader
-            .next_frame(&mut pixels)
-            .map_err(|e| format!("icon.png: {e}"))?;
+        let frames = reader
+            .info()
+            .animation_control
+            .as_ref()
+            .map_or(1, |animation| {
+                u64::from(animation.num_frames) + u64::from(reader.info().frame_control.is_none())
+            });
+        for _ in 0..frames {
+            reader
+                .next_frame(&mut pixels)
+                .map_err(|e| format!("icon.png: {e}"))?;
+        }
         reader.finish().map_err(|e| format!("icon.png: {e}"))?;
         Ok(Self(bytes))
     }
