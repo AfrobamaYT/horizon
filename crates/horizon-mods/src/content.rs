@@ -1194,7 +1194,6 @@ capabilities = ["registries"]
             );
         }
         let oversized = BlockShapes {
-            property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
