@@ -17,8 +17,8 @@
 use crate::{Result, blocks::MAP_COLORS};
 use horizon_core::geometry::{Aabb, Axis, ShapeOp, Vec3, VoxelShape};
 use horizon_mods::content::{
-    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, MenuType, MobEffect,
-    Rarity, StateProperty,
+    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
+    MobEffect, Rarity, StateProperty,
 };
 use horizon_world::nbt::{self, Compound, JavaString, Limits, Tag};
 use serde::{Deserialize, Serialize, de};
@@ -93,6 +93,28 @@ pub fn menu_types(mods: &[ContentMod]) -> Vec<&MenuType> {
     let mut menus: Vec<&MenuType> = mods.iter().flat_map(|m| &m.content.menu_types).collect();
     menus.sort_by(|a, b| a.id.cmp(&b.id));
     menus
+}
+
+static FLUID_LOOKS: std::sync::RwLock<BTreeMap<String, FluidLook>> =
+    std::sync::RwLock::new(BTreeMap::new());
+
+/// Remembers how the mods' fluids look (`data/<id>/horizon/fluid/`), for what the client draws.
+pub fn set_fluid_looks(mods: &[ContentMod]) {
+    let looks = mods
+        .iter()
+        .flat_map(|m| &m.content.fluids)
+        .map(|f| (f.id.clone(), f.clone()))
+        .collect();
+    *FLUID_LOOKS.write().unwrap_or_else(|e| e.into_inner()) = looks;
+}
+
+/// How the fluid `id` looks, when a mod declares it.
+pub fn fluid_look(id: &str) -> Option<FluidLook> {
+    FLUID_LOOKS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .cloned()
 }
 
 /// JSON with its object keys in file order, so a rewritten table differs
