@@ -454,7 +454,6 @@ pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
             .mixins
             .clone()
             .unwrap_or_else(|| native_mods::MIXINS_REV.into()),
-        hooks: bundle.hooks,
     };
     let root = bundle
         .dir
