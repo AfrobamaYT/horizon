@@ -132,8 +132,8 @@ impl Game<'_> {
     }
 
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
-    /// None when it is empty, the entity has no such slot (a player has no
-    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    /// None when it is empty, unsupported (player body and saddle storage is
+    /// not yet modeled), or the handle is stale. API @API:living_refs@.
     pub(super) fn native_living_equipment(
         &self,
         living: LivingRef,
@@ -178,7 +178,7 @@ impl Game<'_> {
         self.native_living_equipment(living, slot)
     }
     /// Puts `stack` (None: empties it) in equipment slot `slot`
-    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// (`LivingEntity.setItemSlot`). False
     /// when the entity has no such slot or is a mob. Mob equipment writes
     /// are not supported until full equipment stacks can be stored.
     /// API @API:living_refs@.

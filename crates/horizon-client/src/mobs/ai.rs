@@ -1149,10 +1149,16 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    ![&m.extra.head, &m.extra.chest, &m.extra.legs, &m.extra.feet]
-        .into_iter()
-        .flatten()
-        .any(|item| immune.is_some_and(|t| t.contains(&**item)))
+    ![
+        &m.extra.head,
+        &m.extra.chest,
+        &m.extra.legs,
+        &m.extra.feet,
+        &m.extra.body,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|item| immune.is_some_and(|t| t.contains(&**item)))
 }
 /// `Mob.playAmbientSound` on demand: a spawn egg or a mob bucket just placed `m`.
 pub fn ambient_sound(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
@@ -1575,7 +1581,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// or without AI (`NoAI` only skips `serverAiStep`).
 fn burn_undead(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.kind.flags.burns_in_day && m.alive() && sun_burn_tick(m, w) {
-        if m.extra.head.is_some() {
+        if m.item_by_slot(m.sun_protection_slot()).is_some() {
             events.push(MobEvent::SunProtectionWear { mob: m.id });
         } else {
             m.ignite_for_ticks(160);
@@ -3134,6 +3140,57 @@ mod same_vehicle_push_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
 
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn zombie_horse_sunburn_checks_body_not_head() {
+        assert!(with_test_world(&[], |world, types| {
+            let mut world = world.clone();
+            world.monsters_burn = true;
+            let mut horse = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:zombie_horse"].clone()),
+                Vec3::ZERO,
+                0.0,
+            );
+            horse.extra.head = Some("minecraft:iron_helmet".into());
+            let mut events = Vec::new();
+            for _ in 0..1000 {
+                burn_undead(&mut horse, &world, &mut events);
+            }
+            assert!(horse.fire_ticks > 0);
+            assert!(events.is_empty());
+            horse.fire_ticks = 0;
+            horse.extra.body = Some("minecraft:leather_horse_armor".into());
+            for _ in 0..1000 {
+                burn_undead(&mut horse, &world, &mut events);
+            }
+            assert_eq!(horse.fire_ticks, 0);
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, MobEvent::SunProtectionWear { .. }))
+            );
+        }));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn leather_body_armor_prevents_freezing() {
+        assert!(with_test_world(&[], |w, types| {
+            let mut horse = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:horse"].clone()),
+                Vec3::ZERO,
+                0.0,
+            );
+            assert!(can_freeze(&horse, w));
+            horse.extra.body = Some("minecraft:leather_horse_armor".into());
+            assert!(!can_freeze(&horse, w));
+            horse.extra.body = Some("minecraft:iron_horse_armor".into());
+            assert!(can_freeze(&horse, w));
+        }));
+    }
+
     /// What a mob holds and wears, by `EquipmentSlot`: the hand's item, the
     /// worn armour's stack (a dyed piece keeps its colour), a horse's
     /// armour in the body slot and its saddle, and nothing else.
@@ -3165,7 +3222,7 @@ mod same_vehicle_push_tests {
             );
             assert_eq!(worn.iter().flatten().count(), 2);
             let mut horse = mob("minecraft:horse");
-            horse.extra.head = Some(std::sync::Arc::from("minecraft:iron_horse_armor"));
+            horse.extra.body = Some(std::sync::Arc::from("minecraft:iron_horse_armor"));
             horse.set_saddle(Some(crate::items::ItemStack::new("minecraft:saddle", 1)));
             let gear = horse.equipment_stacks();
             assert_eq!(
