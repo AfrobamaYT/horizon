@@ -1,0 +1,11 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "energy_amount", "target": "horizon_client::game::machines::native_energy::Game<'_>::native_energy_amount", "backend": true, "mod_api": {}, "side": "server"},
+    {"name": "energy_capacity", "target": "horizon_client::game::machines::native_energy::Game<'_>::native_energy_capacity", "backend": true, "mod_api": {}, "side": "server"},
+    {"name": "energy_insert", "target": "horizon_client::game::machines::native_energy::Game<'_>::native_energy_insert", "backend": true, "mod_api": {}, "side": "server"},
+    {"name": "energy_extract", "target": "horizon_client::game::machines::native_energy::Game<'_>::native_energy_extract", "backend": true, "mod_api": {}, "side": "server"}
+  ],
+  "rust_summary": "the energy capability (`mod_api::ENERGY`, `EnergyHandler`, looked up by `LevelRef::capability` and moved by `move_energy`) and the game's own answer, a mod block entity's buffer by side in the level in place: `native_energy_amount`, `native_energy_capacity`, `native_energy_insert`, `native_energy_extract`, each write kept by the transaction it is given. `ITEM_ENERGY` (`Capabilities.Energy.ITEM`) is energy held by the item at an `ItemPlace`, answered only by mods.",
+  "doc_summary": "the energy capability (`Capabilities.Energy.BLOCK`): `r.block_entity_capability(&ENERGY, \"mymod:battery\", |host, at| Some(Box::new(Battery(at))))` registers a provider for a mod block entity type, giving an `EnergyHandler` (an amount and a capacity, `insert` and `extract` in a transaction); providers are asked as `ITEMS`' are; `level.capability(host, &ENERGY, pos, side)` finds one and `move_energy` moves between two, as `EnergyHandlerUtil.move`. The game answers it for a mod block entity's `block_entity_energy` buffer, as `SimpleEnergyHandler`. `ITEM_ENERGY` (`Capabilities.Energy.ITEM`) is energy held by an item, found with `place.capability(host, &ITEM_ENERGY)` where its stack lives and answered only by mods, vanilla having no energy items."
+}

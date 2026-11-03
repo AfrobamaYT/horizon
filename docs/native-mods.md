@@ -63,6 +63,9 @@ A native mod targets one exact Horizon source revision: `[compatibility] horizon
 with, and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
 building the mod unchanged.
 
+An installed native build with a missing or invalid build record must be rebuilt from an installed
+Horizon version rather than used as a source revision.
+
 Hook points are functions the game calls at fixed places. Their names, parameters and call sites belong to the
 game source and may change. Per-hook catalog versions describe individual contracts, not minimum game versions
 or a cross-release compatibility range.
@@ -1028,7 +1031,7 @@ API 140 adds `native_map_decorations(map, decorations)` is asked each time a map
 
 API 141 adds a player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `native_player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `native_player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `native_net_send_to_player`. Each start has one stop.
 
-API 142 adds an energy buffer on a mod block's block entity (`Capabilities.Energy.BLOCK`), and the helpers that read and change it. `native_block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. `native_energy(dimension, pos, face)` reads it through a side; `native_energy_insert(pos, face, amount, simulate)` and `native_energy_extract(dimension, pos, face, amount, simulate)` answer the amount moved (`simulate` changes nothing); `native_move_energy(dimension, from, from_face, to, to_face, max)` is `EnergyHandlerUtil.move` between two blocks and answers the amount moved.
+API 142 adds an energy buffer on a mod block's block entity. `native_block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability answers it (see "A block's energy").
 
 API 143 adds data maps (`RegisterDataMapTypesEvent`). `native_data_map_types(types)` pushes the types a mod registers: an `id` (`mod_id:name`, not in `minecraft`) for a `registry`, `minecraft:item` or `minecraft:block` so far; asked once per load of the server's data (a world's first open and every `/reload`). The values come from `data/<mod_id>/data_maps/<registry path>/<name>.json` in the world's data packs and from files a mod pushes through `native_data_pack_files` under the key `data_maps/<mod_id>:<registry path>/<name>`: `{"replace": false, "values": {"minecraft:coal": ..., "#minecraft:logs": ...}, "remove": [...]}`, an entry's value being the data itself or `{"value": ..., "replace": false}`; `replace` clears what earlier files set, a tag gives every entry in it the value, `remove` applies after the file's own values, and a newer value overrides an older one. `native_data_map(registry, type, entry)` reads an entry's value (the JSON the file held) and `native_data_map_entries(registry, type)` lists them. Server side only and not synced to clients; mergers, conditions, other registries and mod datapack registries are not here yet.
 
@@ -1542,17 +1545,15 @@ trusting native code is the player's decision, never an agent's.
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with `performance`. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
    as they are. The Mods page's "Native build" row, `horizon-launcher settings native-profile performance|dev|release`
-   or `native-build --profile ...` pick one (the setting's older value `fast` still means `performance`, and an older
-   settings file's "Release build" switch still picks `release`).
+   or `native-build --profile ...` pick one. `native-mods.json` records the profile.
 
-   A revision whose `Cargo.toml` has no `fast` builds with `release`; `native-mods.json` says which (`profile`).
    Each profile is in the build's key, so their builds never mix and may all stay. `performance` and `dev` share
    `native/target/fast/`: every crate but `horizon-client` is built with the same settings, so switching between
    them recompiles only `horizon-client`, and Cargo keeps both builds of it, so switching back finds the other
    still there. `release` has its own folder (`native/target/release/`). The first build in a folder builds every
    crate once (1½ to 3½ minutes measured through the launcher, depending on the machine); later builds reuse them.
    Post-build steps build with the same
-   profile, reusing its crates. The mods feature is passed while the revision still has it. Cargo downloads the locked crates from crates.io (Horizon has no git
+   profile, reusing its crates. Cargo downloads the locked crates from crates.io (Horizon has no git
    dependencies). The compiler and the horizon-mixins build run at the lowest priority (`rust_toolchain::low_priority`:
    nice 19 and the idle I/O class on Linux, nice 19 on macOS, below-normal priority on Windows), so the desktop and a
    game in play stay smooth; on an otherwise idle computer they still use every core. The log is `native/build.log`;
@@ -1754,7 +1755,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
 Builds a standalone dedicated-server engine into `DIR`, which must not exist yet. `FOLDER` (a mod folder or a
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.
 It reuses the pinned toolchain, source and horizon-mixins and compiles `--no-default-features` (no audio or
-controllers), keeping the mods feature when the revision has it. `--version` pins the Horizon release/Nightly the
+controllers). `--version` pins the Horizon release/Nightly the
 export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources,
 `native-data/` and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
@@ -2447,6 +2448,12 @@ a dimension.
   `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
   place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
   client only.
+- `player.stop_sound(host, sound, source)` sends `StopSoundCommand`'s packet to that player (`None` for any sound or
+  source), `player.play_sound(host, sound, source, volume, pitch)` plays a sound for them only at their position, and
+  `entity.play_bound_sound(host, sound, source, volume, pitch)` plays one that follows the entity for the players in
+  range, as `Level.playSound(null, entity, ...)` does. `/stopsound` and `/playsound` send through the same code. They
+  return false for a stale handle or a player who isn't online. Looping, fading and a handle to a playing sound need
+  client handles.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2463,8 +2470,7 @@ a dimension.
 
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags.
 
-Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
-(`entity`, `level`, `block_entity`) also becomes a method of that handle.
+A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 
 ### Mobs drawn by a mod
 
@@ -2842,10 +2848,18 @@ another mod's hook object is not exposed.
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
 
+The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
+The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
+construction, the allocator and the canonical game identity. Source without this template is refused
+before staging trait mods: update the game first.
+
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
-and in the server thread's log line, with the bundle's `[mod] id` (the generated executable passes the ids to
-`mod_api::name_mods`; a build that doesn't gives the mod's place in dispatch order, `#0` first). The game still
-stops as before. Render hooks and trait injections are not named yet.
+and in the server thread's log line, with the bundle's `[mod] id`. Each entry passed to
+`entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
+The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
+Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
+id for startup errors and hook panics. The game still stops as before. Render hooks and trait injections
+are not named yet.
 
 A bundle with an `[api]` package may declare its own injection in the trait:
 
@@ -3205,10 +3219,29 @@ drained whole, an empty bucket taking plain water or lava and becoming its full 
 bucket. `move_resources` moves between an item and a block as between two blocks: a full cauldron fills a bucket in a
 player's slot, and two thirds of one fill none.
 
+#### A block's energy
+
+Energy is the capability `ENERGY` (NeoForge's `Capabilities.Energy.BLOCK`), answered by an `EnergyHandler`: an
+amount and a capacity, with no resource, and `insert` and `extract` written in a transaction as a
+`ResourceHandler`'s are. `r.block_entity_capability(&ENERGY, "mymod:battery", …)` registers a provider, asked as
+`ITEMS`' are, and `level.capability(host, &ENERGY, pos, side)` finds one. The game's own answer is a mod block
+entity's `block_entity_energy` buffer, as NeoForge's `SimpleEnergyHandler`: a fill through the sides it comes
+through, up to the buffer's room and its limit per insert, and a drain by the sides it leaves by, up to the limit per
+extract; a side that reaches neither finds no handler. `move_energy(host, &from, &to, max, tx)` moves between two
+(`EnergyHandlerUtil.move`) as one step of `move_resources`: all or nothing, a move the target takes only part of
+tried again with that part.
+
+Energy held by an item is `ITEM_ENERGY` (NeoForge's `Capabilities.Energy.ITEM`), found where its stack lives with
+`place.capability(host, &ITEM_ENERGY)`, as `ITEM_FLUIDS` is, and moved by `move_energy` as a block's is. A mod
+answers it for its item with `r.item_capability(&ITEM_ENERGY, "mymod:cell", …)`, keeping the energy in the item's
+own stack and rewriting it by an exchange of one, so from a stack of more than one the charged item splits off.
+Vanilla has no energy items, so the game answers it for none.
+
 The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
-move undone, in its transaction, and is warned once naming the mod, and `move_resources` returns `Overanswered`
-naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so neither end keeps
-any of it: a broken handler can't make a move overflow, duplicate or lose items or fluid, or panic the game.
+move undone, in its transaction, and is warned once naming the mod, and `move_resources` or `move_energy` returns
+`Overanswered` naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so
+neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
+panic the game.
 
 `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
@@ -3232,6 +3265,33 @@ abort does not undo them. This differs from writes through journaled capability 
 `Capabilities.Item.ENTITY`), read and written like any other place.
 Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
 
+#### A mod's own capability
+
+A mod can define a capability of its own, as Mekanism defines chemicals: a resource type and a key, published from
+its `[api]` package ([Dependencies between trait mods](#dependencies-between-trait-mods)) for other mods to use.
+
+```rust
+// chem-api's [api] package
+#[derive(Clone, PartialEq)]
+pub struct Chemical(pub String);
+pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> = CapabilityKey::new("chem_api:chemical");
+```
+
+A mod that names it under `[dependencies]` builds against the same `Chemical` and `CHEMICALS`, so its providers,
+`r.block_entity_capability(&chem_api::CHEMICALS, "chem_pipe:vat", …)`, answer the same capability, and
+`level.capability(host, &chem_api::CHEMICALS, pos, side)` finds either mod's handler. `move_resources` moves a
+chemical as it moves items, in the caller's transaction. The game has no answer of its own for a mod's key, so only
+the mods' providers do, and a lookup with none registered costs one table check. A handler that keeps its amount in
+its block entity's saved data (`BlockEntityRef::merge_data`) is covered by the game's journal, so an aborted
+transaction puts it back. `ItemCapabilityKey::new` and `EntityCapabilityKey::new` define item and entity
+capabilities the same way.
+
+A key is known by its name, which must be namespaced (`chem_api:chemical`), and a name has one handler type. Two
+mods that each declare their own `Chemical` under one name, rather than sharing the defining mod's, would never see
+each other's handlers. So the game refuses that at startup, naming both mods and both types, as NeoForge's
+`CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
+namespace. Both checks run once, when the mods register.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an
@@ -3241,7 +3301,7 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
@@ -3253,7 +3313,7 @@ impl Hooks for Counter {
     }
 }
 let count = Arc::new(AtomicUsize::new(0));
-let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Counter(count.clone()))];
+let mods = [ModEntry::new("counter", Box::new(Counter(count.clone())))];
 with_mods(mods.into(), || dispatch_tick(&mut HostDouble));
 assert_eq!(count.load(Ordering::Relaxed), 1);
 ```
@@ -3262,6 +3322,7 @@ If a `Host` method returns a game value a test can't build, a double can return 
 `acting_player() -> Option<NativeServerPlayer>`. If the dispatch function itself takes an unconstructible value,
 such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
 hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
+
 
 ### Adding a hook
 
