@@ -1396,7 +1396,6 @@ API 286 adds `native_portal_create(dimension, pos)` is told after a Nether porta
 
 API 287 adds A thrown splash or lingering potion finished applying its hit effects; the hook reports the potion item and impact position. Experience bottles are excluded. Bundles need "hooks": 287.
 
-
 API 289 adds A grindstone result was prepared: `native_prepare_grindstone(player, name, pos, result)` is called for a server player at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 289.
 
 API 290 adds A crafting-grid result was prepared: `native_prepare_item_craft(player, name, pos, result)` is called for the inventory grid (None) or a table at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 290.

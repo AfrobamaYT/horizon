@@ -197,7 +197,6 @@ impl Game<'_> {
                 && let Some(mut update) = gs.menu.anvil_update()
             {
                 let guest = &host.hub.guests[gi];
-                update.player_name = Some(guest.name.clone());
                 let mut cancel = false;
                 self.native_anvil_update(
                     guest.uuid,

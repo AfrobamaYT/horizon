@@ -477,8 +477,6 @@ pub struct Anvil {
 /// more than it holds: all of it), each starting at vanilla's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnvilUpdate {
-    /// Server player's name, when available.
-    pub player_name: Option<String>,
     pub left: ItemStack,
     pub right: Option<ItemStack>,
     /// The rename box's text, `None` when the client sent none.
@@ -516,7 +514,6 @@ impl AnvilUpdate {
             material_cost: i32::try_from(vanilla.repair_item_count_cost).unwrap_or(i32::MAX),
         };
         Self {
-            player_name: None,
             left,
             right,
             name,
