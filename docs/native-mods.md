@@ -3050,13 +3050,10 @@ limits). `hook` and `hook_version` work in place of `target`.
 The helper runs in every `Game` that calls its target, and attachments answer `MissingHolder` outside the server's game,
 as they do in hooks.
 
-A catalog hook's trait method, event and return are part of its `hook_version` contract ([Named hook
-points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). Later Horizons only add event fields
-(`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So a mod whose `[api]` package uses only catalog
-hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in its `.hnmod`'s `horizon-native.json` to the
-`NATIVE_HOOKS_API` it was made on.
-A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
-leaves `hooks` out.
+A catalog hook's trait method, event and return make up its `hook_version` contract
+([Named hook points](#named-hook-points)). These per-hook contract versions are catalog metadata, not minimum game
+versions. Catalog hooks, `Host` calls and raw `target` injections all build against the
+[installed game's exact source revision](#building-against-the-installed-game). Rebuild the mod when that contract changes.
 
 ### Parts
 
