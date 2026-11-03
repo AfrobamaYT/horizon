@@ -353,6 +353,18 @@ a version. Helpers (`native_text`, `native_player`…) have no hook entry; the c
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
+### Damage with the attacker, weapon and geometry
+
+`living_incoming_damage` (API 50) is one hook for every hit: it gets the attacker's network id,
+the weapon (a player's selected stack, a mob's main hand; `weapon.enchantments()` exposes the
+enchantment ids and levels), the hit's source position, and a mob victim's position and look
+vector, so an enchantment can tell a blow from behind and change `amount`. The weapon and the
+attacker come from the attack scope the game opens around an attack and are recorded only while
+a native mod is loaded; the positions are none for a player or the dragon as victim. It has no
+`Host`: the game is in the middle of the hit, so read the world from a tick hook. These arguments
+were added after the hook first shipped, so a mixin injection that names
+`native_living_incoming_damage` as a raw target must take them too.
+
 ### The build's warnings
 
 Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that
@@ -2430,6 +2442,8 @@ a dimension.
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+- `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
+  `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
@@ -3001,6 +3015,14 @@ that already has that kind of part warns, naming both mods, and the earlier mod'
 doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
+
+A capability is answered by block entity type: `r.block_entity_capability(&ITEMS, "mymod:pipe",
+Arc::new(PipeItems))` gives the type an `ItemHandler` in place of the game's answer, and
+`host.capability(&ITEMS, pos)` finds the handler at `pos`, the mod's or the game's own (a block entity's slots
+by side, by the rules hoppers follow). A handler holds no borrow: each call is given the host, so it may call a
+neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
+`insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
+mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
 ### Testing a trait mod
 

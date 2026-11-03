@@ -3947,8 +3947,42 @@ impl Game<'_> {
         let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
         if let Some(head) = g.bed {
             let block = self.world.block(head[0], head[1], head[2]);
-            let bed = self.res.facts().get(block).name.ends_with("_bed");
-            if g.dead || g.health <= 0.0 || !bed {
+            let gone = g.dead || g.health <= 0.0;
+            let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
+            let modded = !horizon_client::mod_api::mods().is_empty();
+            let mut keep_sleeping = !gone;
+            if !modded {
+                keep_sleeping &= self.sleep_problem(bed_exists, true).is_none();
+            } else if keep_sleeping {
+                // Player.tick's bed rule check, which comes before and doesn't
+                // look at the bed.
+                let problem = self.sleep_problem(true, true);
+                let mut may_continue = None;
+                self.native_can_continue_sleeping(
+                    g.uuid,
+                    &g.name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
+                keep_sleeping = may_continue.unwrap_or(problem.is_none());
+            }
+            // Then LivingEntity.tick's checkBedExists, for a sleeper still in bed.
+            if modded && keep_sleeping {
+                let problem = self.sleep_problem(bed_exists, false);
+                let mut may_continue = None;
+                self.native_can_continue_sleeping(
+                    g.uuid,
+                    &g.name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
+                keep_sleeping = may_continue.unwrap_or(problem.is_none());
+            }
+            if !keep_sleeping {
                 self.wake_guest(host, gi);
             } else {
                 // LivingEntity.tick: a sleeper's xRot is 0.
