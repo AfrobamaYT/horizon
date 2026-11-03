@@ -20,10 +20,10 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
-    NativeProgressType, NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse,
-    WorldPhase,
+    self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
+    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
+    RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LogicalSide, NativeBlockClick,
@@ -3378,7 +3378,7 @@ impl Game<'_> {
     }
     /// A server player's level is about to change through
     /// `Player.giveExperienceLevels`: once per level gained or lost by points,
-    /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
+    /// and for the anvil, `/experience add ... levels` and `PlayerRef::give_levels`.
     /// Change `levels`, or set `cancel` to leave the level unchanged. The
     /// player's state is swapped in, so `native_acting_player`, `native_tell`
     /// and the item helpers reach them. Server-side.
@@ -3414,6 +3414,88 @@ impl Game<'_> {
             original,
             amount,
             cancel,
+        );
+    }
+    /// Not `native_loot_drops`: that is the loot-modifier step, which edits
+    /// the stacks a table rolled (blocks, shearing, a mob's table). This hook
+    /// fires once after it, on the entity's whole collected drop list, and
+    /// nothing is spawned until it returns.
+    /// A dying mob, server player or armor stand `entity` of `kind` (`player`
+    /// is a player's UUID) is about to drop `drops`, the items
+    /// `LivingEntity.dropAllDeathLoot` collected (NeoForge's
+    /// `LivingDropsEvent`): the loot tables' stacks (after `native_loot_drops`),
+    /// the equipment that rolled to drop, a mob's own extras (an enderman's
+    /// carried block, a fox's mouth item, a piglin's inventory, a copper golem's
+    /// preserved equipment) and a player's inventory, each with the position,
+    /// motion and pickup delay its item entity will have. Edit the list (take
+    /// out, change or add drops) or set `cancel` for no drops at all; empty
+    /// stacks don't drop. `source` is the killing blow (`causing` and `direct`
+    /// entity ids, 0 when none or not known) and `recently_hit` is whether a
+    /// player hurt it within 100 ticks, which is what lets a mob drop its
+    /// equipment. An armor stand fires it from `brokenByAnything` with an
+    /// empty list (its stand item and its equipment pop outside the list, as
+    /// in vanilla). Experience orbs are not in the list
+    /// (`native_living_experience_drop`); a spectator, who drops nothing,
+    /// doesn't call this. Item entity state such as no-gravity, owner and
+    /// lifetime isn't in `NativeItemDrop`. Server-side.
+    pub(super) fn native_living_drops(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        player: Option<u128>,
+        source: &HurtSource<'_>,
+        recently_hit: bool,
+        drops: &mut Vec<NativeItemDrop>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_drops(
+            self,
+            entity,
+            kind,
+            player,
+            source,
+            recently_hit,
+            drops,
+            cancel,
+        );
+    }
+    /// A dying mob `entity` of `kind` is about to roll its drop chance for
+    /// the item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
+    /// `GetEquipmentDropChanceEvent`). `original_chance` is
+    /// `DropChances.byEquipment`; `chance` starts as the chance after the
+    /// enchantments of the attacker and the victim (`getOriginalChance` and
+    /// `getDropChance`); change `chance` (1.0 or more always drops, 0 or less
+    /// never does). `preserved` is `DropChances.isPreserved`: the slot drops
+    /// without a player kill, whatever the mod chooses. Each slot is asked
+    /// at its own point of the loop, after the mob's loot table was rolled
+    /// and just before the slot's roll, only when it holds an item and its
+    /// recorded chance isn't 0, in `EquipmentSlot` order. The roll is drawn
+    /// whatever the chance is, so the mob's random follows vanilla's order.
+    /// `source` and `recently_hit` are as in `native_living_drops`.
+    /// Server-side.
+    pub(super) fn native_get_equipment_drop_chance(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        slot: EquipmentSlot,
+        source: &HurtSource<'_>,
+        recently_hit: bool,
+        stack: &ItemStack,
+        original_chance: f32,
+        preserved: bool,
+        chance: &mut f32,
+    ) {
+        mod_api::dispatch_get_equipment_drop_chance(
+            self,
+            entity,
+            kind,
+            slot,
+            source,
+            recently_hit,
+            stack,
+            original_chance,
+            preserved,
+            chance,
         );
     }
     /// A server player's experience points are about to change through
@@ -6252,7 +6334,7 @@ impl Game<'_> {
     /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
     /// experience unspent when it overrides a positive proposal. If the selected
     /// stack changes, the repair is skipped.
-    /// Server-side, including `native_give_experience`.
+    /// Server-side, including `PlayerRef::give_experience_points`.
     pub(super) fn native_mending_repair(
         &mut self,
         player: u128,

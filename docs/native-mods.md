@@ -867,7 +867,7 @@ one, where vanilla gives the `by` one.
   armadillo or a suspicious block, carving a pumpkin, picking sweet berries or cave vines, and a player taking an item frame or
   its item now pass through it too, with `NativeLootDrops::used` set and the player named.
 
-- `native_experience_orbs(dimension, min, max)`, the experience orbs in a box; `native_give_experience(uuid, points)`, points given to any player as an orb they touch gives them (Mending first); and `native_give_levels(uuid, levels)`, levels given or, negative, taken.
+- Server experience: `native_experience_orbs(dimension, min, max)` reads the experience orbs in a box; `PlayerRef::give_experience_points` gives points as an orb they touch does (Mending first), and `PlayerRef::give_levels` gives or, for a negative amount, takes levels.
 
 - Lead drops to `native_loot_drops`: untying a lead or cutting it with shears (`used`), and the lead a mob a
   player killed while leashed drops on its next tick, naming the killer.
@@ -1064,7 +1064,7 @@ there is no per-particle code hook.
 
 - a player changing dimension: `native_player_changed_dimension(player, name, from, to)` is heard once per move of a server's player into another level, when the move has ended (a portal's exit found and the player standing there, a command's teleport landed, a respawn in another level placed for good), with `from` and `to` as dimension ids (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`) and the player's state swapped in so that `native_tell` and the other helpers reach them. A move within a level is not heard.
 
-- A mod that hears `native_experience_orb_pickup` sets `listened` in `native_experience_orb_pickup_listened` (a HEAD injection); `native_experience_orb_pickup(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `native_give_experience` too. Both run on the integrated and the dedicated server, guests included.
+- A mod that hears `native_experience_orb_pickup` sets `listened` in `native_experience_orb_pickup_listened` (a HEAD injection); `native_experience_orb_pickup(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
 
 - Where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and
   `native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken
@@ -2205,9 +2205,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   in, so `native_acting_player`, `native_tell` and the item helpers reach them.
 - Items: a player's inventory is their [`ENTITY_ITEMS`](#an-entitys-items) handler, from any server hook.
 - Experience: `native_experience_orbs(dimension, min, max)`, the orbs in a box (id, position, `value`, and `count`
-  for merged orbs), read before a mod cancels an orb in `native_entity_join_level`; and `native_give_experience(uuid,
-  points)`, points given to any player as touching an orb gives them: Mending repairs their damaged items first, the
-  rest goes to their experience, with the level-up sound; and `native_give_levels(uuid, levels)`, levels added or,
+  for merged orbs), read before a mod cancels an orb in `native_entity_join_level`; and a player's `give_experience_points(host,
+  points)` and `give_levels(host, levels)` through their `PlayerRef`: points given as touching an orb gives them, Mending
+  repairing their damaged items first, the rest going to their experience with the level-up sound; levels added or,
   negative, taken off (`Player.giveExperienceLevels`, as the anvil and the enchanting table charge; below 0 the level
   and points are 0; no level-up sound). Both return false for a player not here, dead, or swapped out by another
   player's hook, and where the server's player list is busy (some world ticks hold it): give first, and cancel the orb
@@ -2338,6 +2338,20 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   frame's entity, no table). A dispenser's shears and an explosion's frames aren't told. Leads: untying one or cutting it with
   shears is a use (the leashed mob, no table), and a mob a player killed while leashed drops its lead on its next tick as a call
   of its own, naming the killer (`used` false, no table). A lead that snaps or loses its holder names no player and isn't told.
+- **`native_living_drops(entity, kind, player, source, recently_hit, drops, cancel)`**: NeoForge's
+  `LivingDropsEvent`, the whole of what a dying mob, server player or armor stand drops, after `native_loot_drops` and with the
+  rest of `dropAllDeathLoot` in: an enderman's carried block, a copper golem's preserved equipment, and a player's inventory
+  (unless `keepInventory`). Each `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets;
+  item entity state such as no-gravity, owner and lifetime isn't exposed through it. `source` is a `HurtSource` (the damage type,
+  `causing` and `direct` entity ids); the id of a projectile isn't kept, so `direct` is 0 for it. Edit the list or set `cancel`
+  for no drops; experience orbs are separate (`native_living_experience_drop`). An armor stand fires it from `brokenByAnything`
+  with an empty list, and its stand item and equipment pop outside the list, as in vanilla. `native_loot_drops` stays for loot that
+  is not a death (blocks, shearing, leads); for a mob's death it is heard first (it edits the stacks a table rolled), and this hook
+  then fires once on the whole collected list, with nothing spawned until it returns.
+- **`native_get_equipment_drop_chance(entity, kind, slot, source, recently_hit, stack, original_chance, preserved, chance)`**:
+  NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
+  is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
+  own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
 
 ### A block's items
 
@@ -2421,6 +2435,9 @@ a dimension.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
+- `level.pop_resource(host, pos, stack)` drops a stack as a broken block does (`Block.popResource`), `spawn_item(host, x, y, z,
+  stack)` and `spawn_item_with_motion` spawn a plain item entity and give its handle, and `award_experience(host, x, y, z,
+  amount)` splits experience into orbs (`ExperienceOrb.award`), all in the level in place.
 
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags.
 
