@@ -1,0 +1,19 @@
+# The #[ignore]d library tests tools/ci/ignored_tests.py expects to fail on main, one per line:
+#   PACKAGE TEST REFERENCE [flaky|harness]
+# REFERENCE is the issue or PR that tracks it. A listed test that passes fails the job until its line is
+# removed, so this list only shrinks; `flaky` lets one pass. `harness` marks a parity harness's own step:
+# its harness runs it with the environment it needs, and the job skips it.
+
+# Parity harness steps.
+horizon-client game::dragon::tests::dragon_render_parity_fixture tools/test_dragon_render_parity.py harness
+horizon-client game::entity_model_loading_tests::entity_model_document_benchmark ENTITY_MODEL_BENCH_DOCUMENT harness
+horizon-client-lib entity_nbt::equipment_tests::write_fixtures HORIZON_WRITE_FIXTURES harness
+horizon-client-lib mobs::dragon_contacts::parity::contact_transcript tools/test_dragon_contacts_parity.py harness
+horizon-client-lib mobs::villager_brain::farming_tests::vanilla_farming_classification_matches_the_oracle tools/test_villager_farming_parity.py harness
+horizon-client-render packs::cache::tests::benchmark_real_resource_root HORIZON_OVERLAY_BENCH_VANILLA harness
+
+# Known failures on main.
+horizon-client game::native_guest_turn_tests::another_guest_follows_a_vehicle_teleported_during_a_turn horizon-rust/horizon#8383
+horizon-client-lib mobs::cem::tests::names_reach_horizons_models horizon-rust/horizon#8426
+horizon-client-lib vanillagen::lod::tests::decorated_lod_refines_real_seed_canopies_and_all_dimensions LOD-UPSTREAM-ISSUE flaky
+horizon-client-render lod::tests::real_mesh_clips_near_chunks_and_preserves_water_and_edited_surfaces LOD-UPSTREAM-ISSUE
