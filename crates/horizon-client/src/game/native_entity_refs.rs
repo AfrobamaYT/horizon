@@ -549,6 +549,26 @@ pub(super) mod tests {
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
+            game.lan = Some(host);
+            let player = game.native_player_ref(12).unwrap();
+            assert!(!game.native_player_set_game_mode(player, -1));
+            assert!(!game.native_player_set_game_mode(player, 4));
+            assert!(!game.native_player_set_game_mode(player, 0));
+            assert!(game.native_player_set_game_mode(player, 1));
+            assert_eq!(game.native_player_game_mode(player), Some(1));
+            let abilities = game.native_player_abilities(player).unwrap();
+            assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
+            assert!(game.native_player_set_game_mode(player, 0));
+            assert_eq!(game.native_player_game_mode(player), Some(0));
+            let abilities = game.native_player_abilities(player).unwrap();
+            assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
+            let mut stale = player;
+            stale.entity = horizon_client::mod_api::EntityRef::new(
+                horizon_client::mod_api::NativeWorldEpoch::new(0),
+                player.entity.id(),
+            );
+            assert!(!game.native_player_set_game_mode(stale, 1));
+            host = game.lan.take().unwrap();
             let other = game
                 .native_lifecycle
                 .epoch()
@@ -593,6 +613,10 @@ pub(super) mod tests {
             let player = game.native_player_ref(13).unwrap();
             assert_eq!(player.entity, other);
             assert_eq!(player.game_mode(game), Some(0));
+            assert!(!game.native_player_set_game_mode(player, 1));
+            let acting = game.native_player_ref(12).unwrap();
+            assert!(game.native_player_set_game_mode(acting, 2));
+            assert_eq!(game.native_player_game_mode(acting), Some(2));
             host = game.lan.take().unwrap();
             let nested = game.enter_guest(&mut host, 13).unwrap();
             game.lan = Some(host);
