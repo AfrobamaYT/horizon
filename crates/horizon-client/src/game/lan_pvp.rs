@@ -116,7 +116,8 @@ impl Game<'_> {
 
     /// The player `id` that guest `conn` attacks, if it is one.
     pub(super) fn pvp_victim(&self, conn: u32, id: i32) -> Option<Victim> {
-        self.lan.as_ref()?.hub
+        let host = self.lan.as_ref()?;
+        host.hub
             .guests
             .iter()
             .find(|g| g.entity_id == id && g.conn != conn && host.hub.here(g) && !g.dead)

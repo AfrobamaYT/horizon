@@ -2885,7 +2885,8 @@ impl Game<'_> {
     /// sooner removes it too.
     /// `ServerGamePacketListenerImpl.handleTeleportToEntityPacket` for a
     /// player: the host's own, or a guest in the world.
-    fn guest_spectate_teleport(&mut self, host: &mut LanHost, gi: usize, uuid: u128) {
+    fn guest_spectate_teleport(&mut self, gi: usize, uuid: u128) {
+        let Some(host) = self.lan.as_mut() else { return; };
         let own = host.hub.guests[gi].conn;
         let target = host
             .hub
@@ -2987,13 +2988,12 @@ impl Game<'_> {
     /// is on it, else at its centre.
     fn look_at_entity(
         &mut self,
-        host: &mut LanHost,
         gi: usize,
         id: i32,
         location: Option<[f64; 3]>,
     ) -> Option<([f64; 3], [f64; 3])> {
         let eye = {
-            let g = &host.hub.guests[gi];
+            let g = &self.lan.as_ref()?.hub.guests[gi];
             [g.position[0], g.position[1] + g.eye_height(), g.position[2]]
         };
         let object = || {
@@ -3040,7 +3040,7 @@ impl Game<'_> {
                 ]
             }
         };
-        let g = &mut host.hub.guests[gi];
+        let g = &mut self.lan.as_mut()?.hub.guests[gi];
         let d = [centre[0] - eye[0], centre[1] - eye[1], centre[2] - eye[2]];
         let horizontal = (d[0] * d[0] + d[2] * d[2]).sqrt();
         g.yaw = (-d[0].atan2(d[2])).to_degrees() as f32;
@@ -3051,13 +3051,15 @@ impl Game<'_> {
     /// `ServerGamePacketListenerImpl.handlePlayerAction` for STAB: the spear in
     /// the guest's main hand jabs once its charge allows it (with five ticks
     /// of tolerance). The guest's client is sent the dash Lunge gave them.
-    fn guest_jab(&mut self, host: &mut LanHost, conn: u32) {
+    fn guest_jab(&mut self, conn: u32) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let Some(g) = host.hub.guest(conn) else {
             return;
         };
         let at = g.position;
+        let Some(mut host) = self.lan.take() else { return; };
         let sound = self
-            .guest_hit_by(host, conn, |g| {
+            .guest_hit_by(&mut host, conn, |g| {
                 if g.cannot_attack_with_item(g.attack_ticks as i32, 5) {
                     None
                 } else {
@@ -3071,6 +3073,7 @@ impl Game<'_> {
             let source = horizon_client::settings::sound_source(name) as i32;
             host.hub.sound(name, at, 1.0, 1.0, source, Some(conn));
         }
+        self.lan = Some(host);
     }
 
     /// `Level.getEntityOrPart(id).getBoundingBox()` for a guest's attack or
@@ -4825,8 +4828,11 @@ impl Game<'_> {
     /// and slides on the rider's keys, a camel dashes — and the sound vanilla's
     /// server plays is broadcast to the players near the mount, the rider
     /// included (their own client plays none).
-    fn lan_start_riding_jump(&mut self, host: &mut LanHost, conn: u32, data: i32) {
-        let Some(Some(index)) = self.as_guest(host, conn, |g| g.mount_index()) else {
+    fn lan_start_riding_jump(&mut self, conn: u32, data: i32) {
+        let Some(mut host) = self.lan.take() else { return; };
+        let index = self.as_guest(&mut host, conn, |g| g.mount_index());
+        self.lan = Some(host);
+        let Some(Some(index)) = index else {
             return;
         };
         let m = &mut self.mobs[index];
@@ -4839,6 +4845,7 @@ impl Game<'_> {
             .iter()
             .position(|s| *s == "neutral")
             .unwrap_or(0) as i32;
+        let Some(host) = self.lan.as_ref() else { return; };
         host.hub.sound(
             &format!("minecraft:{sound}"),
             at,
@@ -4852,20 +4859,22 @@ impl Game<'_> {
     /// ServerGamePacketListenerImpl.handlePlayerCommand START_FALL_FLYING:
     /// `Player.tryToStartFallFlying`, or else `stopFallFlying` (a second
     /// start while gliding ends the glide, as in vanilla).
-    fn lan_start_gliding(&mut self, host: &mut LanHost, conn: u32) {
-        let Some(g) = host.hub.guest_mut(conn) else {
+    fn lan_start_gliding(&mut self, conn: u32) {
+        let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
-        let start = !g.fall_flying && self.guest_can_glide(host, conn) == Some(true);
+        let start = !g.fall_flying && self.guest_can_glide(conn) == Some(true);
+        let Some(mut host) = self.lan.take() else { return; };
         let in_liquid = self
-            .as_guest(host, conn, |game| {
+            .as_guest(&mut host, conn, |game| {
                 game.player
                     .as_ref()
                     .is_some_and(|p| p.fluids.was_touching_water || p.is_in_lava())
             })
             .unwrap_or(true);
+        self.lan = Some(host);
         let mut changed = None;
-        if let Some(g) = host.hub.guest_mut(conn) {
+        if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
             let gliding = start && !in_liquid;
             if g.fall_flying != gliding {
                 g.fall_flying = gliding;
@@ -4879,14 +4888,17 @@ impl Game<'_> {
 
     /// `Player.canGlide`: not flying, airborne, not riding, no levitation, and
     /// a glider that its next point of wear won't break.
-    fn guest_can_glide(&mut self, host: &mut LanHost, conn: u32) -> Option<bool> {
-        let g = host.hub.guest_mut(conn)?;
+    fn guest_can_glide(&mut self, conn: u32) -> Option<bool> {
+        let g = self.lan.as_ref()?.hub.guest(conn)?;
         if g.flying || g.on_ground || g.vehicle.is_some() {
             return Some(false);
         }
-        self.as_guest(host, conn, |game| {
+        let mut host = self.lan.take()?;
+        let result = self.as_guest(&mut host, conn, |game| {
             game.glider_worn() && game.potions.effects.get("levitation").is_none()
-        })
+        });
+        self.lan = Some(host);
+        result
     }
 
     /// `LivingEntity.updateFallFlying` on the server, once a tick for a
@@ -4894,8 +4906,8 @@ impl Game<'_> {
     /// 20th tick wears the glider by one, and every 10th is an
     /// `elytra_glide` game event. Entity.checkFallDistanceAccumulation runs
     /// first: a glide that isn't diving keeps the fall distance at 1.
-    fn guest_glide_tick(&mut self, host: &mut LanHost, conn: u32, fell: f64) {
-        let Some(g) = host.hub.guest_mut(conn) else {
+    fn guest_glide_tick(&mut self, conn: u32, fell: f64) {
+        let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) else {
             return;
         };
         if !g.fall_flying {
@@ -4911,13 +4923,14 @@ impl Game<'_> {
         {
             m.fall_distance = 1.0;
         }
-        if self.guest_can_glide(host, conn) != Some(true) {
-            if let Some(g) = host.hub.guest_mut(conn) {
+        if self.guest_can_glide(conn) != Some(true) {
+            if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
                 g.fall_flying = false;
             }
             return;
         }
-        self.as_guest(host, conn, |game| {
+        let Some(mut host) = self.lan.take() else { return; };
+        self.as_guest(&mut host, conn, |game| {
             let Some(p) = game.player.as_mut() else {
                 return;
             };
@@ -4933,6 +4946,7 @@ impl Game<'_> {
             let ctx = game.player_context(None);
             game.post_game_event("minecraft:elytra_glide", at, ctx);
         });
+        self.lan = Some(host);
     }
 
     /// `Entity.isInWall`: a suffocating block in the box at the eyes as wide
