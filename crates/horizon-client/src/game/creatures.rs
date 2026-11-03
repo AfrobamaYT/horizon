@@ -913,14 +913,16 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() {
+        if round.listening() || !horizon_client::mod_api::mods().is_empty() {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
                 let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
                 if self.world.loaded(x, z) && ticking(x, z) {
                     let (id, kind) = (m.id, super::native_ticks::TickKind::Mob(m.kind.clone()));
-                    self.native_tick_pre_batch(&mut round, id, kind);
+                    if self.native_tick_pre_batch(&mut round, id, kind) {
+                        self.sync_sleeping_mob(i);
+                    }
                 }
                 i += 1;
             }
@@ -1203,7 +1205,8 @@ impl Game<'_> {
         let mut dying = m.clone();
         // LivingEntity.die: the death is heard, and a sculk catalyst nearby
         // takes the experience (before the loot is dropped). It takes what
-        // would drop, whoever killed the mob.
+        // would drop, whoever killed the mob. Experience the catalyst takes is
+        // never dropped, so living_experience_drop does not hear of it.
         self.sculk_mob_died(m);
         let mut catalyst_xp = 0;
         let consumed =
@@ -1405,6 +1408,26 @@ impl Game<'_> {
             None => None,
         }
     }
+    /// `LivingEntity.dropExperience`: the experience a dying mob or player is worth once
+    /// the mods have had their say; 0 when they cancel it.
+    pub(super) fn living_experience_drop(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        attacker: Option<u128>,
+        original: i32,
+    ) -> i32 {
+        let (mut amount, mut cancel) = (original, false);
+        self.native_living_experience_drop(
+            entity,
+            kind,
+            attacker,
+            original,
+            &mut amount,
+            &mut cancel,
+        );
+        if cancel { 0 } else { amount.max(0) }
+    }
     fn drop_death_loot(
         &mut self,
         m: &mut Mob,
@@ -1552,8 +1575,11 @@ impl Game<'_> {
                         self.spawn_item(item, pos, dispenser::new_item_motion(), 10);
                     }
                 }
-                drops::Drop::Orb(value) if !consumed => self.spawn_orbs(pos, value as u32),
-                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Orb(_) => {}
+                drops::Drop::Experience(reward) if !consumed => {
+                    let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
+                    self.spawn_orbs(pos, amount as u32);
+                }
+                drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
     }

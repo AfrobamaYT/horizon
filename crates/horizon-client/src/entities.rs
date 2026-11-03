@@ -1076,21 +1076,21 @@ impl Experience {
             7 + level * 2
         }
     }
-    /// Returns the first multiple of 5 the player reached, where each level
-    /// gained would play the level-up sound (`Player.giveExperienceLevels`).
-    pub fn give(&mut self, points: i32) -> Option<i32> {
-        let mut sound_level = None;
+    /// The first half of `Player.giveExperiencePoints`: the points go to the
+    /// bar and the total, and the levels they cross follow one at a time.
+    pub fn add_points(&mut self, points: i32) {
         self.progress += points as f32 / Self::needed(self.level) as f32;
         self.total = self.total.saturating_add(points).max(0);
-        while self.progress >= 1.0 {
-            self.progress = (self.progress - 1.0) * Self::needed(self.level) as f32;
-            self.level += 1;
-            if self.level % 5 == 0 {
-                sound_level.get_or_insert(self.level);
-            }
-            self.progress /= Self::needed(self.level) as f32;
+    }
+    /// The change `Player.giveExperienceLevels` makes: below level 0 the level,
+    /// the progress and the total are 0.
+    pub fn add_levels(&mut self, levels: i32) {
+        self.level = self.level.saturating_add(levels);
+        if self.level < 0 {
+            self.level = 0;
+            self.progress = 0.0;
+            self.total = 0;
         }
-        sound_level
     }
 }
 /// A painting (`Painting`, a `HangingEntity`): the block it hangs in, the
@@ -1628,15 +1628,15 @@ mod experience_tests {
 
     #[test]
     fn respawn_clears_all_xp_unless_it_is_kept() {
-        let mut xp = Experience::default();
-        xp.give(155);
-        let before = (xp.level, xp.progress, xp.total);
+        let mut xp = Experience {
+            level: 7,
+            progress: 0.5,
+            total: 155,
+        };
         xp.respawn(true);
-        assert_eq!((xp.level, xp.progress, xp.total), before);
+        assert_eq!((xp.level, xp.progress, xp.total), (7, 0.5, 155));
         xp.respawn(false);
         assert_eq!((xp.level, xp.progress, xp.total), (0, 0.0, 0));
-        xp.give(7);
-        assert_eq!((xp.level, xp.progress, xp.total), (1, 0.0, 7));
     }
 }
 
