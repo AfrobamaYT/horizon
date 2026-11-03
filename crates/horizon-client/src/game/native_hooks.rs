@@ -6220,8 +6220,9 @@ impl Game<'_> {
     /// loot rolled): `fished` holds the bobber and the items, and
     /// `rod_damage` the damage the rod takes (vanilla's 1, or 2 with the
     /// bobber on the ground), which the mods may set (`damageRodBy`, not
-    /// negative). Set `cancel` and the player receives nothing (no items,
-    /// experience, statistic or advancement); the bobber is gone and the rod
+    /// negative). Set `cancel` and the player receives nothing: no items,
+    /// experience or statistic, and no `fishing_rod_hooked` trigger; the
+    /// bobber is gone and the rod
     /// still takes `rod_damage`. After `player_fish`'s reel-in. Server-side.
     /// @API:item_fished@.
     pub(super) fn native_item_fished(

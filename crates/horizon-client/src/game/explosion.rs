@@ -7,8 +7,13 @@ use super::{
     entity::{Blast, Entity, EntityHandle, with_entity, with_entity_mut},
 };
 use horizon_client::{
-    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, mobs::Who,
-    mod_api::NativeExplosionStart, text::Text,
+    Result,
+    blocks::Fluid,
+    collisions::SceneCollisions,
+    items::ItemStack,
+    mobs::Who,
+    mod_api::{NativeBlockInteraction, NativeExplosionStart},
+    text::Text,
 };
 use horizon_core::{
     geometry::{Vec3, VoxelShape},
@@ -877,20 +882,20 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let interaction_name = match interaction {
-                BlockInteraction::Keep => "keep",
-                BlockInteraction::Destroy => "destroy",
-                BlockInteraction::DestroyWithDecay => "destroy_with_decay",
-            };
             let start = NativeExplosionStart {
                 dimension: self.dim.id(),
                 center,
                 radius,
                 fire,
-                interaction: interaction_name,
-                damage_type: Some(damage_type),
+                interaction: match interaction {
+                    BlockInteraction::Keep => NativeBlockInteraction::Keep,
+                    BlockInteraction::Destroy => NativeBlockInteraction::Destroy,
+                    BlockInteraction::DestroyWithDecay => NativeBlockInteraction::DestroyWithDecay,
+                },
+                damage_type,
                 source: self.combat.explosion_source,
-                owner: self.combat.explosion_owner,
+                // `getIndirectSourceEntity`, as the blast's attacker is.
+                owner: self.blast_attacker().map(|(id, _)| id),
             };
             if self.explosion_start_cancelled(&start) {
                 return Ok(());

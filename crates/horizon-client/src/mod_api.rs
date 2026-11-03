@@ -133,19 +133,28 @@ pub struct NativeExplosionStart<'a> {
     pub radius: f32,
     /// It sets fires (`createFire`).
     pub fire: bool,
-    /// `Explosion.BlockInteraction`: `keep`, `destroy`, `destroy_with_decay`,
-    /// or `trigger_block` (a wind burst, which pushes and triggers blocks).
-    pub interaction: &'a str,
-    /// The damage type it hurts with (`minecraft:explosion`,
-    /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`); none for
-    /// a wind burst, which hurts nothing.
-    pub damage_type: Option<&'a str>,
-    /// The mob that explodes (a creeper) or whose projectile does (a ghast's
-    /// fireball, a wither's skull), when Horizon tracks one.
+    pub interaction: NativeBlockInteraction,
+    /// The damage type of its damage source (`minecraft:explosion`,
+    /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`).
+    pub damage_type: &'a str,
+    /// The entity that explodes (`getDirectSourceEntity`): a creeper, a wind
+    /// charge, the bearer of Wind Charged, when Horizon tracks it.
     pub source: Option<u32>,
-    /// The mob that owns that projectile (`getIndirectSourceEntity`), when
-    /// Horizon tracks one.
+    /// `getIndirectSourceEntity`: a living source itself, a primed TNT's
+    /// owner, or a projectile's living owner (a ghast for its fireball, a
+    /// wither for its skull, the thrower of a wind charge).
     pub owner: Option<u32>,
+}
+
+/// What an explosion does to blocks (`Explosion.BlockInteraction`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeBlockInteraction {
+    Keep,
+    Destroy,
+    DestroyWithDecay,
+    /// A wind burst: it pushes, and triggers doors, buttons, bells and the like.
+    TriggerBlock,
 }
 
 /// A fishing catch, for `item_fished` (`ItemFishedEvent`).
