@@ -159,13 +159,12 @@ fn a_hit_on_the_dragon_fires_pre_and_post() {
 fn the_container_names_what_armor_took() {
     let heard = heard(|game| {
         let mut zombie = mob(game, 225011, "minecraft:zombie");
-        assert!(zombie.damage(
-            damage_level_of!(game),
-            10.0,
-            Damage::of(DamageKind::Generic)
-        ));
+        // A mob's attack: armor takes its share, where a generic hit bypasses it.
+        let attack = Damage::mob(225012, [2.0, 0.0, 2.0]);
+        assert!(zombie.damage(damage_level_of!(game), 10.0, attack));
     });
-    // A zombie's two armor points: `CombatRules.getDamageAfterAbsorb` keeps 1 - 2/25 of the hit.
-    let after = 10.0 * (1.0 - 2.0_f32 / 25.0);
+    // A zombie's two armor points against 10 damage: `CombatRules.getDamageAfterAbsorb`
+    // clamps 2 - 10 / 2 up to a fifth of the armor, 0.4, and keeps 1 - 0.4 / 25 of the hit.
+    let after = 10.0 * (1.0 - 0.4_f32 / 25.0);
     assert_eq!(heard.pre, [(225011, 10.0, after, 10.0 - after)]);
 }
