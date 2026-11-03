@@ -3302,6 +3302,14 @@ enum Dim {
     End,
 }
 impl Dim {
+    /// The level as block behaviour and the mods name it.
+    fn level(self) -> LevelDimension {
+        match self {
+            Self::Overworld => LevelDimension::Overworld,
+            Self::Nether => LevelDimension::Nether,
+            Self::End => LevelDimension::End,
+        }
+    }
     fn id(self) -> &'static str {
         match self {
             Self::Overworld => "minecraft:overworld",
@@ -4587,11 +4595,7 @@ impl Game<'_> {
             })
             .collect();
         let guest_boxes = self.lan_block_trigger_boxes();
-        let dimension = match self.dim {
-            Dim::Overworld => LevelDimension::Overworld,
-            Dim::Nether => LevelDimension::Nether,
-            Dim::End => LevelDimension::End,
-        };
+        let dimension = self.dim.level();
         let rules = self.level_rules();
         let fire_players: Vec<[f64; 3]> = self
             .player
@@ -6312,10 +6316,18 @@ impl Game<'_> {
         // but on a server a spectator's use on a block opens the block's
         // menu (ServerPlayerGameMode.useItemOn).
         if self.spectator() {
-            if matches!(self.guest_use, Some(GuestUse::OnBlock(_)))
+            if let Some(GuestUse::OnBlock(hand)) = self.guest_use
                 && let Some(hit) = self.pick()
             {
-                self.spectator_open_menu(hit.pos);
+                self.with_hand(hand, |game| {
+                    let held = game.held().cloned();
+                    if matches!(
+                        game.right_click_block(&hit, hand, held.as_ref()),
+                        native_hooks::BlockClickAnswer::Go { .. }
+                    ) {
+                        game.spectator_open_menu(hit.pos);
+                    }
+                });
             }
             return Ok(None);
         }
@@ -6356,11 +6368,6 @@ impl Game<'_> {
         for hand in hands {
             // The off hand's turn starts on the entity too (Minecraft.startUseItem).
             if entity && hand == Hand::Off && self.with_hand(hand, |g| g.interact_entity(None))? {
-                return Ok(Some(hand));
-            }
-            // A click on the fence block: `LeadItem.useOn`. A client whose crosshair
-            // met the knot first sends Interact with the knot's id instead.
-            if on_block && self.with_hand(hand, Game::interact_knot) {
                 return Ok(Some(hand));
             }
             if self.with_hand(hand, |game| game.use_hand(block_hit.as_ref()))? {
@@ -6455,35 +6462,60 @@ impl Game<'_> {
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
         let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
         let mut anchor_passed = false;
-        // Native mods, where ServerPlayerGameMode.useItemOn starts: a
-        // canceled click does nothing (a guest's block is sent back).
+        // Native mods, where ServerPlayerGameMode.useItemOn starts
+        // (RightClickBlock): a cancel answers for the block and the item, and
+        // its PASS goes on to Item.use, which a guest's UseItem asks for.
+        use horizon_client::mod_api::{NativeInteractionResult as Answer, NativeTriState};
+        let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
+        let mut block_hit = block_hit;
+        let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
         if let Some(hit) = block_hit {
-            let mut canceled = false;
-            let player = self.native_acting_id();
-            let player_entity_id = self
-                .lan_acting_entity
-                .map_or_else(|| self.own_entity_id(), |id| id as i32);
-            let (hand, at) = (self.hand, hit.native());
-            self.native_right_click_block(
-                hit.pos,
-                hit.face,
-                hand,
-                at,
-                player,
-                player_entity_id,
-                &mut canceled,
-            );
-            if canceled {
-                // Nothing was used, so nothing consumed the action.
-                self.use_failed = true;
-                return Ok(true);
+            let held = self.held().cloned();
+            match self.right_click_block(hit, self.hand, held.as_ref()) {
+                native_hooks::BlockClickAnswer::Go {
+                    use_block: block,
+                    use_item: item,
+                } => (use_block, use_item) = (block, item),
+                native_hooks::BlockClickAnswer::Canceled(answer)
+                    if answer.consumes_action() || answer == Answer::Fail =>
+                {
+                    if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                        self.swing_arm();
+                    }
+                    self.use_failed = answer == Answer::Fail;
+                    return Ok(true);
+                }
+                native_hooks::BlockClickAnswer::Canceled(_) => {
+                    (use_block, use_item) = (NativeTriState::False, NativeTriState::False);
+                }
             }
         }
+        // A fence click reaches the hook before attaching a lead.
+        if on_block
+            && (use_block.or(!(sneaking && hands_full))
+                || use_item.or(true)
+                    && self
+                        .held()
+                        .is_some_and(|stack| &*stack.item == "minecraft:lead"))
+            && self.interact_knot()
+        {
+            return Ok(true);
+        }
         // MultiPlayerGameMode.useItemOn: blocks react first.
-        if !(sneaking && hands_full)
+        if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
+            if self.use_on_cauldron(hit.pos)? {
+                self.swing_arm();
+                return Ok(true);
+            }
+            if let Some(placed) = self.use_on_campfire(hit.pos)? {
+                if placed {
+                    self.swing_arm();
+                }
+                return Ok(true);
+            }
             if self.use_lectern(hit.pos, held.as_ref()) {
                 self.swing_arm();
                 return Ok(true);
@@ -6662,6 +6694,14 @@ impl Game<'_> {
                 }
             }
         }
+        // RightClickBlock's useItem FALSE: no ItemStack.useOn, so only
+        // Item.use is left (a guest's UseItem asks for it).
+        if !use_item.or(true) {
+            if on_block {
+                return Ok(false);
+            }
+            block_hit = None;
+        }
         let Some(stack) = self.held().cloned() else {
             return Ok(false);
         };
@@ -6669,26 +6709,25 @@ impl Game<'_> {
             return Ok(false);
         };
         // ServerPlayerGameMode.useItem and useItemOn: an item on cooldown is
-        // not used (PASS, so the other hand may still act).
-        if self
-            .cooldowns
-            .is_on_cooldown(&horizon_client::cooldowns::group(
-                &stack,
-                info.use_cooldown.as_ref(),
-            ))
+        // not used (PASS, so the other hand may still act), unless
+        // RightClickBlock's useItem TRUE forces a block click's useOn.
+        let forced = on_block && use_item == NativeTriState::True;
+        if !forced
+            && self
+                .cooldowns
+                .is_on_cooldown(&horizon_client::cooldowns::group(
+                    &stack,
+                    info.use_cooldown.as_ref(),
+                ))
         {
             return Ok(false);
         }
         // Native mods, where ItemStack.useOn and Item.use start: the block
         // aimed at had its turn, and the item is off cooldown. A guest's
         // UseItemOn reaches only useOn, its UseItem only use.
-        let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut claimed = false;
         if let Some(hit) = block_hit {
-            let player = self.native_acting_id();
-            let player_entity_id = self
-                .lan_acting_entity
-                .map_or_else(|| self.own_entity_id(), |id| id as i32);
+            let (player, player_entity_id) = self.native_clicker();
             let (hand, at) = (self.hand, hit.native());
             self.native_use_item_on(
                 &stack,
@@ -13021,10 +13060,6 @@ impl Game<'_> {
         let Some(held) = self.held() else {
             return Ok(false);
         };
-        // Player.isSecondaryUseActive with an item in hand skips useItemOn.
-        if self.keys.contains(&KeyCode::ShiftLeft) {
-            return Ok(false);
-        }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
         let mut hand = powder_snow::HeldSlot {
@@ -13356,19 +13391,6 @@ impl Game<'_> {
                 f64::from(p[2]) + 0.5,
             ]
         };
-        if allow_block_actions
-            && let Some(hit) = self.pick()
-            && self.use_on_cauldron(hit.pos)?
-        {
-            return Ok(UseResult::Success { swing: true });
-        }
-        if allow_block_actions
-            && let Some(hit) = self.pick()
-            && let Some(placed) = self.use_on_campfire(hit.pos)?
-        {
-            // SUCCESS_SERVER swings; a full campfire's CONSUME does not.
-            return Ok(UseResult::Success { swing: placed });
-        }
         // BucketItem has no useOn: a guest's UseItemOn leaves it to UseItem.
         let bucket = horizon_client::items::bucket_contents(&stack.item);
         if matches!(self.guest_use, Some(GuestUse::OnBlock(_)))
@@ -22060,6 +22082,154 @@ fn debug_crosshair_drawn(
 mod tests {
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn right_click_block_controls_cauldron_use() {
+        use horizon_client::mod_api::{
+            self, Flow, Hooks, Host, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        struct Observer(Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicUsize>);
+        impl Hooks for Observer {
+            fn right_click_block(
+                &self,
+                _: &mut dyn Host,
+                event: &mut RightClickBlockEvent<'_>,
+            ) -> Flow {
+                self.2.fetch_add(1, Ordering::SeqCst);
+                if self.1.load(Ordering::SeqCst) {
+                    return Flow::Cancel;
+                }
+                *event.use_block = if self.0.load(Ordering::SeqCst) {
+                    NativeTriState::True
+                } else {
+                    NativeTriState::False
+                };
+                *event.use_item = NativeTriState::False;
+                Flow::Continue
+            }
+        }
+        let allowed = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods =
+            Arc::from(vec![
+                Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
+                    as Box<dyn Hooks>,
+            ]);
+        assert!(mod_api::MODS.set(mods).is_ok());
+        super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let empty = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cauldron")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                empty,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
+            let hit = Hit {
+                pos: [0, 64, 0],
+                face: [0, 1, 0],
+                point: [0.5, 65.0, 0.5],
+                inside: false,
+            };
+            game.use_hand(Some(&hit)).unwrap();
+            assert_eq!(game.world.block(0, 64, 0), empty);
+            allowed.store(true, Ordering::SeqCst);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_ne!(game.world.block(0, 64, 0), empty);
+            assert!(game.native_level_set_block(
+                level,
+                hit.pos,
+                empty,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
+            game.keys.insert(KeyCode::ShiftLeft);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_ne!(game.world.block(0, 64, 0), empty);
+            game.keys.remove(&KeyCode::ShiftLeft);
+
+            let campfire = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:campfire")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                hit.pos,
+                campfire,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let entity = game.new_block_entity("minecraft:campfire").unwrap();
+            game.world.block_entities.insert((0, 64, 0), entity);
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:beef", 2));
+            allowed.store(false, Ordering::SeqCst);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 2);
+            allowed.store(true, Ordering::SeqCst);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
+
+            // A canceled click on a fence must not tie the player's mob.
+            let fence = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:oak_fence")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                hit.pos,
+                fence,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            let mut mob = horizon_client::mobs::Mob::new(
+                12,
+                kind,
+                horizon_core::geometry::Vec3::new(1.0, 64.0, 1.0),
+                0.0,
+            );
+            mob.extra.leash = Some(horizon_client::mobs::leash::Holder::Player);
+            game.mobs.push(mob);
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:lead", 1));
+            game.guest_use = Some(GuestUse::OnBlock(Hand::Main));
+            game.forced_hit = Some(hit);
+            cancel.store(true, Ordering::SeqCst);
+            let before = calls.load(Ordering::SeqCst);
+            game.use_item_as_player().unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+            assert_eq!(
+                game.mobs.last().unwrap().extra.leash,
+                Some(horizon_client::mobs::leash::Holder::Player)
+            );
+
+            // A spectator's packet reaches the event, even when canceled.
+            game.set_mode_id(3);
+            game.guest_use = Some(GuestUse::OnBlock(Hand::Main));
+            game.forced_hit = Some(hit);
+            cancel.store(true, Ordering::SeqCst);
+            let before = calls.load(Ordering::SeqCst);
+            game.use_item_as_player().unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+        });
+    }
 
     #[test]
     fn tool_transform_keeps_hoe_and_shovel_results_with_scrape_particle() {
