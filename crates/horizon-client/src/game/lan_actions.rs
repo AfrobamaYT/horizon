@@ -6194,14 +6194,7 @@ mod tests {
             answer: Arc<Mutex<Option<Answer>>>,
             replace_with: Arc<Mutex<Option<horizon_world::registry::BlockStateId>>>,
             empty_answer: Arc<Mutex<Option<Answer>>>,
-            empty_clicks: Arc<
-                Mutex<
-                    Vec<(
-                        horizon_world::registry::BlockStateId,
-                        crate::first_person::Hand,
-                    )>,
-                >,
-            >,
+            empty_clicks: Arc<Mutex<Vec<(horizon_world::registry::BlockStateId, u128)>>>,
             clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
@@ -6232,10 +6225,11 @@ mod tests {
                 _: &mut dyn ServerHost,
                 event: &mut UseWithoutItemEvent<'_>,
             ) -> Option<Answer> {
+                assert_eq!(event.click.hand, crate::first_person::Hand::Main);
                 self.empty_clicks
                     .lock()
                     .unwrap()
-                    .push((event.state, event.click.hand));
+                    .push((event.state, event.click.player));
                 *self.empty_answer.lock().unwrap()
             }
         }
@@ -6501,7 +6495,7 @@ mod tests {
 
                 assert_eq!(
                     user.empty_clicks.lock().unwrap().last(),
-                    Some(&(floor_lever, Hand::Main))
+                    Some(&(floor_lever, 7))
                 );
 
                 // Every supplied empty result replaces the lever; TRY is not retried.
@@ -6517,7 +6511,12 @@ mod tests {
                     game.world.set(8, 64, 4, floor_lever).unwrap();
                     *user.empty_answer.lock().unwrap() = Some(answer);
                     let calls = user.empty_clicks.lock().unwrap().len();
+                    let before = game.swings_started;
                     assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                    assert_eq!(
+                        game.swings_started - before,
+                        u64::from(answer != Answer::Consume)
+                    );
                     assert_eq!(game.world.block(8, 64, 4), floor_lever);
                     assert_eq!(user.empty_clicks.lock().unwrap().len(), calls + 1);
                     if matches!(
@@ -6599,11 +6598,12 @@ mod tests {
                     Some(horizon_client::containers::BlockEntity::ChiseledBookshelf(b)) if b.items[0].is_none()
                 ));
 
-                // The real guest packet follows the same path, with the guest's UUID.
+                // The real guest packet reaches empty use with the guest's UUID.
                 game.world.set(0, 64, 4, lever).unwrap();
                 game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
                     Some(ItemStack::new("minecraft:stick", 1));
-                *user.answer.lock().unwrap() = Some(Answer::Success);
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
                 game.lan_guest_packet(
                     12,
                     play::Serverbound::UseItemOn(play::UseItemOn {
@@ -6617,6 +6617,7 @@ mod tests {
                     }),
                 );
                 assert_eq!(user.clicks.lock().unwrap().last(), Some(&(12, Hand::Main)));
+                assert_eq!(user.empty_clicks.lock().unwrap().last(), Some(&(lever, 12)));
                 assert_eq!(user.item_uses.load(SeqCst), item_uses);
                 assert_eq!(game.world.block(0, 64, 4), lever);
                 game.world.set(0, 64, 4, stone).unwrap();
