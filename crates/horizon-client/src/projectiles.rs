@@ -22,15 +22,6 @@ pub fn own_random(shooter: &crate::mobs::Mob) -> horizon_core::random::LegacyRan
     )
 }
 
-/// A random seeded from a position alone: an arrow's existing seed, so two
-/// arrows at one spot share a stream (tracked on #29). New randoms use
-/// [`unique_random`].
-pub fn position_random(position: Vec3) -> horizon_core::random::LegacyRandom {
-    horizon_core::random::LegacyRandom::new(
-        position.x.to_bits() as i64 ^ position.z.to_bits().rotate_left(17) as i64,
-    )
-}
-
 /// A projectile's `Entity.random`. Two projectiles are equal whatever their
 /// randoms, as with `ArrowState`: the state is not part of what they are.
 #[derive(Clone, Debug)]
@@ -512,7 +503,7 @@ impl Projectile {
             random: OwnRandom(unique_random(position)),
             no_deflect_ticks,
             arrow: kind_is_arrow
-                .then(|| Box::new(crate::arrows::ArrowState::new(position_random(position)))),
+                .then(|| Box::new(crate::arrows::ArrowState::new(unique_random(position)))),
         }
     }
     /// Entity box from the feet (`EntityType.sized` cube of `kind.size()`).
@@ -1995,6 +1986,17 @@ mod deflect_tests {
             .map(|_| (a.random.0.next_float(), b.random.0.next_float()))
             .unzip();
         assert_ne!(fa, fb);
+        let arrow = ProjectileKind::Arrow {
+            base_damage: 2.0,
+            critical: false,
+            effect: None,
+        };
+        let mut a = Projectile::new(arrow.clone(), at, None);
+        let mut b = Projectile::new(arrow, at, None);
+        assert_ne!(
+            a.entity_random().next_float(),
+            b.entity_random().next_float()
+        );
         assert_ne!(
             unique_random(at).next_float(),
             unique_random(at).next_float()

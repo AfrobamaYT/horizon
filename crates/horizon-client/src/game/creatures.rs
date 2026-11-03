@@ -4101,13 +4101,6 @@ impl Game<'_> {
                 .filter(|m| m.alive() && m.species() == Species::Breeze)
                 .map(|m| m.id)
                 .collect();
-            // Drawn only when a breeze could deflect a projectile: an empty
-            // level must not move the level random every tick.
-            let jitter = if breezes.is_empty() || projectiles.is_empty() {
-                0.0
-            } else {
-                self.world.random.next_float()
-            };
             let w = self.mob_world_base(&[]);
             let rain = self.arrow_rain();
             let scene = self.arrow_scene(&rain);
@@ -4279,7 +4272,7 @@ impl Game<'_> {
                     && !wind
                     && breezes.contains(&id)
                 {
-                    super::wind::reverse(p, jitter);
+                    super::wind::reverse(p);
                     if p.arrow.is_some() {
                         horizon_client::arrows::finish_entity_hit(p, &scene, EntityHit::Deflected);
                         let a = p.arrow.as_mut().expect("an arrow");
