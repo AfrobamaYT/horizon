@@ -795,11 +795,11 @@ mod tests {
             // Each case: the entity's type, its hoard, side effects; the gold that comes out.
             let asked = HOARD_ASKED.load(Ordering::Relaxed);
             for (id, hoard, side_effects, gold) in [
-                ("test:hoard", 5, true, 5),
-                ("test:hoard", 5, false, 0),
-                ("test:hoard", 0, true, 0),
-                // `test:press` blocks hold this type too: its removal doesn't reach `Hoard`.
-                ("test:press_entity", 5, true, 0),
+                ("doubler:hoard", 5, true, 5),
+                ("doubler:hoard", 5, false, 0),
+                ("doubler:hoard", 0, true, 0),
+                // A different declared type's removal doesn't reach `Hoard`.
+                ("doubler:press_entity", 5, true, 0),
             ] {
                 let pos = BlockPos::new(1, 64, 2);
                 let key = (pos.x, pos.y, pos.z);
@@ -840,7 +840,7 @@ mod tests {
                 assert!(random, "{id}: the random drew only the scatter");
                 assert!(game.world.block_entities.get(&key).is_none());
             }
-            // Only the two `test:hoard` removals with side effects asked it.
+            // Only the two `doubler:hoard` removals with side effects asked it.
             assert_eq!(HOARD_ASKED.load(Ordering::Relaxed) - asked, 2);
         });
     }
@@ -889,7 +889,10 @@ mod tests {
             };
             game.world.block_entities.insert(
                 key,
-                BlockEntity::Mod(Box::new(ModBlockEntity::new("test:hoard".into(), fields))),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    "doubler:hoard".into(),
+                    fields,
+                ))),
             );
             let holder = Holder::BlockEntity([pos.x, pos.y, pos.z]);
             let host: &mut dyn horizon_client::mod_api::Host = game;

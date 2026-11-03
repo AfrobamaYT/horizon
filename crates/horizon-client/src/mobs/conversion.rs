@@ -77,6 +77,7 @@ pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
         to.add_effect(effect, ticks, amplifier);
     }
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
+    to.extra.effect_chains = from.extra.effect_chains.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
     if from.is_baby() {
         super::finalize::set_baby(to, true);

@@ -810,8 +810,8 @@ impl Game<'_> {
                 self.armor_stands[i].previous_yaw = self.armor_stands[i].yaw;
                 continue;
             }
-            self.armor_stand_location_effects(i, false);
             self.armor_stands[i].first_tick = false;
+            self.armor_stand_location_effects(i, false);
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
