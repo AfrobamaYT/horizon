@@ -927,6 +927,13 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// How a criterion's advancement progress changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeProgressType {
+    Grant,
+    Revoke,
+}
+
 /// Read-only context for a tool modification.
 #[non_exhaustive]
 pub struct ToolUse {

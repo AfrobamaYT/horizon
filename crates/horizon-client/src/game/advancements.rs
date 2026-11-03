@@ -6,6 +6,7 @@ use horizon_client::{
     advancements::{self as adv, EntityView, Frame, ItemView, Progress, Tree},
     hud::{HudBatch, rgba},
     items::ItemStack,
+    mod_api::NativeProgressType,
     text::{self, Style, Text},
     toasts::Slide,
 };
@@ -609,7 +610,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
-                self.advancement_progress(&a.id, criterion, true);
+                self.advancement_progress(&a.id, criterion, NativeProgressType::Grant);
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -618,7 +619,15 @@ impl Game<'_> {
         }
     }
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
-    fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
+    fn advancement_progress(
+        &mut self,
+        advancement: &str,
+        criterion: &str,
+        progress_type: NativeProgressType,
+    ) {
+        if crate::mod_api::mods().is_empty() {
+            return;
+        }
         if let (Some(uuid), Some(entity_id), Some(name)) = (
             self.lan_acting_uuid,
             self.lan_acting_entity,
@@ -630,7 +639,7 @@ impl Game<'_> {
                 &name,
                 advancement,
                 criterion,
-                granted,
+                progress_type,
             );
         }
     }
@@ -648,7 +657,7 @@ impl Game<'_> {
                     &batch.name,
                     &grant.advancement,
                     &grant.criterion,
-                    true,
+                    NativeProgressType::Grant,
                 );
             }
         }
@@ -1997,7 +2006,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
-                self.advancement_progress(&a.id, c, true);
+                self.advancement_progress(&a.id, c, NativeProgressType::Grant);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -2027,7 +2036,7 @@ impl Game<'_> {
     fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
         let revoked = self.adv.progress.revoke(advancement, criterion);
         if revoked {
-            self.advancement_progress(advancement, criterion, false);
+            self.advancement_progress(advancement, criterion, NativeProgressType::Revoke);
         }
         revoked
     }

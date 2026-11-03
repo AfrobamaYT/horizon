@@ -881,8 +881,8 @@ use super::{
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
     self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeServerPlayer,
-    RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
+    NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
@@ -4614,9 +4614,9 @@ impl Game<'_> {
     /// A criterion of a server player's advancement was granted or revoked,
     /// after its progress changed and before any completion rewards, except
     /// the `minecraft:tick` criteria granted on a network player's first tick
-    /// or a reload, which are heard after that tick's rewards and packets. A
-    /// grant or revoke that changes nothing is not heard. `granted` is false for a
-    /// revoke. The full advancement progress is not yet exposed. Helpers
+    /// or a reload, which are heard after that tick's rewards and packets
+    /// (tracked on #29). A grant or revoke that changes nothing is not heard.
+    /// The full advancement progress is not yet exposed (tracked on #29). Helpers
     /// looking up the guest through `self.lan` may find nothing during its
     /// packet. 320.
     pub(super) fn native_player_advancement_progress(
@@ -4626,7 +4626,7 @@ impl Game<'_> {
         name: &str,
         advancement: &str,
         criterion: &str,
-        granted: bool,
+        progress_type: NativeProgressType,
     ) {
         mod_api::dispatch_player_advancement_progress(
             self,
@@ -4636,7 +4636,7 @@ impl Game<'_> {
             name,
             advancement,
             criterion,
-            granted,
+            progress_type,
         );
     }
     /// A statistic is about to be awarded to a server player, before its count

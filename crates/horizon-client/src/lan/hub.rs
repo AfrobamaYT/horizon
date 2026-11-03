@@ -2843,12 +2843,14 @@ impl Hub {
                     g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                 }
                 g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
-                self.native_advancement_grants.push(TickGrants {
-                    player: g.uuid,
-                    entity_id: g.entity_id,
-                    name: g.name.clone(),
-                    grants: first.granted,
-                });
+                if self.mods_loaded {
+                    self.native_advancement_grants.push(TickGrants {
+                        player: g.uuid,
+                        entity_id: g.entity_id,
+                        name: g.name.clone(),
+                        grants: first.granted,
+                    });
+                }
                 g.advancements_visible = sync.advancements.visibility(&g.advancements);
                 g.advancements_changed.clear();
             } else {
@@ -3012,12 +3014,14 @@ impl Hub {
             ) {
                 g.send(&raw(ids::RECIPE_BOOK_ADD, add));
             }
-            self.native_advancement_grants.push(TickGrants {
-                player: g.uuid,
-                entity_id: g.entity_id,
-                name: g.name.clone(),
-                grants: granted,
-            });
+            if self.mods_loaded {
+                self.native_advancement_grants.push(TickGrants {
+                    player: g.uuid,
+                    entity_id: g.entity_id,
+                    name: g.name.clone(),
+                    grants: granted,
+                });
+            }
         }
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));
