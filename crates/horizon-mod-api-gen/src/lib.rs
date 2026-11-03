@@ -232,6 +232,7 @@ fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<
 fn host_method(
     method: &syn::ItemFn,
     name: &str,
+    trait_name: &str,
     exports: &HashSet<String>,
 ) -> Result<(String, String), String> {
     struct Types<'a> {
@@ -384,7 +385,7 @@ fn host_method(
         .collect::<String>();
     Ok((
         format!(
-            "{docs}{} {{ {unused} unimplemented!(\"Host::{name}\") }}\n",
+            "{docs}{} {{ {unused} unimplemented!(\"{trait_name}::{name}\") }}\n",
             sig.to_token_stream()
         ),
         format!(
@@ -1241,42 +1242,48 @@ mod tests {
         for ty in ["Visible", "Renamed", "Defined", "Generated"] {
             let method: syn::ItemFn =
                 syn::parse_str(&format!("fn native_test(&self, value: {ty}) {{ }}")).unwrap();
-            assert!(super::host_method(&method, "test", &exports).is_ok());
+            assert!(super::host_method(&method, "test", "Host", &exports).is_ok());
         }
         let foreign: syn::ItemFn =
             syn::parse_quote! { fn native_foreign(&self, value: elsewhere::Visible) {} };
-        assert!(super::host_method(&foreign, "foreign", &exports).is_err());
+        assert!(super::host_method(&foreign, "foreign", "Host", &exports).is_err());
         let hidden_trait: syn::ItemFn =
             syn::parse_quote! { fn native_hidden(&self, value: &dyn Hidden) {} };
-        assert!(super::host_method(&hidden_trait, "hidden", &exports).is_err());
+        assert!(super::host_method(&hidden_trait, "hidden", "Host", &exports).is_err());
         let read: syn::ItemFn = syn::parse_quote! {
             /// Read a value exactly.
             ///
             /// Keep the blank line too.
             fn native_read(&self, pos: [i32; 3]) -> String { todo!() }
         };
-        let (declaration, implementation) = super::host_method(&read, "read", &exports).unwrap();
+        let (declaration, implementation) =
+            super::host_method(&read, "read", "Host", &exports).unwrap();
         assert!(
             declaration.contains("/// Read a value exactly.\n///\n/// Keep the blank line too.")
         );
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("self.native_read(pos)"));
         let dir: syn::ItemFn = syn::parse_quote! { fn native_dir() -> PathBuf { todo!() } };
-        let (declaration, implementation) = super::host_method(&dir, "dir", &exports).unwrap();
+        let (declaration, implementation) =
+            super::host_method(&dir, "dir", "Host", &exports).unwrap();
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("Self::native_dir()"));
         let owned: syn::ItemFn = syn::parse_quote! { fn native_owned(self) {} };
-        assert!(super::host_method(&owned, "owned", &exports).is_err());
+        assert!(super::host_method(&owned, "owned", "Host", &exports).is_err());
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_write(&mut self, value: i32) { }
         };
-        let (declaration, _) = super::host_method(&write, "write", &exports).unwrap();
+        let (declaration, _) = super::host_method(&write, "write", "Host", &exports).unwrap();
         assert!(declaration.contains("& mut self"));
+        for side in ["ServerHost", "ClientHost"] {
+            let (declaration, _) = super::host_method(&write, "write", side, &exports).unwrap();
+            assert!(declaration.contains(&format!("{side}::write")));
+        }
         let private: syn::ItemFn = syn::parse_quote! {
             fn native_private(&self, value: BinOnly) { }
         };
         assert!(
-            super::host_method(&private, "private", &exports)
+            super::host_method(&private, "private", "Host", &exports)
                 .unwrap_err()
                 .contains("BinOnly")
         );
@@ -1284,7 +1291,7 @@ mod tests {
             fn native_generic<T>(&self, value: T) { }
         };
         assert!(
-            super::host_method(&generic, "generic", &exports)
+            super::host_method(&generic, "generic", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1292,7 +1299,7 @@ mod tests {
             fn native_callback(&self, callback: impl FnOnce()) { }
         };
         assert!(
-            super::host_method(&callback, "callback", &exports)
+            super::host_method(&callback, "callback", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1300,7 +1307,7 @@ mod tests {
             async fn native_async(&self) { }
         };
         assert!(
-            super::host_method(&asynchronous, "async", &exports)
+            super::host_method(&asynchronous, "async", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );

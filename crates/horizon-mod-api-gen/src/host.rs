@@ -61,24 +61,38 @@ pub(super) fn generate(
         }
         let target = helper["target"].as_str().ok_or("helper target missing")?;
         let method = helper_target(&game, name, target)?;
-        let (declaration, implementation) = host_method(method, name, &types.exports)?;
+        let receiver = helper.get("receiver");
+        let is_backend = match helper.get("backend") {
+            None => false,
+            Some(value) => value.as_bool().ok_or("helper backend must be a boolean")?,
+        };
+        let trait_name = if receiver.is_some() || is_backend {
+            if matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some())
+            {
+                "BackendMut"
+            } else {
+                "Backend"
+            }
+        } else {
+            match side {
+                HelperSide::Both => "Host",
+                HelperSide::Server => "ServerHost",
+                HelperSide::Client => "ClientHost",
+            }
+        };
+        let (declaration, implementation) = host_method(method, name, trait_name, &types.exports)?;
         if let Some(client_target) = helper.get("client_target") {
             let client_target = client_target
                 .as_str()
                 .ok_or("client_target must be a string")?;
             let client = helper_target(&game, name, client_target)?;
-            let (_, client_implementation) = host_method(client, name, &types.exports)?;
+            let (_, client_implementation) = host_method(client, name, trait_name, &types.exports)?;
             matching_helper_signatures(&implementation, &client_implementation, name)?;
         }
         let side_doc = match side {
             HelperSide::Server => "/// Side: server.\n",
             HelperSide::Client => "/// Side: client.\n",
             HelperSide::Both => "/// Side: both.\n",
-        };
-        let receiver = helper.get("receiver");
-        let is_backend = match helper.get("backend") {
-            None => false,
-            Some(value) => value.as_bool().ok_or("helper backend must be a boolean")?,
         };
         if receiver.is_some() || is_backend {
             let mutable = matches!(method.sig.inputs.first(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
@@ -145,7 +159,7 @@ pub(super) fn generate(
     }
     let side_enum = |name: &str, server: &str, client: &str| {
         format!(
-            "/// The logical side of a hook's host.\npub enum {name}<'a> {{ Server({server}), Client({client}) }}\n"
+            "/// The logical side of a hook's host.\n#[non_exhaustive]\npub enum {name}<'a> {{ Server({server}), Client({client}) }}\n"
         )
     };
     let sides = format!(

@@ -2062,6 +2062,14 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 /// }
 /// ```
 ///
+/// Side enums are non-exhaustive: external matches must include a wildcard.
+/// ```compile_fail
+/// use horizon_client::mod_api::HostSide;
+/// fn side(host: HostSide<'_>) {
+///     match host { HostSide::Server(_) => (), HostSide::Client(_) => () }
+/// }
+/// ```
+///
 /// Wrong-side services do not compile:
 /// ```compile_fail
 /// use horizon_client::mod_api::ClientHost;
@@ -2232,22 +2240,30 @@ pub trait LevelHost {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
     /// unknown state.
-    fn state_block(&self, state: BlockStateId) -> Option<&str>;
+    fn state_block(&self, _state: BlockStateId) -> Option<&str> {
+        unimplemented!("LevelHost::state_block")
+    }
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
-        state: BlockStateId,
-        key: &str,
-        value: &str,
-    ) -> Option<BlockStateId>;
+        _state: BlockStateId,
+        _key: &str,
+        _value: &str,
+    ) -> Option<BlockStateId> {
+        unimplemented!("LevelHost::state_with_property")
+    }
 }
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
 pub trait LevelRandomHost: LevelHost {
     /// Access a holder's server-owned attachment map.
-    fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError>;
+    fn attachments(&mut self, _holder: Holder) -> Result<&mut Attachments, AttachmentError> {
+        unimplemented!("LevelRandomHost::attachments")
+    }
     /// The level's random stream through `native_level_random`, or None on a non-authoritative level.
-    fn random(&mut self) -> Option<&mut LegacyRandom>;
+    fn random(&mut self) -> Option<&mut LegacyRandom> {
+        unimplemented!("LevelRandomHost::random")
+    }
 }
 
 /// A `LevelReader` with vanilla's `ScheduledTickAccess`. Shape updates cannot write blocks.
