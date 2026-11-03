@@ -6811,6 +6811,7 @@ mod tests {
 
         #[derive(Clone)]
         struct BlockUse(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
         impl BlockPart for BlockUse {
             fn use_item_on(
                 &self,
@@ -6879,6 +6880,7 @@ mod tests {
 
         #[derive(Clone)]
         struct Replacement(Arc<AtomicBool>);
+        #[mod_api::horizon_part]
         impl BlockPart for Replacement {
             fn use_without_item(
                 &self,
