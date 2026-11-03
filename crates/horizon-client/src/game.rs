@@ -209,6 +209,7 @@ mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 mod native_components;
+mod native_configs;
 mod native_criteria;
 mod native_data_maps;
 mod native_display_refs;
@@ -446,6 +447,7 @@ use horizon_world::{
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use native_configs::{NativeConfig, NativeConfigFile, NativeConfigKind};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
 pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
@@ -3112,6 +3114,8 @@ struct Game<'a> {
     native_lifecycle: native_lifecycle::NativeLifecycle,
     /// Entities whose copies are held out of storage; their handles refuse until stored back.
     held_out: Vec<u32>,
+    /// Native mods' config files this game loaded (game/native_configs.rs).
+    native_configs: native_configs::NativeConfigs,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
@@ -4984,6 +4988,11 @@ impl Game<'_> {
                 forced: self.streaming.forced.iter().copied().collect(),
                 // Filled from the `PORTAL` tickets by `update`.
                 portal: Vec::new(),
+                // EnderDragonFight.tick: while a player watches the fight, the
+                // arena holds a `DRAGON` ticket of radius 9 at (0, 0), so its
+                // island ticks out to 7 chunks whatever the watcher's
+                // simulation distance. The fight lives in the End only.
+                dragon: (self.dim == Dim::End && self.fight.arena_watched()).then_some((0, 0)),
                 view_distance: self.settings.render_distance.clamp(2, 32),
                 simulation_distance: self.settings.simulation_distance.max(2),
             }
@@ -18854,6 +18863,7 @@ impl Game<'_> {
                             self.tick_fov();
                         }
                         self.tick_win_screen()?;
+                        self.native_configs_tick_client();
                         // Gui.tick runs ChatListener.tick paused or not.
                         self.tick_chat_queue();
                         self.tick_music();
@@ -19606,6 +19616,7 @@ impl<'a> Game<'a> {
             native_input: Default::default(),
             native_lifecycle: Default::default(),
             held_out: Vec::with_capacity(4),
+            native_configs: Default::default(),
             native_net: Default::default(),
             native_mod_screen: None,
             sky_darken_memo: Default::default(),
