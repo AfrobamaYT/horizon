@@ -1,16 +1,39 @@
 //! Derive hook subscriptions from a trait implementation.
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{ImplItem, ImplItemFn, ItemImpl, parse_macro_input};
+use syn::{
+    ImplItem, ImplItemFn, ItemImpl, Meta, Token, parse::Parser, parse_macro_input,
+    punctuated::Punctuated,
+};
 
-/// A method's `#[cfg]` attributes: they gate the method body, so the same
-/// conditions gate its derived subscription entry. `cfg_attr` is left out —
-/// it expands to other attributes, not a condition of its own.
-fn cfg_attributes(method: &ImplItemFn) -> Vec<&syn::Attribute> {
+/// Keep only attributes that can gate a method, including nested `cfg_attr`s.
+fn cfg_meta(meta: &Meta) -> Option<Meta> {
+    if meta.path().is_ident("cfg") {
+        return Some(meta.clone());
+    }
+    let Meta::List(list) = meta else { return None };
+    if !list.path.is_ident("cfg_attr") {
+        return None;
+    }
+    let args = Punctuated::<Meta, Token![,]>::parse_terminated
+        .parse2(list.tokens.clone())
+        .ok()?;
+    let mut args = args.iter();
+    let condition = args.next()?;
+    let gated: Vec<_> = args.filter_map(cfg_meta).collect();
+    if gated.is_empty() {
+        None
+    } else {
+        Some(syn::parse_quote!(cfg_attr(#condition, #(#gated),*)))
+    }
+}
+
+fn cfg_attributes(method: &ImplItemFn) -> Vec<syn::Attribute> {
     method
         .attrs
         .iter()
-        .filter(|attribute| attribute.path().is_ident("cfg"))
+        .filter_map(|attr| cfg_meta(&attr.meta))
+        .map(|meta| syn::parse_quote!(#[#meta]))
         .collect()
 }
 

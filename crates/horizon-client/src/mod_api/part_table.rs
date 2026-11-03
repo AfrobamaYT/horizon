@@ -955,9 +955,12 @@ pub(crate) mod tests {
     struct Gauge;
     #[mod_api::horizon_part]
     impl BlockPart for Gauge {
+        #[cfg_attr(test, inline)]
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output += 5;
         }
+        #[cfg_attr(test, cfg(any()))]
+        fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
     }
 
     /// Connects redstone wire to its block from any side.
@@ -2253,6 +2256,7 @@ pub(crate) mod tests {
         assert!(connect.block_state(BlockStateId(1)).is_empty());
         assert_eq!(connect.block_state(BlockStateId(3)).len(), 1);
         assert!(analog.block_state(BlockStateId(3)).is_empty());
+        assert!(!super::has_part_hook(HookId::ShouldCheckWeakPower));
         super::TEST_PART_LOOKUPS.set(0);
         let mut check = false;
         dispatch_should_check_weak_power(
