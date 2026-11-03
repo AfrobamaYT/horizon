@@ -2,7 +2,9 @@
 //! `Capabilities.Energy.BLOCK`, an [`EnergyHandler`]: an amount and a capacity, with no resource,
 //! written only inside a transaction.
 use super::resource::{Ends, move_once};
-use super::{BlockSide, Capability, CapabilityKey, Host, Overanswered, Transaction};
+use super::{
+    BlockSide, Capability, CapabilityKey, Host, ItemCapabilityKey, Overanswered, Transaction,
+};
 use std::marker::PhantomData;
 
 /// A block's energy (NeoForge's `EnergyHandler`): stateless, given the host, and written only in
@@ -30,6 +32,14 @@ pub const ENERGY: CapabilityKey<dyn EnergyHandler> = CapabilityKey {
     }),
     handler: PhantomData,
 };
+
+/// Energy held by an item, as NeoForge 26.3's `Capabilities.Energy.ITEM`: a handler for the item at
+/// one place, found with [`ItemPlace::capability`](super::ItemPlace::capability), whose changes
+/// rewrite the item there with an [`exchange`](super::ItemPlace::exchange) of one, so from a stack
+/// of more than one the changed item splits off. Vanilla has no energy items, so only mods answer
+/// it.
+pub const ITEM_ENERGY: ItemCapabilityKey<dyn EnergyHandler> =
+    ItemCapabilityKey::new("horizon:item_energy");
 
 /// The game's own [`ENERGY`]: a mod block entity's buffer, as `.side` reaches it.
 struct GameEnergy(BlockSide);

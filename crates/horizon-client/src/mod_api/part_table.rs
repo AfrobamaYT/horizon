@@ -801,6 +801,9 @@ pub(crate) mod tests {
             r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
                 Some(Box::new(Pouch(place.clone())))
             });
+            r.item_capability(&ITEM_ENERGY, "test:cell", |_, place| {
+                Some(Box::new(Cell(place.clone())))
+            });
             r.item_capability_before_game(&ITEM_ITEMS, "test:bag", |_, place| {
                 Some(Box::new(Bag(place.clone())))
             });
@@ -1920,6 +1923,75 @@ pub(crate) mod tests {
         player.main_hand = Some(stack("minecraft:stone", 1, 0));
         let host: &mut dyn Host = &mut player;
         assert!(HAND.capability(host, &ITEM_ITEMS).is_none());
+    }
+
+    /// A mod's energy cell at `.0`: up to 1000, kept in the cell's own stack (its damage, for the
+    /// test), so the handler holds nothing.
+    struct Cell(ItemPlace);
+    impl Cell {
+        /// The cell here rewritten as holding `energy`: `moved` when that goes through, else 0.
+        fn rewrite(&self, host: &mut dyn Host, tx: &Transaction, energy: u32, moved: u32) -> u32 {
+            let charged = ItemResource::of(&stack("test:cell", 1, energy));
+            match self.0.exchange(host, tx, &charged, 1) {
+                1 => moved,
+                _ => 0,
+            }
+        }
+    }
+    impl EnergyHandler for Cell {
+        fn amount(&self, host: &mut dyn Host) -> u32 {
+            self.0.stack(host).map_or(0, |cell| cell.damage)
+        }
+        fn capacity(&self, _: &mut dyn Host) -> u32 {
+            1000
+        }
+        fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            match amount.min(1000 - held) {
+                0 => 0,
+                went => self.rewrite(host, tx, held + went, went),
+            }
+        }
+        fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            match amount.min(held) {
+                0 => 0,
+                came => self.rewrite(host, tx, held - came, came),
+            }
+        }
+    }
+
+    #[test]
+    fn an_items_energy_moves_through_its_place_and_a_charged_one_splits_off_its_stack() {
+        game_thread();
+        let slot = ItemPlace::PlayerSlot { player: 1, slot: 9 };
+        let mut player = Player {
+            main_hand: Some(stack("test:cell", 2, 600)),
+            ..Player::default()
+        };
+        player.slots.insert(9, stack("test:cell", 1, 900));
+        let host: &mut dyn Host = &mut player;
+        let hand = HAND.capability(host, &ITEM_ENERGY).unwrap();
+        let other = slot.capability(host, &ITEM_ENERGY).unwrap();
+        // The other cell has room for 100: one of the two in the hand gives that and splits off.
+        let moved = host.transaction(|host, tx| move_energy(host, &hand, &other, 400, tx));
+        assert_eq!(moved, Ok(100));
+        assert_eq!(player.slots[&9], stack("test:cell", 1, 1000));
+        assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
+        assert_eq!(player.given, [stack("test:cell", 1, 500)]);
+        // Aborted, a move leaves both as they were.
+        let host: &mut dyn Host = &mut player;
+        let aborted = host.transaction(|host, tx| {
+            let moved = move_energy(host, &other, &hand, 400, tx);
+            Err::<(), _>(moved)
+        });
+        assert_eq!(aborted, Err(Ok(400)));
+        assert_eq!(player.slots[&9], stack("test:cell", 1, 1000));
+        assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
+        // An item no mod answers for has no energy.
+        player.main_hand = Some(stick());
+        let host: &mut dyn Host = &mut player;
+        assert!(HAND.capability(host, &ITEM_ENERGY).is_none());
     }
 
     #[test]
