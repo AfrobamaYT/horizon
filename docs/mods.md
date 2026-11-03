@@ -69,7 +69,10 @@ capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
 ```
 
-Unknown keys are refused, so a typo is an error, not a silently ignored permission.
+Unknown keys are refused, so a typo is an error, not a silently ignored permission. Content manifests
+use only `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
+Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
+installed through a modpack. Code is never silently skipped.
 
 ### Content mods (API 0.2)
 
@@ -84,8 +87,8 @@ A server that has content mods on also checks them one by one (`horizon_protocol
 `horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
 `side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
 not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
-HUD, a minimap) never blocks a join and is never told to a server, and a `server` mod stays private to it. A manifest
-with no `side` line is `client`, so a content mod meant for both halves must say `side = "both"`, or this check
+local resource pack) never blocks a join and is never told to a server. A manifest with no `side` line is `client`,
+so a content mod meant for both halves must say `side = "both"`, or this check
 ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
 list yet: their manifest has no side.
 
@@ -185,8 +188,7 @@ Coordinates must be finite and each minimum must not exceed its maximum. `[]` is
 `properties` names an ordered tuple of template and/or declared state properties; each `values` key
 lists their values in that order, separated by commas without spaces. A nonmatching tuple uses
 `default`. Without `default`, every tuple must be covered. A default-only table gives every state the
-same shape. The existing `{"property":"axis","values":{"x":[...],"y":[...],"z":[...]}}`
-format still works; use either `property` or `properties`, not both. Unknown properties, unreachable
+same shape. A single-property table uses `"properties":["axis"]`. Unknown properties, unreachable
 value tuples, malformed boxes and duplicate property names reject the mod with a load error rather
 than silently ignoring a typo. Omitted `shapes` preserves the template outline (or the connecting
 block's `thickness` outline). Omitted `collision_shapes` preserves the existing behavior: a declared
@@ -400,8 +402,7 @@ generation `step` of every biome in `biomes`; `remove_features` takes them out o
 none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
 NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
 feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
-(registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
-Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
+(registry `minecraft:worldgen/feature`).
 
 Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one object or a list with `type`,
 `weight`, `minCount` and `maxCount`) to each entity type's category, converting the count range to 26.3's `count`;
@@ -502,7 +503,7 @@ who rated.
 
 Your page can live in your repository too: a `horizon-registry.toml` at its root (on the newest release's tag) with
 `name`, `summary`, `description`, `authors` and `license` fills what the registry's entry leaves out; the entry's own
-words win. Its owners, key, kind and icon are the registry's, changed by a pull request. Projects listed before this
+words win. Its owners, key and icon are the registry's, changed by a pull request; its kind never changes. Projects listed before this
 (`versions` in their entry) keep their hosted versions. The formats: [api/mod-index.md](api/mod-index.md).
 
 ### Integrity and signing

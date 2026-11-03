@@ -2,32 +2,32 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "player_stat",
+      "name": "player_stat", "side": "server",
       "target": "horizon_client::game::native_player_stats::Game<'_>::native_player_stat",
       "receiver": "player"
     },
     {
-      "name": "player_award_stat",
+      "name": "player_award_stat", "side": "server",
       "target": "horizon_client::game::native_player_stats::Game<'_>::native_player_award_stat",
       "receiver": "player"
     },
     {
-      "name": "player_reset_stat",
+      "name": "player_reset_stat", "side": "server",
       "target": "horizon_client::game::native_player_stats::Game<'_>::native_player_reset_stat",
       "receiver": "player"
     },
     {
-      "name": "player_has_discovered_recipe",
+      "name": "player_has_discovered_recipe", "side": "server",
       "target": "horizon_client::game::native_player_stats::Game<'_>::native_player_has_discovered_recipe",
       "receiver": "player"
     },
     {
-      "name": "player_award_recipes",
+      "name": "player_award_recipes", "side": "server",
       "target": "horizon_client::game::native_player_stats::Game<'_>::native_player_award_recipes",
       "receiver": "player"
     },
     {
-      "name": "player_reset_recipes",
+      "name": "player_reset_recipes", "side": "server",
       "target": "horizon_client::game::native_player_stats::Game<'_>::native_player_reset_recipes",
       "receiver": "player"
     }

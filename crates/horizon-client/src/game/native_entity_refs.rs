@@ -180,7 +180,7 @@ impl Game<'_> {
         self.remote.is_none()
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && self.world.loaded(pos[0], pos[2])
-            && (self.world.layout().min_y()..self.world.layout().max_y()).contains(&pos[1])
+            && self.world.shape.contains_y(pos[1])
     }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
@@ -450,6 +450,50 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_reads_and_writes_use_dimension_build_height() {
+        use horizon_client::{
+            chunk::{Chunk, LevelShape},
+            mod_api::NativeBlockUpdateFlags,
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world.shape = LevelShape::new(0, 128, 128, true, false).unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 127, 0, stone).unwrap();
+            game.world.set(0, 128, 0, stone).unwrap();
+            assert!(game.native_level_is_loaded(level, [0, 127, 0]));
+            assert_eq!(game.native_level_state(level, [0, 127, 0]), Some(stone));
+            assert_eq!(
+                game.native_level_block(level, [0, 127, 0]).as_deref(),
+                Some("minecraft:stone")
+            );
+            assert!(game.native_level_write_allowed(level, [0, 127, 0]));
+            assert!(!game.native_level_is_loaded(level, [0, 128, 0]));
+            assert_eq!(game.native_level_state(level, [0, 128, 0]), None);
+            assert_eq!(game.native_level_block(level, [0, 128, 0]), None);
+            assert!(!game.native_level_is_loaded(level, [0, -1, 0]));
+            assert_eq!(game.native_level_state(level, [0, -1, 0]), None);
+            assert!(!game.native_level_set_block(
+                level,
+                [0, 128, 0],
+                stone,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(!game.native_level_destroy_block(level, [0, 128, 0], false));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn equipping_mobs_by_hand_keeps_one_complete_stack() {
         use horizon_client::{items::ItemStack, mobs::Mob};
         use horizon_core::geometry::Vec3;
@@ -561,7 +605,7 @@ pub(super) mod tests {
         use horizon_client::{
             items::ItemStack,
             lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-            mod_api::EquipmentSlot,
+            mod_api::{EquipmentSlot, GameMode},
         };
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{
@@ -621,15 +665,19 @@ pub(super) mod tests {
             }
             game.lan = Some(host);
             let player = game.native_player_ref(12).unwrap();
-            assert!(!game.native_player_set_game_mode(player, -1));
-            assert!(!game.native_player_set_game_mode(player, 4));
-            assert!(!game.native_player_set_game_mode(player, 0));
-            assert!(game.native_player_set_game_mode(player, 1));
-            assert_eq!(game.native_player_game_mode(player), Some(1));
+            assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
+            assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+            assert_eq!(
+                game.native_player_game_mode(player),
+                Some(GameMode::Creative)
+            );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
-            assert!(game.native_player_set_game_mode(player, 0));
-            assert_eq!(game.native_player_game_mode(player), Some(0));
+            assert!(game.native_player_set_game_mode(player, GameMode::Survival));
+            assert_eq!(
+                game.native_player_game_mode(player),
+                Some(GameMode::Survival)
+            );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
             let mut stale = player;
@@ -637,7 +685,7 @@ pub(super) mod tests {
                 horizon_client::mod_api::NativeWorldEpoch::new(0),
                 player.entity.id(),
             );
-            assert!(!game.native_player_set_game_mode(stale, 1));
+            assert!(!game.native_player_set_game_mode(stale, GameMode::Creative));
             host = game.lan.take().unwrap();
             let other = game
                 .native_lifecycle
@@ -682,11 +730,14 @@ pub(super) mod tests {
             );
             let player = game.native_player_ref(13).unwrap();
             assert_eq!(player.entity, other);
-            assert_eq!(player.game_mode(game), Some(0));
-            assert!(!game.native_player_set_game_mode(player, 1));
+            assert_eq!(player.game_mode(game), Some(GameMode::Survival));
+            assert!(!game.native_player_set_game_mode(player, GameMode::Creative));
             let acting = game.native_player_ref(12).unwrap();
-            assert!(game.native_player_set_game_mode(acting, 2));
-            assert_eq!(game.native_player_game_mode(acting), Some(2));
+            assert!(game.native_player_set_game_mode(acting, GameMode::Adventure));
+            assert_eq!(
+                game.native_player_game_mode(acting),
+                Some(GameMode::Adventure)
+            );
             host = game.lan.take().unwrap();
             let nested = game.enter_guest(&mut host, 13).unwrap();
             game.lan = Some(host);
