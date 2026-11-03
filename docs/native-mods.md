@@ -2388,6 +2388,11 @@ client, so a call a tick looks smooth.
 several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
 a dimension.
 
+An entity held out of storage while it is changed refuses handle reads and writes: reads return `None` and writes return
+`false`. This includes cart and ridden-cart ticks, boat ticks and leash changes, and a copper golem turning into a
+statue. A block entity also refuses its handle while it is being ticked. Tick hooks before and after that work can use
+the handle normally.
+
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
 - `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name

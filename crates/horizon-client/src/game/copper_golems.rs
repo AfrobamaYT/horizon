@@ -144,11 +144,13 @@ impl Game<'_> {
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return;
         };
-        let mut m = self.mobs[i].clone();
-        self.golem_turn_to_statue(&mut m);
-        if let Some(i) = self.mobs.iter().position(|x| x.id == id) {
-            self.mobs[i] = m;
-        }
+        self.with_entity_held_out(id, |game| {
+            let mut m = game.mobs[i].clone();
+            game.golem_turn_to_statue(&mut m);
+            if let Some(i) = game.mobs.iter().position(|x| x.id == id) {
+                game.mobs[i] = m;
+            }
+        });
     }
     fn golem_turn_to_statue(&mut self, m: &mut Mob) {
         let pos = [

@@ -18,9 +18,24 @@ use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
+    /// Keep a held-out entity inaccessible until its copy has been stored back.
+    pub(super) fn with_entity_held_out<R>(
+        &mut self,
+        id: u32,
+        action: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.held_out.push(id);
+        let result = action(self);
+        self.held_out.pop();
+        result
+    }
+
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+        if self.held_out.contains(&entity.id())
+            || !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(entity.epoch())
+        {
             return None;
         }
         let id = i32::try_from(entity.id()).ok()?;

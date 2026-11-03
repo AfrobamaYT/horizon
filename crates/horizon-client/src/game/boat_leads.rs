@@ -403,9 +403,12 @@ impl Game<'_> {
     /// `Leashable.dropLeash` for each boat in `list`.
     pub(super) fn drop_boat_leashes(&mut self, list: &[usize]) {
         for &i in list {
-            let mut b = self.boats[i].clone();
-            self.release_boat_leash(&mut b, true);
-            self.boats[i] = b;
+            let id = self.boats[i].id;
+            self.with_entity_held_out(id, |game| {
+                let mut b = game.boats[i].clone();
+                game.release_boat_leash(&mut b, true);
+                game.boats[i] = b;
+            });
         }
     }
 
@@ -454,9 +457,11 @@ impl Game<'_> {
         if self.boat_led_by_player(i) {
             // hasInfiniteMaterials: removeLeash, else dropLeash.
             let drop = !self.creative;
-            let mut b = self.boats[i].clone();
-            self.release_boat_leash(&mut b, drop);
-            self.boats[i] = b;
+            self.with_entity_held_out(id, |game| {
+                let mut b = game.boats[i].clone();
+                game.release_boat_leash(&mut b, drop);
+                game.boats[i] = b;
+            });
             self.lead_game_event("minecraft:entity_interact", at);
             self.lead_sound("untied", at);
             return true;
@@ -465,11 +470,13 @@ impl Game<'_> {
         if item.as_deref() == Some("minecraft:lead") && !taken_by_player {
             let player = self.player_center();
             if self.boat_can_attach(i, player) {
-                let mut b = self.boats[i].clone();
-                self.release_boat_leash(&mut b, true);
-                b.leash = Some(Holder::Player);
-                b.leash_player = Some(self.acting_player_uuid());
-                self.boats[i] = b;
+                self.with_entity_held_out(id, |game| {
+                    let mut b = game.boats[i].clone();
+                    game.release_boat_leash(&mut b, true);
+                    b.leash = Some(Holder::Player);
+                    b.leash_player = Some(game.acting_player_uuid());
+                    game.boats[i] = b;
+                });
                 self.lead_sound("tied", at);
                 // The lead is always used up.
                 if let Some(stack) = self.held_mut().as_mut() {
