@@ -2831,11 +2831,11 @@ pub(crate) mod tests {
             Some(Box::new(ChemTank(at)))
         });
         r.mod_index = 1;
-        r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
-            Some(Box::new(ChemTank(at)))
-        });
         r.block_entity_capability(&NOT_CHEMICALS, "test:chem_vat", |_, at| {
             Some(Box::new(ModTank { at, lie: None }))
+        });
+        r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
+            Some(Box::new(ChemTank(at)))
         });
         r.block_entity_capability(&UNNAMESPACED, "test:chem_vat", |_, at| {
             Some(Box::new(ChemTank(at)))
