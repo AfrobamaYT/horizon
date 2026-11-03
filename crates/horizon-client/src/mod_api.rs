@@ -804,6 +804,17 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
+/// that destroy it. The unloading and dimension-change reasons belong to the
+/// game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeRemovalReason {
+    /// `KILLED`: a mob's effects that act on removal run.
+    Killed,
+    /// `DISCARDED`, as `Entity.discard`.
+    Discarded,
+}
+
 /// Block shape used by an empty-context level ray.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
