@@ -47,6 +47,40 @@ impl Game<'_> {
         };
         Some([v.x, v.y, v.z])
     }
+    /// `Entity.getKnownSpeed`, in blocks a tick: what the entity moved in its
+    /// last tick (`computeSpeed`), or for a player what the client reported.
+    /// A mob, projectile, rocket or trident gives its displacement; any other
+    /// simulated entity its velocity.
+    pub(super) fn native_entity_known_speed(&self, entity: EntityRef) -> Option<Vec3> {
+        let t = self.native_entity_target(entity)?;
+        if let Some(g) = self.native_target_guest(t) {
+            let [x, y, z] = g.known_movement;
+            return Some(Vec3::new(x, y, z));
+        }
+        Some(match t {
+            Target::Player => self.known_player_movement(),
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id)?;
+                m.position.subtract(m.previous)
+            }
+            Target::Projectile(id) => {
+                let p = self.creatures.projectiles.iter().find(|p| p.id == id)?;
+                p.position.subtract(p.previous)
+            }
+            Target::Rocket(id) => {
+                let r = self.rockets.iter().find(|r| r.id == id)?;
+                r.position.subtract(r.previous)
+            }
+            Target::Trident(id) => {
+                let r = self.tridents.iter().find(|r| r.id == id)?;
+                r.position.subtract(r.previous)
+            }
+            _ => {
+                let [x, y, z] = self.native_entity_velocity(entity)?;
+                Vec3::new(x, y, z)
+            }
+        })
+    }
     /// Sets the entity's velocity (`Entity.setDeltaMovement`); clients see it
     /// as they see the entity move. False for a player (its client moves
     /// it), an entity Horizon doesn't simulate, or a value that isn't finite.

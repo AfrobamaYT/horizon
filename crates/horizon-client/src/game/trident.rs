@@ -47,6 +47,8 @@ pub(super) struct ThrownTrident {
     pub(super) owner: u32,
     /// The guest that threw it (`Projectile.getOwner`); `None` for the host.
     pub(super) guest: Option<u32>,
+    /// `Entity.random`: what a mod's `Projectile.deflect` draws from.
+    pub(super) random: horizon_core::random::LegacyRandom,
 }
 /// A player a trident can return to (its owner) or that can pick it up: this
 /// game's own, or a server's guest in this level, which is all a server has.
@@ -122,6 +124,7 @@ impl ThrownTrident {
             age: 0,
             owner: 0,
             guest: None,
+            random: horizon_client::projectiles::position_random(position),
         }
     }
     /// `ThrownTrident.tick`'s Loyalty return: pulled up and towards the
@@ -442,6 +445,7 @@ impl Game<'_> {
             age: 0,
             owner: 0,
             guest: self.lan_acting,
+            random: horizon_client::projectiles::position_random(start),
         });
         self.player_projectile_shot();
         self.audio

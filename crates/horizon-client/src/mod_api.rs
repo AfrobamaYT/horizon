@@ -718,8 +718,9 @@ impl ItemEntityRef {
 }
 
 /// A projectile of the open world (vanilla's `Projectile`), narrowed with
-/// `host.projectile`: arrows, mob-thrown tridents, thrown items, fireballs,
-/// wind charges, skulls, shulker bullets and mods' thrown types.
+/// `host.projectile`: arrows, tridents (a player's too), firework rockets,
+/// thrown items, fireballs, wind charges, skulls, shulker bullets and mods'
+/// thrown types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ProjectileRef(EntityRef);
 

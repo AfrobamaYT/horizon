@@ -6,7 +6,7 @@
 use super::{Game, lan::LanHost, ray_box, view_vector};
 use horizon_client::{
     mobs::Who,
-    projectiles::{Projectile, ProjectileKind},
+    projectiles::{Projectile, ProjectileKind, Turn},
 };
 use horizon_core::geometry::{Aabb, Vec3};
 
@@ -29,20 +29,22 @@ pub(super) fn redirectable(p: &Projectile) -> bool {
 /// with `deflect(AIM_DEFLECT, hitter's owner, hitter's owner, true, 1.0)`.
 /// It flies along the owner's look (`Entity.getLookAngle`; unchanged when the
 /// owner is gone), is that owner's now, and its acceleration power is back
-/// to 0.1 (`AbstractHurtingProjectile.onDeflection` by an attack).
+/// to 0.1 (`AbstractHurtingProjectile.onDeflection` by an attack). A wind
+/// charge in its first five ticks refuses (`WindCharge.deflect`): false, and
+/// nothing changes.
 pub(super) fn aim_deflect(
     p: &mut Projectile,
     look: Option<Vec3>,
     owner: Option<Who>,
     owner_uuid: Option<[i32; 4]>,
     guest: Option<u32>,
-) {
-    if let Some(look) = look {
-        p.velocity = look;
-        p.needs_sync = true;
-    }
-    (p.owner, p.owner_uuid, p.guest) = (owner, owner_uuid, guest);
-    p.acceleration = 0.1;
+) -> bool {
+    p.deflect(
+        Turn::Direction(look),
+        [1.0; 3],
+        (owner, owner_uuid, guest),
+        true,
+    )
 }
 
 /// `Entity.getPickRadius`: only `AbstractHurtingProjectile` has one (1); a shulker
@@ -127,7 +129,11 @@ impl Game<'_> {
         ) {
             self.hit_shulker_bullet(None, i);
         } else {
-            self.deflect(i);
+            if !self.deflect(i) {
+                // `Player.deflectProjectile` refused (a wind charge made
+                // under five ticks ago): the blow goes on as an attack.
+                return false;
+            }
         }
         true
     }
@@ -194,24 +200,24 @@ impl Game<'_> {
         Some(horizon_world::view_direction::view_vector(pitch, yaw))
     }
 
-    /// `Projectile.deflect(AIM_DEFLECT, player, player, true)`.
-    pub(super) fn deflect(&mut self, i: usize) {
+    /// `Projectile.deflect(AIM_DEFLECT, player, player, true)`. False, and
+    /// nothing changes, when the projectile refuses.
+    pub(super) fn deflect(&mut self, i: usize) -> bool {
         let dir = view_vector(self.yaw, self.pitch);
         let (guest, owner_uuid) = (self.lan_acting, Some(self.acting_player_uuid()));
         let p = &mut self.creatures.projectiles[i];
-        p.velocity = Vec3::new(dir[0], dir[1], dir[2]);
+        let owner = (Some(Who::Player), owner_uuid, guest);
+        let look = Vec3::new(dir[0], dir[1], dir[2]);
+        if !p.deflect(Turn::Direction(Some(look)), [1.0; 3], owner, true) {
+            return false;
+        }
         p.yaw = dir[0].atan2(dir[2]).to_degrees() as f32;
         p.pitch = dir[1].atan2(dir[0].hypot(dir[2])).to_degrees() as f32;
-        p.owner = Some(Who::Player);
-        // On a server, the guest who struck it (their projectile now).
-        (p.guest, p.owner_uuid) = (guest, owner_uuid);
         // Not into the one who turned it on its way out.
         p.left_owner = false;
-        // `AbstractHurtingProjectile.onDeflection` by an attack, and the
-        // `needsSync` that `AIM_DEFLECT` sets: a server's players see it turn
-        // at once, not at the fireball's next update ten ticks later.
-        p.acceleration = 0.1;
-        p.needs_sync = true;
+        // The deflection set `needsSync`, `onDeflection`'s power and the
+        // owner (on a server the guest who struck it): a server's players
+        // see it turn at once, not at the fireball's next update.
         self.reset_attack_strength();
         self.swing_arm();
         let from = self
@@ -220,6 +226,7 @@ impl Game<'_> {
             .map(|p| [p.position.x, p.position.y, p.position.z]);
         self.audio
             .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
+        true
     }
 }
 
@@ -268,7 +275,35 @@ mod tests {
             Some(Who::Mob(7)),
         );
         p.velocity = Vec3::new(0.0, 1.5, 0.0);
+        // Past `WindCharge.noDeflectTicks`.
+        p.no_deflect_ticks = 0;
         p
+    }
+
+    #[test]
+    fn a_new_wind_charge_refuses_a_redirect_for_five_ticks() {
+        let mut p = wind_charge();
+        p.no_deflect_ticks = 5;
+        let look = Vec3::new(0.0, -1.0, 0.0);
+        assert!(!aim_deflect(
+            &mut p,
+            Some(look),
+            Some(Who::Player),
+            None,
+            None
+        ));
+        assert_eq!(p.velocity, Vec3::new(0.0, 1.5, 0.0));
+        assert_eq!(p.owner, Some(Who::Mob(7)));
+        assert!(!p.needs_sync);
+        p.no_deflect_ticks = 0;
+        assert!(aim_deflect(
+            &mut p,
+            Some(look),
+            Some(Who::Player),
+            None,
+            None
+        ));
+        assert_eq!(p.velocity, look);
     }
 
     #[test]
