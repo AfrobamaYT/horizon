@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn named_source_without_an_entry_template_is_refused_before_staging() {
-        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'engine'\n");
+        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n");
         let stage_dir = dir.join("workspace");
         let source = stage_dir.join("crates/horizon-client/src");
         fs::create_dir_all(&source).unwrap();
