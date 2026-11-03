@@ -57,36 +57,19 @@ beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach th
 still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
 requires a farmer at work and `mob_griefing` enabled.
 
-## Pinned to a Nightly
+## Native mod source revisions
 
-A native mod builds on one exact Horizon commit: `[compatibility] horizon_revision` in its `horizon-mixin.toml`,
-and `horizon` in the `horizon-native.json` of its registry file (`.hnmod`, `horizon_mods::index::native`). Mods
-pin a **Nightly's commit** (or a release's). Every Nightly ships its source and keeps its commit for good as the
-tag `nightly-source/<date>-<short>` ([release-flow.md](release-flow.md#nightly-channel)), so a pinned mod still
-builds after its Nightly is replaced. When the mods of one build pin different commits, the launcher says which
-mod pins which and the commit the build would use, the newest of them, and builds only after the player chooses
-**Build anyway** (`native-build --allow-version-mismatch`): such mods often still apply and compile. A failed build
-then says the mods were made for other versions. Their horizon-mixins pins may differ too: the build uses the
-newest of them and the launcher's own, never one older than a mod was made with. A bundle with no pin builds on
-the commit of the installed version the build starts from.
+A native mod targets one exact Horizon source revision: `[compatibility] horizon_revision` in its
+`horizon-mixin.toml`, and `horizon` in its `horizon-native.json`. Match the mod to the game revision it will run
+with, and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
+building the mod unchanged.
 
-### Mods on the hook points
+Hook points are functions the game calls at fixed places. Their names, parameters and call sites belong to the
+game source and may change. Per-hook catalog versions describe individual contracts, not minimum game versions
+or a cross-release compatibility range.
 
-A mod that hooks only Horizon's native hook points (`crates/horizon-client/src/game/native_hooks.rs`, with a few
-free functions in other crates: [render hook points](#render-hook-points), [items' default
-components](#items-default-components), `horizon_world::loot::native_loot_table_load`, [menu slot
-rules](#menu-slot-rules); empty functions the game
-calls at fixed places, plus helpers, kept stable across releases) can name the version it
-needs instead of pinning: `"hooks": 1` in its `.hnmod`'s `horizon-native.json`, the `NATIVE_HOOKS_API` of that
-file when it was made. Hook points are only ever added: each addition raises `NATIVE_HOOKS_API`, and a mod builds
-on any Horizon whose version is the one it needs or a later one. Its `horizon` is then only the commit it was tested on. The launcher builds it on the commit the other mods
-pin, else on the installed version's commit (the game the player plays), after checking that commit's
-`NATIVE_HOOKS_API` (read from GitHub) is at least the mod's; when it isn't and nothing pins, it builds on the commit the
-mod was tested on. In its own copy of the mod it sets `horizon_revision` to the commit it builds on. Horizon's
-own native mods (Zoom, FPS counter, Keystrokes, Minimap; horizon-rust/horizon-mods, `native/<name>/`) are made this way, so any of them build together
-with no re-release for each Nightly.
-
-Hook and helper authors use [API fragments](../tools/native-hook-fragments/README.md) to request a number.
+Hook and helper authors add [catalog fragments](../tools/native-hook-fragments/README.md). Collection updates
+the catalog, not a global API number, source comments or documentation histories.
 
 API 2 adds the item panel beside container screens and its recipe pages (`native_panel_items`,
 `native_panel_recipes`, and the hook `native_panel_event` for the player's clicks, searches and keys over items), and
@@ -3029,7 +3012,7 @@ as they do in hooks.
 A catalog hook's trait method, event and return make up its `hook_version` contract
 ([Named hook points](#named-hook-points)). These per-hook contract versions are catalog metadata, not minimum game
 versions. Catalog hooks, `Host` calls and raw `target` injections all build against the
-[installed game's exact source revision](#building-against-the-installed-game). Rebuild the mod when that contract changes.
+[game's exact source revision](#native-mod-source-revisions). Rebuild the mod when that contract changes.
 
 ### Parts
 

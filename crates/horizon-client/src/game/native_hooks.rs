@@ -842,8 +842,8 @@
 //! `native_known_recipes`, `native_place_recipe`, `native_give`): what a
 //! recipe viewer needs.
 //!
-//! Native mods build against the installed game's exact source revision.
-//! Names, parameters and call sites may change; rebuild mods after game updates.
+//! Native hook contracts belong to the game source. Names, parameters and call
+//! sites may change; rebuild native mods after game updates.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
@@ -1025,6 +1025,11 @@ impl Game<'_> {
 /// `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and `UPDATE_IMMEDIATE` change nothing
 /// yet.
 pub(super) use horizon_world::level::flags;
+
+/// The hook points' API version. The launcher reads this line from the
+/// source it builds; keep its form.
+#[allow(dead_code)]
+pub(crate) const NATIVE_HOOKS_API: u32 = 359;
 
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. 232.
@@ -11377,6 +11382,7 @@ mod tests {
             .trim_end()
             .strip_suffix("#[cfg(test)]")
             .expect("the tests module has its cfg");
+        assert!(code.contains("\npub(crate) const NATIVE_HOOKS_API: u32 = "));
         let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
         for line in lines {
             assert!(!line.contains("cfg"), "a cfg in the hook points: {line}");

@@ -113,17 +113,17 @@ class StampTests(unittest.TestCase):
         repo = self.original
         fragments = sorted((repo / stamp.FRAGMENTS).glob("*.json"))
         expected = json.loads((repo / stamp.CATALOG).read_text())
-        expected_hooks = [h["name"] for h in expected["hooks"]]
+        expected_hooks = [(h["name"], h["side"]) for h in expected["hooks"]]
         expected_helpers = expected.get("helpers", []).copy()
         for path in fragments:
             fragment = json.loads(path.read_text())
-            expected_hooks.extend(h["name"] for h in fragment["hooks"])
+            expected_hooks.extend((h["name"], h["side"]) for h in fragment["hooks"])
             expected_helpers.extend(fragment.get("helpers", []))
             shutil.copyfile(path, self.root / stamp.FRAGMENTS / path.name)
         shutil.copyfile(repo / stamp.CATALOG, self.root / stamp.CATALOG)
         self.assertFalse(stamp.collect_fragments(False))
         catalog = json.loads((self.root / stamp.CATALOG).read_text())
-        self.assertEqual([h["name"] for h in catalog["hooks"]], expected_hooks)
+        self.assertEqual([(h["name"], h["side"]) for h in catalog["hooks"]], expected_hooks)
         self.assertEqual(catalog.get("helpers", []), expected_helpers)
         self.assertFalse(list((self.root / stamp.FRAGMENTS).glob("*.json")))
 
