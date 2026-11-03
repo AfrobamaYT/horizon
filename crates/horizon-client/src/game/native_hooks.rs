@@ -2387,6 +2387,16 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_interact_entity(self, mod_api::mods(), entity, kind, stack, claimed);
     }
+    /// The local player left-clicks empty space, with any main-hand stack.
+    /// Client-side only; the server does not receive this event. @API:left_click_empty@.
+    pub(super) fn native_left_click_empty(&mut self) {
+        mod_api::dispatch_left_click_empty(self, mod_api::mods());
+    }
+    /// The local player right-clicks empty space with an empty `hand`.
+    /// Client-side only; the server does not receive this event. @API:right_click_empty@.
+    pub(super) fn native_right_click_empty(&mut self, hand: Hand) {
+        mod_api::dispatch_right_click_empty(self, mod_api::mods(), hand);
+    }
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
     /// (`[0, 1, 0]` is the top): where `ServerPlayerGameMode.handleBlockBreakAction`
     /// takes a dig's start, after its reach, spawn protection and world border

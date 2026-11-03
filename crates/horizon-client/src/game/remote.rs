@@ -8245,6 +8245,13 @@ impl Game<'_> {
     /// the main hand's item, then the off hand's turn (its block, its item).
     /// The server does each packet's part with that packet's hand only.
     fn remote_use_hands(&mut self) {
+        // Nothing in the crosshair: an empty hand's click is heard, by mods only.
+        let miss = !horizon_client::mod_api::mods().is_empty()
+            && !self.entity_targeted()
+            && self.pick().is_none();
+        if miss && self.held().is_none() {
+            self.native_right_click_empty(Hand::Main);
+        }
         // A successful Item.use always drops the hand (LocalPlayer.itemUsed).
         if self.remote_use_item(Hand::Main) {
             self.heights.item_used(Hand::Main);
@@ -8264,6 +8271,9 @@ impl Game<'_> {
         };
         if off_target {
             return;
+        }
+        if miss && self.offhand.is_none() {
+            self.native_right_click_empty(Hand::Off);
         }
         if self.remote_use_item(Hand::Off) {
             self.heights.item_used(Hand::Off);
@@ -8541,7 +8551,7 @@ impl Game<'_> {
     }
 
     fn remote_start_attack(&mut self) -> bool {
-        if self.clicks.miss_time > 0 {
+        if self.clicks.miss_time > 0 || self.hands_busy() {
             return false;
         }
         if self.spectator() {
@@ -8630,12 +8640,25 @@ impl Game<'_> {
         } else if !self.entity_targeted()
             && let Some(hit) = self.pick()
         {
+            // A block hit on air falls through to MISS. `instant` below reads the
+            // block again after the dig, which may have broken it.
+            if !horizon_client::mod_api::mods().is_empty()
+                && self
+                    .res
+                    .facts()
+                    .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
+            {
+                self.native_left_click_empty();
+            }
             self.remote_mining(true);
             instant = self
                 .res
                 .facts()
                 .is_air(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]));
         } else {
+            if !horizon_client::mod_api::mods().is_empty() && !self.entity_targeted() {
+                self.native_left_click_empty();
+            }
             if !self.creative {
                 self.clicks.miss_time = 10;
             }
