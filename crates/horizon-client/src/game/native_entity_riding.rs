@@ -246,6 +246,11 @@ impl Game<'_> {
     }
 
     /// Attempts to board a vehicle through the shared server mount path.
+    ///
+    /// Players and mobs can ride a mob, boat or minecart. Returns false for
+    /// unsupported entity pairs, stale or held-out handles, a full stored
+    /// vehicle, a cycle, or a canceled mount or dismount. `force` bypasses
+    /// the rider's normal admission checks, not storage limits.
     pub(super) fn native_entity_start_riding(
         &mut self,
         entity: EntityRef,
@@ -292,5 +297,38 @@ impl Game<'_> {
             any |= self.native_entity_stop_riding(p);
         }
         any
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::commands::Target;
+    use horizon_client::mobs::Mob;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mount_rejects_cycles_and_respects_cooldown_unless_forced() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for id in [30, 31, 32] {
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            game.mobs[0].extra.boarding_cooldown = 10;
+            assert!(!game.start_riding_target(Target::Mob(30), Target::Mob(31), false));
+            assert!(game.start_riding_target(Target::Mob(30), Target::Mob(31), true));
+            assert!(!game.start_riding_target(Target::Mob(30), Target::Mob(31), true));
+            assert!(!game.start_riding_target(Target::Mob(31), Target::Mob(30), true));
+            assert!(!game.start_riding_target(Target::Mob(32), Target::Mob(31), true));
+            assert_eq!(game.mobs[0].extra.mount, Some(31));
+            assert_eq!(game.mobs[1].extra.rider, Some(30));
+            assert_eq!(game.mobs[2].extra.mount, None);
+            game.dismount_mob(30);
+            assert_eq!(game.mobs[0].extra.mount, None);
+            assert_eq!(game.mobs[0].extra.boarding_cooldown, 60);
+            assert!(!game.start_riding_target(Target::Mob(30), Target::Mob(32), false));
+            assert!(game.start_riding_target(Target::Mob(30), Target::Mob(32), true));
+            assert_eq!(game.mobs[0].extra.mount, Some(32));
+        });
     }
 }
