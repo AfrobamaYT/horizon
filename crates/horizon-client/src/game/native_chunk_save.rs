@@ -49,6 +49,7 @@ mod tests {
                 .join("../../target")
                 .join(format!("chunk-save-seam-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
+            game.world_root = dir.clone();
             game.save = Arc::new(SaveDir::new(dir.clone(), LevelShape::OVERWORLD));
             let key = (99, 99);
             game.world
