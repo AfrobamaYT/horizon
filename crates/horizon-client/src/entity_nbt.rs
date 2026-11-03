@@ -523,7 +523,7 @@ pub fn mob_to_nbt(
     }
     // Animal.addAdditionalSaveData: the love ticks left, whatever the save had.
     if is_animal(id) {
-        map.insert("InLove".into(), Tag::Int(m.extra.in_love.max(0)));
+        map.insert("InLove".into(), Tag::Int(m.extra.in_love));
         // Animal.addAdditionalSaveData: the player who fed it.
         if let Some(cause) = m.extra.love_cause {
             map.insert("LoveCause".into(), Tag::IntArray(cause.to_vec()));
@@ -2142,6 +2142,34 @@ pub fn tnt_to_nbt(
     }
     tag
 }
+/// `EvokerFangs.addAdditionalSaveData`: always save the live warmup counter.
+/// Known Owner UUIDs use `EntityReference.store` encoding; unresolved
+/// loaded Owner data remains in the raw compound.
+pub fn evoker_fangs_to_nbt(
+    position: Vec3,
+    yaw: f32,
+    warmup: i32,
+    owner: Option<[i32; 4]>,
+    uuid: [i32; 4],
+    raw: Option<&Tag>,
+) -> Tag {
+    let mut tag = Base {
+        id: "minecraft:evoker_fangs",
+        uuid,
+        position,
+        motion: raw.map(motion).unwrap_or(Vec3::ZERO),
+        rotation: [yaw, raw.map(rotation).unwrap_or([0.0; 2])[1]],
+        on_ground: raw.is_some_and(|t| flag(t, "OnGround")),
+        fall_distance: 0.0,
+    }
+    .tag(raw);
+    put(&mut tag, "Warmup", Tag::Int(warmup));
+    if let Some(owner) = owner {
+        put(&mut tag, "Owner", Tag::IntArray(owner.to_vec()));
+    }
+    tag
+}
+
 pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemEntity> {
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
@@ -3495,6 +3523,72 @@ mod tests {
     }
 
     #[test]
+    fn loaded_villager_command_names_follow_profession_and_custom_name() {
+        use crate::mobs::Species;
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:villager".into();
+        def.species = Species::Villager;
+        let types = [("minecraft:villager".into(), kind)].into();
+        for (profession, key) in [
+            ("none", "entity.minecraft.villager.none"),
+            ("nitwit", "entity.minecraft.villager.nitwit"),
+            ("cleric", "entity.minecraft.villager.cleric"),
+            ("farmer", "entity.minecraft.villager.farmer"),
+            ("librarian", "entity.minecraft.villager.librarian"),
+        ] {
+            let data = Tag::compound([
+                ("profession", string(&format!("minecraft:{profession}"))),
+                ("type", string("minecraft:plains")),
+                ("level", Tag::Int(1)),
+            ]);
+            let mut tag = Tag::compound([
+                ("id", string("minecraft:villager")),
+                ("Pos", doubles(&[4.5, 220.0, 4.5])),
+                ("NoAI", Tag::Byte(1)),
+                ("VillagerData", data.clone()),
+            ]);
+            let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
+            assert_eq!(villager_data(&mob), data);
+            assert_eq!(mob.command_name().translation_key(), Some(key));
+            put(&mut tag, "CustomName", string("Ada"));
+            let named = mob_from_nbt(&tag, &types, 8, None).unwrap();
+            assert_eq!(
+                named.command_name().component(),
+                crate::text::Text::literal("Ada").component()
+            );
+        }
+    }
+
+    #[test]
+    fn other_mob_command_names_keep_their_type_and_custom_name() {
+        use crate::mobs::Species;
+        for (id, species, key) in [
+            (
+                "minecraft:zombie_villager",
+                Species::ZombieVillager,
+                "entity.minecraft.zombie_villager",
+            ),
+            (
+                "minecraft:wandering_trader",
+                Species::WanderingTrader,
+                "entity.minecraft.wandering_trader",
+            ),
+            ("audit:helper", Species::Pig, "entity.audit.helper"),
+        ] {
+            let mut kind = crate::mobs::sensor_scan_tests::kind();
+            let def = Arc::make_mut(&mut kind);
+            def.id = id.into();
+            def.species = species;
+            let mut mob = Mob::new(1, kind, Vec3::ZERO, 0.0);
+            mob.extra.variant2 = 4;
+            assert_eq!(mob.command_name().translation_key(), Some(key));
+            mob.custom_name = Some("Ada".into());
+            assert_eq!(mob.command_name().plain(), "Ada");
+        }
+    }
+
+    #[test]
     fn mob_loading_accepts_default_namespace_and_preserves_custom_namespaces() {
         let cow = crate::mobs::sensor_scan_tests::kind();
         let types = [
@@ -3834,6 +3928,50 @@ mod tests {
         let cleared = item_entity_to_nbt(&cleared, [1, 2, 3, 4], Some(&tag));
         assert!(cleared.get("Thrower").is_none());
     }
+    #[test]
+    fn animal_nbt_preserves_signed_integer_in_love_and_defaults_after_removal() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:pig".into();
+        def.species = crate::mobs::Species::Pig;
+        let types = [("minecraft:pig".into(), kind)].into();
+        for (input, expected) in [
+            (Tag::Int(-32769), -32769),
+            (Tag::Int(-32768), -32768),
+            (Tag::Int(-129), -129),
+            (Tag::Int(-128), -128),
+            (Tag::Int(-1), -1),
+            (Tag::Byte(-1), -1),
+            (Tag::Byte(-128), -128),
+            (Tag::Int(0), 0),
+            (Tag::Int(1), 1),
+            (Tag::Int(37), 37),
+        ] {
+            let raw = Tag::compound([
+                ("id", string("minecraft:pig")),
+                ("Pos", doubles(&[4.0, 200.0, 4.0])),
+                ("NoAI", Tag::Byte(1)),
+                ("NoGravity", Tag::Byte(1)),
+                ("InLove", input),
+            ]);
+            let mob = mob_from_nbt(&raw, &types, 1, None).unwrap();
+            assert_eq!(mob.extra.in_love, expected);
+            // Query snapshots and saves both write the live field as an int,
+            // regardless of whether there is an old compound to preserve.
+            for old in [None, Some(&raw)] {
+                let mut saved = mob_to_nbt(&mob, [0, 0, 0, 1], old, None);
+                assert_eq!(saved.get("InLove"), Some(&Tag::Int(expected)));
+                if let Tag::Compound(map) = &mut saved {
+                    map.remove(&"InLove".into());
+                }
+                let cleared = mob_from_nbt(&saved, &types, 2, None).unwrap();
+                assert_eq!(cleared.extra.in_love, 0);
+                let saved = mob_to_nbt(&cleared, [0, 0, 0, 1], Some(&saved), None);
+                assert_eq!(saved.get("InLove"), Some(&Tag::Int(0)));
+            }
+        }
+    }
+
     #[test]
     fn unknown_fields_survive() {
         let raw = Tag::compound([
@@ -5740,12 +5878,24 @@ mod held_item_name_tests {
         let mut helmet = crate::items::ItemStack::new("minecraft:iron_helmet", 1);
         helmet.damage = 40;
         helmet.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Hat".into()));
-        crate::mobs::finalize::set_item_stack(&mut mob, crate::mobs::finalize::HEAD, helmet);
+        helmet.data_mut().trim = Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")));
+        assert!(mob.set_equipment_stack(5, Some(helmet.clone())));
+        assert!(mob.set_equipment_stack(0, Some(helmet)));
         let raw = mob_to_nbt(&mob, [1, 2, 3, 4], None, None);
         let loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
         let worn = crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::HEAD).unwrap();
         assert_eq!(worn.damage, 40);
         assert_eq!(worn.custom_name().as_deref(), Some("Hat"));
+        let held =
+            crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::MAINHAND).unwrap();
+        assert_eq!(
+            held.data().unwrap().trim,
+            Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")))
+        );
+        assert_eq!(
+            worn.data().unwrap().trim,
+            Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")))
+        );
         // Replacing the item forgets the old stack.
         let mut loaded = loaded;
         crate::mobs::finalize::set_item(

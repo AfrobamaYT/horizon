@@ -807,6 +807,8 @@ pub struct ProtoChunk {
     /// Entities placed by structures (`ProtoChunk.addEntity`), as NBT with
     /// absolute `Pos`.
     pub entities: Vec<crate::nbt::Compound>,
+    /// Unmodelled root keys retained from a saved proto chunk.
+    pub saved_root: crate::nbt::Compound,
 }
 impl ProtoChunk {
     /// Its own heap bytes by part (`horizon-ctl memory`): packed blocks,
@@ -1631,6 +1633,7 @@ where
                 structure_starts: references,
                 own_starts,
                 entities: Vec::new(),
+                saved_root: Default::default(),
             });
         }
         let volume = DensityVolume::new(
@@ -1788,6 +1791,7 @@ where
             structure_starts: references,
             own_starts,
             entities: Vec::new(),
+            saved_root: Default::default(),
         })
     }
 }
@@ -3434,16 +3438,29 @@ impl OverworldGenerator {
         dimension: &str,
         with_structures: bool,
     ) -> Result<Self, GeneratorError> {
-        let preset_json: Value = serde_json::from_str(
-            data.world_presets
-                .get(preset)
-                .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
-        )?;
-        // A data pack's level stem replaces the preset's, as the world's
-        // dimension registry does.
-        let stem = match data.dimensions.get(dimension) {
-            Some(json) => serde_json::from_str(json)?,
-            None => preset_json["dimensions"][dimension].clone(),
+        Self::for_world_with_settings(data, seed, preset, dimension, with_structures, None)
+    }
+    /// A saved level stem supplies the generator and dimension type when no data
+    /// pack replaces that dimension. Worlds without one use the preset's stem.
+    pub fn for_world_with_settings(
+        data: Arc<GeneratorData>,
+        seed: i64,
+        preset: &str,
+        dimension: &str,
+        with_structures: bool,
+        saved_stem: Option<&Value>,
+    ) -> Result<Self, GeneratorError> {
+        let stem = if let Some(json) = data.dimensions.get(dimension) {
+            serde_json::from_str(json)?
+        } else if let Some(stem) = saved_stem {
+            stem.clone()
+        } else {
+            let preset_json: Value = serde_json::from_str(
+                data.world_presets
+                    .get(preset)
+                    .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
+            )?;
+            preset_json["dimensions"][dimension].clone()
         };
         let generator = stem["generator"].clone();
         // The level's build range: its dimension type's, a data pack's

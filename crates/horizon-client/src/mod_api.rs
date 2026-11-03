@@ -5,7 +5,7 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
-pub use crate::biome::BiomeColors;
+pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
@@ -84,6 +84,16 @@ pub struct NativeCamera {
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
 
+/// Context for a player tuning a note block.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeNoteBlockChange<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub instrument: &'a str,
+    /// The note before tuning, in the range 0 through 24.
+    pub old_note: i32,
+}
+
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -120,6 +130,93 @@ pub struct NativeLootDrops<'a> {
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.
     pub used: bool,
+}
+
+/// A note block's instrument (`NoteBlockInstrument`), for `note_block_play`,
+/// in the `instrument` property's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum NativeNoteInstrument {
+    Harp,
+    Basedrum,
+    Snare,
+    Hat,
+    Bass,
+    Flute,
+    Bell,
+    Guitar,
+    Chime,
+    Xylophone,
+    IronXylophone,
+    CowBell,
+    Didgeridoo,
+    Bit,
+    Banjo,
+    Pling,
+    Trumpet,
+    TrumpetExposed,
+    TrumpetOxidized,
+    TrumpetWeathered,
+    Zombie,
+    Skeleton,
+    Creeper,
+    Dragon,
+    WitherSkeleton,
+    Piglin,
+    CustomHead,
+}
+
+impl NativeNoteInstrument {
+    /// Every instrument, in the `instrument` property's order.
+    pub const ALL: [Self; 27] = {
+        use NativeNoteInstrument::*;
+        [
+            Harp,
+            Basedrum,
+            Snare,
+            Hat,
+            Bass,
+            Flute,
+            Bell,
+            Guitar,
+            Chime,
+            Xylophone,
+            IronXylophone,
+            CowBell,
+            Didgeridoo,
+            Bit,
+            Banjo,
+            Pling,
+            Trumpet,
+            TrumpetExposed,
+            TrumpetOxidized,
+            TrumpetWeathered,
+            Zombie,
+            Skeleton,
+            Creeper,
+            Dragon,
+            WitherSkeleton,
+            Piglin,
+            CustomHead,
+        ]
+    };
+    /// The `instrument` property's value (`harp`, `cow_bell`).
+    pub fn name(self) -> &'static str {
+        horizon_world::level::data::INSTRUMENTS[self as usize]
+    }
+}
+
+/// The empty frame a fire is about to fill with a nether portal, for
+/// `portal_spawn` (`BlockEvent.PortalSpawnEvent.getPortalSize`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativePortalShape {
+    /// The portal runs along X (else along Z).
+    pub x_axis: bool,
+    /// Its bottom-left inside block.
+    pub bottom_left: [i32; 3],
+    pub width: i32,
+    pub height: i32,
 }
 
 /// A server explosion about to happen, for `explosion_start`
@@ -504,6 +601,26 @@ impl LivingRef {
 impl From<LivingRef> for EntityRef {
     fn from(living: LivingRef) -> Self {
         living.0
+    }
+}
+
+/// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MobRef(EntityRef);
+
+impl MobRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an entity handle.
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The same entity as a living handle.
+    pub fn living(self) -> LivingRef {
+        LivingRef::new(self.0)
     }
 }
 
@@ -1006,7 +1123,7 @@ macro_rules! level_attachment_host {
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
-pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
@@ -1014,10 +1131,12 @@ mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 pub use transaction::TransactionSeal;
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
-    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
-    place_provider, resolve_parts,
+    Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
+    providers, resolve_parts,
+};
+pub use part_table::{
+    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
 };
 
 mod generated {
@@ -1026,6 +1145,9 @@ mod generated {
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+#[cfg(test)]
+pub(crate) use part_table::tests as part_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1559,6 +1681,88 @@ mod tests {
         assert_eq!(stand.items[0], Some(awkward));
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
+
+    /// Writes down every game rule change and level save it hears.
+    struct Recorder(Arc<Mutex<Vec<String>>>);
+
+    impl Hooks for Recorder {
+        fn game_rule_changed(&self, _host: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{} {}", event.rule, event.value));
+        }
+        fn level_save(&self, _host: &mut dyn Host, event: &mut LevelSaveEvent<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("saved {}", event.dimension));
+        }
+    }
+
+    /// `GameRuleChangedEvent` as the server's setters fire it: only for a
+    /// rule `GameRules.set` took, with its id and new value, to every mod.
+    #[test]
+    fn a_game_rule_change_reaches_every_mod_once_the_rule_is_set() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(Recorder(seen.clone())),
+            Box::new(Recorder(seen.clone())),
+        ];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut rules = crate::gamerules::GameRules::default();
+        // What `set_game_rule` and the other setters do.
+        let mut set = |name: &str, value: GameRuleValue| {
+            if rules.set(name, value) {
+                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+            }
+        };
+        set("keep_inventory", GameRuleValue::Bool(true));
+        // Out of range, of the wrong type, unknown: GameRules.set refuses them.
+        set("random_tick_speed", GameRuleValue::Int(-1));
+        set("keep_inventory", GameRuleValue::Int(1));
+        set("no_such_rule", GameRuleValue::Bool(true));
+        set("random_tick_speed", GameRuleValue::Int(7));
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "minecraft:keep_inventory true",
+                "minecraft:keep_inventory true",
+                "minecraft:random_tick_speed 7",
+                "minecraft:random_tick_speed 7",
+            ]
+        );
+    }
+
+    /// `LevelEvent.Save` as a world save fires it: once for each level, in
+    /// the order they are saved, to every mod.
+    #[test]
+    fn each_saved_level_reaches_every_mod() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(Recorder(seen.clone())),
+            Box::new(Recorder(seen.clone())),
+        ];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for dimension in ["minecraft:the_nether", "minecraft:overworld"] {
+            dispatch_level_save(&mut host, &mods, dimension);
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "saved minecraft:the_nether",
+                "saved minecraft:the_nether",
+                "saved minecraft:overworld",
+                "saved minecraft:overworld",
+            ]
+        );
     }
 
     /// Keeps the cod: reads the catch, sets the rod's damage, and cancels a

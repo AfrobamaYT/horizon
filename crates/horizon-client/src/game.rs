@@ -204,6 +204,7 @@ pub mod native_block_entity_draw;
 mod native_block_entity_refs;
 mod native_block_sprites;
 mod native_block_states;
+mod native_chunk_save;
 mod native_claimed_items;
 mod native_components;
 mod native_criteria;
@@ -228,12 +229,14 @@ mod native_lifecycle;
 mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
+mod native_mob_refs;
 mod native_mobs;
 mod native_motion;
 mod native_mounts;
 mod native_net;
 mod native_panel;
 mod native_panel_recipes;
+mod native_player_cooldowns;
 mod native_player_food;
 mod native_projectiles;
 mod native_quick_move;
@@ -1294,6 +1297,25 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn note_block_change(
+        &self,
+        pos: BlockPos,
+        instrument: &str,
+        old: i32,
+        mut new: i32,
+    ) -> Option<i32> {
+        let mut cancel = false;
+        if self.native_authoritative {
+            let context = horizon_client::mod_api::NativeNoteBlockChange {
+                dimension: self.dimension,
+                pos,
+                instrument,
+                old_note: old,
+            };
+            self.native_note_block_change(&context, &mut new, &mut cancel);
+        }
+        (!cancel).then_some(new)
+    }
     fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
@@ -1305,6 +1327,47 @@ impl LevelAccess for GameLevel<'_> {
                 note,
                 &mut cancel,
             );
+        }
+        !cancel
+    }
+    fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+        use horizon_client::mod_api::NativeNoteInstrument;
+        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+            return true;
+        }
+        let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
+        let mut played = *note;
+        let mut cancel = false;
+        self.native_note_block_play(
+            self.dimension,
+            pos,
+            &mut played_instrument,
+            &mut played,
+            &mut cancel,
+        );
+        *instrument = played_instrument as u8;
+        // A note out of 0 to 24 keeps the block's own.
+        if (0..=24).contains(&played) {
+            *note = played;
+        }
+        !cancel
+    }
+    fn allow_portal_spawn(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        shape: &horizon_world::level::PortalShape,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+            let b = shape.bottom_left;
+            let shape = horizon_client::mod_api::NativePortalShape {
+                x_axis: shape.x_axis,
+                bottom_left: [b.x, b.y, b.z],
+                width: shape.width,
+                height: shape.height,
+            };
+            self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
         }
         !cancel
     }
@@ -2474,6 +2537,9 @@ struct Game<'a> {
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: horizon_client::widgets::Cursor,
     captured: bool,
+    /// Native grab mode used by winit. Linux window managers can drop the
+    /// grab without a focus event, leaving `captured` true but stale.
+    capture_mode: Option<CursorGrabMode>,
     /// The window held the pointer when it lost focus: the system lets a
     /// grabbed pointer go with the focus, and a window that comes back still
     /// wanting it takes it again (`MouseHandler.grabMouse`, whose grab
@@ -3122,6 +3188,11 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
+    /// when their own state is back in their record.
+    save_after_guest_turn: bool,
+    /// Guests whose records are displaced by nested player swaps, outer first.
+    lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -7703,6 +7774,7 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_falling", || self.tick_falling())?;
             horizon_client::spans::time("tick_tnt", || self.tick_tnt())?;
+            self.apply_late_wind_pushes();
         }
         if running {
             horizon_client::spans::time("tick_block_entities", || self.tick_block_entities())?;
@@ -7816,7 +7888,7 @@ impl Game<'_> {
         for mapped in self.settings.keys.translate_all(key) {
             match mapped {
                 Ok(k) => {
-                    self.mapped_key(k, pressed, repeat)?;
+                    self.mapped_key(k, pressed, repeat, key)?;
                 }
                 Err(button) => {
                     let action = match (pressed, repeat) {
@@ -7842,8 +7914,18 @@ impl Game<'_> {
         Ok(())
     }
     /// A key event after rebinding, as the default key of its mapping (the
-    /// keyboard and controllers both end here).
-    fn mapped_key(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> Result<()> {
+    /// keyboard and controllers both end here). `raw` is the physical key
+    /// the event started from (`key` where the caller started from no window
+    /// key): the screens act in that keyspace (`Screen.keyPressed`), where
+    /// `key`, the vanilla default the mapping translated to, may itself be
+    /// another mapping's rebound key.
+    fn mapped_key(
+        &mut self,
+        key: KeyCode,
+        pressed: bool,
+        repeat: bool,
+        raw: KeyCode,
+    ) -> Result<()> {
         // Sneak and sprint are ToggleKeyMappings: a press (or a key
         // repeat) flips them when toggling; only releases reach them
         // behind a screen (KeyboardHandler.keyPress).
@@ -7877,7 +7959,7 @@ impl Game<'_> {
         if repeat && key != KeyCode::KeyQ {
             return Ok(());
         }
-        self.key_pressed(key)
+        self.key_pressed(key, raw)
     }
     /// `KeyMapping.releaseAll` when a screen opens and
     /// `restoreToggleStatesOnScreenClosed` when it closes.
@@ -8063,6 +8145,7 @@ impl Game<'_> {
         // Splitscreen: another player has the pointer; this one's menus leave it alone.
         if !self.keyboard_mouse {
             self.captured = false;
+            self.capture_mode = None;
             return;
         }
         if capture && !self.captured && !cfg!(target_os = "macos") {
@@ -8093,6 +8176,7 @@ impl Game<'_> {
                 self.mouse.set_ignore_first_move();
             }
             self.captured = capture;
+            self.capture_mode = None;
         } else if capture {
             self.mouse.set_ignore_first_move();
             // macOS warps by re-associating the mouse with the pointer,
@@ -8108,10 +8192,14 @@ impl Game<'_> {
             if self.focused {
                 warp(window);
             }
-            self.captured = window
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-                .is_ok();
+            self.capture_mode = if window.set_cursor_grab(CursorGrabMode::Locked).is_ok() {
+                Some(CursorGrabMode::Locked)
+            } else if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                Some(CursorGrabMode::Confined)
+            } else {
+                None
+            };
+            self.captured = self.capture_mode.is_some();
             // Windows already warped above, inside the clip's own position.
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             if self.captured && self.focused {
@@ -8135,6 +8223,7 @@ impl Game<'_> {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
             }
             self.captured = false;
+            self.capture_mode = None;
         }
         // MouseHandler.grabMouse and releaseMouse: the mouse position is
         // the window's centre whenever the pointer's grab state changes, so
@@ -8149,6 +8238,33 @@ impl Game<'_> {
             self.cursor = pos;
         }
         if !self.options.offscreen || self.split_window {
+            window.set_cursor_visible(!self.captured);
+        }
+    }
+    /// A Linux window manager can release the native pointer grab while the
+    /// window remains focused. Reapply the recorded mode on the next gameplay
+    /// click or wheel event, without warping the pointer or consuming input.
+    fn reassert_pointer_capture(&mut self) {
+        #[cfg(target_os = "linux")]
+        if self.screen == Screen::Playing
+            && self.focused
+            && self.captured
+            && !self.options.offscreen
+            && let (Some(window), Some(mode)) = (&self.window, self.capture_mode)
+        {
+            let other = match mode {
+                CursorGrabMode::Locked => CursorGrabMode::Confined,
+                CursorGrabMode::Confined => CursorGrabMode::Locked,
+                CursorGrabMode::None => return,
+            };
+            self.capture_mode = if window.set_cursor_grab(mode).is_ok() {
+                Some(mode)
+            } else if window.set_cursor_grab(other).is_ok() {
+                Some(other)
+            } else {
+                None
+            };
+            self.captured = self.capture_mode.is_some();
             window.set_cursor_visible(!self.captured);
         }
     }
@@ -13450,7 +13566,10 @@ impl Game<'_> {
                 hit.pos[2] + hit.face[2],
             ];
             if self.can_place_used_fire(target) {
-                if !self.try_light_portal(target)? {
+                // With mods, the fire goes in and `BaseFireBlock.onPlace`
+                // fills the frame, as vanilla's order is, so that
+                // `portal_spawn` is asked once, where vanilla asks it.
+                if !horizon_client::mod_api::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -13775,7 +13894,7 @@ impl Game<'_> {
             self.add_pickup(pickups::Taken::Orb(Box::new(o)), pickups::Collector::Player);
         }
         if gained > 0 {
-            self.give_experience_points(gained as i32);
+            self.give_experience_points(gained as i32, false);
         }
     }
     /// `FurnaceResultSlot.checkTakeAchievements`: the player took from the output of the
@@ -13801,7 +13920,15 @@ impl Game<'_> {
     }
     /// `Player.giveExperiencePoints`: `add_experience_levels` runs once for each
     /// level gained or lost, and the mods hear of the level change once.
-    pub(super) fn give_experience_points(&mut self, points: i32) {
+    pub(super) fn give_experience_points(&mut self, points: i32, allow_negative: bool) {
+        let Some(points) = self.xp_change(points) else {
+            return;
+        };
+        let points = if allow_negative {
+            points
+        } else {
+            points.max(0)
+        };
         let old_level = self.experience.level;
         self.experience.add_points(points);
         while self.experience.progress < 0.0 {
@@ -14534,37 +14661,30 @@ impl Game<'_> {
                 && (position.y - f64::from(bed[1])).abs() <= 2.0
                 && (position.z - f64::from(bed[2]) - 0.5).abs() <= 3.0
         };
-        if !reachable(head) && !reachable(foot) {
-            self.tell_sleeper(
-                "block.minecraft.bed.too_far_away",
-                "You may not rest now; the bed is too far away",
-                true,
-            );
-            return;
-        }
+        let mut problem: Option<&'static str> = if !reachable(head) && !reachable(foot) {
+            Some("too_far_away")
+        } else {
+            None
+        };
         // ServerPlayer.bedBlocked: Player.freeAt (not suffocating) for the
         // blocks above the head and the foot, as `in_wall` reads suffocating.
-        let blocked = [head, foot].iter().any(|bed| {
-            let f = self
-                .res
-                .facts()
-                .get(self.world.block(bed[0], bed[1] + 1, bed[2]));
-            f.full_collision && f.solid_render
-        });
+        let blocked = problem.is_none()
+            && [head, foot].iter().any(|bed| {
+                let f = self
+                    .res
+                    .facts()
+                    .get(self.world.block(bed[0], bed[1] + 1, bed[2]));
+                f.full_collision && f.solid_render
+            });
         if blocked {
-            self.tell_sleeper(
-                "block.minecraft.bed.obstructed",
-                "This bed is obstructed",
-                true,
-            );
-            return;
+            problem = Some("obstructed");
         }
         // In reach (bedInRange), day or night: setRespawnPosition(
         // RespawnConfig(the head, the player's yaw), not forced). It replaces
         // an anchor or a spawnpoint; respawning checks the bed is still there
         // and finds where to stand up (findRespawnAndUseSpawnBlock).
         // Straw beds never set it (`straw_bed_rule`).
-        if self.bed_sets_spawn(state) {
+        if problem.is_none() && self.bed_sets_spawn(state) {
             let config = respawn_anchor::RespawnConfig::wrapped(self.dim, head, yaw, false);
             // ServerPlayer.setRespawnPosition: the chat message only when the
             // point moved (`isSamePosition`).
@@ -14604,16 +14724,12 @@ impl Game<'_> {
                 };
             }
         }
-        if !self.bed_can_sleep_now() {
-            self.tell_sleeper(
-                "block.minecraft.bed.no_sleep",
-                "You can sleep only at night or during thunderstorms",
-                true,
-            );
-            return;
+        if problem.is_none() && !self.bed_can_sleep_now() {
+            problem = Some("not_possible_now");
         }
         // Creative players skip the monster check (`!this.isCreative()`).
-        let monsters = !self.creative
+        if problem.is_none()
+            && !self.creative
             && self.mobs.iter().any(|m| {
                 // `Monster.class` entities that `isPreventingPlayerRest`: a
                 // zombified piglin only while it is angry.
@@ -14624,13 +14740,41 @@ impl Game<'_> {
                     && (m.position.x - position.x).abs() < 8.0
                     && (m.position.y - position.y).abs() < 5.0
                     && (m.position.z - position.z).abs() < 8.0
-            });
-        if monsters {
-            self.tell_sleeper(
-                "block.minecraft.bed.not_safe",
-                "You may not rest now; there are monsters nearby",
-                true,
-            );
+            })
+        {
+            problem = Some("not_safe");
+        }
+        // NeoForge's CanPlayerSleepEvent: a mod may clear or replace the
+        // problem vanilla found, or add one.
+        let mut problem = problem.map(str::to_owned);
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_can_player_sleep(player, &name, head, &mut problem);
+        }
+        if let Some(problem) = problem {
+            match problem.as_str() {
+                "too_far_away" => self.tell_sleeper(
+                    "block.minecraft.bed.too_far_away",
+                    "You may not rest now; the bed is too far away",
+                    true,
+                ),
+                "obstructed" => self.tell_sleeper(
+                    "block.minecraft.bed.obstructed",
+                    "This bed is obstructed",
+                    true,
+                ),
+                "not_safe" => self.tell_sleeper(
+                    "block.minecraft.bed.not_safe",
+                    "You may not rest now; there are monsters nearby",
+                    true,
+                ),
+                "not_possible_now" => self.tell_sleeper(
+                    "block.minecraft.bed.no_sleep",
+                    "You can sleep only at night or during thunderstorms",
+                    true,
+                ),
+                // `other_problem` and any name a mod invents: refused without a message.
+                _ => {}
+            }
             return;
         }
         // ServerPlayer.startSleepInBed: a percentage above 100 cannot skip the night.
@@ -15431,10 +15575,14 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
-        self.save.save_attachments(&self.world.attachments)?;
         self.save.save_forced_chunks(&self.streaming.forced)?;
         self.streaming.save(&mut self.world, wait);
-        let keys: Vec<_> = self.world.modified.drain().collect();
+        let keys: Vec<_> = self.world.modified.iter().copied().collect();
+        self.native_full_chunk_saves(&keys);
+        self.save.save_attachments(&self.world.attachments)?;
+        for key in &keys {
+            self.world.modified.remove(key);
+        }
         let chunks = self.with_entities(keys.iter().filter_map(|k| self.world.chunks.get(k)));
         self.save
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
@@ -15443,6 +15591,9 @@ impl Game<'_> {
         self.save_raids();
         if wait {
             self.save.flush()?;
+        }
+        if !horizon_client::mod_api::mods().is_empty() {
+            self.native_level_save(self.dim.id());
         }
         Ok(())
     }
@@ -16259,8 +16410,12 @@ impl Game<'_> {
             sides: BorderRenderer::sides(&self.border_state, camera, distance),
         })
     }
-    /// A key press while a world is open (keyboard or control socket).
-    fn key_pressed(&mut self, key: KeyCode) -> Result<()> {
+    /// A key press while a world is open (keyboard or control socket). `key`
+    /// is the vanilla default the pressed mapping translates to, `raw` the
+    /// physical key as pressed (the same where the caller had no window key):
+    /// `Screen.keyPressed` hears the raw one, and only a raw key settles what
+    /// the container's hotbar keys are now (`checkHotbarKeyPressed`).
+    fn key_pressed(&mut self, key: KeyCode, raw: KeyCode) -> Result<()> {
         if self.sleeping.is_some()
             && self.screen == Screen::Playing
             && !matches!(
@@ -16326,12 +16481,16 @@ impl Game<'_> {
             // `checkHotbarKeyPressed`: the keys the controls bind to the off
             // hand and the hotbar slots, so a rebound key swaps instead of
             // reaching the screen. The list below keeps Q and the defaults.
+            // The raw key asks what the bindings are now: the translated
+            // `key` is a vanilla default and may itself be another mapping's
+            // rebound key (the off hand on Left Alt while hotbar 7 is on F
+            // would find that F a second time and swap with slot 7).
             _ if (self.screen == Screen::Inventory
                 || (self.screen == Screen::Creative && !self.creative_screen.tab().search))
                 && self
                     .settings
                     .keys
-                    .container_hotbar_key(key)
+                    .container_hotbar_key(raw)
                     .is_some_and(|key| self.inventory_hotkey(key)) => {}
             KeyCode::Digit1
             | KeyCode::Digit2
@@ -16783,12 +16942,35 @@ impl Game<'_> {
         self.streaming
             .extra
             .extend(waiting.into_iter().map(|chunk| (chunk, 0)));
-        let (uploads, unloaded) =
-            horizon_client::spans::time("streaming", || self.streaming.update(&mut self.world));
+        let plan = horizon_client::spans::time("streaming_plan", || {
+            self.streaming.plan_update(&mut self.world)
+        });
+        self.native_full_chunk_saves(plan.unloading());
+        let (uploads, unloaded) = horizon_client::spans::time("streaming", || {
+            self.streaming.finish_update(&mut self.world, plan)
+        });
         self.streaming.extra.truncate(areas);
+        let dirty: Vec<_> = unloaded
+            .iter()
+            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
+            .cloned()
+            .collect();
+        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
+        if !modified.is_empty()
+            && let Err(e) = horizon_client::spans::time("save_chunks", || {
+                self.save
+                    .save_later(&modified, self.pack.assets.registry, world_biomes!(self))
+            })
+        {
+            log::warn!("Horizon: failed to save unloaded chunks: {e}");
+        }
         self.spawn_fresh_chunks();
-        // Before the unloaded chunks' block entities are written and dropped.
-        self.native_chunks_changed(&unloaded);
+        // Vanilla saves the chunk before its unload hook and drops its block entities afterwards.
+        self.native_chunks_loaded();
+        self.native_chunks_unloaded(&unloaded);
+        for chunk in &unloaded {
+            self.world.modified.remove(&(chunk.x, chunk.z));
+        }
         if let Some(lod) = &mut self.lod {
             self.lod_observe
                 .extend(uploads.iter().map(|(key, _)| (key.0, key.2)));
@@ -16812,12 +16994,6 @@ impl Game<'_> {
                 }
             });
         }
-        let dirty: Vec<_> = unloaded
-            .iter()
-            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
-            .cloned()
-            .collect();
-        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
         horizon_client::spans::time("unload_entities", || self.unload_entities(&unloaded));
         if !unloaded.is_empty() {
             let gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> =
@@ -16828,14 +17004,6 @@ impl Game<'_> {
             self.world
                 .block_names
                 .retain(|p, _| !gone.contains(&(p.0 >> 4, p.2 >> 4)));
-        }
-        if !modified.is_empty()
-            && let Err(e) = horizon_client::spans::time("save_chunks", || {
-                self.save
-                    .save_later(&modified, self.pack.assets.registry, world_biomes!(self))
-            })
-        {
-            log::warn!("Horizon: failed to save unloaded chunks: {e}");
         }
         let (far_distance, far_reduced) = self.far_terrain_choice();
         // Terrain still on its way from the server (single player's integrated one
@@ -17259,6 +17427,14 @@ impl Game<'_> {
                 | WindowEvent::CursorMoved { .. }
         ) {
             self.last_input = Instant::now();
+        }
+        if !self.pad_synthetic_input()
+            && matches!(
+                event,
+                WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }
+            )
+        {
+            self.reassert_pointer_capture();
         }
         // The real mouse takes the pointer back from the keyboard's focus.
         self.key_focus_mouse(event_loop, &event);
@@ -17903,7 +18079,7 @@ impl Game<'_> {
                                     Err(b) => self.play_mouse(b, pressed)?,
                                     Ok(k) if pressed => {
                                         self.keys.insert(k);
-                                        self.key_pressed(k)?;
+                                        self.key_pressed(k, k)?;
                                     }
                                     Ok(k) => {
                                         self.keys.remove(&k);
@@ -18813,6 +18989,7 @@ impl<'a> Game<'a> {
             cursor: (0.0, 0.0),
             cursor_icon: horizon_client::widgets::Cursor::Arrow,
             captured: false,
+            capture_mode: None,
             regrab_on_refocus: false,
             keyboard_mouse: true,
             split_window: false,
@@ -19176,6 +19353,8 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            save_after_guest_turn: false,
+            lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,
@@ -20322,15 +20501,21 @@ fn load_world_rest(
     };
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
-        let mob_types: HashMap<_, _> = MobTypes::load(root)?
-            .types
-            .into_iter()
-            .map(|(k, v)| (k, Arc::new(v)))
-            .collect();
+        let mob_types: HashMap<_, _> = if draws {
+            MobTypes::load(root)?
+        } else {
+            MobTypes::load_for_server(root)?
+        }
+        .types
+        .into_iter()
+        .map(|(k, v)| (k, Arc::new(v)))
+        .collect();
         let mut mob_data = horizon_client::mobs::MobData::load(root, facts);
-        mob_data.cem = std::sync::RwLock::new(Arc::new(
-            horizon_client::mobs::cem::CemModels::load(root, &mob_types),
-        ));
+        mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
+            horizon_client::mobs::cem::CemModels::load(root, &mob_types)
+        } else {
+            horizon_client::mobs::cem::CemModels::default()
+        }));
         horizon_client::mobs::trial_spawner::load_registry(root);
         Ok((mob_types, mob_data))
     };
