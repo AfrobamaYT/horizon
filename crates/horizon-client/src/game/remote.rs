@@ -10493,10 +10493,22 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
     }
 }
 
-#[derive(Default)]
 pub(super) struct ClientMenu {
     current: Option<(i32, String)>,
     pub(super) generation: u64,
+    pub(super) layout: Option<horizon_client::menu::Menu>,
+}
+
+impl Default for ClientMenu {
+    fn default() -> Self {
+        Self {
+            current: None,
+            generation: 0,
+            layout: Some(horizon_client::menu::Menu::new(
+                horizon_client::menu::Kind::Inventory,
+            )),
+        }
+    }
 }
 
 impl ClientMenu {
@@ -10505,6 +10517,26 @@ impl ClientMenu {
             .generation
             .checked_add(1)
             .expect("menu generation exhausted");
+        use horizon_client::menu::{Kind, Menu};
+        let kind = match current.as_ref().map(|entry| entry.1.as_str()) {
+            None => Some(Kind::Inventory),
+            Some("minecraft:crafting") => Some(Kind::Crafting),
+            Some("minecraft:generic_9x1") => Some(Kind::Chest(1)),
+            Some("minecraft:generic_9x2") => Some(Kind::Chest(2)),
+            Some("minecraft:generic_9x3") => Some(Kind::Chest(3)),
+            Some("minecraft:generic_9x4") => Some(Kind::Chest(4)),
+            Some("minecraft:generic_9x5") => Some(Kind::Chest(5)),
+            Some("minecraft:generic_9x6") => Some(Kind::Chest(6)),
+            Some("minecraft:shulker_box") => Some(Kind::Shulker),
+            Some("minecraft:hopper") => Some(Kind::Hopper),
+            Some("minecraft:generic_3x3") => Some(Kind::Dispenser),
+            Some("minecraft:furnace") => Some(Kind::Furnace("smelting")),
+            Some("minecraft:blast_furnace") => Some(Kind::Furnace("blasting")),
+            Some("minecraft:smoker") => Some(Kind::Furnace("smoking")),
+            Some("minecraft:brewing_stand") => Some(Kind::Brewing),
+            _ => None,
+        };
+        self.layout = kind.map(Menu::new);
         self.current = current;
     }
 
@@ -10783,6 +10815,231 @@ mod tests {
         let before_replacement = menu.generation;
         menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
         assert_ne!(before_replacement, menu.generation);
+    }
+
+    #[test]
+    fn client_menu_layout_matches_packet_slot_mapping() {
+        use horizon_client::menu::MenuSlotAddress;
+        let mut menu = super::ClientMenu::default();
+        for name in [
+            "inventory",
+            "minecraft:crafting",
+            "minecraft:generic_9x1",
+            "minecraft:generic_9x2",
+            "minecraft:generic_9x3",
+            "minecraft:generic_9x4",
+            "minecraft:generic_9x5",
+            "minecraft:generic_9x6",
+            "minecraft:shulker_box",
+            "minecraft:hopper",
+            "minecraft:generic_3x3",
+            "minecraft:furnace",
+            "minecraft:blast_furnace",
+            "minecraft:smoker",
+            "minecraft:brewing_stand",
+        ] {
+            menu.set((name != "inventory").then(|| (7, name.to_owned())));
+            let layout = menu.layout.as_ref().unwrap();
+            for index in 0..layout.slot_count() {
+                let internal = match layout.slot_address(index).unwrap() {
+                    MenuSlotAddress::Player(index @ 0..=35) => index,
+                    MenuSlotAddress::Player(index @ 36..=39) => 500 + 39 - index,
+                    MenuSlotAddress::Player(40) => 504,
+                    MenuSlotAddress::Player(_) => unreachable!(),
+                    MenuSlotAddress::Main(index) => 300 + index,
+                    MenuSlotAddress::Grid(index) => 100 + index,
+                    MenuSlotAddress::Result(_) => 200,
+                    _ => unreachable!(),
+                };
+                assert_eq!(
+                    super::Game::menu_slot(name, index as i32),
+                    Some(internal),
+                    "{name} slot {index}"
+                );
+            }
+            assert_eq!(
+                super::Game::menu_slot(name, layout.slot_count() as i32),
+                None,
+                "{name}"
+            );
+        }
+        menu.set(Some((7, "minecraft:loom".into())));
+        assert!(menu.layout.is_none());
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_menu_reads_follow_packets_and_lifetimes() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{
+            connection::Pipe,
+            item::Stack,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            assert!(game.native_client_menu().is_none());
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let menu = game.native_client_menu().unwrap();
+            assert_eq!(game.native_menu_client_slot_count(menu), Some(46));
+            assert_eq!(game.native_menu_client_slot(menu, 46), None);
+            assert_eq!(game.native_menu_client_slot(menu, 36), Some(None));
+            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 3));
+            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
+                slot: 0,
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_client_slot(menu, 36)
+                    .unwrap()
+                    .unwrap()
+                    .count,
+                3
+            );
+            game.handle_packet(C::SetCursorItem(play::SetCursorItem {
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_client_carried(menu)
+                    .unwrap()
+                    .unwrap()
+                    .count,
+                3
+            );
+            let crafting_id = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:crafting")
+                .unwrap();
+            let open = || {
+                C::OpenScreen(play::OpenScreen {
+                    container: 7,
+                    menu: crafting_id,
+                    title: Tag::String("Crafting".into()),
+                })
+            };
+            game.handle_packet(open()).unwrap();
+            assert_eq!(game.native_menu_client_slot_count(menu), None);
+            let crafting = game.native_client_menu().unwrap();
+            assert_eq!(game.native_menu_client_slot_count(crafting), Some(46));
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 1,
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_client_slot(crafting, 1)
+                    .unwrap()
+                    .unwrap()
+                    .count,
+                3
+            );
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 0,
+                item: stone,
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_client_slot(crafting, 0)
+                    .unwrap()
+                    .unwrap()
+                    .count,
+                3
+            );
+            game.handle_packet(open()).unwrap();
+            assert_eq!(game.native_menu_client_slot_count(crafting), None);
+            let crafting = game.native_client_menu().unwrap();
+            game.handle_packet(C::Respawn(play::Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_client_slot_count(crafting), None);
+            let inventory = game.native_client_menu().unwrap();
+            assert_ne!(inventory, menu);
+            let chest_id = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:generic_9x3")
+                .unwrap();
+            game.handle_packet(C::OpenScreen(play::OpenScreen {
+                container: 7,
+                menu: chest_id,
+                title: Tag::String("Chest".into()),
+            }))
+            .unwrap();
+            let chest = game.native_client_menu().unwrap();
+            assert_eq!(game.native_menu_client_slot_count(chest), Some(63));
+            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 4));
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 2,
+                item: stone,
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_client_slot(chest, 2)
+                    .unwrap()
+                    .unwrap()
+                    .count,
+                4
+            );
+            assert_eq!(game.native_menu_client_slot(chest, 3), Some(None));
+            game.remote
+                .as_mut()
+                .unwrap()
+                .menu
+                .set(Some((7, "minecraft:loom".into())));
+            assert!(game.native_client_menu().is_none());
+            assert_eq!(game.native_menu_client_slot_count(inventory), None);
+            assert_eq!(game.native_menu_client_slot_count(chest), None);
+            game.remote.as_mut().unwrap().menu.set(None);
+            let before_replacement = game.native_client_menu().unwrap();
+            let mut other = spawn;
+            other.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&other, true, Reason::Other);
+            assert_eq!(game.native_menu_client_slot_count(before_replacement), None);
+            let before_logout = game.native_client_menu().unwrap();
+            game.client_logging_out();
+            assert_eq!(game.native_menu_client_slot_count(before_logout), None);
+            assert!(game.native_client_menu().is_none());
+        });
     }
 
     #[test]

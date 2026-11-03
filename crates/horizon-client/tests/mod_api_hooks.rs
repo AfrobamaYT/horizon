@@ -7,8 +7,13 @@ struct Keys;
 
 #[mod_api::horizon_mod]
 impl Hooks for Keys {
-    fn input_key(&self, _host: &mut dyn ClientHost, event: &mut InputKeyEvent<'_>) {
+    fn input_key(&self, host: &mut dyn ClientHost, event: &mut InputKeyEvent<'_>) {
         let _: &winit::event::KeyEvent = event.event;
+        if let Some(menu) = host.client_menu() {
+            let _ = menu.client_slot_count(host);
+            let _ = menu.client_slot(host, 0);
+            let _ = menu.client_carried(host);
+        }
     }
 }
 

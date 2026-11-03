@@ -10,11 +10,92 @@ use horizon_client::{
         guest::Guest,
         menu::{SlotBacking, Slots, VEHICLE_KEY_Y},
     },
-    menu::{Kind, Menu},
+    menu::{Kind, Menu, MenuSlotAddress},
     mod_api::{EntityRef, MenuRef, MenuSlotBacking, PlayerRef},
 };
 
 impl Game<'_> {
+    fn native_client_menu_layout(&self, menu: MenuRef) -> Option<&Menu> {
+        let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
+        let epoch = self.native_lifecycle.epoch()?;
+        (menu.player.entity.epoch() == epoch
+            && menu.player.entity.id() == u32::try_from(remote.entity_id).ok()?
+            && menu.player.uuid == remote.profile
+            && menu.generation == remote.menu.generation
+            && menu.window == remote.menu.as_ref().map_or(0, |entry| entry.0))
+        .then_some(())?;
+        remote.menu.layout.as_ref()
+    }
+
+    /// The local player's current supported menu, including the inventory.
+    /// Returns None without a client world or for an unsupported menu.
+    pub(super) fn native_client_menu(&self) -> Option<MenuRef> {
+        let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
+        remote.menu.layout.as_ref()?;
+        Some(MenuRef {
+            player: PlayerRef {
+                entity: EntityRef::new(
+                    self.native_lifecycle.epoch()?,
+                    u32::try_from(remote.entity_id).ok()?,
+                ),
+                uuid: remote.profile,
+            },
+            window: remote.menu.as_ref().map_or(0, |entry| entry.0),
+            generation: remote.menu.generation,
+        })
+    }
+
+    /// Number of slots in this supported client menu, or None if stale.
+    pub(super) fn native_menu_client_slot_count(&self, menu: MenuRef) -> Option<usize> {
+        Some(self.native_client_menu_layout(menu)?.slot_count())
+    }
+
+    /// The client menu slot, with outer None for an unavailable slot and
+    /// Some(None) for an empty slot.
+    pub(super) fn native_menu_client_slot(
+        &self,
+        menu: MenuRef,
+        slot: usize,
+    ) -> Option<Option<ItemStack>> {
+        let address = self.native_client_menu_layout(menu)?.slot_address(slot)?;
+        match address {
+            MenuSlotAddress::Player(index @ 0..=35) => Some(self.inventory.get(index)?.clone()),
+            MenuSlotAddress::Player(index @ 36..=39) => Some(self.armor[39 - index].clone()),
+            MenuSlotAddress::Player(40) => Some(self.offhand.clone()),
+            MenuSlotAddress::Player(_) => None,
+            MenuSlotAddress::Grid(index) => Some(self.craft_grid.get(index)?.clone()),
+            MenuSlotAddress::Result(0) => Some(self.remote.as_ref()?.craft_result.clone()),
+            MenuSlotAddress::Result(_) => None,
+            MenuSlotAddress::Main(mut index) => {
+                let own = self.container?;
+                let own_entity = self.world.block_entities.get(&own)?;
+                let partner = self.chest_partner(own);
+                let first = match partner {
+                    Some((other, false)) => other,
+                    _ => own,
+                };
+                let first_entity = self.world.block_entities.get(&first)?;
+                if index < first_entity.slots().len() {
+                    return Some(first_entity.slots().get(index)?.clone());
+                }
+                index -= first_entity.slots().len();
+                let second = match partner {
+                    Some((other, true)) => self.world.block_entities.get(&other)?,
+                    Some((_, false)) => own_entity,
+                    None => return None,
+                };
+                Some(second.slots().get(index)?.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// The cursor stack, with outer None for a stale or unavailable menu.
+    pub(super) fn native_menu_client_carried(&self, menu: MenuRef) -> Option<Option<ItemStack>> {
+        self.native_client_menu_layout(menu)?;
+        Some(self.carried.clone())
+    }
+
     fn native_menu_guest(&self, menu: MenuRef) -> Option<&Guest> {
         let super::native_server::PlayerRead::Guest(guest) =
             self.player_handle_read(menu.player)?

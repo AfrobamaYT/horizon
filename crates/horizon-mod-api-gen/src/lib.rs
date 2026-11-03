@@ -438,7 +438,10 @@ fn handle_method<'a>(
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
             syn::parse_quote!(host: &mut dyn ServerHost)
         }
-        Some(FnArg::Receiver(r)) if r.reference.is_some() => syn::parse_quote!(host: &dyn Host),
+        Some(FnArg::Receiver(r)) if r.reference.is_some() => match side {
+            HelperSide::Client => syn::parse_quote!(host: &dyn ClientHost),
+            HelperSide::Server | HelperSide::Both => syn::parse_quote!(host: &dyn Host),
+        },
         _ => return Err(format!("{name}: a {receiver} helper borrows Game")),
     };
     let takes_handle = matches!(
@@ -1207,6 +1210,15 @@ mod tests {
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
         assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
+        let (_, client_code) = super::handle_method(
+            &read,
+            "entity_position",
+            "entity",
+            super::HelperSide::Client,
+            &types.handles,
+        )
+        .unwrap();
+        assert!(client_code.contains("host : & dyn ClientHost"));
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_level_set(&mut self, level: LevelRef) -> bool { todo!() }
         };

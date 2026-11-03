@@ -1670,6 +1670,9 @@ impl BossBarOverlay {
 }
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
+/// Client menu handles are also invalidated on respawn. Client menu readers require a client host.
+#[doc = "\x60\x60\x60compile_fail\nuse horizon_client::mod_api::{MenuRef, ServerHost};\nfn wrong(menu: MenuRef, host: &dyn ServerHost) { let _ = menu.client_slot(host, 0); }\n\x60\x60\x60"]
+#[doc = "\x60\x60\x60compile_fail\nuse horizon_client::mod_api::ServerHost;\nfn wrong(host: &dyn ServerHost) { let _ = host.client_menu(); }\n\x60\x60\x60"]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
