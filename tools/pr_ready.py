@@ -136,8 +136,6 @@ def area(path):
     return "game"
 
 
-
-
 def scope_warnings(paths):
     """A pull request keeps to one area; its size is its own concern (#385)."""
     warnings = []
