@@ -6164,6 +6164,7 @@ mod tests {
         use crate::mod_api::{
             self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemStack,
             NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
+            UseWithoutItemEvent,
         };
         use horizon_client::{
             chunk::Chunk,
@@ -6192,6 +6193,15 @@ mod tests {
         struct User {
             answer: Arc<Mutex<Option<Answer>>>,
             replace_with: Arc<Mutex<Option<horizon_world::registry::BlockStateId>>>,
+            empty_answer: Arc<Mutex<Option<Answer>>>,
+            empty_clicks: Arc<
+                Mutex<
+                    Vec<(
+                        horizon_world::registry::BlockStateId,
+                        crate::first_person::Hand,
+                    )>,
+                >,
+            >,
             clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
@@ -6217,6 +6227,17 @@ mod tests {
                     .push((event.click.player, event.click.hand));
                 *self.answer.lock().unwrap()
             }
+            fn use_without_item(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut UseWithoutItemEvent<'_>,
+            ) -> Option<Answer> {
+                self.empty_clicks
+                    .lock()
+                    .unwrap()
+                    .push((event.state, event.click.hand));
+                *self.empty_answer.lock().unwrap()
+            }
         }
         struct Mod {
             picks: Arc<Mutex<Vec<bool>>>,
@@ -6231,6 +6252,8 @@ mod tests {
                 r.block_part("minecraft:lever", self.user.clone());
                 r.block_part("minecraft:cauldron", self.user.clone());
                 r.block_part("minecraft:jukebox", self.user.clone());
+                r.block_part("minecraft:decorated_pot", self.user.clone());
+                r.block_part("minecraft:chiseled_bookshelf", self.user.clone());
             }
             fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
                 self.user
@@ -6243,6 +6266,8 @@ mod tests {
         let user = User {
             answer: Arc::new(Mutex::new(Some(Answer::Success))),
             replace_with: Arc::new(Mutex::new(None)),
+            empty_answer: Arc::new(Mutex::new(None)),
+            empty_clicks: Arc::new(Mutex::new(Vec::new())),
             clicks: Arc::new(Mutex::new(Vec::new())),
             item_uses: Arc::new(AtomicUsize::new(0)),
         };
@@ -6343,7 +6368,12 @@ mod tests {
                     *user.answer.lock().unwrap() = Some(answer);
                     game.swing = Default::default();
                     let before = game.swings_started;
+                    let empty_before = user.empty_clicks.lock().unwrap().len();
                     assert!(game.use_hand(Some(&hit)).unwrap());
+                    assert_eq!(
+                        user.empty_clicks.lock().unwrap().len() - empty_before,
+                        usize::from(answer == Answer::TryWithEmptyHand),
+                    );
                     assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
                     assert_eq!(game.swings_started - before, swings);
                     assert_eq!(user.item_uses.load(SeqCst), item_uses);
@@ -6423,6 +6453,13 @@ mod tests {
                     ..hit
                 };
                 *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                assert!(game.use_hand(Some(&jukebox_hit)).unwrap());
+                assert!(matches!(
+                    game.world.block_entities.get(&(6, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::Jukebox(j)) if j.record().is_some()
+                ));
+                *user.empty_answer.lock().unwrap() = None;
                 let calls = user.clicks.lock().unwrap().len();
                 assert!(game.use_hand(Some(&jukebox_hit)).unwrap());
                 assert_eq!(user.clicks.lock().unwrap().len(), calls + 1);
@@ -6462,6 +6499,106 @@ mod tests {
                 assert_eq!(game.world.block(8, 64, 4), powered);
                 assert_eq!(user.item_uses.load(SeqCst), 4);
 
+                assert_eq!(
+                    user.empty_clicks.lock().unwrap().last(),
+                    Some(&(floor_lever, Hand::Main))
+                );
+
+                // Every supplied empty result replaces the lever; TRY is not retried.
+                let mut item_uses = 4;
+                for answer in [
+                    Answer::Success,
+                    Answer::SuccessServer,
+                    Answer::Consume,
+                    Answer::Pass,
+                    Answer::Fail,
+                    Answer::TryWithEmptyHand,
+                ] {
+                    game.world.set(8, 64, 4, floor_lever).unwrap();
+                    *user.empty_answer.lock().unwrap() = Some(answer);
+                    let calls = user.empty_clicks.lock().unwrap().len();
+                    assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                    assert_eq!(game.world.block(8, 64, 4), floor_lever);
+                    assert_eq!(user.empty_clicks.lock().unwrap().len(), calls + 1);
+                    if matches!(
+                        answer,
+                        Answer::Pass | Answer::Fail | Answer::TryWithEmptyHand
+                    ) {
+                        item_uses += 1;
+                    }
+                    assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                }
+
+                // The template's TRY reaches the part too; the off hand never does.
+                *user.answer.lock().unwrap() = None;
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                assert_eq!(game.world.block(8, 64, 4), floor_lever);
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                game.hand = Hand::Off;
+                game.offhand = Some(ItemStack::new("minecraft:stick", 1));
+                let calls = user.empty_clicks.lock().unwrap().len();
+                assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                assert_eq!(user.empty_clicks.lock().unwrap().len(), calls);
+                item_uses += 1;
+                assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                game.hand = Hand::Main;
+                game.offhand = None;
+
+                // The hook precedes the pot's wobble and the bookshelf's removal.
+                let pot = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:decorated_pot")
+                    .unwrap();
+                game.world.set(10, 64, 4, pot).unwrap();
+                let pot_hit = super::super::Hit {
+                    pos: [10, 64, 4],
+                    point: [10.5, 65.0, 4.5],
+                    ..hit
+                };
+                assert!(game.use_hand(Some(&pot_hit)).unwrap());
+                assert!(!game.be_anims.pots.contains_key(&pot_hit.pos));
+                *user.empty_answer.lock().unwrap() = None;
+                assert!(game.use_hand(Some(&pot_hit)).unwrap());
+                assert!(game.be_anims.pots.contains_key(&pot_hit.pos));
+                let shelf = game
+                    .with_props(
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:chiseled_bookshelf")
+                            .unwrap(),
+                        &[("facing", "north"), ("slot_0_occupied", "true")],
+                    )
+                    .unwrap();
+                game.world.set(9, 64, 4, shelf).unwrap();
+                let mut books = Box::<horizon_client::containers::ChiseledBookshelf>::default();
+                books.items[0] = Some(ItemStack::new("minecraft:book", 1));
+                game.world.block_entities.insert(
+                    (9, 64, 4),
+                    horizon_client::containers::BlockEntity::ChiseledBookshelf(books),
+                );
+                let shelf_hit = super::super::Hit {
+                    pos: [9, 64, 4],
+                    face: [0, 0, -1],
+                    point: [9.75, 64.75, 4.0],
+                    inside: false,
+                };
+                *user.empty_answer.lock().unwrap() = Some(Answer::Success);
+                assert!(game.use_hand(Some(&shelf_hit)).unwrap());
+                assert!(matches!(
+                    game.world.block_entities.get(&(9, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::ChiseledBookshelf(b)) if b.items[0].is_some()
+                ));
+                *user.empty_answer.lock().unwrap() = None;
+                assert!(game.use_hand(Some(&shelf_hit)).unwrap());
+                assert!(matches!(
+                    game.world.block_entities.get(&(9, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::ChiseledBookshelf(b)) if b.items[0].is_none()
+                ));
+
                 // The real guest packet follows the same path, with the guest's UUID.
                 game.world.set(0, 64, 4, lever).unwrap();
                 game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
@@ -6480,7 +6617,7 @@ mod tests {
                     }),
                 );
                 assert_eq!(user.clicks.lock().unwrap().last(), Some(&(12, Hand::Main)));
-                assert_eq!(user.item_uses.load(SeqCst), 4);
+                assert_eq!(user.item_uses.load(SeqCst), item_uses);
                 assert_eq!(game.world.block(0, 64, 4), lever);
                 game.world.set(0, 64, 4, stone).unwrap();
                 game.lan_guest_packet(

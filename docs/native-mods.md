@@ -121,6 +121,14 @@ the catalog, not a global API number, source comments or documentation histories
   event still decides whether the block is used at all. Dispatch asks the global `Hooks`
   subscriber (when present), then the clicked state's parts.
 
+- A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces
+  `Block.useWithoutItem` on the server, on the main hand only, after `useItemOn` returns
+  `TryWithEmptyHand`. The event keeps the original state's key even if the item phase
+  changed the block. `Some` replaces the template; `None` runs it, including jukebox ejection,
+  pot wobble and bookshelf removal. Consuming results trigger DEFAULT_BLOCK_USE.
+  `Pass`, `Fail` and `TryWithEmptyHand` continue to the item; the empty method is never
+  retried. Dispatch asks the global `Hooks` subscriber (when present), then the clicked state's parts.
+
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims

@@ -847,7 +847,7 @@ impl Behaviours {
     }
     /// `BlockState.useItemOn`: the result, or `None` for
     /// `TRY_WITH_EMPTY_HAND`.
-    fn block_use_item_on<L: LevelAccess + ?Sized>(
+    pub fn block_use_item_on<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
         ticks: &mut Ticks,
