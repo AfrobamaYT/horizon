@@ -983,8 +983,8 @@ context or retained-listener lookup here.
 ```rust,ignore
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
-    AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier, ServerReloadApply,
-    ServerReloadContext, ServerReloadError, ServerReloadListener,
+    self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
+    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
 };
 
 struct MachineData(Arc<RwLock<serde_json::Value>>);
@@ -1000,7 +1000,9 @@ impl ServerReloadListener for MachineData {
         Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
     }
 }
+#[derive(Default)]
 struct MyMod(Arc<MachineData>);
+#[mod_api::horizon_mod]
 impl Hooks for MyMod {
     fn add_server_reload_listeners(&self, _host: &dyn Host, event: &mut AddServerReloadListenersEvent<'_>) {
         event.listeners.add_listener(
