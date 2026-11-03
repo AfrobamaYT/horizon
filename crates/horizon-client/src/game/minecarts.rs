@@ -503,6 +503,9 @@ impl Game<'_> {
     /// collision, which sets a TNT minecart off.
     fn cart_entity_collisions(&self, c: &Minecart) -> Vec<Aabb> {
         let near = c.bounds().inflate(Vec3::new(2.0, 2.0, 2.0));
+        // Only the boxes near the cart are kept (in the same order): filtered before they are
+        // collected, as a world with hundreds of mineshaft carts and thousands of mobs would
+        // otherwise gather every mob's box for every cart each tick.
         let mut boxes: Vec<Aabb> = self
             .carts
             .iter()
@@ -521,6 +524,7 @@ impl Game<'_> {
                     })
                     .map(|m| m.bounds()),
             )
+            .filter(|b| b.intersects(near))
             .collect();
         if self.riding != Some(c.id)
             && let Some(p) = self.player.as_ref()
@@ -554,7 +558,14 @@ impl Game<'_> {
             binding: self.collision,
             subject: None,
         };
-        let entities = self.cart_entity_collisions(c);
+        // Entity.collide: a move of zero is the move, whatever stands around (the boxes are only
+        // read for a move that goes somewhere, and a box with NaN in it touches nothing). A cart
+        // at rest on its rails, as mineshafts' chest carts are, needs none of them.
+        let entities = if delta.length_squared() == 0.0 {
+            Vec::new()
+        } else {
+            self.cart_entity_collisions(c)
+        };
         let mut scene = horizon_client::collisions::EntityCollisions {
             blocks: scene,
             entities: &entities,
