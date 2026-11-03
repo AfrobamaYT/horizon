@@ -266,7 +266,10 @@ impl Game<'_> {
     /// damage outside the border.
     /// `BorderChangeListener.DelegateBorderChangeListener`'s packets: what
     /// changed on the border since the guests were last told of it.
-    pub(in crate::game) fn lan_sync_border(&mut self, host: &mut crate::game::lan::LanHost) {
+    pub(in crate::game) fn lan_sync_border(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let now = horizon_client::lan::border::Sent::of(&self.border);
         if let Some(sent) = host.border_sent.replace(now) {
             for packet in sent.changes(&self.border) {
@@ -727,7 +730,7 @@ impl Game<'_> {
                     };
                     let Some(slot) = slot else { continue };
                     let item = drops.get(i).cloned();
-                    if self.slot_set(&slot, item.clone()) {
+                    if self.slot_set_by_command(&slot, item.clone()) {
                         used.push(item.unwrap_or(ItemStack {
                             item: "minecraft:air".into(),
                             count: 0,

@@ -14,7 +14,7 @@
 
 use super::{
     Dim, ExperienceOrb, FallingBlock, Game, ItemEntity, Mob, boats, commands,
-    creaking::CreakingState, dragon, fireworks, lan::LanHost, lightning, machines, minecarts,
+    creaking::CreakingState, dragon, fireworks, lightning, machines, minecarts,
     ominous_item_spawner, persist, raids::Raiding, sculk::SculkState, tnt, trident,
 };
 use horizon_client::{
@@ -88,6 +88,8 @@ pub(super) struct Parked {
     raiding: Raiding,
     sculk: SculkState,
     creaking: CreakingState,
+    /// Natural spawning's candidate cache: each level keeps its own players' squares.
+    spawn_scratch: super::natural_spawning::SpawnScratch,
     /// Server ticks since a player was last in the level.
     idle: u32,
 }
@@ -141,6 +143,15 @@ impl Levels {
             .map(|(_, level)| &level.world)
     }
 
+    /// The world of the level not in place whose dimension is `dimension`, to
+    /// change.
+    pub(super) fn parked_world_mut_of(&mut self, dimension: &str) -> Option<&mut World> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &mut level.world)
+    }
+
     /// The streaming of the level not in place whose dimension is `dimension`.
     pub(super) fn parked_streaming_of(&self, dimension: &str) -> Option<&Streaming> {
         self.parked
@@ -164,11 +175,6 @@ impl Levels {
     /// The worlds of the levels not in place.
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
-    }
-
-    /// The world of the level not in place, in `dim`, to change.
-    pub(super) fn parked_world_mut(&mut self, dim: Dim) -> Option<&mut World> {
-        self.parked.get_mut(&dim).map(|level| &mut level.world)
     }
 
     /// The level not in place, in `dim`.
@@ -261,6 +267,7 @@ impl Game<'_> {
             raiding: Default::default(),
             sculk: Default::default(),
             creaking: Default::default(),
+            spawn_scratch: Default::default(),
             idle: 0,
         })
     }
@@ -327,6 +334,7 @@ impl Game<'_> {
         self.raiding.swap_level(&mut p.raiding);
         self.sculk.swap_level(&mut p.sculk);
         self.creaking.swap_level(&mut p.creaking);
+        swap(&mut self.spawn_scratch, &mut p.spawn_scratch);
         // What only the client draws starts over.
         self.particles.clear();
         self.pickups.clear();
@@ -334,13 +342,8 @@ impl Game<'_> {
 
     /// Put `target`'s level in place, opening it first if it is not loaded.
     /// The level that was in place is kept with the others; the shared
-    /// clock and weather go with the swap. `host` is the hub when the caller
-    /// holds it (`self.lan` is taken during the network tick).
-    pub(super) fn enter_level(
-        &mut self,
-        mut host: Option<&mut LanHost>,
-        target: Dim,
-    ) -> Result<()> {
+    /// clock and weather go with the swap.
+    pub(super) fn enter_level(&mut self, target: Dim) -> Result<()> {
         // A client holds no levels.
         if self.options.execution_role.is_client() {
             return Ok(());
@@ -362,10 +365,7 @@ impl Game<'_> {
             // The tracked entities go with their level: a level's moves, read before its tick
             // describes its entities again, would otherwise meet the last level's (the anticheat
             // missed the boat under a player while anyone was in another dimension).
-            let states = match host.as_deref_mut() {
-                Some(h) => Some(&mut h.states),
-                None => self.lan.as_mut().map(|h| &mut h.states),
-            };
+            let states = self.lan.as_mut().map(|h| &mut h.states);
             if let Some(states) = states {
                 std::mem::swap(states, &mut p.lan_states);
             }
@@ -380,11 +380,7 @@ impl Game<'_> {
                 self.native_level_opened(target);
             }
         }
-        let host = match host {
-            Some(h) => Some(h),
-            None => self.lan.as_mut(),
-        };
-        if let Some(h) = host {
+        if let Some(h) = self.lan.as_mut() {
             h.hub.set_dimension(target.id());
         }
         Ok(())
@@ -429,7 +425,7 @@ impl Game<'_> {
             return None;
         }
         let back = self.dim;
-        match self.enter_level(None, dim) {
+        match self.enter_level(dim) {
             Ok(()) => Some(back),
             Err(e) => {
                 log::error!("could not open {}: {e}", dim.id());
@@ -451,8 +447,13 @@ impl Game<'_> {
         // `ServerTickStart` before that level work, where NeoForge fires
         // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
         let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
+        let server = self.serving.is_some() || self.options.dedicated.is_some();
+        // A config edited while the server is paused (empty) still reloads.
+        if server {
+            self.native_configs_poll();
+        }
         if let Some(running) = running
-            && (self.serving.is_some() || self.options.dedicated.is_some())
+            && server
         {
             self.native_lifecycle_server_tick_start(running);
         }
@@ -463,7 +464,7 @@ impl Game<'_> {
         let n = dims.len();
         let mut result = Ok(());
         for (k, dim) in dims.into_iter().enumerate() {
-            if let Err(e) = self.enter_level(None, dim) {
+            if let Err(e) = self.enter_level(dim) {
                 result = Err(e);
                 break;
             }
@@ -507,15 +508,14 @@ impl Game<'_> {
             if running == Some(true) {
                 let mut moved = false;
                 for &earlier in &order[..k] {
-                    if !self.arrival_chunks(earlier).is_empty()
-                        && self.enter_level(None, earlier).is_ok()
+                    if !self.arrival_chunks(earlier).is_empty() && self.enter_level(earlier).is_ok()
                     {
                         self.land_portal_arrivals();
                         moved = true;
                     }
                 }
                 if moved {
-                    self.enter_level(None, dim)?;
+                    self.enter_level(dim)?;
                 }
             }
         }
@@ -589,10 +589,7 @@ impl Game<'_> {
             self.console_broadcast = Some(true);
             self.sprint_report(&report);
             self.console_broadcast = None;
-            if let Some(mut host) = self.lan.take() {
-                self.send_admin_feedback(&mut host, None);
-                self.lan = Some(host);
-            }
+            self.send_admin_feedback(None);
             self.admin_feedback.clear();
         }
         let now = Instant::now();
@@ -698,7 +695,7 @@ impl Game<'_> {
         }
         let back = self.dim;
         for dim in closing {
-            self.enter_level(None, dim)?;
+            self.enter_level(dim)?;
             // Vanilla saves the level's chunks before their unload hooks.
             self.native_chunks_loaded();
             self.save_level(true)?;
@@ -708,7 +705,7 @@ impl Game<'_> {
             for uuid in self.persist.uuids.values() {
                 self.entity_attachments.remove(uuid);
             }
-            self.enter_level(None, back)?;
+            self.enter_level(back)?;
             self.levels.parked.remove(&dim);
             self.native_level_closed(dim);
         }
@@ -725,11 +722,13 @@ impl Game<'_> {
         }
         self.levels.heard_open.push(dim);
         self.native_level_load(dim.id());
+        self.validate_mod_chunk_tickets(dim);
     }
 
     /// The mods hear `dim`'s level close (`LevelEvent.Unload`), once for
     /// each open they heard.
     fn native_level_closed(&mut self, dim: Dim) {
+        self.remove_level_fake_players(dim.id());
         let Some(i) = self.levels.heard_open.iter().position(|d| *d == dim) else {
             return;
         };
@@ -755,9 +754,9 @@ impl Game<'_> {
         let back = self.dim;
         let dims: Vec<Dim> = self.levels.parked.keys().copied().collect();
         for dim in dims {
-            self.enter_level(None, dim)?;
+            self.enter_level(dim)?;
             self.save_level(wait)?;
         }
-        self.enter_level(None, back)
+        self.enter_level(back)
     }
 }

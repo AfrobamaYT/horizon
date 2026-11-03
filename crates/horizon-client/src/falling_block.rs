@@ -432,7 +432,10 @@ mod tests {
             Mob::new(4, cow, Vec3::ZERO, 0.0),
         ];
         mobs[2].invulnerable_flag = true;
-        mobs[3].extra.head = Some("minecraft:carved_pumpkin".into());
+        mobs[3].extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:carved_pumpkin".into()),
+        );
         let initial = mobs.iter().map(|m| m.health).collect::<Vec<_>>();
         hurt_mobs(
             &mut mobs,

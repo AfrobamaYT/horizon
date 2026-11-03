@@ -45,6 +45,38 @@ fn cloud_hits(at: [f64; 3], radius: f32, bounds: Aabb, pos: Vec3) -> bool {
     bounds.intersects(area) && dx * dx + dz * dz <= f64::from(radius * radius)
 }
 
+/// `AreaEffectCloud.WAIT_TIME` default: the cloud is inert for its first 20
+/// ticks (no radius growth, no effects).
+const BREATH_WAIT: i32 = 20;
+
+/// `AreaEffectCloud.serverTick`: discarded once `tickCount - waitTime >=
+/// duration`, so the wait does not count against the duration.
+fn breath_expired(age: i32, duration: i32) -> bool {
+    age - BREATH_WAIT >= duration
+}
+
+/// `AreaEffectCloud.serverTick` victims: every 5 ticks after the wait, drop
+/// entries whose delay (`reapplicationDelay` 20) has passed, then return the
+/// candidates not in the map, recording them until `age + 20`.
+fn breath_victims(
+    age: i32,
+    victims: &mut Vec<(FightWho, i32)>,
+    candidates: impl IntoIterator<Item = FightWho>,
+) -> Vec<FightWho> {
+    if age < BREATH_WAIT || age % 5 != 0 {
+        return Vec::new();
+    }
+    victims.retain(|&(_, until)| age < until);
+    let mut hit = Vec::new();
+    for who in candidates {
+        if !victims.iter().any(|&(v, _)| v == who) {
+            victims.push((who, age + 20));
+            hit.push(who);
+        }
+    }
+    hit
+}
+
 /// `DragonFireball.onHit`: the cloud moves to the first living entity in the
 /// fireball's box inflated by (4, 2, 4) that is within 4 blocks of it.
 /// `feet` is the fireball's position (the bottom of its 1x1x1 box).
@@ -67,7 +99,7 @@ fn fireball_cloud_origin(feet: [f64; 3], targets: &[(Aabb, Vec3)]) -> [f64; 3] {
 pub(super) const SPECIAL: u32 = u32::MAX - 4096;
 pub(super) const CRYSTAL_IDS: u32 = SPECIAL + 16;
 const FIGHT_FILE: &str = "data/minecraft/ender_dragon_fight.dat";
-const MAX_HEALTH: f32 = 200.0;
+pub(super) const MAX_HEALTH: f32 = 200.0;
 /// `Mob.getAmbientSoundInterval`.
 const AMBIENT_INTERVAL: i32 = 80;
 
@@ -107,6 +139,15 @@ enum Respawn {
     Preparing,
     Pillars,
     Summoning,
+}
+impl Fight {
+    /// `EnderDragonFight.tick`'s ticket condition: the fight's boss bar has a
+    /// player (`dragonEvent.getPlayers()` is not empty), which holds the
+    /// arena's `TicketType.DRAGON` ticket. The bar is scanned every 20 ticks,
+    /// as `updatePlayers` is.
+    pub(super) fn arena_watched(&self) -> bool {
+        self.players
+    }
 }
 impl Respawn {
     fn name(self) -> &'static str {
@@ -346,10 +387,13 @@ pub(super) struct Dragon {
     pub(super) flame_ended: bool,
     flame_count: i32,
     sitting_damage: f32,
+    /// `LivingEntity.equipment`: nothing in the fight reads it; it is kept
+    /// for mods and saves.
+    pub equipment: horizon_items::equipment::Equipment,
     growl: i32,
     /// `Mob.ambientSoundTime`.
     ambient_time: i32,
-    ticks: i32,
+    pub(super) ticks: i32,
     /// DragonFlightHistory: (y, yRot) samples, newest at `head`.
     history: [(f64, f32); 64],
     head: usize,
@@ -484,6 +528,7 @@ impl Dragon {
             flame_ended: false,
             flame_count: 0,
             sitting_damage: 0.0,
+            equipment: Default::default(),
             growl: 100,
             ambient_time: 0,
             ticks: 0,
@@ -907,8 +952,7 @@ impl Game<'_> {
         (-2..=1).all(|cz| (-2..=1).all(|cx| self.streaming.is_lit(cx, cz)))
     }
     /// A player's entity id: the acting player's body has it, another
-    /// player's comes from the hub (0 when it is out on a guest's turn, and
-    /// for no player).
+    /// player's comes from the hub (0 when no such player is available).
     fn fight_entity(&self, who: FightWho) -> i32 {
         if who == self.acting_player() {
             return self.player.as_ref().map_or(0, |p| p.entity_id);
@@ -965,11 +1009,7 @@ impl Game<'_> {
         match who {
             FightWho::Host => f(self),
             FightWho::Guest(conn) => {
-                let Some(mut host) = self.lan.take() else {
-                    return;
-                };
-                self.guest_hit_by(&mut host, conn, f);
-                self.lan = Some(host);
+                self.guest_hit_by(conn, f);
             }
         }
     }
@@ -1342,14 +1382,8 @@ impl Game<'_> {
             _ => None,
         };
         let credited = guest.is_some_and(|conn| {
-            let Some(mut host) = self.lan.take() else {
-                return false;
-            };
-            let done = self
-                .as_guest(&mut host, conn, |g| g.award_dragon_kill(id, &view, blow))
-                .is_some();
-            self.lan = Some(host);
-            done
+            self.as_guest(conn, |g| g.award_dragon_kill(id, &view, blow))
+                .is_some()
         });
         if !credited {
             self.award_dragon_kill(id, &view, blow);
@@ -1947,6 +1981,7 @@ impl Game<'_> {
                         age: 0,
                         duration: 200,
                         from_dragon: true,
+                        victims: Vec::new(),
                         potion: None,
                     });
                 }
@@ -2564,6 +2599,7 @@ impl Game<'_> {
                     age: 0,
                     duration: 600,
                     from_dragon: false,
+                    victims: Vec::new(),
                     potion: None,
                 });
                 // DragonFireball.onHit: level event 2006 (the burst of dragon
@@ -2626,10 +2662,10 @@ impl Game<'_> {
                 return false;
             }
             c.age += 1;
-            if c.age >= c.duration {
+            if breath_expired(c.age, c.duration) {
                 return false;
             }
-            if !c.from_dragon {
+            if !c.from_dragon && c.age >= BREATH_WAIT {
                 // DragonFireball's cloud: radius per tick (7 - 3) / duration.
                 c.radius += (7.0 - 3.0) / c.duration as f32;
             }
@@ -2650,16 +2686,16 @@ impl Game<'_> {
                     true,
                 );
             }
-            // AreaEffectCloud: after its 20-tick wait, every 20 ticks per entity.
-            if c.age >= 20 && c.age % 20 == 0 {
-                // Instant damage I from the flame cloud, II from a fireball's,
-                // both at the cloud's 0.5 scale.
-                let amount = harm_amount(u32::from(!c.from_dragon));
-                for p in &players {
-                    if cloud_hits(c.at, r, p.bounds, p.position) {
-                        harmed.push((p.who, amount));
-                    }
-                }
+            // AreaEffectCloud: after its wait, each entity every 20 ticks.
+            // Instant damage I from the flame cloud, II from a fireball's,
+            // both at the cloud's 0.5 scale.
+            let amount = harm_amount(u32::from(!c.from_dragon));
+            let inside = players
+                .iter()
+                .filter(|p| cloud_hits(c.at, r, p.bounds, p.position))
+                .map(|p| p.who);
+            for who in breath_victims(c.age, &mut c.victims, inside) {
+                harmed.push((who, amount));
             }
             true
         });
@@ -2865,6 +2901,8 @@ pub(super) struct Breath {
     pub(super) age: i32,
     pub(super) duration: i32,
     pub(super) from_dragon: bool,
+    /// Who it hit and until which age (`AreaEffectCloud.victims`).
+    pub(super) victims: Vec<(FightWho, i32)>,
     /// A lingering potion's cloud (`ThrownLingeringPotion`): what it applies.
     pub(super) potion: Option<super::potions::PotionCloud>,
 }
@@ -3225,6 +3263,10 @@ impl Game<'_> {
 }
 /// Saving and loading the dragon and the crystals as chunk entities.
 impl Dragon {
+    /// `Entity.firstTick`: no tick has run yet.
+    pub(super) fn first_tick(&self) -> bool {
+        self.ticks == 0
+    }
     pub(super) fn to_nbt(&self, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
         let mut tag = horizon_client::entity_nbt::vehicle_to_nbt(
             "minecraft:ender_dragon",
@@ -3245,6 +3287,7 @@ impl Dragon {
                 "sitting_damage_received".into(),
                 Tag::Float(self.sitting_damage.to_bits()),
             );
+            self.equipment.store(map);
         }
         tag
     }
@@ -3262,6 +3305,9 @@ impl Dragon {
             d.death_time = *t;
         }
         d.persistent = horizon_client::entity_nbt::flag(tag, "PersistenceRequired");
+        if let Some(equipment) = tag.get("equipment") {
+            d.equipment = horizon_items::equipment::Equipment::read(equipment);
+        }
         Some(d)
     }
 }
@@ -4271,6 +4317,27 @@ fn push_seen_with_hurt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_dragon_save_keeps_equipment_only_while_something_is_equipped() {
+        use horizon_client::items::ItemStack;
+        use horizon_items::equipment::{BODY, SADDLE};
+        let mut d = Dragon::new(Vec3::ZERO, 0.0, 0);
+        // An old save has no `equipment` key: the dragon loads empty and saves none.
+        let old = d.to_nbt([0; 4], None);
+        assert!(old.get("equipment").is_none());
+        assert!(Dragon::from_nbt(&old, 0).unwrap().equipment.is_empty());
+        // Body and saddle round-trip with their name and damage.
+        let mut body = ItemStack::new("minecraft:diamond_horse_armor", 1);
+        body.damage = 6;
+        body.data_mut().custom_name = Some(Tag::String("Plate".into()));
+        d.equipment[BODY] = Some(body);
+        d.equipment[SADDLE] = Some(ItemStack::new("minecraft:saddle", 1));
+        let saved = d.to_nbt([0; 4], None);
+        assert_eq!(Dragon::from_nbt(&saved, 0).unwrap().equipment, d.equipment);
+        // Saving over a raw save that holds a stale key removes it once emptied.
+        d.equipment.take_all().for_each(drop);
+        assert!(d.to_nbt([0; 4], Some(&saved)).get("equipment").is_none());
+    }
 
     fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
         (
@@ -4280,6 +4347,28 @@ mod tests {
             ),
             Vec3::new(feet[0], feet[1], feet[2]),
         )
+    }
+
+    #[test]
+    fn breath_lifetime_excludes_the_wait() {
+        assert!(!breath_expired(219, 200));
+        assert!(breath_expired(220, 200));
+        assert!(!breath_expired(619, 600));
+        assert!(breath_expired(620, 600));
+    }
+
+    #[test]
+    fn breath_victims_cadence() {
+        let (a, b) = (FightWho::Host, FightWho::Guest(1));
+        let mut v = Vec::new();
+        assert!(breath_victims(15, &mut v, [a]).is_empty());
+        assert_eq!(breath_victims(20, &mut v, [a]), vec![a]);
+        assert!(breath_victims(25, &mut v, [a]).is_empty());
+        // A newcomer is hit at the next 5-tick check, not the next 20.
+        assert_eq!(breath_victims(30, &mut v, [a, b]), vec![b]);
+        assert!(breath_victims(35, &mut v, [a, b]).is_empty());
+        assert_eq!(breath_victims(40, &mut v, [a, b]), vec![a]);
+        assert_eq!(breath_victims(50, &mut v, [a, b]), vec![b]);
     }
 
     #[test]

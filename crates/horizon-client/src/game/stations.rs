@@ -2235,6 +2235,13 @@ impl Game<'_> {
                 lines.push((random.with_color(horizon_client::text::GRAY), u32::MAX));
             }
         }
+        // A mod item's own `Item.appendHoverText`, its parts' lines, before the components; a
+        // tooltip the stack hides, and a crossbow's projectile, stay without them.
+        if !nested && !lines.is_empty() {
+            let mut own = Vec::new();
+            self.native_tooltip(stack, &mut own);
+            lines.extend(own);
+        }
         // TropicalFish.Pattern.addToTooltip.
         for text in horizon_client::item_tooltip::tropical_fish_lines(stack, &display) {
             lines.push((text, gray));
@@ -2589,11 +2596,6 @@ impl Game<'_> {
                     rgba(255, 85, 85, 255),
                 ));
             }
-        }
-        // Native mods last, once getTooltipLines has built every line; a
-        // tooltip the stack hides stays hidden.
-        if !nested && !lines.is_empty() {
-            self.native_tooltip(stack, &mut lines);
         }
         lines
     }
@@ -3083,17 +3085,19 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn anvil_subscriber_probe_and_answer_cache() {
-        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, Host, ModEntry};
+        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, HostSide, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
         };
 
         struct DefaultMod;
+        #[mod_api::__subscriptions]
         impl Hooks for DefaultMod {}
         struct Listener(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn anvil_update(&self, _: &mut dyn Host, _: &mut AnvilUpdateEvent<'_>) -> Flow {
+            fn anvil_update(&self, _: HostSide<'_>, _: &mut AnvilUpdateEvent<'_>) -> Flow {
                 self.0.fetch_add(1, Ordering::Relaxed);
                 Flow::Continue
             }
@@ -3103,12 +3107,11 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let mut station = super::Station::new(super::Kind::Anvil, [0; 3]);
                 station.inputs[0] = Some(super::ItemStack::new("minecraft:iron_sword", 1));
-                assert!(mod_api::listened(HookId::AnvilUpdate));
-                game.update_anvil_answer(&mut station, "first".into());
                 assert!(!mod_api::listened(HookId::AnvilUpdate));
-                assert_eq!(station.anvil_answer.as_ref().unwrap().1, "first");
+                game.update_anvil_answer(&mut station, "first".into());
+                assert!(station.anvil_answer.is_none());
                 game.update_anvil_answer(&mut station, "second".into());
-                assert_eq!(station.anvil_answer.as_ref().unwrap().1, "first");
+                assert!(station.anvil_answer.is_none());
             });
         });
         let calls = Arc::new(AtomicUsize::new(0));
@@ -3122,6 +3125,69 @@ mod tests {
                 game.update_anvil_answer(&mut station, "second".into());
                 assert_eq!(calls.load(Ordering::Relaxed), 2);
                 assert!(mod_api::listened(HookId::AnvilUpdate));
+            });
+        });
+    }
+    /// A stick's part adds its line where `Item.appendHoverText` does, after the name and before
+    /// the advanced id line; a stick whose tooltip is hidden doesn't ask it.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn tooltip_part_lines_come_after_the_name_and_never_for_a_hidden_tooltip() {
+        use crate::mod_api::{
+            self, ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, TooltipEvent,
+        };
+        use horizon_client::text::Text;
+
+        #[derive(Clone)]
+        struct Lore;
+        impl ItemPart for Lore {
+            fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
+                assert!(event.lines.is_empty());
+                event.lines.push((Text::literal("part"), u32::MAX));
+            }
+        }
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut Registrar) {
+                r.item_part("minecraft:stick", Lore);
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("lore", Box::new(Mod))].into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.settings.file.set(
+                    "advancedItemTooltips",
+                    horizon_client::options_file::V::Bool(true),
+                );
+                let stick = super::ItemStack::new("minecraft:stick", 1);
+                let lines: Vec<String> = game
+                    .stack_tooltip_lines(&stick, false, false)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                let id_and_components = ["minecraft:stick", "14 component(s)"];
+                assert_eq!(lines[..2], ["Stick", "part"]);
+                assert_eq!(lines[2..], id_and_components);
+                // `hide_tooltip`: no name, and the part isn't asked; the advanced lines stay.
+                let mut hidden = stick.clone();
+                hidden.data_mut().set_other(
+                    "minecraft:tooltip_display",
+                    Some(horizon_world::nbt::Tag::compound([(
+                        "hide_tooltip",
+                        horizon_world::nbt::Tag::Byte(1),
+                    )])),
+                );
+                let lines: Vec<String> = game
+                    .stack_tooltip_lines(&hidden, false, false)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                assert!(
+                    !lines.iter().any(|l| l == "Stick" || l == "part"),
+                    "{lines:?}"
+                );
             });
         });
     }

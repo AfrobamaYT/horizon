@@ -223,6 +223,34 @@ impl Game<'_> {
                     "value": self.lan.as_ref().is_some_and(|host| host.hub.config.allow_flight)
                 });
             }
+            "serversettings/hide_online_players" => {
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.hide_online_players())
+                });
+            }
+            "serversettings/hide_online_players/set" => {
+                let Some(hide) = body["value"].as_bool() else {
+                    return json!({ "error": "hide online players must be a boolean" });
+                };
+                let current = self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|host| host.hub.lan.shared.hide_online_players());
+                rpc(format!(
+                    "Update hide online players from {current} to {hide}"
+                ));
+                self.set_hide_online_players(hide);
+                self.store_property("hide-online-players", hide.to_string());
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.hide_online_players())
+                });
+            }
             "serversettings/player_idle_timeout" => {
                 return json!({ "value": state.lists.lock().unwrap().player_idle_timeout });
             }
@@ -536,14 +564,7 @@ impl Game<'_> {
         rpc(format!("Add ip '{}' to ban list", ban.user));
         let ip = ban.user.clone();
         state.lists.lock().unwrap().ip_bans.add(ban);
-        let banned: Vec<u128> = self.lan.as_ref().map_or_else(Vec::new, |h| {
-            h.hub
-                .guests
-                .iter()
-                .filter(|g| g.address.ip().to_string() == ip)
-                .map(|g| g.uuid)
-                .collect()
-        });
+        let banned = self.ip_ban_players(&ip);
         for uuid in banned {
             self.kick_uuid(uuid, translatable("multiplayer.disconnect.ip_banned", &[]));
         }
@@ -595,6 +616,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
+            .filter(|g| g.participates_online())
             .find(|g| match (id, name) {
                 (Some(id), _) => g.uuid == id,
                 (None, Some(name)) => g.name.eq_ignore_ascii_case(name),
@@ -650,6 +672,30 @@ fn management_ip_ban(entry: &Value, ip: String) -> IpBan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn management_online_skips_fake_players_by_name_and_id() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            let level = game.native_level("minecraft:overworld").unwrap();
+            game.native_fake_player(level, 100, "robot").unwrap();
+            assert_eq!(game.management_online(&json!({"name": "robot"})), None);
+            assert_eq!(game.management_online(&json!({"id": "64"})), None);
+            assert_eq!(
+                game.management_online(&json!({"name": "GUEST12"})),
+                Some((12, "127.0.0.1".into()))
+            );
+            // Id takes precedence, with no fallback from a fake id to a real name.
+            assert_eq!(
+                game.management_online(&json!({"id": "c", "name": "robot"})),
+                Some((12, "127.0.0.1".into()))
+            );
+            assert_eq!(
+                game.management_online(&json!({"id": "64", "name": "guest12"})),
+                None
+            );
+        });
+    }
 
     #[test]
     fn a_game_rule_is_written_as_vanillas_typed_codec_does() {

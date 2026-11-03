@@ -136,6 +136,16 @@ pub fn jump_sound(m: &Mob) -> &'static str {
         _ => "entity.horse.jump",
     }
 }
+/// `PlayerRideableJumping.getPlayerJumpPendingScale`: the charge `data` out of
+/// 100 as the scale a mount leaps or dashes with (a full bar is 1.0 and the
+/// shortest is 0.4).
+pub fn jump_pending_scale(data: i32) -> f32 {
+    if data >= 90 {
+        1.0
+    } else {
+        0.4 + 0.4 * data as f32 / 90.0
+    }
+}
 /// `AbstractHorse.onPlayerJump`: a released jump bar lets the horse slide on
 /// the rider's keys (`allowStandSliding`) and makes it rear.
 pub fn on_player_jump(m: &mut Mob) {
@@ -262,12 +272,12 @@ pub fn controlled(m: &Mob) -> bool {
     };
     match m.species() {
         // Pig/Strider.getControllingPassenger: saddled, the rider holding the stick.
-        Species::Pig | Species::Strider => m.extra.saddled && r.steer,
+        Species::Pig | Species::Strider => m.extra.saddled() && r.steer,
         Species::HappyGhast => super::happy_ghast::controlled(m),
         Species::Nautilus | Species::ZombieNautilus => super::nautilus::controlled(m),
         // AbstractHorse.getControllingPassenger: saddled with a player on it. A
         // tamed skeleton horse (SkeletonTrapGoal only tames it) needs the saddle too.
-        _ => m.extra.saddled,
+        _ => m.extra.saddled(),
     }
 }
 /// `AbstractHorse`s (camels too, not llamas, which no player steers): the

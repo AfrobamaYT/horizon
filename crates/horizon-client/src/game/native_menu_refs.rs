@@ -16,16 +16,13 @@ use horizon_client::{
 
 impl Game<'_> {
     fn native_menu_guest(&self, menu: MenuRef) -> Option<&Guest> {
-        if self.lan_acting.is_some() {
+        let super::native_server::PlayerRead::Guest(guest) =
+            self.player_handle_read(menu.player)?
+        else {
             return None;
-        }
-        (self.native_player_ref(menu.player.uuid())? == menu.player).then_some(())?;
+        };
         let host = self.lan.as_ref()?;
-        let guest = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && g.uuid == menu.player.uuid())?;
+        (host.hub.holder_guest(guest.uuid, self.dim.id())?.conn == guest.conn).then_some(())?;
         (guest.menu_generation == menu.generation).then_some(())?;
         if let Some(open) = &guest.menu {
             (open.window == menu.window && open.hidden.is_empty()).then_some(guest)
@@ -48,14 +45,12 @@ impl Game<'_> {
 
     /// A player's current supported menu. Refuses crafting tables, merchants,
     /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// clients, stale players and calls during a player swap.
+    /// clients, stale players and players whose state is swapped out.
     pub(super) fn native_menu_ref(&self, player: PlayerRef) -> Option<MenuRef> {
-        let host = self.lan.as_ref()?;
-        let guest = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && g.uuid == player.uuid())?;
+        let super::native_server::PlayerRead::Guest(guest) = self.player_handle_read(player)?
+        else {
+            return None;
+        };
         let menu = MenuRef {
             player,
             window: guest.menu.as_ref().map_or(0, |m| m.window),
@@ -244,7 +239,11 @@ impl Game<'_> {
             .lan
             .iter_mut()
             .flat_map(|host| host.hub.guests.iter_mut());
-        let g = guests.find(|g| g.placed && g.uuid == menu.player.uuid())?;
+        let g = guests.find(|g| {
+            g.placed
+                && g.uuid == menu.player.uuid()
+                && g.entity_id as u32 == menu.player.entity().id()
+        })?;
         match backing {
             MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),
             MenuSlotBacking::CraftGrid(n) => g.craft_grid.get_mut(n),

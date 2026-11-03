@@ -51,13 +51,13 @@ impl Game<'_> {
                 !baby
             }
             // Pig / Strider.mobInteract: a saddled one is ridden.
-            Species::Pig | Species::Strider => m.extra.saddled && !sneaking,
+            Species::Pig | Species::Strider => m.extra.saddled() && !sneaking,
             // HappyGhast.mobInteract: a harnessed adult is ridden.
-            Species::HappyGhast => !baby && m.extra.body.is_some(),
+            Species::HappyGhast => !baby && m.extra.body_id().is_some(),
             // TamableAnimal (wolf, cat, parrot) on a client: CONSUME once tame.
             Species::Wolf | Species::Cat | Species::Parrot => m.extra.tame,
             // Allay.mobInteract: gives an item or takes it back.
-            Species::Allay => !item.is_empty() || m.extra.main_hand.is_some(),
+            Species::Allay => !item.is_empty() || m.extra.main_hand_id().is_some(),
             Species::Cow | Species::Goat => item == "minecraft:bucket" && !baby,
             Species::Mooshroom => {
                 !baby

@@ -8,9 +8,10 @@
 //! A write runs in a transaction of its own, nested in the caller's, and changes the place where
 //! it is, journaled: an abort puts it back, at every level of an item inside an item. A handler
 //! answering more than it was asked is a mod bug, named once, and the write aborts.
+use super::HostTransaction;
 use super::{
-    Capability, Direction, ENTITY_ITEMS, Hand, Host, ITEMS, ItemResource, ItemStack, LevelRef,
-    MenuRef, MenuSlotBacking, ResourceHandler, Transaction, backend_mut_of, backend_of,
+    Capability, Direction, ENTITY_ITEMS, Hand, ITEMS, ItemResource, ItemStack, LevelRef, MenuRef,
+    MenuSlotBacking, ResourceHandler, ServerHost, Transaction, backend_mut_of, backend_of,
 };
 use std::{collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
 
@@ -61,13 +62,13 @@ pub enum ItemPlace {
 /// attachments).
 pub trait PlaceProvider: Send + Sync + 'static {
     /// The stack at `key`, if any.
-    fn stack(&self, host: &mut dyn Host, key: u64) -> Option<ItemStack>;
+    fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack>;
     /// Puts up to `amount` of `resource` at `key`, in transaction `tx`: how much went. What
     /// doesn't stack with what is there may go where the mod puts it, such as the player's
     /// inventory (`ItemAccess.insert`); none where `key` is no longer a place.
     fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         key: u64,
         resource: &ItemResource,
@@ -76,7 +77,7 @@ pub trait PlaceProvider: Send + Sync + 'static {
     /// Takes up to `amount` of `resource` from `key`, in transaction `tx`: how much came.
     fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         key: u64,
         resource: &ItemResource,
@@ -88,7 +89,7 @@ pub trait PlaceProvider: Send + Sync + 'static {
 /// provider, if the game has one.
 pub struct ItemCapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    pub(super) default: Option<fn(&mut dyn Host, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
+    pub(super) default: Option<fn(&mut dyn ServerHost, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
     pub(super) handler: PhantomData<fn() -> Box<T>>,
 }
 
@@ -120,7 +121,7 @@ pub const ITEM_ITEMS: ItemCapabilityKey<dyn ResourceHandler<ItemResource>> = Ite
 /// The game's own [`ITEM_ITEMS`] for the item at `.0`, over the `item_container` helpers.
 struct GameItemItems(ItemPlace);
 impl GameItemItems {
-    fn slot(&self, host: &mut dyn Host, index: usize) -> Option<ItemStack> {
+    fn slot(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemStack> {
         let held = self.0.stack(host)?;
         backend_of(&*host)?
             .item_container_slots(&held)?
@@ -130,7 +131,7 @@ impl GameItemItems {
     /// Rewrites one item at `.0` as `changed`: `moved` when that goes through, else 0.
     fn rewrite(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         changed: &ItemStack,
         moved: u32,
@@ -142,7 +143,7 @@ impl GameItemItems {
     }
 }
 impl ResourceHandler<ItemResource> for GameItemItems {
-    fn size(&self, host: &mut dyn Host) -> usize {
+    fn size(&self, host: &mut dyn ServerHost) -> usize {
         self.0
             .stack(host)
             .and_then(|held| {
@@ -150,13 +151,13 @@ impl ResourceHandler<ItemResource> for GameItemItems {
             })
             .map_or(0, |slots| slots.len())
     }
-    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+    fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
         Some(ItemResource::of(&self.slot(host, index)?))
     }
-    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
         self.slot(host, index).map_or(0, |stack| stack.count)
     }
-    fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+    fn capacity(&self, host: &mut dyn ServerHost, index: usize, resource: &ItemResource) -> u32 {
         self.0.stack(host).map_or(0, |held| {
             backend_of(&*host).map_or(0, |backend| {
                 backend.item_container_capacity(&held, index, &resource.to_stack(1))
@@ -165,7 +166,7 @@ impl ResourceHandler<ItemResource> for GameItemItems {
     }
     fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -185,7 +186,7 @@ impl ResourceHandler<ItemResource> for GameItemItems {
     }
     fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -230,7 +231,7 @@ pub(super) fn warned_about(owner: &str) -> bool {
 
 impl ItemPlace {
     /// The stack here, if any (`getResource` and `getAmount`).
-    pub fn stack(&self, host: &mut dyn Host) -> Option<ItemStack> {
+    pub fn stack(&self, host: &mut dyn ServerHost) -> Option<ItemStack> {
         match self {
             ItemPlace::BlockEntity {
                 level,
@@ -257,12 +258,12 @@ impl ItemPlace {
     }
 
     /// What is here, without its count (`ItemAccess.getResource`).
-    pub fn resource(&self, host: &mut dyn Host) -> Option<ItemResource> {
+    pub fn resource(&self, host: &mut dyn ServerHost) -> Option<ItemResource> {
         self.stack(host).map(|stack| ItemResource::of(&stack))
     }
 
     /// How many are here (`ItemAccess.getAmount`).
-    pub fn amount(&self, host: &mut dyn Host) -> u32 {
+    pub fn amount(&self, host: &mut dyn ServerHost) -> u32 {
         self.stack(host).map_or(0, |stack| stack.count)
     }
 
@@ -275,7 +276,7 @@ impl ItemPlace {
     /// (`forHandlerIndex`); a mod's place's where its [`PlaceProvider`] puts it.
     pub fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         resource: &ItemResource,
         amount: u32,
@@ -287,7 +288,7 @@ impl ItemPlace {
     /// (`ItemAccess.extract`). A creative player's hand gives without losing any.
     pub fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         resource: &ItemResource,
         amount: u32,
@@ -303,13 +304,13 @@ impl ItemPlace {
     /// changed, and the others stay as they were.
     pub fn exchange(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
         let _ = tx;
-        let swap = |host: &mut dyn Host, tx: &Transaction| {
+        let swap = |host: &mut dyn ServerHost, tx: &Transaction| {
             let old = self.resource(host).ok_or(())?;
             let out = self.extract(host, tx, &old, amount);
             match out == amount && self.insert(host, tx, resource, out) == out {
@@ -326,7 +327,7 @@ impl ItemPlace {
     /// asked has it undone, and its mod named.
     fn moved(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         resource: &ItemResource,
         amount: u32,
@@ -352,7 +353,7 @@ impl ItemPlace {
         // handler may move less per call than it could): what `slot` doesn't take goes to the
         // other indices (`forHandlerIndex`).
         let through = |handler: Capability<dyn ResourceHandler<ItemResource>>,
-                       host: &mut dyn Host,
+                       host: &mut dyn ServerHost,
                        tx: &Transaction,
                        slot: usize,
                        spills: bool| {
@@ -395,13 +396,13 @@ impl ItemPlace {
                 let (handler, index) = match menu.slot_backing(host, *slot).ok_or(())? {
                     MenuSlotBacking::Player(index) => {
                         let player = menu.player.entity();
-                        (player.capability(host, &ENTITY_ITEMS), index)
+                        (player.capability(host, &ENTITY_ITEMS, ()), index)
                     }
                     MenuSlotBacking::BlockEntity { level, pos, slot } => {
                         (level.capability(host, &ITEMS, pos, None), slot)
                     }
                     MenuSlotBacking::Entity { entity, slot } => {
-                        (entity.capability(host, &ENTITY_ITEMS), slot)
+                        (entity.capability(host, &ENTITY_ITEMS, ()), slot)
                     }
                     MenuSlotBacking::CraftResult => return Ok(0),
                     _ => {
@@ -447,9 +448,9 @@ impl ItemPlace {
 /// same one, which alone changes.
 fn alone(
     place: &ItemPlace,
-    host: &mut dyn Host,
+    host: &mut dyn ServerHost,
     tx: &Transaction,
-    f: &mut dyn FnMut(&mut dyn Host, &Transaction) -> Result<u32, ()>,
+    f: &mut dyn FnMut(&mut dyn ServerHost, &Transaction) -> Result<u32, ()>,
 ) -> Result<u32, ()> {
     match place {
         ItemPlace::Nested { parent, .. } => alone(parent, host, tx, &mut |host, tx| {
@@ -464,9 +465,9 @@ fn alone(
 /// an exchange puts it. All written in place in `tx`, so an abort puts every level back.
 fn one_of(
     parent: &ItemPlace,
-    host: &mut dyn Host,
+    host: &mut dyn ServerHost,
     tx: &Transaction,
-    f: impl FnOnce(&mut dyn Host, &Transaction) -> Result<u32, ()>,
+    f: impl FnOnce(&mut dyn ServerHost, &Transaction) -> Result<u32, ()>,
 ) -> Result<u32, ()> {
     let held = parent.stack(host).ok_or(())?;
     let others = held.count - 1;
@@ -494,7 +495,7 @@ impl ItemPlace {
     /// mods' others, each in registration order.
     pub fn capability<T: ?Sized + 'static>(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         key: &ItemCapabilityKey<T>,
     ) -> Option<Capability<T>> {
         let stack = self.stack(host)?;

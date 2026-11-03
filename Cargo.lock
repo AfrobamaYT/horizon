@@ -1336,6 +1336,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1468,6 +1469,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1599,7 +1601,17 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1609,6 +1621,8 @@ dependencies = [
  "horizon-shader-api",
  "log",
  "minisign-verify",
+ "png",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -1646,8 +1660,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "toml",
  "ureq",
+ "url",
  "zip",
 ]
 
@@ -3515,6 +3531,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"

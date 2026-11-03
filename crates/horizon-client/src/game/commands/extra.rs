@@ -738,7 +738,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| lan.hub.singleplayer_owner != Some(g.uuid))
+                .filter(|g| g.participates_online() && lan.hub.singleplayer_owner != Some(g.uuid))
                 .filter(|g| match &s.player_name {
                     Some(name) => g.name.eq_ignore_ascii_case(name),
                     None => s.kind == 'a' || s.kind == 'e',
@@ -982,17 +982,9 @@ impl Game<'_> {
         Ok(port)
     }
     pub(super) fn cmd_unpublish(&mut self) -> R<i32> {
-        if self.serving() {
-            if !self.unpublish() {
-                return Err(err("commands.unpublish.notPublished", &[]));
-            }
-            self.feedback(Text::translate("commands.unpublish.success", &[]));
-            return Ok(1);
-        }
-        if self.lan.is_none() {
+        if !self.unpublish() {
             return Err(err("commands.unpublish.notPublished", &[]));
         }
-        self.lan_close(false);
         self.feedback(Text::translate("commands.unpublish.success", &[]));
         Ok(1)
     }
