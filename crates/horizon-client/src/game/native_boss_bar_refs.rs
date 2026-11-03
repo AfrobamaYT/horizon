@@ -42,9 +42,11 @@ impl Game<'_> {
     }
 
     /// An existing custom boss bar by id (`minecraft:` when no namespace), or
-    /// None. The bars load with the world's first tick. Boss bars of mobs and
-    /// raids are not custom boss events.
-    pub(super) fn native_boss_bar(&self, id: &str) -> Option<BossBarRef> {
+    /// None. Saved bars are there from the world's start, as vanilla's
+    /// `CustomBossEvents`. Boss bars of mobs and raids are not custom boss
+    /// events.
+    pub(super) fn native_boss_bar(&mut self, id: &str) -> Option<BossBarRef> {
+        self.load_bossbars();
         let id = Identifier::parse(id).ok()?;
         let id = format!("{}:{}", id.namespace(), id.path());
         self.boss_bar_handle(self.boss_bar_state_by_id(&id)?)
@@ -58,7 +60,8 @@ impl Game<'_> {
     }
 
     /// Every custom boss bar, in the order `/bossbar list` shows them.
-    pub(super) fn native_boss_bars(&self) -> Vec<BossBarRef> {
+    pub(super) fn native_boss_bars(&mut self) -> Vec<BossBarRef> {
+        self.load_bossbars();
         if self.remote.is_some() {
             return Vec::new();
         }
@@ -466,6 +469,27 @@ mod tests {
             assert_eq!(again.name(game).unwrap().plain(), "New");
             assert!(game.run_command("bossbar remove mod:bar"));
             assert_eq!(again.id(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn saved_bars_are_found_before_any_tick() {
+        with_game(|game| {
+            let dir = std::env::temp_dir().join(format!("boss-early-{}", std::process::id()));
+            game.world_root = dir.clone();
+            let bar = game
+                .native_create_boss_bar("mod:saved", Text::literal("Kept"))
+                .unwrap();
+            assert!(bar.set_value(game, 7));
+            game.save_bossbars();
+            // The world opens again: nothing has loaded the bars yet.
+            game.bosses = Default::default();
+            let found = game.native_boss_bar("mod:saved").unwrap();
+            assert_eq!(found.value(game), Some(7));
+            game.bosses = Default::default();
+            assert_eq!(game.native_boss_bars().len(), 1);
+            let _ = std::fs::remove_dir_all(dir);
         });
     }
 
