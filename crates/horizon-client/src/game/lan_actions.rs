@@ -1349,11 +1349,23 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
+        // A block's or a double chest's menu counts among the openers of its
+        // lid (a vehicle keeps its own `Container`, an ender chest has none).
+        let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
         if !hidden.is_empty() {
             host.hub.hide_menu_slots(conn, hidden);
+        }
+        // `ContainerOpenersCounter.incrementOpeners` (`ChestBlockEntity.startOpen`,
+        // `ShulkerBoxBlockEntity.startOpen`): the lid opens for the guest, and
+        // when this is the first opener the open sound plays for everyone
+        // around, the opener included (`playSound(null, …)`, which the capture
+        // relay sends on to the guests). Without it the host's copy never
+        // learned of the open, so a guest's box opened silently.
+        if counts_openers && self.container_openers_changed(pos, true) {
+            self.container_edge_sound(pos, true);
         }
         true
     }
@@ -1780,13 +1792,6 @@ impl Game<'_> {
                     if canceled == Some(true) {
                         return;
                     }
-                    let play = host.play.entry(conn).or_default();
-                    play.digging = Some((a.pos, face));
-                    play.dig_start = host.hub.ticks;
-                    play.last_progress = -1;
-                    // The pause between two blocks is the client's (MultiPlayerGameMode's
-                    // destroyDelay); the server digs from the START it receives.
-                    play.destroy_delay = 0;
                     // ServerPlayerGameMode.handleBlockBreakAction: a creative START
                     // destroys the block at once (destroyAndAck "creative destroy"),
                     // so a UseItemOn sent behind it in the same tick (both buttons
@@ -1794,30 +1799,51 @@ impl Game<'_> {
                     // attacks the block at once, so a tap released in the same tick
                     // still plays a note. The dig is marked begun for tick_mining.
                     let pos = a.pos;
-                    let destroyed = self.as_guest(host, conn, |g| {
+                    enum StartDig {
+                        Creative,
+                        Restricted,
+                        Air,
+                        Accepted,
+                    }
+                    let start = self.as_guest(host, conn, |g| {
                         if g.creative {
                             let _ = g.break_block(pos);
-                            return true;
+                            return StartDig::Creative;
                         }
-                        if !g.block_action_restricted(pos) {
-                            let _ = g.attack_block(pos);
+                        if g.block_action_restricted(pos) {
+                            return StartDig::Restricted;
+                        }
+                        if g.res.facts().is_air(g.world.block(pos[0], pos[1], pos[2])) {
                             g.mining = Some(Mining {
                                 pos,
                                 progress: 0.0,
                                 ticks: 0,
                             });
+                            return StartDig::Air;
                         }
-                        false
+                        let _ = g.attack_block(pos);
+                        g.mining = Some(Mining {
+                            pos,
+                            progress: 0.0,
+                            ticks: 0,
+                        });
+                        StartDig::Accepted
                     });
-                    if destroyed == Some(true)
-                        && let Some(play) = host.play.get_mut(&conn)
-                    {
-                        play.digging = None;
+                    if matches!(start, Some(StartDig::Accepted | StartDig::Air)) {
+                        let play = host.play.entry(conn).or_default();
+                        play.digging = Some((pos, face));
+                        play.dig_start = host.hub.ticks;
+                        play.last_progress = -1;
+                        // The pause between blocks is the client's destroyDelay.
+                        play.destroy_delay = 0;
+                        if matches!(start, Some(StartDig::Air)) {
+                            play.destroy_pos = Some(pos);
+                        }
                     }
                     // ServerPlayerGameMode.handleBlockBreakAction writes `destroyPos`
                     // only for a dig that takes more than one hit: a creative START
                     // and an instant one leave no block behind for a later STOP.
-                    if destroyed != Some(true) {
+                    if matches!(start, Some(StartDig::Accepted)) {
                         let one_hit = self
                             .as_guest(host, conn, |g| g.destroy_progress(pos))
                             .is_some_and(|p| p >= 1.0);
@@ -2296,6 +2322,13 @@ impl Game<'_> {
                 });
             }
             S::PlayerCommand(p) if p.action == 6 => self.lan_start_gliding(host, conn),
+            // START_RIDING_JUMP: the mount's handleStartJump.
+            S::PlayerCommand(p) if p.action == 3 => {
+                self.lan_start_riding_jump(host, conn, p.data);
+            }
+            // STOP_RIDING_JUMP: AbstractHorse and Camel handleStopJump do
+            // nothing, and a nautilus' dash is not stopped this way.
+            S::PlayerCommand(p) if p.action == 4 => {}
             // ServerboundResourcePackPacket in play: the server has nothing to
             // do with it (a declined required pack is handled on the connection).
             S::ResourcePack(r) => {
@@ -3667,6 +3700,17 @@ impl Game<'_> {
                 self.guest_die(host, gi, conn);
                 continue;
             }
+            // ServerPlayerGameMode.tick stops an active destroy when its block is air.
+            if let Some((pos, _)) = host.play.get(&conn).and_then(|play| play.digging)
+                && self
+                    .res
+                    .facts()
+                    .is_air(self.world.block(pos[0], pos[1], pos[2]))
+                && let Some(play) = host.play.get_mut(&conn)
+            {
+                play.digging = None;
+                play.mining = None;
+            }
             let play = host.play.entry(conn).or_default();
             // ServerGamePacketListenerImpl.tick's dropSpamThrottler.
             play.creative_drops = play.creative_drops.saturating_sub(1);
@@ -3852,10 +3896,34 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3, at);
-            if let Some(eyes) = drops {
-                self.as_guest(host, conn, |game| game.drop_inventory(eyes));
+            self.as_guest(host, conn, |game| {
+                if let Some(eyes) = drops {
+                    game.drop_inventory(eyes);
+                }
+                game.score_player_died();
+                game.award_custom_stat("deaths", 1);
+                game.stats.reset_death_timers();
+            });
+            // ServerPlayer.die: a spectator never reaches dropAllDeathLoot.
+            if drops.is_some() {
+                // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+                let now = self.world.game_time;
+                let attacker = if horizon_client::mod_api::mods().is_empty() {
+                    None
+                } else {
+                    self.guest_combat
+                        .get_mut(&conn)
+                        .and_then(|c| c.take_hurt_by_player(now))
+                        .and_then(|c| c.uuid(host))
+                };
+                let reward = self.living_experience_drop(
+                    id as u32,
+                    "minecraft:player",
+                    attacker,
+                    reward as i32,
+                );
+                self.spawn_orbs(at, reward as u32);
             }
-            self.spawn_orbs(at, reward);
         }
     }
 
@@ -3935,8 +4003,42 @@ impl Game<'_> {
         let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
         if let Some(head) = g.bed {
             let block = self.world.block(head[0], head[1], head[2]);
-            let bed = self.res.facts().get(block).name.ends_with("_bed");
-            if g.dead || g.health <= 0.0 || !bed {
+            let gone = g.dead || g.health <= 0.0;
+            let bed_exists = self.res.facts().get(block).name.ends_with("_bed");
+            let modded = !horizon_client::mod_api::mods().is_empty();
+            let mut keep_sleeping = !gone;
+            if !modded {
+                keep_sleeping &= self.sleep_problem(bed_exists, true).is_none();
+            } else if keep_sleeping {
+                // Player.tick's bed rule check, which comes before and doesn't
+                // look at the bed.
+                let problem = self.sleep_problem(true, true);
+                let mut may_continue = None;
+                self.native_can_continue_sleeping(
+                    g.uuid,
+                    &g.name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
+                keep_sleeping = may_continue.unwrap_or(problem.is_none());
+            }
+            // Then LivingEntity.tick's checkBedExists, for a sleeper still in bed.
+            if modded && keep_sleeping {
+                let problem = self.sleep_problem(bed_exists, false);
+                let mut may_continue = None;
+                self.native_can_continue_sleeping(
+                    g.uuid,
+                    &g.name,
+                    "minecraft:player",
+                    head,
+                    problem,
+                    &mut may_continue,
+                );
+                keep_sleeping = may_continue.unwrap_or(problem.is_none());
+            }
+            if !keep_sleeping {
                 self.wake_guest(host, gi);
             } else {
                 // LivingEntity.tick: a sleeper's xRot is 0.
@@ -4408,6 +4510,35 @@ impl Game<'_> {
         }
     }
 
+    /// ServerGamePacketListenerImpl.handlePlayerCommand START_RIDING_JUMP: the
+    /// vehicle the guest rides takes its own `handleStartJump` — a horse rears
+    /// and slides on the rider's keys, a camel dashes — and the sound vanilla's
+    /// server plays is broadcast to the players near the mount, the rider
+    /// included (their own client plays none).
+    fn lan_start_riding_jump(&mut self, host: &mut LanHost, conn: u32, data: i32) {
+        let Some(Some(index)) = self.as_guest(host, conn, |g| g.mount_index()) else {
+            return;
+        };
+        let m = &mut self.mobs[index];
+        let Some((sound, volume)) = crate::game::mounts::start_riding_jump(m, data) else {
+            return;
+        };
+        let at = m.center();
+        // LivingEntity.getSoundSource: a mob's sounds are in the neutral source.
+        let neutral = horizon_client::settings::SOUND_SOURCES
+            .iter()
+            .position(|s| *s == "neutral")
+            .unwrap_or(0) as i32;
+        host.hub.sound(
+            &format!("minecraft:{sound}"),
+            at,
+            volume,
+            1.0,
+            neutral,
+            None,
+        );
+    }
+
     /// ServerGamePacketListenerImpl.handlePlayerCommand START_FALL_FLYING:
     /// `Player.tryToStartFallFlying`, or else `stopFallFlying` (a second
     /// start while gliding ends the glide, as in vanilla).
@@ -4521,9 +4652,17 @@ impl Game<'_> {
             .res
             .facts()
             .is_air(self.world.block(pos[0], pos[1], pos[2]));
-        let per_tick = self
-            .as_guest(host, conn, |g| g.destroy_progress(pos))
-            .unwrap_or(0.0);
+        let per_tick = if !air
+            && host
+                .play
+                .get(&conn)
+                .is_some_and(|p| p.dig_start_for(pos).is_some())
+        {
+            self.as_guest(host, conn, |g| g.destroy_progress(pos))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
         let decision = {
             let play = host.play.entry(conn).or_default();
             play.dig_ended();
@@ -4912,7 +5051,7 @@ impl Game<'_> {
                 };
                 let mut amount = rest.min(i32::MAX as u32) as i32;
                 game.native_player_exp_change(player, &name, &mut amount);
-                game.give_orb_points(amount.max(0) as u32);
+                game.give_experience_points(amount.max(0));
             }
         });
     }

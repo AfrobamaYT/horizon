@@ -600,9 +600,14 @@ fn fluid_id(name: &str) -> Option<u32> {
 pub use horizon_items::item_nbt::{
     decode_items, encode_item, encode_items, item_from_nbt, item_to_nbt,
 };
+/// Whether a mod block entity is temporarily out of the world for its tick.
+pub fn block_entity_placeholder(entity: &crate::containers::BlockEntity) -> bool {
+    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id.is_empty())
+}
+
 /// The block entity type ID for the block it sits in (a chest-like container
 /// is a chest, trapped chest or barrel).
-fn block_entity_id(e: &crate::containers::BlockEntity, block: &str) -> String {
+pub fn block_entity_id(e: &crate::containers::BlockEntity, block: &str) -> String {
     match (e, block) {
         (
             crate::containers::BlockEntity::Chest(_),
@@ -1415,7 +1420,7 @@ pub fn encode_with(
         .iter()
         // A mod block entity a native mod is ticking right now
         // (`tick_mod_block_entity`): its data is out of the world.
-        .filter(|(_, e)| !matches!(e, crate::containers::BlockEntity::Mod(m) if m.id.is_empty()))
+        .filter(|(_, e)| !block_entity_placeholder(e))
         .map(|(p, e)| {
             let block = block_name(p);
             let mut current = encode_block_entity(*p, e, &block);
@@ -4846,8 +4851,23 @@ fn decode_lod_surfaces(
             }
         }
     }
+    // Spans are pushed top down, so the reverse puts the topmost last, as
+    // `Column::from_chunk` leaves them. Open water is then lit as open sky,
+    // exactly as the live path does: without it a saved column kept each
+    // water block's own faded skylight and drew a dark band through the sea
+    // where saved columns met the generator's (`grid`'s stride limit).
+    // Only where there is a sky to be lit by: the Nether's water must not
+    // gain skylight it never had.
+    let is_water = |state| {
+        sky_light
+            && assets
+                .registry
+                .state(state)
+                .is_some_and(|block| block.name == "minecraft:water")
+    };
     for column in &mut *columns {
         column.spans.reverse();
+        column.light_open_water_where(is_water);
     }
     Some(Arc::from(columns))
 }
@@ -4963,6 +4983,9 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
     fn prepare_loaded(&self, worker: &mut G::Worker, chunk: &Chunk) {
         self.inner.prepare_loaded(worker, chunk);
     }
+    fn all_idle(&self) {
+        self.inner.all_idle();
+    }
     fn idle(&self, worker: &mut G::Worker) {
         self.inner.idle(worker);
     }
@@ -4987,6 +5010,12 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
         proto: &crate::streaming::Proto,
     ) -> Option<crate::section_mask::SectionMask> {
         self.inner.non_air_sections(proto)
+    }
+    fn cache_census(&self) -> Vec<(&'static str, usize, Option<usize>)> {
+        self.inner.cache_census()
+    }
+    fn proto_heap_bytes(&self, proto: &crate::streaming::Proto) -> ([usize; 6], [usize; 16]) {
+        self.inner.proto_heap_bytes(proto)
     }
     fn save_protos(&self, protos: &[&crate::streaming::Proto]) {
         self.save
@@ -5639,6 +5668,20 @@ mod tests {
         let underwater = surfaces[4 * 16 + 4].surface.unwrap();
         assert_eq!((underwater.height, underwater.state), (55, sand));
         assert_eq!(underwater.water, Some((64, water)));
+        // Open water reads as open sky, as the generator's far columns do.
+        // Saved columns that kept each block's own faded skylight drew a dark
+        // band through the sea where the two met.
+        let sea = &surfaces[4 * 16 + 4].spans;
+        let lit: Vec<_> = sea
+            .iter()
+            .filter(|span| span.state == water)
+            .map(|span| span.light & 0xf0)
+            .collect();
+        assert!(!lit.is_empty(), "the column keeps its water spans");
+        assert!(
+            lit.iter().all(|sky| *sky == 0xf0),
+            "saved open water is lit as open sky, got {lit:?}"
+        );
         let chorus_column = &surfaces[2 * 16 + 12];
         assert_eq!(
             chorus_column

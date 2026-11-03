@@ -19,25 +19,30 @@ pub use crate::game::{
     ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
     NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
     NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake,
+    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
 };
+pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
 };
+pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::menu::StackedOnOther;
 pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::recipe_book::RecipeBookCategory;
 pub use crate::text::Text;
-pub use horizon_assets::item_model::DisplayContext;
+pub use horizon_assets::item_model::{DisplayContext, StackView};
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
 pub use horizon_world::consumable::UseAnimation;
+pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
@@ -343,8 +348,43 @@ pub enum NativeAuthority {
     RemoteClient,
 }
 
+/// Supported vanilla `Block.UPDATE_*` flags for a level block write.
+/// Horizon currently sends all writes to clients regardless of client flags.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeBlockUpdateFlags(i32);
+
+impl NativeBlockUpdateFlags {
+    /// No update flags.
+    pub const NONE: Self = Self(0);
+    /// Notify neighboring blocks.
+    pub const NEIGHBORS: Self = Self(1);
+    /// Skip neighbor shape updates.
+    pub const KNOWN_SHAPE: Self = Self(16);
+    /// Suppress drops caused by neighbor shape updates.
+    pub const SUPPRESS_DROPS: Self = Self(32);
+    /// The replacement is caused by a piston.
+    pub const MOVE_BY_PISTON: Self = Self(64);
+    /// Skip wire shape updates.
+    pub const SKIP_SHAPE_UPDATE_ON_WIRE: Self = Self(128);
+    /// Skip the removed block entity's side effects, including container spills.
+    pub const SKIP_BLOCK_ENTITY_SIDE_EFFECTS: Self = Self(256);
+    /// Skip the new block's on-place behavior.
+    pub const SKIP_ON_PLACE: Self = Self(512);
+    #[doc(hidden)]
+    pub fn bits(self) -> i32 {
+        self.0
+    }
+}
+
+impl std::ops::BitOr for NativeBlockUpdateFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
 /// One open attempt of one world; it rejects a previous open's commands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeWorldEpoch(u64);
 
 impl NativeWorldEpoch {
@@ -357,6 +397,162 @@ impl NativeWorldEpoch {
     pub fn get(self) -> u64 {
         self.0
     }
+}
+
+/// An entity of the open world, for the `Host` methods that read or change one
+/// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
+/// are shared by every level and never reused while the world is open, and an
+/// entity that changes dimension gets a new one, as in vanilla. A handle from an
+/// earlier open, of an entity that is gone, or used on a client reads as `None`
+/// and changes nothing. `Host::entity` makes one from an event's entity id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EntityRef {
+    epoch: NativeWorldEpoch,
+    id: u32,
+}
+
+impl EntityRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, id: u32) -> Self {
+        Self { epoch, id }
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.id
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+}
+
+/// A living entity of the open world: a mob, a player, an armor stand or the
+/// dragon (vanilla's `LivingEntity`). `host.living(entity)` makes one from an
+/// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
+/// entity's methods work on it too. Stale handles read as `None`, as an
+/// `EntityRef`'s do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LivingRef(EntityRef);
+
+impl LivingRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl From<LivingRef> for EntityRef {
+    fn from(living: LivingRef) -> Self {
+        living.0
+    }
+}
+
+/// A level of the open world, by its dimension (`minecraft:the_nether`).
+/// `Host::level` makes one, and `entity.level(host)` gives an entity's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LevelRef {
+    epoch: NativeWorldEpoch,
+    dimension: &'static str,
+}
+
+impl LevelRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
+        Self { epoch, dimension }
+    }
+    /// The level's dimension (`minecraft:overworld`).
+    pub fn dimension(self) -> &'static str {
+        self.dimension
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+}
+
+/// The empty-context block shape requested from a level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockShapeKind {
+    /// Selection outline (`BlockState.getShape`).
+    Outline,
+    /// Collision shape (`BlockState.getCollisionShape`).
+    Collision,
+}
+
+/// An online player in one open server world, keyed by UUID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlayerRef {
+    pub(crate) entity: EntityRef,
+    pub(crate) uuid: u128,
+}
+
+impl PlayerRef {
+    /// The same player as an entity handle.
+    pub fn entity(self) -> EntityRef {
+        self.entity
+    }
+    /// The player's UUID.
+    pub fn uuid(self) -> u128 {
+        self.uuid
+    }
+}
+
+impl From<PlayerRef> for EntityRef {
+    fn from(player: PlayerRef) -> Self {
+        player.entity
+    }
+}
+
+/// A player's food data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerFood {
+    /// Food level.
+    pub level: i32,
+    /// Food saturation.
+    pub saturation: f32,
+    /// Food exhaustion.
+    pub exhaustion: f32,
+}
+
+/// A player's server-side abilities.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerAbilities {
+    /// Whether ordinary damage is ignored.
+    pub invulnerable: bool,
+    /// Whether the player is flying.
+    pub flying: bool,
+    /// Whether the player may fly.
+    pub may_fly: bool,
+    /// Whether items are used without consumption.
+    pub instabuild: bool,
+    /// Whether the player may build.
+    pub may_build: bool,
+    /// Flying speed.
+    pub fly_speed: f32,
+    /// Walking speed. Horizon currently keeps no per-player value; this is 0.1.
+    pub walk_speed: f32,
+}
+
+/// A block entity at a position in an open level. A replacement at the same
+/// position resolves to the new entity, unlike vanilla's object identity.
+/// A removed entity or a handle from an earlier world open reads as `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BlockEntityRef {
+    pub(crate) level: LevelRef,
+    pub(crate) position: [i32; 3],
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
@@ -411,6 +607,37 @@ pub struct NativeLifecycleContext {
     pub tick: NativeTickId,
 }
 
+/// Tool action requested by a block interaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToolAbility {
+    AxeStrip,
+    AxeScrape,
+    AxeWaxOff,
+    ShovelFlatten,
+    ShovelDouse,
+    HoeTill,
+}
+
+/// Read-only context for a tool modification.
+#[non_exhaustive]
+pub struct ToolUse {
+    /// The acting entity ID, if present.
+    pub player: Option<u32>,
+    /// The hand holding the tool.
+    pub hand: crate::first_person::Hand,
+    /// The clicked block position.
+    pub pos: [i32; 3],
+    /// The clicked face's direction.
+    pub face: [i32; 3],
+    /// The click position in world coordinates.
+    pub click: [f64; 3],
+    /// The action being considered.
+    pub ability: ToolAbility,
+    /// Whether this is a simulation. Current vanilla calls pass false.
+    pub simulated: bool,
+}
+
 /// The ordered list of mods shared by the client and server.
 pub type Mods = Arc<[Box<dyn Hooks>]>;
 
@@ -442,6 +669,39 @@ fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     }
 }
 
+/// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
+/// type, so a panic in it names the mod, the hook and the part.
+fn entered_parts<'a, P: ?Sized>(
+    parts: &'a [Attached<P>],
+    hook: &'static str,
+) -> impl Iterator<Item = &'a P> {
+    let mut guard = None;
+    parts.iter().map(move |attached| {
+        // The last part's mark goes first, as in `Entered`.
+        drop(guard.take());
+        guard = Some(crate::crash::enter_native_mod(
+            crate::crash::NativeModCall {
+                id: MOD_IDS
+                    .get()
+                    .and_then(|ids| ids.get(attached.mod_index))
+                    .copied(),
+                index: attached.mod_index,
+                hook,
+                part: Some(attached.type_name),
+            },
+        ));
+        &*attached.part
+    })
+}
+
+/// Mod `index` of [`mods`] by its `[mod] id`, or by its place when the build didn't name them.
+fn mod_name(index: usize) -> String {
+    MOD_IDS
+        .get()
+        .and_then(|ids| ids.get(index))
+        .map_or_else(|| format!("native mod #{index}"), |id| (*id).to_owned())
+}
+
 struct Entered<'a> {
     mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
     hook: &'static str,
@@ -460,6 +720,7 @@ impl<'a> Iterator for Entered<'a> {
                 id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
                 index,
                 hook: self.hook,
+                part: None,
             },
         ));
         Some(hooks)
@@ -475,7 +736,9 @@ pub enum Flow {
     Cancel,
 }
 
-mod generated_host;
+mod generated_host {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
+}
 pub use generated_host::Host;
 
 /// Result of accessing or decoding an attachment.
@@ -493,6 +756,9 @@ pub trait LevelHost {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
     /// `Level.isClientSide`, through `LevelAccess::is_client_side`.
     fn is_client_side(&self) -> bool;
+    /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
+    /// unknown state.
+    fn state_block(&self, state: BlockStateId) -> Option<&str>;
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
@@ -554,7 +820,22 @@ macro_rules! level_attachment_host {
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
-mod generated;
+mod capability;
+pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+mod fluid_capability;
+pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
+mod item_place;
+pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
+mod part_table;
+pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
+pub(crate) use part_table::{
+    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
+    place_provider, resolve_parts,
+};
+
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
+}
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
@@ -619,6 +900,41 @@ mod tests {
         }
     }
 
+    struct MorePhantoms;
+
+    impl Hooks for MorePhantoms {
+        fn player_spawn_phantoms(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerSpawnPhantomsEvent<'_>,
+        ) -> Option<PhantomSpawnResult> {
+            *event.phantoms = event.phantoms.map(|count| count + 2);
+            None
+        }
+    }
+
+    #[test]
+    fn phantom_listener_can_increase_the_default_count() {
+        let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut count = Some(3);
+        let mut result = None;
+        dispatch_player_spawn_phantoms(
+            &mut host,
+            &mods,
+            7,
+            "Probe",
+            [0; 3],
+            &mut count,
+            &mut result,
+        );
+        assert_eq!(count, Some(5));
+        assert!(result.is_none());
+    }
+
     /// Asks the host to tell a player without anyone having implemented it.
     struct Chatty;
 
@@ -670,7 +986,35 @@ mod tests {
     }
 
     #[test]
+    fn player_turn_mods_receive_identity_and_chain_changes() {
+        struct Turn;
+        impl Hooks for Turn {
+            fn calculate_player_turn(
+                &self,
+                _host: &dyn Host,
+                event: &mut CalculatePlayerTurnEvent,
+            ) {
+                assert_eq!((event.player_entity_id, event.player_uuid), (42, 123));
+                event.mouse_sensitivity *= 2.0;
+                event.cinematic_camera_enabled = !event.cinematic_camera_enabled;
+            }
+        }
+        let host = Reader {
+            block: "",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Turn), Box::new(Turn)];
+        let mut sensitivity = 0.25;
+        let mut cinematic = false;
+        dispatch_calculate_player_turn(&host, &mods, 42, 123, &mut sensitivity, &mut cinematic);
+        assert_eq!(sensitivity, 1.0);
+        assert!(!cinematic);
+    }
+
+    #[test]
     fn a_test_host_implements_only_what_its_hook_calls() {
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
         let mods = [Box::new(Probe) as Box<dyn Hooks>];
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
@@ -687,8 +1031,58 @@ mod tests {
     }
 
     #[test]
+    fn mining_events_identify_the_player_and_keep_mod_decisions() {
+        struct MiningProbe(Arc<Mutex<Vec<u32>>>);
+        impl Hooks for MiningProbe {
+            fn player_harvest_check(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerHarvestCheckEvent,
+            ) {
+                self.0.lock().unwrap().push(event.player);
+                event.can_harvest = false;
+            }
+            fn player_break_speed(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerBreakSpeedEvent,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.player);
+                event.new_speed = 2.0;
+                Flow::Continue
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(MiningProbe(seen.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut harvest = true;
+        let mut speed = 1.0;
+        let mut canceled = false;
+        dispatch_player_harvest_check(&mut host, &mods, 42, [1, 2, 3], 7, &mut harvest);
+        dispatch_player_break_speed(
+            &mut host,
+            &mods,
+            42,
+            [1, 2, 3],
+            7,
+            1.0,
+            &mut speed,
+            &mut canceled,
+        );
+        assert_eq!(*seen.lock().unwrap(), [42, 42]);
+        assert!(!harvest);
+        assert_eq!(speed, 2.0);
+        assert!(!canceled);
+    }
+
+    #[test]
     #[should_panic(expected = "Host::tell")]
     fn an_unexpected_host_call_names_the_method() {
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
         let mods = [Box::new(Chatty) as Box<dyn Hooks>];
         let mut host = Reader {
             block: "minecraft:stone",
@@ -696,5 +1090,184 @@ mod tests {
         };
         let mut claimed = false;
         dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+    }
+
+    /// Cancels every brew and leaves its own slots; records what it saw.
+    struct BrewSwapper(Arc<Mutex<Vec<String>>>);
+
+    impl Hooks for BrewSwapper {
+        fn potion_brew_pre(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PotionBrewPreEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push("pre".into());
+            event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
+            Flow::Cancel
+        }
+        fn potion_brew_post(&self, _host: &mut dyn Host, event: &mut PotionBrewPostEvent<'_>) {
+            let first = event.stacks[0].as_ref().map_or("", |s| &s.item);
+            self.0.lock().unwrap().push(format!("post {first}"));
+            event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
+        }
+    }
+
+    /// Edits the slots in `PotionBrewEvent.Pre` without cancelling.
+    struct BrewEditor;
+
+    impl Hooks for BrewEditor {
+        fn potion_brew_pre(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PotionBrewPreEvent<'_>,
+        ) -> Flow {
+            event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
+            Flow::Continue
+        }
+        fn potion_brew_post(&self, _host: &mut dyn Host, event: &mut PotionBrewPostEvent<'_>) {
+            event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
+        }
+    }
+
+    /// `PotionBrewEvent.Pre` and `.Post` around `doBrew`: a cancelling mod's
+    /// slots replace the brew, with no ingredient used, and Post fires once
+    /// with them; a mod that doesn't cancel has its Pre edits dropped,
+    /// vanilla brews, and its Post edits stay.
+    #[test]
+    fn a_cancelled_brew_takes_the_mods_slots_and_an_uncancelled_one_brews() {
+        use crate::brewing::{Brewing, BrewingRecipe, BrewingStand, PotionIngredient};
+        let set = |ids: &[&str]| ids.iter().map(|s| (*s).to_owned()).collect();
+        let brewing = Brewing {
+            reagents: set(&["minecraft:nether_wart"]),
+            inputs: Default::default(),
+            recipes: vec![BrewingRecipe {
+                id: "awkward".into(),
+                input: PotionIngredient {
+                    items: set(&["minecraft:potion"]),
+                    potions: Some(set(&["minecraft:water"])),
+                },
+                reagent: PotionIngredient {
+                    items: set(&["minecraft:nether_wart"]),
+                    potions: None,
+                },
+                output: ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward"),
+            }],
+        };
+        let items = crate::items::Items::for_tests(Default::default());
+        let water = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water");
+        let awkward = ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward");
+        let fresh = || {
+            let mut stand = BrewingStand::new();
+            stand.items[0] = Some(water.clone());
+            stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 2));
+            stand
+        };
+        let mut host = Reader {
+            block: "minecraft:brewing_stand",
+            lines: Vec::new(),
+        };
+        // What `tick_brewing_stand` does once the brew is due.
+        let brew = |mods: &[Box<dyn Hooks>], host: &mut Reader, stand: &mut BrewingStand| {
+            let mut stacks = stand.items.clone();
+            let mut cancel = false;
+            dispatch_potion_brew_pre(host, mods, [1, 2, 3], &mut stacks, &mut cancel);
+            let mut out = crate::brewing::BrewTick::default();
+            stand.brew_after_pre(Some((stacks, cancel)), &brewing, &items, &mut out);
+            if out.brewed || cancel {
+                dispatch_potion_brew_post(host, mods, [1, 2, 3], &mut stand.items);
+            }
+            out.brewed
+        };
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewSwapper(seen.clone()))];
+        let mut stand = fresh();
+        assert!(!brew(&mods, &mut host, &mut stand));
+        assert_eq!(*seen.lock().unwrap(), ["pre", "post minecraft:diamond"]);
+        assert_eq!(&*stand.items[0].as_ref().unwrap().item, "minecraft:diamond");
+        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
+        assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(2));
+
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewEditor)];
+        let mut stand = fresh();
+        assert!(brew(&mods, &mut host, &mut stand));
+        assert_eq!(stand.items[0], Some(awkward));
+        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
+        assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
+
+    /// Records what `player_brewed_potion` told it.
+    struct BrewWatcher(Arc<Mutex<Vec<(u128, i32, ItemStack)>>>);
+
+    impl Hooks for BrewWatcher {
+        fn player_brewed_potion(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerBrewedPotionEvent<'_>,
+        ) {
+            let seen = (event.player, event.player_entity_id, event.stack.clone());
+            self.0.lock().unwrap().push(seen);
+        }
+    }
+
+    /// `BrewingStandMenu.PotionSlot.onTake`: a pickup and a shift-click on a
+    /// bottle slot each tell a listening mod once, with the taken stack and
+    /// the player's UUID and entity id; with no listener nothing is kept.
+    #[test]
+    fn a_bottle_slot_take_tells_the_listener_once_with_the_player() {
+        use crate::menu::{Env, Input, Kind, LogicalSide, Menu};
+        let root = std::env::temp_dir().join(format!("horizon-brewed-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = crate::items::Items::for_tests(Default::default());
+        let overlay = &horizon_world::loot::PackOverlay::NONE;
+        let recipes = crate::crafting::Recipes::load(&root, &items, overlay).unwrap();
+        let brewing = crate::brewing::Brewing::load(&root, &items, overlay);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        let potion = ItemStack::new("minecraft:potion", 1);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewWatcher(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for input in [Input::Pickup, Input::QuickMove] {
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.set_slot(env, 0, Some(potion.clone()));
+            menu.click(env, 0, 0, input).unwrap();
+            // Without a listener the take is only the advancement's.
+            assert!(menu.brewed_potion_takes.is_empty(), "{input:?}");
+            assert_eq!(menu.brewed, std::slice::from_ref(&potion), "{input:?}");
+
+            let mut menu = Menu::new(Kind::Brewing);
+            menu.brewed_potion_hook = true;
+            menu.set_slot(env, 0, Some(potion.clone()));
+            menu.click(env, 0, 0, input).unwrap();
+            assert_eq!(
+                menu.brewed_potion_takes,
+                std::slice::from_ref(&potion),
+                "{input:?}"
+            );
+            for stack in &menu.brewed_potion_takes {
+                dispatch_player_brewed_potion(&mut host, &mods, 7, 41, stack);
+            }
+        }
+        let told = (7, 41, potion);
+        assert_eq!(*seen.lock().unwrap(), [told.clone(), told]);
     }
 }

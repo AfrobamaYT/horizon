@@ -273,6 +273,7 @@ impl Game<'_> {
                     // Runtime-only state (AI, animation) carries over.
                     let old = std::mem::replace(slot, new);
                     slot.ai = old.ai;
+                    slot.extra.armor_attributes = old.extra.armor_attributes;
                     slot.age = old.age;
                     slot.previous = slot.position;
                 }
@@ -418,7 +419,7 @@ impl Game<'_> {
                 // BlockEntity.saveWithFullMetadata: no chunk-only keepPacked,
                 // and the lock the model does not hold.
                 let mut tag = save::block_entity_data(key, e, &name, self.world.block_lock(key));
-                self.restore_loot_table(key, &mut tag);
+                Self::restore_loot_table(&self.world, key, &mut tag);
                 Ok(tag)
             }
             DataRef::Storage(id) => Ok(self.score.storage.get(id)),
@@ -872,7 +873,7 @@ impl Game<'_> {
         }
     }
     /// The `summon <entity> <pos> <nbt>` form.
-    pub(super) fn summon_with_nbt(
+    pub(in crate::game) fn summon_with_nbt(
         &mut self,
         kind: &str,
         pos: [f64; 3],

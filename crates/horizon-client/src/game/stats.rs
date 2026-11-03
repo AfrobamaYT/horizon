@@ -2,6 +2,7 @@
 //! mined, items used/crafted/broken/picked up/dropped and mobs killed or
 //! killed by, saved to `players/stats/<uuid>.json`, plus the phantom
 //! spawner that reads the time since rest (`PhantomSpawner`).
+use super::native_hooks::PhantomSpawnResult;
 use super::{Dim, Game};
 use horizon_core::geometry::Vec3;
 use horizon_core::random::RandomSource;
@@ -9,6 +10,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
+
+/// One player `PhantomSpawner.tick` visits. `identity` is the server player's uuid and
+/// name, absent for a game's own player, which no server player stands for.
+struct PhantomTarget {
+    position: Vec3,
+    since_rest: i32,
+    identity: Option<(u128, String)>,
+}
 
 /// `stats[type][key]`, with `type` and `key` namespaced ids.
 #[derive(Default)]
@@ -79,6 +88,11 @@ impl Stats {
         self.mark_dirty(&format!("minecraft:{ty}"), key);
         self.events
             .push((format!("minecraft:{ty}"), key.to_owned(), None));
+    }
+    /// `ServerPlayer.die`'s `resetStat` of `TIME_SINCE_DEATH` and `TIME_SINCE_REST`.
+    pub(super) fn reset_death_timers(&mut self) {
+        self.reset("custom", "minecraft:time_since_death");
+        self.reset("custom", "minecraft:time_since_rest");
     }
     pub(super) fn custom(&mut self, key: &str, n: i32) {
         namespaced(key, |key| self.add("custom", key, n));
@@ -372,13 +386,16 @@ impl Game<'_> {
             return;
         }
         let rest = |s: &Stats| s.get("custom", "minecraft:time_since_rest");
-        // `level.players()`: (block position, time since rest) of each player
-        // who isn't a spectator.
+        // `level.players()`: each player who isn't a spectator.
         let mut players = Vec::new();
         if let Some(p) = self.player.as_ref()
             && !self.spectator()
         {
-            players.push((p.position, rest(&self.stats)));
+            players.push(PhantomTarget {
+                position: p.position,
+                since_rest: rest(&self.stats),
+                identity: None,
+            });
         }
         if let Some(host) = self.lan.as_ref() {
             let level = self.dim.id();
@@ -388,24 +405,43 @@ impl Game<'_> {
                     && g.game_mode != horizon_client::lan::guest::SPECTATOR
             }) {
                 let since = host.play.get(&g.conn).map_or(0, |p| rest(&p.stats));
-                players.push((
-                    Vec3::new(g.position[0], g.position[1], g.position[2]),
-                    since,
-                ));
+                players.push(PhantomTarget {
+                    position: Vec3::new(g.position[0], g.position[1], g.position[2]),
+                    since_rest: since,
+                    identity: (!horizon_client::mod_api::mods().is_empty())
+                        .then(|| (g.uuid, g.name.clone())),
+                });
             }
         }
-        for (position, since) in players {
-            self.spawn_phantoms_near(position, since);
+        for target in players {
+            self.spawn_phantoms_near(target);
         }
     }
     /// One player's turn of `PhantomSpawner.tick`.
-    fn spawn_phantoms_near(&mut self, position: Vec3, since_rest: i32) {
+    fn spawn_phantoms_near(&mut self, target: PhantomTarget) {
+        let PhantomTarget {
+            position,
+            since_rest,
+            identity,
+        } = target;
         let pos = [
             position.x.floor() as i32,
             position.y.floor() as i32,
             position.z.floor() as i32,
         ];
-        if pos[1] < 63 || !self.can_see_sky(pos) {
+        let difficulty_id = self.difficulty_id();
+        let mut result = None;
+        let mut phantoms = None;
+        if let Some((player, name)) = identity {
+            phantoms = Some(phantom_group_size(&mut self.world.random, difficulty_id));
+            self.native_player_spawn_phantoms(player, &name, pos, &mut result, &mut phantoms);
+        }
+        let attempt = match result.unwrap_or(PhantomSpawnResult::Default) {
+            PhantomSpawnResult::Allow => true,
+            PhantomSpawnResult::Default => pos[1] >= 63 && self.can_see_sky(pos),
+            PhantomSpawnResult::Deny => false,
+        };
+        if !attempt {
             return;
         }
         // `getCurrentDifficultyAt(playerPos).isHarderThan(random * 3)`.
@@ -430,7 +466,8 @@ impl Game<'_> {
         {
             return;
         }
-        let group = 1 + self.world.random.next_int_bound(3).unwrap_or(0);
+        let group =
+            phantoms.unwrap_or_else(|| phantom_group_size(&mut self.world.random, difficulty_id));
         for _ in 0..group {
             let _ = self.spawn_mob(
                 "minecraft:phantom",
@@ -451,9 +488,45 @@ impl Game<'_> {
     }
 }
 
+/// `1 + random.nextInt(difficulty.getId() + 1)` of `PhantomSpawner.tick`: Peaceful still draws.
+fn phantom_group_size(random: &mut impl RandomSource, difficulty_id: i32) -> i32 {
+    1 + random.next_int_bound(difficulty_id + 1).unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ServerPlayer.die zeroes the two timers (and only them) and sends the new zero.
+    #[test]
+    fn death_resets_the_timers_since_death_and_rest() {
+        let mut s = Stats::default();
+        s.custom("time_since_death", 700);
+        s.custom("time_since_rest", 900);
+        s.custom("deaths", 2);
+        s.events.clear();
+        s.reset_death_timers();
+        assert_eq!(s.get("custom", "minecraft:time_since_death"), 0);
+        assert_eq!(s.get("custom", "minecraft:time_since_rest"), 0);
+        assert_eq!(s.get("custom", "minecraft:deaths"), 2);
+        assert_eq!(s.events.len(), 2);
+    }
+
+    #[test]
+    fn phantom_group_size_follows_difficulty() {
+        // Expected from java.util.Random(12345): 1 + nextInt(id + 1), six draws each.
+        let expected: [(i32, [i32; 6]); 4] = [
+            (0, [1, 1, 1, 1, 1, 1]),
+            (1, [1, 2, 2, 2, 2, 1]),
+            (2, [2, 2, 1, 1, 2, 2]),
+            (3, [2, 3, 4, 4, 4, 1]),
+        ];
+        for (id, sizes) in expected {
+            let mut r = horizon_core::random::LegacyRandom::new(12345);
+            let got: Vec<i32> = (0..6).map(|_| phantom_group_size(&mut r, id)).collect();
+            assert_eq!(got, sizes, "difficulty {id}");
+        }
+    }
 
     #[test]
     fn counters_events_and_dirty_entries() {

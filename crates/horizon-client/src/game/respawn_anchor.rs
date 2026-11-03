@@ -367,10 +367,17 @@ impl Game<'_> {
     /// `BlockState.getCollisionShape(level, pos)`: the shape under the empty
     /// collision context.
     pub(super) fn block_collision_shape(&self, p: [i32; 3]) -> VoxelShape {
-        let state = self.world.block(p[0], p[1], p[2]);
+        self.block_collision_shape_in(&self.world, p)
+    }
+    pub(super) fn block_collision_shape_in(
+        &self,
+        world: &horizon_client::world::World,
+        p: [i32; 3],
+    ) -> VoxelShape {
+        let state = world.block(p[0], p[1], p[2]);
         let binding = self.collision;
         let mut scene = SceneCollisions {
-            world: &self.world,
+            world,
             binding,
             subject: None,
         };
@@ -581,7 +588,7 @@ impl Game<'_> {
         Some((stand, look_at_yaw(stand, head)))
     }
     /// The bed's `facing`, as a step.
-    fn bed_forward(&self, state: BlockStateId) -> [i32; 3] {
+    pub(super) fn bed_forward(&self, state: BlockStateId) -> [i32; 3] {
         let facing = self
             .pack
             .assets

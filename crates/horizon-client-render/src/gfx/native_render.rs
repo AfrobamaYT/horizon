@@ -11,7 +11,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/native_render_generated.rs"));
+}
 pub use generated::{HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent};
 pub use wgpu;
 
@@ -70,6 +72,12 @@ pub struct WorldDrawn<'a> {
     /// ([`RenderNeeds::entity_spans`]) or a shader pack draws them.
     pub entities: &'a [Vertex],
     pub spans: &'a [EntitySpan],
+    /// Which entity each run of `entities` is, recorded every frame (`Frame::entity_motion`):
+    /// the run's first vertex and the entity, `(1 << 32) | id` for a mob or a player and
+    /// `(2 << 32) | id` for a dropped item (their entity ids), 0 for anything else. A run lasts
+    /// until the next. Unlike `spans`, whose ids name a type, these follow one entity from
+    /// frame to frame (API @API:world_drawn_motion@).
+    pub motion: &'a [(u32, u64)],
     /// The shared atlas entity UVs point into.
     pub atlas: Option<&'a wgpu::Texture>,
     /// Quad indices (0 1 2 0 2 3 for each 4 vertices), for as many quads as `entities` holds.

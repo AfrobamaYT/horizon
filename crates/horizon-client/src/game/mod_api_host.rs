@@ -146,8 +146,9 @@ impl Game<'_> {
     }
 }
 
-#[path = "mod_api_host_generated.rs"]
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_host_generated.rs"));
+}
 
 impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
@@ -155,6 +156,9 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     }
     fn is_client_side(&self) -> bool {
         horizon_world::level::LevelAccess::is_client_side(self)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.native_state_block(state)
     }
     fn state_with_property(
         &self,
@@ -196,6 +200,9 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     }
     fn is_client_side(&self) -> bool {
         horizon_client::mod_api::LevelHost::is_client_side(&*self.level)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.level.registry.state(state).map(|s| &*s.name)
     }
     fn state_with_property(
         &self,
