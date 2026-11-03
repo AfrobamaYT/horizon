@@ -643,8 +643,11 @@ impl Game<'_> {
         }
         let t = self.res.mob_types().get(kind).cloned()?;
         let mut cancel = false;
-        let from_kind = super::native_hooks::mob_kind(from);
-        self.native_living_conversion_pre(from.id, &from_kind, kind, &mut cancel);
+        let from_kind = (!horizon_client::mod_api::mods().is_empty())
+            .then(|| super::native_hooks::mob_kind(from));
+        if let Some(from_kind) = &from_kind {
+            self.native_living_conversion_pre(from.id, from_kind, kind, &mut cancel);
+        }
         if cancel {
             return None;
         }
@@ -685,14 +688,17 @@ impl Game<'_> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
-        let transformed_kind = self.mobs.iter().find(|m| m.id == id)?.kind.id.clone();
+        let transformed = self.mobs.iter().find(|m| m.id == id)?;
+        let transformed_kind = from_kind.as_ref().map(|_| transformed.kind.id.clone());
         // Only move passengers once the new mob's join has succeeded.
         for rider in self.mobs.iter_mut() {
             if rider.extra.mount == Some(from.id) {
                 rider.extra.mount = Some(id);
             }
         }
-        self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
+        if let (Some(from_kind), Some(transformed_kind)) = (from_kind, transformed_kind) {
+            self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
+        }
         if let Some(old) = self.mobs.iter_mut().find(|m| m.id == from.id) {
             old.removed = true;
         }
