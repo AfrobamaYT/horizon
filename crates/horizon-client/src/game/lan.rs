@@ -2952,7 +2952,7 @@ impl Game<'_> {
     /// The bed at `head` as a sleeping model lies in it (`ints[1]`,
     /// `villager::sleep_pose`): its `facing`.
     /// `Entity.setPose` for the server's players: the mods hear each placed
-    /// guest's change of pose. Nothing is kept while no mod is loaded.
+    /// guest's change of pose. Nothing is kept while no mod listens.
     fn lan_guest_poses(&mut self, host: &mut LanHost) {
         if !crate::mod_api::listened(crate::mod_api::HookId::EntityPoseChange) {
             host.poses.clear();

@@ -658,6 +658,54 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// A mod that leaves `item_model_property` at its default is asked once, then the
+    /// resolver skips the hook; a mod that answers it is asked on every resolve.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_model_property_is_asked_only_while_a_mod_answers() {
+        use crate::mod_api::{self, HookId, Hooks, Host, ItemModelPropertyEvent, ModEntry};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        struct Quiet;
+        impl Hooks for Quiet {}
+        struct Charged(Arc<AtomicUsize>);
+        impl Hooks for Charged {
+            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                event.value = event.property == "example:charged";
+            }
+        }
+        let stack = StackView::new("minecraft:stick", 1);
+
+        let mods: mod_api::Mods = vec![ModEntry::new("quiet", Box::new(Quiet))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert!(mod_api::listened(HookId::ItemModelProperty));
+                assert!(!env.item_model_property("example:charged", &stack));
+                assert!(!mod_api::listened(HookId::ItemModelProperty));
+                assert!(!env.item_model_property("example:charged", &stack));
+            });
+        });
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("charged", Box::new(Charged(calls.clone())))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                for _ in 0..3 {
+                    assert!(env.item_model_property("example:charged", &stack));
+                }
+                assert!(mod_api::listened(HookId::ItemModelProperty));
+            });
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+
     #[test]
     fn civil_dates_follow_the_gregorian_calendar() {
         assert_eq!(civil(0), (1970, 1, 1));

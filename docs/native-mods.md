@@ -21,7 +21,7 @@ A client mod supplies its own namespaced `minecraft:condition` property by imple
 `Hooks::item_model_property`. This hook is the registration: match your property name, answer
 through `value`, and leave other names untouched. The resolver calls it when choosing a branch,
 not when loading resources. It defaults to false without a provider and skips dispatch entirely
-when no trait mods are loaded. Vanilla properties do not enter the hook.
+once no loaded mod overrides it. Vanilla properties do not enter the hook.
 
 ```rust,ignore
 fn item_model_property(
