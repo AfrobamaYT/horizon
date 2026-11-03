@@ -394,6 +394,9 @@ pub(super) mod tests {
         .unwrap();
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+        // A game that opened its world resolves its parts; the harness stops
+        // short of the open, so do it here for the by-state part table.
+        game.resolve_parts().unwrap();
         test(&mut game);
     }
 
