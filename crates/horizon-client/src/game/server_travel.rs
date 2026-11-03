@@ -1021,7 +1021,7 @@ mod tests {
                     Vec3::ZERO,
                 ));
                 let source = game.dim;
-                game.enter_level(None, Dim::Nether).unwrap();
+                game.enter_level(Dim::Nether).unwrap();
                 game.carts.push(minecarts::Minecart::new(
                     base + 2,
                     minecarts::CartKind::Rideable,
