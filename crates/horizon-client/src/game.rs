@@ -20049,6 +20049,8 @@ impl Game<'_> {
             horizon_client::mod_api::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
                 item: &|id| items.items.contains_key(id),
+                state_count: registry.len(),
+                state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
         .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
@@ -22291,11 +22293,13 @@ mod tests {
                 &game.level.enabled_features,
             );
             game.reload_world_tables(&stack);
-            assert!(
-                !mod_api::parts("test")
-                    .block(|| Some("minecraft:stone"))
-                    .is_empty()
-            );
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            assert!(!mod_api::parts("test").block_state(stone).is_empty());
         });
     }
     use super::*;
