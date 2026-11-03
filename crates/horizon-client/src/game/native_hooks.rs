@@ -880,6 +880,7 @@ use super::{
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
 };
+use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
     self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
     RecipeBookCategory, ServerTickPhase, WorldPhase,
@@ -1861,6 +1862,26 @@ impl OpenNativeScreen {
     }
 }
 
+/// `PlayerSpawnPhantomsEvent.Result`: whether the phantom spawner tries a spawn near a player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhantomSpawnResult {
+    /// Always try, skipping the skylight and sea level check.
+    Allow,
+    /// Try only above sea level with the sky in view.
+    Default,
+    /// Never try.
+    Deny,
+}
+
+/// `Player.BedSleepingProblem` as `CanContinueSleepingEvent.getProblem` reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SleepProblem {
+    /// The sleeper's bed is gone.
+    NotPossibleHere,
+    /// The bed rule no longer lets a player sleep: it is daytime.
+    NotPossibleNow,
+}
+
 /// The player as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
@@ -2058,6 +2079,17 @@ impl Game<'_> {
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
+    }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    pub(super) fn native_item_model_property(
+        &self,
+        property: &str,
+        stack: &StackView,
+        value: &mut bool,
+    ) {
+        mod_api::dispatch_item_model_property(self, mod_api::mods(), property, stack, value);
     }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
@@ -4249,6 +4281,59 @@ impl Game<'_> {
     pub(super) fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         mod_api::dispatch_player_bed_leave(self, mod_api::mods(), player, name, pos);
     }
+    /// `CanContinueSleepingEvent`: a sleeping living entity's check that it may go on
+    /// sleeping, run each tick for a server player the dead and health checks would not
+    /// already wake, and for a sleeping villager or wandering trader. `entity` is its UUID,
+    /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
+    /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
+    /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
+    /// none when nothing is wrong. `may_continue` starts empty, meaning `problem.is_none()` (`mayContinueSleeping`);
+    /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
+    /// on a guest tick. @API:can_continue_sleeping@.
+    pub(super) fn native_can_continue_sleeping(
+        &mut self,
+        entity: u128,
+        name: &str,
+        kind: &str,
+        pos: [i32; 3],
+        problem: Option<SleepProblem>,
+        may_continue: &mut Option<bool>,
+    ) {
+        mod_api::dispatch_can_continue_sleeping(
+            self,
+            mod_api::mods(),
+            entity,
+            name,
+            kind,
+            pos,
+            problem,
+            may_continue,
+        );
+    }
+    /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
+    /// spawn near a non-spectator server player, before its difficulty and rest rolls.
+    /// `result` starts empty, meaning `Default` (skylight and sea level check); `Allow` skips
+    /// that check and `Deny` stops the attempt. `phantoms` starts with a randomly drawn
+    /// group size; set it to override the count. Without mods the original draw order is kept.
+    /// @API:player_spawn_phantoms@.
+    pub(super) fn native_player_spawn_phantoms(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        result: &mut Option<PhantomSpawnResult>,
+        phantoms: &mut Option<i32>,
+    ) {
+        mod_api::dispatch_player_spawn_phantoms(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            pos,
+            phantoms,
+            result,
+        );
+    }
     /// A server player's book edit or signing packet is about to be applied.
     /// `pages` is its page count; `signing` means the packet has a title. Set
     /// `cancel` to drop the edit. Helpers looking up the guest through
@@ -4362,6 +4447,55 @@ impl Game<'_> {
     /// Server-side. 260.
     pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
         mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
+    }
+    /// A server player's level is about to change through
+    /// `Player.giveExperienceLevels`: once per level gained or lost by points,
+    /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
+    /// Change `levels`, or set `cancel` to leave the level unchanged. The
+    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// and the item helpers reach them. Server-side.
+    /// @API:player_xp_level_change@.
+    pub(super) fn native_player_xp_level_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        levels: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_player_xp_level_change(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            levels,
+            cancel,
+        );
+    }
+    /// A dying mob or player `entity` of `kind` is about to drop `original`
+    /// points of experience; the vanilla conditions have been checked.
+    /// `attacking_player` is the player who last hurt it, if any. Change
+    /// `amount` (0 or less drops nothing), or set `cancel` to drop none. A
+    /// sculk catalyst that takes the experience does not call this.
+    /// Server-side. @API:living_experience_drop@.
+    pub(super) fn native_living_experience_drop(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        attacking_player: Option<u128>,
+        original: i32,
+        amount: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_experience_drop(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            attacking_player,
+            original,
+            amount,
+            cancel,
+        );
     }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
@@ -6421,6 +6555,16 @@ impl Game<'_> {
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    pub(super) fn native_create_spawn_position(
+        &mut self,
+        position: &mut [i32; 3],
+        rotation: &mut [f32; 2],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_create_spawn_position(self, mod_api::mods(), position, rotation, cancel);
+    }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
     /// food and experience reset, with their state swapped in. Once for each
@@ -7164,6 +7308,13 @@ impl Game<'_> {
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
     /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
+    /// `attacker` is the attacking entity's network id (the recorded attack scope, or `causing`),
+    /// `weapon` what it holds in its main hand (a player's selected stack, a mob's main hand; none
+    /// when unknown, recorded only while a native mod is loaded) with its enchantment levels, and
+    /// `source_position`, `victim_position` and `victim_view` the hit's position, a mob victim's
+    /// position and look vector (none when not known, always for a player or the dragon), so an
+    /// enchantment can tell a blow from behind. There is no host here: read the world from a
+    /// tick hook.
     /// No `self`: the game is in the middle of the hit. API 50.
     pub(super) fn native_living_incoming_damage(
         entity: i32,
@@ -7171,6 +7322,11 @@ impl Game<'_> {
         damage_type: &str,
         causing: i32,
         direct: i32,
+        attacker: i32,
+        weapon: Option<&ItemStack>,
+        source_position: Option<[f64; 3]>,
+        victim_position: Option<[f64; 3]>,
+        victim_view: Option<[f64; 3]>,
         amount: &mut f32,
         canceled: &mut bool,
     ) {
@@ -7181,6 +7337,11 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
+            attacker,
+            weapon,
+            source_position,
+            victim_position,
+            victim_view,
             amount,
             canceled,
         );
@@ -7471,6 +7632,17 @@ pub(super) fn block_contact(
 /// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether
 /// it canceled the hit. Its one caller.
 pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+    if mod_api::mods().is_empty() {
+        return false;
+    }
+    let (victim_position, victim_view, source_position) = match &hurting {
+        Hurting::Mob(mob, damage) => (
+            Some([mob.position.x, mob.position.y, mob.position.z]),
+            Some(super::view_vector(mob.head_yaw, mob.head_pitch)),
+            damage.from,
+        ),
+        _ => (None, None, None),
+    };
     let (entity, kind, source) = hurt_server_args(hurting);
     let HurtSource {
         damage_type,
@@ -7478,12 +7650,22 @@ pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
         direct,
     } = source;
     let mut canceled = false;
+    let attacker = match causing {
+        0 => horizon_client::health::knockback_attacker(),
+        causing => causing,
+    };
+    let held = horizon_client::health::knockback_held();
     Game::native_living_incoming_damage(
         entity,
         kind,
         damage_type,
         causing,
         direct,
+        attacker,
+        held[0].as_ref(),
+        source_position,
+        victim_position,
+        victim_view,
         amount,
         &mut canceled,
     );
@@ -8424,7 +8606,14 @@ impl Game<'_> {
     }
     /// Collision boxes in block-local coordinates with an empty collision context.
     pub(super) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
-        self.block_collision_shape(pos)
+        self.native_block_collision_in(&self.world, pos)
+    }
+    pub(super) fn native_block_collision_in(
+        &self,
+        world: &horizon_client::world::World,
+        pos: [i32; 3],
+    ) -> Vec<[f64; 6]> {
+        self.block_collision_shape_in(world, pos)
             .boxes()
             .iter()
             .map(|bounds| {
