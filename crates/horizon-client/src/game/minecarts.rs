@@ -607,12 +607,17 @@ impl Game<'_> {
             self.cart_block_effects(c);
         }
     }
-    pub(super) fn max_speed(&self, c: &Minecart) -> f64 {
+    fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if c.in_water { 0.2 } else { 0.4 };
-        if c.kind == CartKind::Furnace {
-            base * if c.in_water { 0.75 } else { 0.5 }
+        furnace_speed(c, base)
+    }
+    /// `AbstractMinecart.getMaxSpeed`: the behavior's, which a furnace
+    /// minecart cuts (`MinecartFurnace.getMaxSpeed`).
+    pub(super) fn cart_max_speed(&self, c: &Minecart) -> f64 {
+        if self.minecart_improvements() {
+            furnace_speed(c, self.max_speed_new(c))
         } else {
-            base
+            self.max_speed(c)
         }
     }
     /// `applyNaturalSlowdown` (with `MinecartFurnace`'s push); `factor` is
@@ -785,7 +790,7 @@ impl Game<'_> {
     }
     /// `NewMinecartBehavior.getMaxSpeed`: the game rule over water's half,
     /// every cart alike (the old behavior's furnace bonus is its own).
-    pub(super) fn max_speed_new(&self, c: &Minecart) -> f64 {
+    fn max_speed_new(&self, c: &Minecart) -> f64 {
         f64::from(self.ui.rules.int("max_minecart_speed")) * if c.in_water { 0.5 } else { 1.0 }
             / 20.0
     }
@@ -1002,7 +1007,7 @@ impl Game<'_> {
                 c.velocity = v;
                 v = self.natural_slowdown(c, ridden, 0.975);
                 if v.length_squared() > 0.0 {
-                    let speed = v.length().min(self.max_speed_new(c));
+                    let speed = v.length().min(self.cart_max_speed(c));
                     v = v.normalize().scale(speed);
                 }
             }
@@ -1137,11 +1142,7 @@ impl Game<'_> {
     }
     /// `comeOffTrack`.
     fn come_off_track(&self, c: &mut Minecart) {
-        let max = if self.minecart_improvements() {
-            self.max_speed_new(c)
-        } else {
-            self.max_speed(c)
-        };
+        let max = self.cart_max_speed(c);
         c.velocity.x = c.velocity.x.clamp(-max, max);
         c.velocity.z = c.velocity.z.clamp(-max, max);
         if c.on_ground {
@@ -2687,6 +2688,16 @@ fn tnt_ignites_by_collision(horizontal_collision: bool, speed_sqr: f64) -> bool 
 /// the cast: HotSpot's atan2, multiplied then divided in Java's order.
 fn java_degrees(y: f64, x: f64) -> f64 {
     horizon_core::jmath::atan2(y, x) * 180.0 / std::f64::consts::PI
+}
+
+/// `MinecartFurnace.getMaxSpeed`: half the behavior's speed, three quarters
+/// in water.
+fn furnace_speed(c: &Minecart, base: f64) -> f64 {
+    if c.kind == CartKind::Furnace {
+        base * if c.in_water { 0.75 } else { 0.5 }
+    } else {
+        base
+    }
 }
 
 #[cfg(test)]

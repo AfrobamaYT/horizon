@@ -61,14 +61,7 @@ impl Game<'_> {
     /// `max_minecart_speed` rule over 20 (halved in water). A furnace minecart
     /// takes half of that, three quarters in water (`MinecartFurnace`).
     pub(super) fn native_minecart_max_speed(&self, cart: MinecartRef) -> Option<f64> {
-        let cart = self.native_minecart(cart)?;
-        Some(if !self.minecart_improvements() {
-            self.max_speed(cart)
-        } else if cart.kind == CartKind::Furnace {
-            self.max_speed_new(cart) * if cart.in_water { 0.75 } else { 0.5 }
-        } else {
-            self.max_speed_new(cart)
-        })
+        Some(self.cart_max_speed(self.native_minecart(cart)?))
     }
 
     /// `AbstractMinecart.isOnRails`.
