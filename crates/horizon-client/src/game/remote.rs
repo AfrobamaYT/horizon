@@ -8865,16 +8865,11 @@ impl Game<'_> {
         if message.starts_with('/') || horizon_client::mod_api::mods().is_empty() {
             self.send_chat(message);
         } else if let Some(uuid) = self.remote.as_ref().map(|r| r.profile) {
-            let mut outgoing = message.to_owned();
-            let mut cancel = false;
-            self.native_client_chat(
-                self.own_entity_id(),
-                uuid,
-                message,
-                &mut outgoing,
-                &mut cancel,
-            );
-            if !cancel && !outgoing.is_empty() {
+            let id = self.own_entity_id();
+            let sent = chat_after_event(message, |outgoing, cancel| {
+                self.native_client_chat(id, uuid, message, outgoing, cancel);
+            });
+            if let Some(outgoing) = sent {
                 self.send_signed_chat(&outgoing);
             }
         }
@@ -10388,9 +10383,31 @@ fn client_millis() -> u64 {
         .as_millis() as u64
 }
 
+/// What `ChatScreen.handleChatInput` sends of typed chat once `ClientChatEvent` (`ask`, with
+/// the outgoing message and the cancel flag) had its say: nothing when canceled or emptied.
+fn chat_after_event(message: &str, ask: impl FnOnce(&mut String, &mut bool)) -> Option<String> {
+    let mut outgoing = message.to_owned();
+    let mut cancel = false;
+    ask(&mut outgoing, &mut cancel);
+    (!cancel && !outgoing.is_empty()).then_some(outgoing)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{keep_client_state, remote_use_swings, synced_local_use};
+    use super::{chat_after_event, keep_client_state, remote_use_swings, synced_local_use};
+
+    /// `ClientChatEvent`: a mod's edit is what is sent; a cancel or an emptied message sends
+    /// nothing; untouched chat goes out as typed.
+    #[test]
+    fn typed_chat_is_sent_as_the_client_chat_event_leaves_it() {
+        assert_eq!(chat_after_event("hello", |_, _| {}), Some("hello".into()));
+        assert_eq!(
+            chat_after_event("hello", |m, _| m.push_str(" world")),
+            Some("hello world".into())
+        );
+        assert_eq!(chat_after_event("hello", |_, c| *c = true), None);
+        assert_eq!(chat_after_event("hello", |m, _| m.clear()), None);
+    }
     use horizon_client::{
         containers::{Beacon, BlockEntity},
         items::ItemStack,
