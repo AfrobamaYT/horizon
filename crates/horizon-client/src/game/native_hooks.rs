@@ -8859,6 +8859,7 @@ impl GameLevel<'_> {
             source: source as i32,
             volume,
             pitch,
+            except: None,
         });
         true
     }
