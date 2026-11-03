@@ -88,7 +88,7 @@ fn cache_hits_are_offline_and_corrupt_files_are_not_silently_replaced() {
         |_, _, _| panic!("download"),
     )
     .unwrap_err();
-    assert!(error.contains("SHA-512 mismatch"));
+    assert!(matches!(error, PrepareError::HashMismatch { .. }));
     assert_eq!(fs::read(path).unwrap(), b"corrupt");
 }
 
@@ -143,8 +143,9 @@ fn headless_refusal_is_actionable_and_never_contacts_modrinth() {
         |_, _, _| panic!("download"),
     )
     .unwrap_err();
-    assert!(error.contains("--allow-jar-downloads"));
-    assert!(error.contains(&expected));
+    assert!(matches!(&error, PrepareError::Refused { missing } if missing.len() == 1));
+    assert!(error.to_string().contains("--allow-jar-downloads"));
+    assert!(error.to_string().contains(&expected));
     assert!(!home.0.join("jars").exists());
 }
 
@@ -161,7 +162,7 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
         |_, _, _| panic!("declined"),
     )
     .unwrap_err();
-    assert!(error.contains("declined"));
+    assert!(matches!(error, PrepareError::Refused { .. }));
     for result in [Ok(None), Err("transport failed".to_owned())] {
         let ask = |_: &[&JarRef]| panic!("lookup failure must not prompt");
         let expected = if result.is_err() {
@@ -177,7 +178,10 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
             |_, _, _| panic!("lookup failed"),
         )
         .unwrap_err();
-        assert!(error.contains(expected));
+        let PrepareError::Download { reason, .. } = error else {
+            panic!("lookup failure must remain typed as Download");
+        };
+        assert!(reason.contains(expected));
     }
     assert!(!home.0.join("jars").exists());
 }

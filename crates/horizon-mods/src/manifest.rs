@@ -343,6 +343,11 @@ pub struct Package {
     pub icon: Option<crate::icon::Icon>,
 }
 impl Package {
+    /// The kind of this validated package, independent of its install folder.
+    pub fn is_native(&self) -> bool {
+        self.manifest.native.is_some()
+    }
+
     /// Read a flat `.hmod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;

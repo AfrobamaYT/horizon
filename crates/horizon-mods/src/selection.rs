@@ -2,11 +2,28 @@
 mod context;
 pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext};
 
-use crate::{Package, find};
+use crate::{
+    Package, find,
+    mod_list::{DIR, NATIVE_DIR},
+};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
+
+/// What the launcher writes beside a game it built with native mods: their ids under `mods`.
+pub const BUILD_INFO: &str = "native-mods.json";
+
+/// IDs compiled into this executable, from the launcher's build record.
+pub fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
+    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
+    info["mods"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str().map(str::to_owned))
+        .collect()
+}
 
 /// A selected package, read and validated once at the filesystem boundary.
 pub struct SelectedPackage {
@@ -19,22 +36,18 @@ pub struct SelectedPackage {
 /// paths take precedence over discovery and are enabled independently of both.
 /// Content validation and duplicate-ID acceptance remain the caller's job.
 pub fn packages<'a>(
-    home: &Path,
+    game_dir: &Path,
     enabled: &'a BTreeSet<String>,
     built: &'a BTreeSet<String>,
     dev: &'a [PathBuf],
 ) -> impl Iterator<Item = SelectedPackage> + 'a {
-    let mut paths = find(&home.join("horizon-mods"));
-    paths.extend(find(&home.join("horizon-native-mods")));
+    let mut paths = find(&game_dir.join(DIR));
+    paths.extend(find(&game_dir.join(NATIVE_DIR)));
     paths.retain(|path| !dev.contains(path));
     paths.extend(dev.iter().cloned());
     paths.into_iter().filter_map(move |path| {
         let package = Package::read(&path).ok()?;
-        let selected = if package.manifest.native.is_some() {
-            built
-        } else {
-            enabled
-        };
+        let selected = if package.is_native() { built } else { enabled };
         (selected.contains(&package.manifest.id) || dev.contains(&path))
             .then_some(SelectedPackage { path, package })
     })
