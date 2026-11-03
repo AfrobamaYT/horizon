@@ -28,8 +28,9 @@ use horizon_client::mod_api::{
     WorldPhase,
 };
 use horizon_client::mod_api::{
-    AttachmentResult, Attachments, BlockHit, BonemealSource, GameRuleValue, Holder, LegacyRandom,
-    LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState, Suggestion,
+    AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState,
+    Suggestion,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -1080,17 +1081,35 @@ pub(crate) enum NativeRecipeLayout {
     Brewing,
 }
 
-/// A recipe the panel shows (`native_panel_recipes`). Each slot, and the
+/// One result of a recipe the panel shows (`native_panel_recipes`): a slot
+/// cycling through `stacks`, one a second, and the chance in percent the recipe
+/// gives it (`Some(25.0)` draws "25%"); `None` gives it every time.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct NativeRecipeResult {
+    pub(crate) stacks: Vec<NativeStack>,
+    pub(crate) chance: Option<f32>,
+}
+
+/// A recipe the panel shows (`native_panel_recipes`). Each slot, and each
 /// result, cycles through its stacks, one a second; an empty slot shows
-/// nothing.
+/// nothing. A crafting recipe has one result and no chance.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct NativeRecipeView {
     pub(crate) layout: NativeRecipeLayout,
-    /// The grid's size (`Grid` only), at most 3 x 3.
+    /// The grid's size (`Grid` only), at most 3 x 3; slots past it continue
+    /// in rows under it, 27 in all.
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) slots: Vec<Vec<NativeStack>>,
-    pub(crate) results: Vec<NativeStack>,
+    /// Up to four, left to right after the arrow.
+    pub(crate) results: Vec<NativeRecipeResult>,
+    /// Fluids the recipe takes and gives, `amount` in millibuckets, each in
+    /// a well with its amount under it; at most eight each. A well shows the
+    /// fluid's client look (`data/<mod>/horizon/fluid/`: sprite and tint), a
+    /// flat square of vanilla's colour for water and lava and else grey when
+    /// the fluid has none.
+    pub(crate) fluid_inputs: Vec<FluidStack>,
+    pub(crate) fluid_outputs: Vec<FluidStack>,
     /// A short line under the recipe (a cooking time), or "".
     pub(crate) note: String,
     /// The action button beside it: none, enabled, or shown greyed.
@@ -7858,13 +7877,15 @@ impl Game<'_> {
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
     /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
     /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
-    /// pixels). False when there is no such sprite.
+    /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
+    /// when there is one. False when there is no such sprite.
     pub(super) fn native_sprite(
         &self,
         batch: &mut HudBatch,
         name: &str,
         src: [f32; 4],
         dst: [f32; 4],
+        tint: Option<u32>,
     ) -> bool {
         let Some(mut r) = self.gui.atlas.sprites.get(name).copied() else {
             return false;
@@ -7874,7 +7895,8 @@ impl Game<'_> {
         r.v0 += src[1] * dv;
         r.u1 = r.u0 + src[2] * du;
         r.v1 = r.v0 + src[3] * dv;
-        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, u32::MAX);
+        let [a, red, green, blue] = tint.unwrap_or(u32::MAX).to_be_bytes();
+        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, rgba(red, green, blue, a));
         true
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
@@ -9522,7 +9544,9 @@ mod tests {
         const EMPTY: &str = "be_test:blank";
         const PLAIN: &str = "be_test:plain_banner";
         struct Press;
+        #[mod_api::horizon_part]
         impl BlockPart for Press {}
+        #[mod_api::horizon_part]
         impl BlockEntityPart for Press {
             fn block_entity(
                 &self,
