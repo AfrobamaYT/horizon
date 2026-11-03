@@ -143,6 +143,13 @@ impl Game<'_> {
         match id {
             "op" => {
                 for player in &players {
+                    let (known, level) = {
+                        let l = lists.lock().unwrap();
+                        (l.ops.contains(player), l.op_level)
+                    };
+                    if !known && self.permission_change(&lists, player, level) {
+                        continue;
+                    }
                     let added = {
                         let mut l = lists.lock().unwrap();
                         let level = l.op_level;
@@ -165,6 +172,10 @@ impl Game<'_> {
             }
             "deop" => {
                 for player in &players {
+                    let known = lists.lock().unwrap().ops.contains(player);
+                    if known && self.permission_change(&lists, player, 0) {
+                        continue;
+                    }
                     let removed = {
                         let mut l = lists.lock().unwrap();
                         l.ops.contains(player) && l.ops.remove(player)

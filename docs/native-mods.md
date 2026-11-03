@@ -60,7 +60,7 @@ requires a farmer at work and `mob_griefing` enabled.
 ## Pinned to a Nightly
 
 A native mod builds on one exact Horizon commit: `[compatibility] horizon_revision` in its `horizon-mixin.toml`,
-and `horizon` in the `horizon-native.json` of its registry file (`.hnmod`, `horizon_mods::index::native`). Mods
+and `horizon` in the `horizon-native.json` of its registry file (`.hmod`, `horizon_mods::index::native`). Mods
 pin a **Nightly's commit** (or a release's). Every Nightly ships its source and keeps its commit for good as the
 tag `nightly-source/<date>-<short>` ([release-flow.md](release-flow.md#nightly-channel)), so a pinned mod still
 builds after its Nightly is replaced. When the mods of one build pin different commits, the launcher says which
@@ -72,19 +72,8 @@ the commit of the installed version the build starts from.
 
 ### Mods on the hook points
 
-A mod that hooks only Horizon's native hook points (`crates/horizon-client/src/game/native_hooks.rs`, with a few
-free functions in other crates: [render hook points](#render-hook-points), [items' default
-components](#items-default-components), `horizon_world::loot::native_loot_table_load`, [menu slot
-rules](#menu-slot-rules); empty functions the game
-calls at fixed places, plus helpers, kept stable across releases) can name the version it
-needs instead of pinning: `"hooks": 1` in its `.hnmod`'s `horizon-native.json`, the `NATIVE_HOOKS_API` of that
-file when it was made. Hook points are only ever added: each addition raises `NATIVE_HOOKS_API`, and a mod builds
-on any Horizon whose version is the one it needs or a later one. Its `horizon` is then only the commit it was tested on. The launcher builds it on the commit the other mods
-pin, else on the installed version's commit (the game the player plays), after checking that commit's
-`NATIVE_HOOKS_API` (read from GitHub) is at least the mod's; when it isn't and nothing pins, it builds on the commit the
-mod was tested on. In its own copy of the mod it sets `horizon_revision` to the commit it builds on. Horizon's
-own native mods (Zoom, FPS counter, Keystrokes, Minimap; horizon-rust/horizon-mods, `native/<name>/`) are made this way, so any of them build together
-with no re-release for each Nightly.
+Native mods pin the Horizon revision they build against. Hook points and their contracts are described in
+[Named hook points](#named-hook-points).
 
 Hook and helper authors use [API fragments](../tools/native-hook-fragments/README.md) to request a number.
 
@@ -586,14 +575,14 @@ and the recipe fails, as an unknown kind does.
 A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
 module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
 `crate::native_data!` inside the lib), since hook points API 41. A mod's crate keeps its own data in its folder and
-reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hnmod` may carry
+reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
 both (`mixins/<id>/data/…`, `mixins/<id>/<crate>/data/…`).
 
 Both are compiled in: neither folder is beside the game when it runs. A file the game reads at run time is one a
 post-build step writes into `HORIZON_NATIVE_DATA_DIR` (below), copying it from `HORIZON_NATIVE_BUNDLE_DATA_DIR` or
 making it; the game finds it with `native_built_data("<mod>")` (None only when the game can't tell its own folder).
 
-**What a `.hnmod` holds.** Only files under `mixins/<id>/`: `.rs` and `.toml` files, the data folders above, and the
+**What a native bundle holds.** Under `mixins/<id>/`: `.rs` and `.toml` files, the data folders above, and the
 text files a crate folder carries (`README*`, `LICENSE*`, `COPYING*`, `NOTICE*`, `.gitignore`, in the bundle's
 folder or a crate's), so a crate that compiles its README in builds the same from the registry as from a folder. At
 most 512 files and 64 MiB unpacked; anything else refuses the bundle. A local folder build has no such limits.
@@ -604,8 +593,7 @@ decides what happens: only `horizon-mod.toml` with `assets/` and `data/` is a co
 one file: `horizon-mod.toml`, `assets/` and `data/` are its content, checked as a content mod's
 (`horizon_mods::Content`) and left out of the build, and the two manifests name the same mod id. A `.hmod` with
 native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
-`horizon_mods::index::native::WASM_GONE`. An `.hnmod` (code only) keeps loading as before. The registry keeps
-publishing native mods as `.hnmod` until launchers and the game read native `.hmod`s. Every rule of the file is in
+`horizon_mods::index::native::WASM_GONE`. Every rule of the file is in
 [api/mod-files.md](api/mod-files.md).
 
 ### Post-build steps
@@ -1550,7 +1538,7 @@ The instance list on the left shows such an instance as "Native build · Nightly
 the mods, warns in red, and builds only from "I trust these mods: build"; the row shows each step and the error if
 one fails, on the instance being built only; one build runs at a time. From the command line:
 `horizon-launcher native-build [FOLDER] [--instance NAME] [--update] --trust-native-code`. FOLDER is a bundle, an
-unpacked `.hnmod`, or a folder of them; without it, the native mods turned on in the instance. It is not an MCP tool:
+unpacked `.hmod`, or a folder of them; without it, the native mods turned on in the instance. It is not an MCP tool:
 trusting native code is the player's decision, never an agent's.
 
 1. **Rust.** The launcher's own toolchain ([`rust_toolchain`](../launcher/src/rust_toolchain.rs)): Rust 1.99.1's
@@ -1571,7 +1559,7 @@ trusting native code is the player's decision, never an agent's.
    `sudo apt install build-essential pkg-config libasound2-dev libudev-dev`). SteamOS has GCC without the C
    library's headers, and a read-only system: native builds don't work there yet.
    `horizon-launcher rust status|install|remove`.
-2. **horizon-mixins**, at the commit the mods name (their `.hnmod`'s `mixins`), else `native_mods::MIXINS_REV`,
+2. **horizon-mixins**, at the commit the mods name (their `.hmod`'s `mixins`), else `native_mods::MIXINS_REV`,
    built once with that cargo (`cargo install --locked --git … --rev …`) into `native/tools/<commit>/`.
 3. **The source** of the pinned commit: GitHub's archive of it, once per commit (`native/source/<commit>/`, about
    63 MB unpacked), with the commit in `.horizon-revision`. Never the player's own checkout. Links in the
@@ -1669,22 +1657,21 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
 (its latest release), `.../releases/tag/<tag>`, `.../tree/<ref>` or `.../commit/<sha>`.
 
 - **Resolved to something exact.** GitHub's public API (no sign-in; a rate limit is said plainly, and
-  `HORIZON_GITHUB_TOKEN` raises it) turns the link into a release's `.hnmod` file or a **commit SHA**, never a
-  branch that moves. A release with a `.hnmod` asset installs that file (its SHA-256 is compared with the one GitHub
+  `HORIZON_GITHUB_TOKEN` raises it) turns the link into a release's `.hmod` file or a **commit SHA**, never a
+  branch that moves. A release with a `.hmod` asset installs that file (its SHA-256 is compared with the one GitHub
   lists). With no release or no such asset, the launcher fetches
   `codeload.github.com/<owner>/<repo>/tar.gz/<sha>` and looks in it for mods by the rules of
-  `native-build <folder>`: a folder with `horizon-mixin.toml`, or an unpacked `.hnmod` (`horizon-native.json`).
+  `native-build <folder>`: a folder with `horizon-mixin.toml`, or an unpacked `.hmod` (`horizon-native.json`).
   Several mods: they are listed, and the player picks one or installs all. A source folder must pin the Horizon commit
-  (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hnmod`.
-  A release that ships only a content mod (`.hmod`) says "not supported yet": installing `.hmod` files from a link
-  is not built.
-- **Checked like the registry's files.** The `.hnmod` is read as `horizon_mods::index::native::Bundle::read` reads a
-  registry file (only Rust, TOML and data under `mixins/<id>/`, size limits, nothing run) before it is installed.
+  (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hmod`.
+  Release packages must contain native code; content-only packages are rejected by this native installer.
+- **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
+  registry file (native source under `mixins/<id>/`, optional content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
   decision, never an agent's.
-- **Origin kept.** `horizon-native-mods/<id>.origin.json` beside the `.hnmod`: owner/repo, release tag (for a
+- **Origin kept.** `horizon-native-mods/<id>.origin.json` beside the `.hmod`: owner/repo, release tag (for a
   release), commit, asset name and the SHA-256 of the installed file. `mods list` shows "from GitHub: owner/repo @
   tag" (or the commit's first 7 digits).
 - **Updates.** `horizon-launcher mods update-github [ID] [--check]` compares a mod from a release with the
@@ -1780,8 +1767,8 @@ each was built or last used): switching a mod off and on again plays the kept bu
   Horizon's own.
 - **The registry** (horizon-rust/horizon-mods) lists them as their own kind, `native-mod`, only after a maintainer
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
-  release of it with a `.hnmod` asset is a version once the bundle passes the registry's checks, with no further
-  review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hnmod` contains `.rs` and `.toml` files and may contain data files under
+  release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
+  review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hmod` contains `.rs` and `.toml` files and may contain data files under
   `mixins/<id>/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
   The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
   `horizon-native.json`. `revoked.toml` takes a bad release down.
@@ -2831,7 +2818,7 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 `cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
 `horizon-mixin.toml`, pinned to that Horizon commit, and an `[api]` crate whose `hooks()` greets each player who
 joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
-as it is (`native-build <path>`) and packs it into a `.hnmod`.
+as it is (`native-build <path>`) and packs it into a `.hmod`.
 
 A bundle declares its trait mod package by its path inside the bundle:
 
@@ -3041,12 +3028,8 @@ The helper runs in every `Game` that calls its target, and attachments answer `M
 as they do in hooks.
 
 A catalog hook's trait method, event and return are part of its `hook_version` contract ([Named hook
-points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). Later Horizons only add event fields
-(`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So a mod whose `[api]` package uses only catalog
-hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in its `.hnmod`'s `horizon-native.json` to the
-`NATIVE_HOOKS_API` it was made on.
-A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
-leaves `hooks` out.
+points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). A raw `target` like `tick_mobs` is not a
+hook point and may change in any commit. Native mods pin their `horizon_revision`.
 
 ### Parts
 
