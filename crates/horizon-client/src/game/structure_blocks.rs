@@ -2,7 +2,7 @@
 //! scan, the `StructureTemplateManager` they go through (templates kept in
 //! memory, written to `<world>/generated/<namespace>/structures/<path>.nbt`),
 //! `StructureBlock.neighborChanged` and `handleSetStructureBlock`.
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_client::{
     containers::BlockEntity,
     gizmos::{Gizmos, InvisibleBlock},
@@ -567,19 +567,20 @@ impl Game<'_> {
     /// only a creative player with game master commands edits the block.
     pub(super) fn lan_set_structure_block(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         p: play::SetStructureBlock,
     ) {
-        let Some(g) = host.hub.guest(conn) else {
+        let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
-        self.as_guest_messaged(host, conn, |game| {
+        let Some(mut host) = self.lan.take() else { return; };
+        self.as_guest_messaged(&mut host, conn, |game| {
             if allowed {
                 game.apply_set_structure_block(&p);
             }
         });
+        self.lan = Some(host);
     }
 
     /// What `handleSetStructureBlock` does once the player may edit blocks.

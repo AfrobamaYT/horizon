@@ -1,7 +1,7 @@
 //! Fishing: `FishingRodItem.use` (cast / reel in), the `FishingHook` (flight,
 //! bobbing, lure and bite timers, open water, hooking mobs, retrieving the
 //! `gameplay/fishing` loot) and `FishingHookRenderer` (bobber and line).
-use super::{Game, lan::LanHost, lan_mobs::guest_bounds, view_vector};
+use super::{Game, lan_mobs::guest_bounds, view_vector};
 use horizon_client::advancements::EntityView;
 use horizon_client::lan::{entity::States, hub::Hub};
 use horizon_client::{
@@ -867,7 +867,8 @@ impl Game<'_> {
     }
     /// The players a hook can catch: everyone but spectators and the dead
     /// (`Projectile.canHitEntity`), the host and the guests in the level.
-    pub(super) fn refresh_hook_targets(&mut self, host: &LanHost) {
+    pub(super) fn refresh_hook_targets(&mut self) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let mut targets = Vec::new();
         for g in &host.hub.guests {
             if host.hub.here(g) && g.loaded && !g.dead && !g.spectator() {

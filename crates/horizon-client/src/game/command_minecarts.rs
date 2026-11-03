@@ -6,7 +6,6 @@ use super::{
     Game,
     command_blocks::CommandBlockScreen,
     commands::{Target, execute::Source},
-    lan::LanHost,
     minecarts::{CartKind, Minecart},
 };
 use horizon_client::{command_block::Mode, text::Text};
@@ -150,21 +149,22 @@ impl Game<'_> {
     /// `ServerGamePacketListenerImpl.handleSetCommandMinecart` for a guest.
     pub(super) fn lan_set_command_minecart(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         p: play::SetCommandMinecart,
     ) {
-        let Some(g) = host.hub.guest(conn) else {
+        let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
-        self.as_guest_messaged(host, conn, |game| {
+        let Some(mut host) = self.lan.take() else { return; };
+        self.as_guest_messaged(&mut host, conn, |game| {
             if allowed {
                 game.apply_cart_command(p.entity as u32, p.command, p.track_output);
             } else {
                 game.system_message(Text::translate("advMode.notAllowed", &[]));
             }
         });
+        self.lan = Some(host);
     }
     /// What `handleSetCommandMinecart` does once the player may edit: the
     /// command (which resets the success count), output tracking, the cleared

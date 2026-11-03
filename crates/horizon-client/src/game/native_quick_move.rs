@@ -1,7 +1,7 @@
 //! A shift-click in a mod container's menu, routed by the mods
 //! (`native_menu_quick_move`, `AbstractContainerMenu.quickMoveStack`) before
 //! the game's own routing.
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_client::{
     block_entities::Pos, containers::BlockEntity, items::ItemStack, lan::menu::Slots,
 };
@@ -88,10 +88,10 @@ impl Game<'_> {
     /// click, and for one no mod took, so the game's own routing runs.
     pub(super) fn lan_mod_quick_move(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         p: &play::ContainerClick,
     ) -> bool {
+        let Some(host) = self.lan.as_ref() else { return false; };
         let Some(g) = host.hub.guest(conn) else {
             return false;
         };
@@ -143,15 +143,18 @@ impl Game<'_> {
         ) {
             return false;
         }
+        let Some(mut host) = self.lan.take() else { return false; };
         let handled = self
-            .as_guest(host, conn, |game| {
+            .as_guest(&mut host, conn, |game| {
                 game.mod_menu_quick_move(pos, size, p.slot as usize, at)
             })
             .unwrap_or(false);
+        self.lan = Some(host);
         if !handled {
             return false;
         }
         // The mod menu type's engine starts over from the block entity next click.
+        let Some(host) = self.lan.as_mut() else { return false; };
         if let Some(play) = host.play.get_mut(&conn)
             && play
                 .crafting

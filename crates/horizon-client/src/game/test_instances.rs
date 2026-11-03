@@ -4,7 +4,6 @@
 use super::{
     Game,
     game_tests::Info,
-    lan::LanHost,
     structure_blocks::{create_seed, template_size},
     test_entities::{aabb_of, inflate},
 };
@@ -333,16 +332,16 @@ impl Game<'_> {
     /// the screen's first look answers with a status packet.
     pub(super) fn lan_test_instance_action(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         p: play::TestInstanceBlockAction,
     ) {
-        let Some(g) = host.hub.guest(conn) else {
+        let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
+        let Some(mut host) = self.lan.take() else { return; };
         let reply = self
-            .as_guest_messaged(host, conn, |game| {
+            .as_guest_messaged(&mut host, conn, |game| {
                 allowed
                     .then(|| game.apply_test_instance_action(&p))
                     .flatten()
@@ -357,6 +356,7 @@ impl Game<'_> {
                 }),
             );
         }
+        self.lan = Some(host);
     }
 
     fn apply_test_instance_action(
