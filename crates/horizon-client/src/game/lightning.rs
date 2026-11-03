@@ -738,8 +738,8 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn conversion_post_reads_original_and_lightning_outcome() {
         use horizon_client::mod_api::{
-            BackendToken, EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, Host,
-            LivingConversionPostEvent, LivingConversionPreEvent, MODS,
+            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, Host, LivingConversionPostEvent,
+            LivingConversionPreEvent, MODS,
         };
         use std::sync::{
             Mutex,
