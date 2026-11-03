@@ -1125,28 +1125,34 @@ pub enum NativeMinecartKind {
 
 /// A block in a dimension, vanilla's `GlobalPos`: the dimension's key
 /// (`minecraft:the_nether`) and the block. The dimension is data, so it need
-/// not be open; `host.level(pos.dimension())` gives its level when it is.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GlobalPos {
-    dimension: String,
+    dimension: Identifier,
     pos: BlockPos,
 }
 
 impl GlobalPos {
     /// A block in the dimension with key `dimension`.
-    pub fn new(dimension: impl Into<String>, pos: BlockPos) -> Self {
-        Self {
-            dimension: dimension.into(),
-            pos,
-        }
+    pub fn new(dimension: Identifier, pos: BlockPos) -> Self {
+        Self { dimension, pos }
     }
     /// The dimension's key (`minecraft:overworld`).
-    pub fn dimension(&self) -> &str {
+    pub fn dimension(&self) -> &Identifier {
         &self.dimension
     }
     /// The block.
     pub fn pos(&self) -> BlockPos {
         self.pos
+    }
+}
+
+impl std::hash::Hash for GlobalPos {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(
+            &(self.dimension.namespace(), self.dimension.path(), self.pos),
+            state,
+        );
     }
 }
 

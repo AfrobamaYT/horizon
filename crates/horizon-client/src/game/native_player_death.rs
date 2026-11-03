@@ -11,7 +11,7 @@
 //! player (`native_as_player`), so it is refused inside `player_died`, where
 //! the read still works.
 use super::Game;
-use horizon_client::mod_api::{GlobalPos, PlayerRef};
+use horizon_client::mod_api::{GlobalPos, Identifier, PlayerRef};
 use horizon_core::position::BlockPos;
 
 impl Game<'_> {
@@ -19,6 +19,7 @@ impl Game<'_> {
     /// (`Player.getLastDeathLocation`).
     pub(super) fn native_player_last_death_location(&self, player: PlayerRef) -> Option<GlobalPos> {
         let (dimension, [x, y, z]) = self.native_player_last_death_record(player)?;
+        let dimension = Identifier::parse(&dimension).ok()?;
         Some(GlobalPos::new(dimension, BlockPos::new(x, y, z)))
     }
 
@@ -35,7 +36,7 @@ impl Game<'_> {
         }
         let stored = location.map(|l| {
             let p = l.pos();
-            (l.dimension().to_owned(), [p.x, p.y, p.z])
+            (l.dimension().to_string(), [p.x, p.y, p.z])
         });
         let mut done = false;
         self.native_as_player(player.uuid(), |game| {
@@ -50,12 +51,15 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
 
     use super::super::Game;
-    use horizon_client::mod_api::{GlobalPos, PlayerRef};
+    use horizon_client::mod_api::{GlobalPos, Identifier, PlayerRef};
     use horizon_core::position::BlockPos;
 
     /// A block of the overworld.
     fn at([x, y, z]: [i32; 3]) -> GlobalPos {
-        GlobalPos::new("minecraft:overworld", BlockPos::new(x, y, z))
+        GlobalPos::new(
+            Identifier::parse("minecraft:overworld").unwrap(),
+            BlockPos::new(x, y, z),
+        )
     }
 
     /// A placed guest record.
@@ -155,6 +159,11 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests[0].placed = false;
             assert_eq!(player.last_death_location(&*game), None);
             game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+
+            // Raw saved data crosses the Identifier boundary only here.
+            game.lan.as_mut().unwrap().hub.guests[0].last_death =
+                Some(("not a dimension key".into(), [1, 2, 3]));
+            assert_eq!(player.last_death_location(&*game), None);
         });
     }
 
@@ -238,9 +247,14 @@ mod tests {
             assert_eq!(
                 player.last_death_location(&*game),
                 Some(GlobalPos::new(
-                    "minecraft:the_nether",
+                    Identifier::parse("minecraft:the_nether").unwrap(),
                     BlockPos::new(-2, 64, 7)
                 ))
+            );
+            assert!(!player.set_last_death_location(game, Some(at([1, 2, 3]))));
+            assert_eq!(
+                player.last_death_location(&*game).unwrap().pos(),
+                BlockPos::new(-2, 64, 7)
             );
         });
     }
