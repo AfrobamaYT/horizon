@@ -931,7 +931,15 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         for (name, ty) in args.iter().chain(collected) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
             let (field, scalar) = lifetimes.field(ty);
-            fields.push_str(&format!("pub {name}: {},\n", field.to_token_stream()));
+            let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
+                "pub(super)"
+            } else {
+                "pub"
+            };
+            fields.push_str(&format!(
+                "{visibility} {name}: {},\n",
+                field.to_token_stream()
+            ));
             if scalar {
                 inits.push(format!("{name}: *{name}"));
                 write_back.push_str(&format!("*{name} = {event}.{name};"));
