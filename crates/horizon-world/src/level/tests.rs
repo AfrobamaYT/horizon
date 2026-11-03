@@ -2314,7 +2314,11 @@ fn replacing_moving_piston_skips_the_same_effects_with_or_without_flag() {
         ));
         assert!(w.b().set_block(&mut w.level, &mut w.ticks, pos, air, flags));
         assert_eq!(w.get(pos), air);
-        assert_eq!(w.get(base), extended, "setBlock over the head keeps the extended base");
+        assert_eq!(
+            w.get(base),
+            extended,
+            "setBlock over the head keeps the extended base"
+        );
         assert!(!w.ticks.moving_pistons.iter().any(|(p, _)| *p == pos));
     }
 }
