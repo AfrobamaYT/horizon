@@ -284,9 +284,6 @@ impl Game<'_> {
             // setItemSlot, so onEquipItem: the equip sound, but no game event
             // for body and saddle.
             Slot::Equipment(i) => {
-                if *i >= crate::equipment::SADDLE + 1 {
-                    return false;
-                }
                 let old = self.equipment[*i].clone();
                 self.equipment.set(*i, stack.clone());
                 self.player_on_equip(
