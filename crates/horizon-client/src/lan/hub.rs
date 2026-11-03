@@ -4439,6 +4439,20 @@ mod tests {
         hub.track_entities(&mut ctx);
         assert!(!hub.guests[0].tracker.is_tracking(2));
         assert!(hub.guests[1].tracker.ids().is_empty());
+        hub.guests[0].placed = false;
+        hub.place_new_player(2, &mut ctx);
+        assert!(rx.try_recv().is_err());
+        hub.place_new_player(1, &mut ctx);
+        let mut saw_list = false;
+        while let Ok(crate::lan::Out::Packet(body)) = rx.try_recv() {
+            let mut reader = horizon_protocol::buf::Reader::new(&body);
+            let Ok(id) = reader.varint() else { continue };
+            if let Ok(C::PlayerInfoUpdate(update)) = C::decode(id, reader.rest()) {
+                saw_list = true;
+                assert!(update.entries.iter().all(|entry| entry.uuid != 2));
+            }
+        }
+        assert!(saw_list);
         hub.ticks = 601;
         hub.end_tick();
         let crate::lan::Out::Packet(body) =
