@@ -2800,10 +2800,10 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
-    /// A server with native mods: goals defer a horse's tame to the game
-    /// (`AnimalTameEvent`). Ravagers also defer their jump when `BreakBlock`
-    /// leaves may be kept by a mod (`IfBroke`).
-    pub ask_mods: bool,
+    /// Whether a listener can cancel animal taming.
+    pub asks_animal_tame: bool,
+    /// Whether a listener can cancel a mob's block destruction.
+    pub asks_living_destroy_block: bool,
     /// Whether a server listener can cancel baby spawning.
     pub asks_baby_spawn: bool,
     /// The level's world border, whose walls stop a mob's moves
