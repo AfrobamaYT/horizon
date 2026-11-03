@@ -359,7 +359,8 @@ impl Game<'_> {
         let Some((_, id)) = self.display_entity(display) else {
             return false;
         };
-        self.persist.display_forced.insert(id);
+        // SynchedEntityData.set(DATA_..._START_DELTA_TICKS_ID, ticks, true).
+        self.persist.force_meta(id, 8);
         self.display_put(display, None, "start_interpolation", Tag::Int(ticks))
     }
 
@@ -810,20 +811,20 @@ mod tests {
         with_game(|game| {
             let text = push(game, 21, "minecraft:text_display");
             let other = push(game, 22, "minecraft:item_display");
-            assert!(game.persist.display_forced.is_empty());
+            assert!(game.persist.forced_meta.is_empty());
             for _ in 0..2 {
                 assert!(text.set_start_interpolation(game, 0));
                 assert_eq!(text.start_interpolation(game), Some(0));
-                assert!(game.persist.display_forced.contains(&21));
+                assert_eq!(game.persist.forced_meta.get(&21), Some(&[1 << 8, 0, 0, 0]));
                 // The tracking pass spends the force; the next write sets it again.
-                game.persist.display_forced.clear();
+                game.spend_forced_meta();
             }
             // Other writes, and writes that fail, force nothing.
             assert!(other.set_view_range(game, 3.0));
-            assert!(game.persist.display_forced.is_empty());
+            assert!(game.persist.forced_meta.is_empty());
             assert!(text.entity().discard(game));
             assert!(!text.set_start_interpolation(game, 0));
-            assert!(game.persist.display_forced.is_empty());
+            assert!(game.persist.forced_meta.is_empty());
         });
     }
 
