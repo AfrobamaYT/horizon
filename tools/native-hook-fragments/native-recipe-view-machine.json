@@ -1,6 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "machine recipes in a mod's item panel through the one `NativeRecipeView`: results with an optional chance (`NativeRecipeResult`), fluids in and out as `FluidStack`, and `native_sprite`'s optional tint.",
-  "doc_summary": "`NativeRecipeView` grows to a machine's recipe: `results` is up to four slots, each with an optional chance in percent (`NativeRecipeResult`), and `fluid_inputs` and `fluid_outputs` hold `FluidStack`s with their amounts in millibuckets, so a crafting recipe is a view with one result and no fluids. `native_sprite` takes an optional `0xAARRGGBB` tint that multiplies the sprite's texels (a fluid's colour).",
-  "comments": []
-}

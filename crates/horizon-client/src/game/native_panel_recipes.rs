@@ -254,7 +254,13 @@ impl Shown {
         let action = if result.0 + SLOT + 16.0 <= room {
             (result.0 + SLOT + 4.0, ((h - 12.0) / 2.0).floor())
         } else {
-            (result.0 + 3.0, result.1 + SLOT + 2.0)
+            // Under the last result, below the chance written there.
+            let chance = if self.chances.last().is_some_and(Option::is_some) {
+                CHANCE_TEXT
+            } else {
+                0.0
+            };
+            (result.0 + 3.0, result.1 + SLOT + 2.0 + chance)
         };
         while at.len() < inputs {
             at.push((f32::NAN, f32::NAN));
@@ -770,6 +776,37 @@ mod tests {
         assert_eq!((at[2].0 - at[1].0, at[3].0 - at[2].0), (SLOT, SLOT));
         assert_eq!(at[1].1, at[3].1);
         assert!(action.0 > at[3].0);
+    }
+
+    /// A narrow panel puts the action under the last result, below its chance line.
+    #[test]
+    fn a_narrow_action_clears_the_chance_line() {
+        let shown = Shown {
+            layout: BrowserLayout::Single,
+            width: 1,
+            height: 1,
+            slots: vec![Vec::new(); 2],
+            chances: vec![Some(25.0)],
+            fluid_inputs: Vec::new(),
+            fluid_outputs: Vec::new(),
+            note: String::new(),
+            action: Some(true),
+        };
+        let (at, _, action) = shown.places(72.0);
+        assert_eq!(at[1], (50.0, 0.0));
+        let line = at[1].1 + SLOT + 1.0;
+        assert!(
+            action.1 >= line + CHANCE_TEXT,
+            "action y {} vs chance line {line}",
+            action.1
+        );
+        assert!(shown.block(72.0) >= action.1 + 12.0);
+        // Without a chance the action keeps the old place under the slot.
+        let plain = Shown {
+            chances: vec![None],
+            ..shown
+        };
+        assert_eq!(plain.places(72.0).2.1, SLOT + 2.0);
     }
 
     fn fluid(amount: u32) -> crate::mod_api::FluidStack {
