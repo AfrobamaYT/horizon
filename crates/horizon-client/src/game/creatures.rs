@@ -1518,10 +1518,7 @@ impl Game<'_> {
     ) {
         use horizon_client::mobs::{DamageKind, Who, drops};
         use horizon_world::loot::{LootDamage, LootEntity};
-        let Some(loot) = horizon_client::structure_blocks::loot_data(
-            &self.options.resources,
-            &self.pack_files(),
-        ) else {
+        let Some(loot) = self.server_loot.get() else {
             return;
         };
         let player = || killer.clone();
@@ -1779,10 +1776,7 @@ impl Game<'_> {
     fn drop_gift_loot(&mut self, mob: u32, table: &'static str, at: [f64; 3]) {
         use horizon_client::mobs::drops;
         use horizon_world::loot::EntityLootParams;
-        let loot = horizon_client::structure_blocks::loot_data(
-            &self.options.resources,
-            &self.pack_files(),
-        );
+        let loot = self.server_loot.get();
         let this = self
             .mobs
             .iter()
