@@ -533,7 +533,9 @@ mod tests {
     fn a_mod_block_entity_rides_its_item() {
         let tank = saved("{id:\"gtbasic:drum\",x:3,y:4,z:5,Fluid:\"gtceu:water\",Amount:2000}");
         let patch = pick(&tank);
-        let data = patch.get(&JavaString::from(BLOCK_ENTITY_DATA)).expect("data");
+        let data = patch
+            .get(&JavaString::from(BLOCK_ENTITY_DATA))
+            .expect("data");
         assert_eq!(data.get("Amount"), Some(&Tag::Int(2000)));
         assert_eq!(data.get("id"), Some(&Tag::String("gtbasic:drum".into())));
         assert_eq!(data.get("x"), None);
