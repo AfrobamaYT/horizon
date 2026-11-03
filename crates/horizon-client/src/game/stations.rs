@@ -2953,6 +2953,8 @@ impl Game<'_> {
                 self.native_potion_brew_pre(at, &mut stacks, &mut cancel);
                 (stacks, cancel)
             });
+            // A cancelled Pre fires Post itself, with the slots the mods left.
+            let cancelled = matches!(asked, Some((_, true)));
             let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
                 return Ok(());
             };
@@ -2963,7 +2965,7 @@ impl Game<'_> {
                 &mut out,
             );
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
-            if out.brewed && hooked {
+            if hooked && (out.brewed || cancelled) {
                 let mut stacks = b.items.clone();
                 self.native_potion_brew_post(at, &mut stacks);
                 if let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) {

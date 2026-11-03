@@ -395,17 +395,16 @@ impl Game<'_> {
             let mut levels = drawn.map(|cost| cost.unwrap_or(0));
             if let Some(item) = gs.menu.slot(0) {
                 for (row, original) in drawn.iter().enumerate() {
-                    if let Some(original) = *original {
-                        self.native_enchantment_level_set(
-                            guest.uuid,
-                            guest.entity_id,
-                            gs.pos,
-                            row as i32,
-                            bookcases,
+                    if let Some(original_level) = *original {
+                        let offer = horizon_client::stations::EnchantmentRow {
+                            player: guest.uuid,
+                            player_entity_id: guest.entity_id,
+                            row: row as i32,
+                            power: bookcases,
                             item,
-                            original,
-                            &mut levels[row],
-                        );
+                            original_level,
+                        };
+                        self.native_enchantment_level_set(gs.pos, &offer, &mut levels[row]);
                     }
                 }
             }

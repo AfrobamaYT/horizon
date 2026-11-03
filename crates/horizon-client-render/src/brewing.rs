@@ -363,8 +363,9 @@ impl BrewingStand {
     }
     /// `doBrew` once `PotionBrewEvent.Pre` asked the mods with `asked`, a
     /// copy of the five slots, and whether they cancelled: a cancel puts the
-    /// mods' slots in and skips the brew; otherwise vanilla brews and the
-    /// copy is dropped. Without mods (`None`) this is `doBrew`.
+    /// mods' slots in and skips the brew (the caller then fires Post);
+    /// otherwise vanilla brews and the copy is dropped. Without mods (`None`)
+    /// this is `doBrew`.
     pub fn brew_after_pre(
         &mut self,
         asked: Option<([Option<ItemStack>; 5], bool)>,

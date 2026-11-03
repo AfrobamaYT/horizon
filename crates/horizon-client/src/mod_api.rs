@@ -1050,7 +1050,7 @@ mod tests {
     }
 
     /// Cancels every brew and leaves its own slots; records what it saw.
-    struct BrewSwapper(Arc<Mutex<Vec<&'static str>>>);
+    struct BrewSwapper(Arc<Mutex<Vec<String>>>);
 
     impl Hooks for BrewSwapper {
         fn potion_brew_pre(
@@ -1058,12 +1058,13 @@ mod tests {
             _host: &mut dyn Host,
             event: &mut PotionBrewPreEvent<'_>,
         ) -> Flow {
-            self.0.lock().unwrap().push("pre");
+            self.0.lock().unwrap().push("pre".into());
             event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
             Flow::Cancel
         }
         fn potion_brew_post(&self, _host: &mut dyn Host, event: &mut PotionBrewPostEvent<'_>) {
-            self.0.lock().unwrap().push("post");
+            let first = event.stacks[0].as_ref().map_or("", |s| &s.item);
+            self.0.lock().unwrap().push(format!("post {first}"));
             event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
         }
     }
@@ -1086,8 +1087,9 @@ mod tests {
     }
 
     /// `PotionBrewEvent.Pre` and `.Post` around `doBrew`: a cancelling mod's
-    /// slots replace the brew, with no ingredient used; a mod that doesn't
-    /// cancel has its Pre edits dropped, vanilla brews, and its Post edits stay.
+    /// slots replace the brew, with no ingredient used, and Post fires once
+    /// with them; a mod that doesn't cancel has its Pre edits dropped,
+    /// vanilla brews, and its Post edits stay.
     #[test]
     fn a_cancelled_brew_takes_the_mods_slots_and_an_uncancelled_one_brews() {
         use crate::brewing::{Brewing, BrewingRecipe, BrewingStand, PotionIngredient};
@@ -1128,7 +1130,7 @@ mod tests {
             dispatch_potion_brew_pre(host, mods, [1, 2, 3], &mut stacks, &mut cancel);
             let mut out = crate::brewing::BrewTick::default();
             stand.brew_after_pre(Some((stacks, cancel)), &brewing, &items, &mut out);
-            if out.brewed {
+            if out.brewed || cancel {
                 dispatch_potion_brew_post(host, mods, [1, 2, 3], &mut stand.items);
             }
             out.brewed
@@ -1138,8 +1140,9 @@ mod tests {
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewSwapper(seen.clone()))];
         let mut stand = fresh();
         assert!(!brew(&mods, &mut host, &mut stand));
-        assert_eq!(*seen.lock().unwrap(), ["pre"]);
+        assert_eq!(*seen.lock().unwrap(), ["pre", "post minecraft:diamond"]);
         assert_eq!(&*stand.items[0].as_ref().unwrap().item, "minecraft:diamond");
+        assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(2));
 
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewEditor)];

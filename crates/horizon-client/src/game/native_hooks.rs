@@ -4722,9 +4722,10 @@ impl Game<'_> {
     /// in `BrewingStandBlockEntity.doBrew`): `stacks` is a copy of its five
     /// slots (three bottles, the ingredient, the fuel). Set `cancel` to skip
     /// vanilla's brew: the stand then takes `stacks` as the mods left them,
-    /// uses no ingredient and plays no brew sound, and neither
-    /// `potion_brew_post` nor `brewing_complete` fires. Uncancelled, changes
-    /// to `stacks` are dropped. Server-side. @API:potion_brew_pre@.
+    /// uses no ingredient and plays no brew sound, and `potion_brew_post`
+    /// fires with those slots; `brewing_complete` doesn't, as nothing was
+    /// brewed. Uncancelled, changes to `stacks` are dropped. Server-side.
+    /// @API:potion_brew_pre@.
     pub(super) fn native_potion_brew_pre(
         &mut self,
         pos: [i32; 3],
@@ -4734,9 +4735,10 @@ impl Game<'_> {
         mod_api::dispatch_potion_brew_pre(self, mod_api::mods(), pos, stacks, cancel);
     }
     /// A brewing stand at `pos` brewed (`PotionBrewEvent.Post`, at the end of
-    /// `BrewingStandBlockEntity.doBrew`): `stacks` holds its five slots after
-    /// the brew, and what the mods leave there is the stand's. Fires before
-    /// `brewing_complete`. Server-side. @API:potion_brew_post@.
+    /// `BrewingStandBlockEntity.doBrew`), or `potion_brew_pre` was cancelled:
+    /// `stacks` holds its five slots after the brew (or as the cancelling
+    /// mods left them), and what the mods leave there is the stand's. Fires
+    /// before `brewing_complete`. Server-side. @API:potion_brew_post@.
     pub(super) fn native_potion_brew_post(
         &mut self,
         pos: [i32; 3],
@@ -4778,37 +4780,20 @@ impl Game<'_> {
             enchantments,
         );
     }
-    /// An enchanting table drew the level of offer `row` (0 to 2) for `item`
-    /// (`EnchantmentMenu.slotsChanged`, after `getEnchantmentCost`): `power`
-    /// is the bookshelves counted and `original_level` the level drawn. Change
+    /// An enchanting table at `pos` drew the level of one offer
+    /// (`EnchantmentMenu.slotsChanged`, after `getEnchantmentCost`): `offer`
+    /// holds the server player whose table it is, the row (0 to 2), the
+    /// power (bookshelves counted), the item and the level drawn. Change
     /// `level` to change the offer; a level below `row + 1` offers nothing,
-    /// as vanilla's. Asked for each row in order, for the server player
-    /// `player` (UUID) and `player_entity_id` whose table it is, before
+    /// as vanilla's. Asked for each row in order, before
     /// `prepare_item_enchant`. Server-side. @API:enchantment_level_set@.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn native_enchantment_level_set(
         &mut self,
-        player: u128,
-        player_entity_id: i32,
         pos: [i32; 3],
-        row: i32,
-        power: i32,
-        item: &ItemStack,
-        original_level: i32,
+        offer: &horizon_client::stations::EnchantmentRow<'_>,
         level: &mut i32,
     ) {
-        mod_api::dispatch_enchantment_level_set(
-            self,
-            mod_api::mods(),
-            player,
-            player_entity_id,
-            pos,
-            row,
-            power,
-            item,
-            original_level,
-            level,
-        );
+        mod_api::dispatch_enchantment_level_set(self, mod_api::mods(), pos, offer, level);
     }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
