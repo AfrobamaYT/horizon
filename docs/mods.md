@@ -185,8 +185,7 @@ Coordinates must be finite and each minimum must not exceed its maximum. `[]` is
 `properties` names an ordered tuple of template and/or declared state properties; each `values` key
 lists their values in that order, separated by commas without spaces. A nonmatching tuple uses
 `default`. Without `default`, every tuple must be covered. A default-only table gives every state the
-same shape. The existing `{"property":"axis","values":{"x":[...],"y":[...],"z":[...]}}`
-format still works; use either `property` or `properties`, not both. Unknown properties, unreachable
+same shape. A single-property table uses `"properties":["axis"]`. Unknown properties, unreachable
 value tuples, malformed boxes and duplicate property names reject the mod with a load error rather
 than silently ignoring a typo. Omitted `shapes` preserves the template outline (or the connecting
 block's `thickness` outline). Omitted `collision_shapes` preserves the existing behavior: a declared
@@ -400,8 +399,7 @@ generation `step` of every biome in `biomes`; `remove_features` takes them out o
 none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
 NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
 feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
-(registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
-Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
+(registry `minecraft:worldgen/feature`).
 
 Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one object or a list with `type`,
 `weight`, `minCount` and `maxCount`) to each entity type's category, converting the count range to 26.3's `count`;
