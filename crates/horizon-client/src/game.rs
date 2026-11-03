@@ -6662,8 +6662,13 @@ impl Game<'_> {
         {
             let held = self.held().cloned();
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-            let mut block_answer = None;
-            if !horizon_client::mod_api::mods().is_empty() {
+            let mut block_answer = self.use_item_on_block(
+                hit,
+                self.hand,
+                held.as_ref(),
+                horizon_client::mod_api::UsePhase::Block,
+            );
+            if block_answer.is_none() && !horizon_client::mod_api::mods().is_empty() {
                 let click = self.block_click(hit, self.hand, held.as_ref());
                 self.native_use_item_on(state, &click, &mut block_answer);
             }
@@ -6933,20 +6938,49 @@ impl Game<'_> {
         // UseItemOn reaches only useOn, its UseItem only use.
         let mut claimed = false;
         if let Some(hit) = block_hit {
-            let (player, player_entity_id) = self.native_clicker();
-            let (hand, at) = (self.hand, hit.native());
-            self.native_use_on(
-                &stack,
-                hit.pos,
-                hit.face,
-                hand,
-                at,
-                player,
-                player_entity_id,
-                &mut claimed,
-            );
+            if let Some(answer) = self.use_item_on_block(
+                hit,
+                self.hand,
+                Some(&stack),
+                horizon_client::mod_api::UsePhase::ItemAfterBlock,
+            ) {
+                if answer.consumes_action() {
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &stack);
+                    if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if answer == Answer::Fail {
+                    self.use_failed = true;
+                    return Ok(true);
+                }
+                if on_block {
+                    return Ok(false);
+                }
+                block_hit = None;
+            } else {
+                let (player, player_entity_id) = self.native_clicker();
+                let (hand, at) = (self.hand, hit.native());
+                self.native_use_on(
+                    &stack,
+                    hit.pos,
+                    hit.face,
+                    hand,
+                    at,
+                    player,
+                    player_entity_id,
+                    &mut claimed,
+                );
+            }
         }
         if !claimed && !on_block {
+            if let Some(answer) = self.right_click_item(self.hand, &stack) {
+                if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                    self.swing_arm();
+                }
+                return Ok(answer.consumes_action());
+            }
             self.native_use_item(&stack, &mut claimed);
         }
         if claimed {
