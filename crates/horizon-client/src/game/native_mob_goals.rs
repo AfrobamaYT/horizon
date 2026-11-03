@@ -9,6 +9,7 @@ use horizon_client::{
             MeleeAttack, NearestTarget, Panic, Prey, RandomLookAround, RestrictSun, Stroll, Tempt,
             TryFindWater,
         },
+        nav::NavKind,
     },
     mod_api::{MobRef, NativeGoal, NativeMobFilter, NativeMobGoalEntry},
 };
@@ -70,10 +71,15 @@ impl Game<'_> {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
         };
-        let Some(species) = self.mobs.iter().find(|m| m.id == id).map(|m| m.species()) else {
+        let Some((species, navigation)) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| (m.species(), m.ai.nav.kind))
+        else {
             return false;
         };
-        let Some(goal) = self.boxed_goal(species, goal) else {
+        let Some(goal) = self.boxed_goal(species, navigation, goal) else {
             return false;
         };
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
@@ -94,10 +100,15 @@ impl Game<'_> {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
         };
-        let Some(species) = self.mobs.iter().find(|m| m.id == id).map(|m| m.species()) else {
+        let Some((species, navigation)) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| (m.species(), m.ai.nav.kind))
+        else {
             return false;
         };
-        let Some(goal) = self.boxed_goal(species, goal) else {
+        let Some(goal) = self.boxed_goal(species, navigation, goal) else {
             return false;
         };
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
@@ -225,7 +236,12 @@ impl Game<'_> {
     /// constructor takes or the mob's class does not hold the goal. The
     /// species ids of a filter resolve through the mob type table, a bare
     /// id in `minecraft:`'s, as the effects' ids read.
-    fn boxed_goal(&self, species: Species, goal: &NativeGoal) -> Option<Box<dyn Goal>> {
+    fn boxed_goal(
+        &self,
+        species: Species,
+        navigation: NavKind,
+        goal: &NativeGoal,
+    ) -> Option<Box<dyn Goal>> {
         let needs_pathfinder = !matches!(
             goal,
             NativeGoal::Float
@@ -241,22 +257,9 @@ impl Game<'_> {
             return None;
         }
         if matches!(goal, NativeGoal::FollowMob { .. })
-            && matches!(
-                species,
-                Species::Tadpole
-                    | Species::Cod
-                    | Species::Salmon
-                    | Species::TropicalFish
-                    | Species::Pufferfish
-                    | Species::Dolphin
-                    | Species::Guardian
-                    | Species::ElderGuardian
-                    | Species::Nautilus
-                    | Species::ZombieNautilus
-                    | Species::Axolotl
-                    | Species::Drowned
-                    | Species::Turtle
-                    | Species::Frog
+            && !matches!(
+                navigation,
+                NavKind::Ground | NavKind::WallClimber | NavKind::Flying
             )
         {
             return None;
@@ -510,6 +513,7 @@ mod tests {
                 let actual = game
                     .boxed_goal(
                         species,
+                        super::NavKind::Ground,
                         &NativeGoal::Panic {
                             speed: 1.0,
                             water_range: None,
@@ -524,15 +528,26 @@ mod tests {
             }
             assert!(mismatches.is_empty(), "{}", mismatches.join("; "));
             for species in [Species::Bat, Species::Ghast, Species::Phantom] {
-                assert!(game.boxed_goal(species, &NativeGoal::EatBlock).is_some());
-                assert!(game.boxed_goal(species, &NativeGoal::RestrictSun).is_none());
                 assert!(
-                    game.boxed_goal(species, &NativeGoal::HurtByTarget { alert: false })
+                    game.boxed_goal(species, super::NavKind::Ground, &NativeGoal::EatBlock)
+                        .is_some()
+                );
+                assert!(
+                    game.boxed_goal(species, super::NavKind::Ground, &NativeGoal::RestrictSun)
                         .is_none()
                 );
                 assert!(
                     game.boxed_goal(
                         species,
+                        super::NavKind::Ground,
+                        &NativeGoal::HurtByTarget { alert: false }
+                    )
+                    .is_none()
+                );
+                assert!(
+                    game.boxed_goal(
+                        species,
+                        super::NavKind::Ground,
                         &NativeGoal::FollowMob {
                             speed: 1.0,
                             stop: 2.0,
@@ -554,6 +569,7 @@ mod tests {
                 assert!(
                     game.boxed_goal(
                         species,
+                        super::NavKind::Water { breach: false },
                         &NativeGoal::FollowMob {
                             speed: 1.0,
                             stop: 2.0,
@@ -562,6 +578,38 @@ mod tests {
                     )
                     .is_none()
                 );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn follow_mob_uses_the_mobs_actual_navigation() {
+        with_game(|game| {
+            let mob = mob_in_game(game, "minecraft:cow", 501);
+            let goal = NativeGoal::FollowMob {
+                speed: 1.0,
+                stop: 2.0,
+                area: 8.0,
+            };
+            for nav in [
+                super::NavKind::Water { breach: false },
+                super::NavKind::Amphibious {
+                    prefers_shallow: false,
+                },
+            ] {
+                game.mobs[0].ai.nav.kind = nav;
+                assert!(!game.native_mob_add_goal(mob, 0, &goal));
+                assert!(!game.native_mob_add_target_goal(mob, 0, &goal));
+            }
+            for nav in [
+                super::NavKind::Ground,
+                super::NavKind::WallClimber,
+                super::NavKind::Flying,
+            ] {
+                game.mobs[0].ai.nav.kind = nav;
+                assert!(game.native_mob_add_goal(mob, 0, &goal));
+                assert!(game.native_mob_add_target_goal(mob, 0, &goal));
             }
         });
     }

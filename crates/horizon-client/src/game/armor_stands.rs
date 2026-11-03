@@ -810,8 +810,8 @@ impl Game<'_> {
                 self.armor_stands[i].previous_yaw = self.armor_stands[i].yaw;
                 continue;
             }
-            self.armor_stand_location_effects(i, false);
             self.armor_stands[i].first_tick = false;
+            self.armor_stand_location_effects(i, false);
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
@@ -1412,7 +1412,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // Player.drop(stack, false): thrown from the eyes, no thrower.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
         // The attribute modifiers of a worn piece come from the server's
         // ClientboundUpdateAttributesPacket on a client.

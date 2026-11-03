@@ -632,7 +632,7 @@ impl Game<'_> {
             && let Some(eye) = self.eye_position()
         {
             // `player.drop(stack, false)`.
-            self.throw_from_eyes(rest, eye, false);
+            self.throw_from_eyes(rest, eye, false, false);
         }
     }
     /// Drinking a potion while right-click is held; true when handled.
@@ -1025,6 +1025,19 @@ impl Game<'_> {
             let _ = p.set_health(current.max(target), true);
         }
         self.mod_effect_added(id, None, amp, new);
+        changed
+    }
+    /// Removes one effect, or all effects, and refreshes the player's derived state.
+    pub(super) fn remove_player_effects(&mut self, effect: Option<&str>) -> bool {
+        let before = self.potions.effects.list.len();
+        self.potions
+            .effects
+            .list
+            .retain(|e| effect.is_some_and(|id| e.id != id));
+        let changed = self.potions.effects.list.len() != before;
+        if changed {
+            self.apply_effect_status();
+        }
         changed
     }
     /// `LivingEntity.addEffect` for a content mod's effect: its

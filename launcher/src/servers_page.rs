@@ -426,9 +426,21 @@ impl Launcher {
         let Some(dir) = self.servers.open.clone() else {
             return;
         };
+        let tx = self.tx.clone();
         self.server_job(label.to_string(), move |log| {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            servers::run_streamed(&dir, &args, log).map(|_| String::new())
+            let result = match args.first().copied() {
+                Some("start" | "restart") => {
+                    if args[0] == "start" {
+                        log(tr("A new world takes a minute the first time").into());
+                    }
+                    crate::jar_launch::with_consent(&tx, |permission| {
+                        servers::run_managed(&dir, &args, log, permission)
+                    })
+                }
+                _ => servers::run_streamed(&dir, &args, log),
+            };
+            result.map(|_| String::new())
         });
     }
 
@@ -748,10 +760,7 @@ impl Launcher {
         };
         STARTED_HERE.lock().unwrap().push(dir.clone());
         self.servers.restart_needed.clear();
-        self.server_job("Starting", move |log| {
-            log("A new world takes a minute the first time".into());
-            servers::run_streamed(&dir, &["start"], log).map(|_| String::new())
-        });
+        self.server_command("Starting", vec!["start".into()]);
     }
 
     fn fix(&mut self, fix: Fix, cx: &mut Context<Self>) {

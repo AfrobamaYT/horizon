@@ -1,12 +1,29 @@
 //! The package candidates the game loads, before content validation and conflicts.
 mod context;
-pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext};
+pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext, data_dir_with};
 
-use crate::{Package, find};
+use crate::{
+    Package, find,
+    mod_list::{DIR, NATIVE_DIR},
+};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
+
+/// What the launcher writes beside a game it built with native mods: their ids under `mods`.
+pub const BUILD_INFO: &str = "native-mods.json";
+
+/// IDs compiled into this executable, from the launcher's build record.
+pub fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
+    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
+    info["mods"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str().map(str::to_owned))
+        .collect()
+}
 
 /// A selected package, read and validated once at the filesystem boundary.
 pub struct SelectedPackage {
@@ -14,29 +31,48 @@ pub struct SelectedPackage {
     pub package: Package,
 }
 
+/// Selected content-only packages, including explicit development paths.
+/// Native packages are not content candidates, even through a development path:
+/// their canonical source and compiled identity are owned by the engine.
+pub fn content_packages<'a>(
+    game_dir: &Path,
+    enabled: &'a BTreeSet<String>,
+    dev: &'a [PathBuf],
+) -> impl Iterator<Item = SelectedPackage> + 'a {
+    selected_packages(game_dir, enabled, None, dev)
+}
+
 /// Native content follows the compiled build, not the next build's toggles.
 /// Content-only packages follow the player's toggles. Explicit development
 /// paths take precedence over discovery and are enabled independently of both.
 /// Content validation and duplicate-ID acceptance remain the caller's job.
 pub fn packages<'a>(
-    home: &Path,
+    game_dir: &Path,
     enabled: &'a BTreeSet<String>,
     built: &'a BTreeSet<String>,
     dev: &'a [PathBuf],
 ) -> impl Iterator<Item = SelectedPackage> + 'a {
-    let mut paths = find(&home.join("horizon-mods"));
-    paths.extend(find(&home.join("horizon-native-mods")));
+    selected_packages(game_dir, enabled, Some(built), dev)
+}
+
+fn selected_packages<'a>(
+    game_dir: &Path,
+    enabled: &'a BTreeSet<String>,
+    native: Option<&'a BTreeSet<String>>,
+    dev: &'a [PathBuf],
+) -> impl Iterator<Item = SelectedPackage> + 'a {
+    let mut paths = find(&game_dir.join(DIR));
+    paths.extend(find(&game_dir.join(NATIVE_DIR)));
     paths.retain(|path| !dev.contains(path));
     paths.extend(dev.iter().cloned());
     paths.into_iter().filter_map(move |path| {
         let package = Package::read(&path).ok()?;
-        let selected = if package.manifest.native.is_some() {
-            built
+        let selected = if package.is_native() {
+            native.is_some_and(|ids| ids.contains(&package.manifest.id) || dev.contains(&path))
         } else {
-            enabled
+            enabled.contains(&package.manifest.id) || dev.contains(&path)
         };
-        (selected.contains(&package.manifest.id) || dev.contains(&path))
-            .then_some(SelectedPackage { path, package })
+        selected.then_some(SelectedPackage { path, package })
     })
 }
 
@@ -116,6 +152,20 @@ mod tests {
             .map(|p| p.path)
             .collect();
         assert_eq!(rebuilt, [content]);
+    }
+
+    #[test]
+    fn content_candidates_do_not_load_native_inputs_even_when_enabled_or_developed() {
+        let home = Scratch::new();
+        let native = home.package("horizon-mods", "native", true);
+        home.package("horizon-native-mods", "other_native", true);
+        let plain = home.package("horizon-native-mods", "plain", false);
+        let external = home.package("workspace", "external", false);
+        let enabled = BTreeSet::from(["native".into(), "other_native".into(), "plain".into()]);
+        let selected: Vec<_> = content_packages(&home.0, &enabled, &[native, external.clone()])
+            .map(|p| p.path)
+            .collect();
+        assert_eq!(selected, [plain, external]);
     }
 
     #[test]

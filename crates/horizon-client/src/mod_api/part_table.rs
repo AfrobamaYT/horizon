@@ -10,6 +10,7 @@ use super::{
     EntityCapabilityKey, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey, ItemPart,
     ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
 };
+use horizon_mods::content::BlockEntityType;
 use std::{
     any::{Any, TypeId, type_name},
     cell::{Cell, RefCell},
@@ -38,17 +39,41 @@ pub struct Attached<P: ?Sized> {
     pub(super) part: Arc<P>,
 }
 
-impl<P: ?Sized> Clone for Attached<P> {
-    fn clone(&self) -> Self {
-        Self {
+impl<P: ?Sized> Attached<P> {
+    fn with_part<Q: ?Sized>(&self, part: Arc<Q>) -> Attached<Q> {
+        Attached {
             mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.order,
             kind: self.kind,
             type_name: self.type_name,
-            part: self.part.clone(),
+            part,
         }
     }
+}
+
+impl<P: ?Sized> Clone for Attached<P> {
+    fn clone(&self) -> Self {
+        self.with_part(self.part.clone())
+    }
+}
+
+fn insert_part<P: ?Sized>(
+    table: &mut HashMap<Box<str>, Vec<Attached<P>>>,
+    id: &str,
+    part: Attached<P>,
+    refused: &mut Vec<String>,
+) -> bool {
+    let list = table.entry(id.into()).or_default();
+    if let Some(other) = list.iter().find(|other| other.kind == part.kind) {
+        refused.push(format!(
+            "{} is attached to {id} twice, by {} and {}",
+            part.type_name, other.mod_id, part.mod_id
+        ));
+        return false;
+    }
+    list.push(part);
+    true
 }
 
 /// Every mod's parts, by the id of the thing they are attached to, in dispatch order.
@@ -89,6 +114,17 @@ pub(crate) struct HookParts {
 }
 
 type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
+
+enum ProviderTarget<'a> {
+    BlockEntity(&'a super::BlockEntityTypeKey),
+    Id(&'a str),
+}
+
+#[derive(Debug)]
+pub(crate) struct BlockEntityTypeRequest {
+    pub(crate) mod_id: &'static str,
+    pub(crate) kind: super::BlockEntityTypeKey,
+}
 
 /// A capability provider a mod registered: an `Arc` of [`BlockProvider`], [`ItemProvider`] or
 /// [`EntityProvider`] of the capability's handler trait.
@@ -134,14 +170,19 @@ struct TagParts {
 struct Installed {
     keys: Parts,
     tags: TagParts,
-    block_entity_types: Vec<super::BlockEntityTypeKey>,
+    block_entity_types: Vec<BlockEntityType>,
+    requested_types: Vec<BlockEntityTypeRequest>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     hook_bits: Vec<bool>,
 }
 
-pub(crate) fn block_entity_types() -> &'static [super::BlockEntityTypeKey] {
+pub(crate) fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
+}
+
+pub(crate) fn requested_block_entity_types() -> &'static [BlockEntityTypeRequest] {
+    installed().map_or(&[], |installed| &installed.requested_types)
 }
 
 /// The ticket controllers registered at startup.
@@ -569,7 +610,8 @@ pub struct Registrar {
     registered: usize,
     parts: Parts,
     tags: TagParts,
-    block_entity_types: Vec<super::BlockEntityTypeKey>,
+    block_entity_types: Vec<BlockEntityType>,
+    requested_types: Vec<BlockEntityTypeRequest>,
     controllers: Vec<ControllerInfo>,
     refused: Vec<String>,
 }
@@ -583,9 +625,26 @@ impl Registrar {
             parts: Parts::default(),
             tags: TagParts::default(),
             block_entity_types: Vec::new(),
+            requested_types: Vec::new(),
             controllers: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    /// Look up a vanilla or another mod's type. The final registry validates it at load.
+    pub fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey {
+        if !horizon_mods::content::namespaced_id(id) {
+            self.refused.push(format!(
+                "mod {}: invalid block entity type {id:?}",
+                self.mod_id
+            ));
+        }
+        let kind = super::BlockEntityTypeKey(id.into());
+        self.requested_types.push(BlockEntityTypeRequest {
+            mod_id: self.mod_id,
+            kind: kind.clone(),
+        });
+        kind
     }
 
     /// Declare a block entity type in this mod's namespace.
@@ -605,11 +664,8 @@ impl Registrar {
         if !horizon_mods::content::namespaced_id(&id) {
             self.refused.push(format!("invalid block entity type {id}"));
         }
-        let key = super::BlockEntityTypeKey(Arc::new(super::block_entity_type::BlockEntityType {
-            id,
-            blocks,
-        }));
-        self.block_entity_types.push(key.clone());
+        let key = super::BlockEntityTypeKey(id.as_str().into());
+        self.block_entity_types.push(BlockEntityType { id, blocks });
         key
     }
 
@@ -635,29 +691,65 @@ impl Registrar {
     pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
         self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
     }
-    /// Attach a part to a block entity type and its valid blocks.
+    /// Attach a Part to a native type, including one another mod declares later.
+    /// Vanilla keys are usable for capabilities, but not for native payload Parts.
     pub fn block_entity_part<P: BlockEntityPart>(
         &mut self,
         kind: &super::BlockEntityTypeKey,
         part: P,
-    ) {
-        let part = Arc::new(part);
-        if !self.attach::<P, dyn BlockEntityPart>(
+    ) -> Result<(), super::BlockEntityPartError> {
+        if kind.id().starts_with("minecraft:") {
+            return Err(super::BlockEntityPartError::VanillaType { kind: kind.clone() });
+        }
+        if self.attach_known::<P, dyn BlockEntityPart>(
             |p| &mut p.block_entity_kinds,
             kind.id(),
-            part.clone(),
+            Arc::new(part),
         ) {
-            return;
+            Ok(())
+        } else {
+            Err(super::BlockEntityPartError::Duplicate {
+                kind: kind.clone(),
+                part: type_name::<P>(),
+            })
         }
-        for block in &kind.0.blocks {
-            // Every block entity part is a block part too, so a second one is found there.
-            if self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, part.clone()) {
-                self.attach::<P, dyn BlockEntityPart>(
-                    |p| &mut p.block_entities,
-                    block,
-                    part.clone(),
-                );
+    }
+
+    fn expand_block_entity_parts(&mut self) {
+        for (id, parts) in &self.parts.block_entity_kinds {
+            let Some(kind) = self.block_entity_types.iter().find(|kind| kind.id == **id) else {
+                for part in parts {
+                    self.refused.push(format!(
+                        "mod {} attached {} to undeclared native block entity type {id}",
+                        part.mod_id, part.type_name
+                    ));
+                }
+                continue;
+            };
+            for block in &kind.blocks {
+                for part in parts {
+                    let block_part: Arc<dyn BlockPart> = part.part.clone();
+                    if insert_part(
+                        &mut self.parts.blocks,
+                        block,
+                        part.with_part(block_part),
+                        &mut self.refused,
+                    ) {
+                        insert_part(
+                            &mut self.parts.block_entities,
+                            block,
+                            part.clone(),
+                            &mut self.refused,
+                        );
+                    }
+                }
             }
+        }
+        for parts in self.parts.blocks.values_mut() {
+            parts.sort_by_key(|part| (part.mod_index, part.order));
+        }
+        for parts in self.parts.block_entities.values_mut() {
+            parts.sort_by_key(|part| (part.mod_index, part.order));
         }
     }
     /// Attach `part` to every block in tag `tag` (`minecraft:logs`, without `#`), as each game's
@@ -675,20 +767,26 @@ impl Registrar {
     pub fn item_part<P: ItemPart>(&mut self, item: &str, part: P) {
         self.attach::<P, dyn ItemPart>(|p| &mut p.items, item, Arc::new(part));
     }
-    /// Answer capability `key` for the mod block entity type `kind` (`mymod:press`) with
-    /// `provider`, which gives a handler for one block entity and side, or none:
-    /// `r.block_entity_capability(&ITEMS, "mymod:press", |_, _| Some(Box::new(PressItems)))`.
+    /// Answer capability `key` for block entity type `kind` with `provider`, which gives
+    /// a handler for one block entity and side, or none:
+    /// `r.block_entity_capability(&ITEMS, &press, |_, _| Some(Box::new(PressItems)))`.
     /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: in the fork's chosen order
     /// (NeoForge's javadoc states none), the game's own is asked first, then the mods' in
     /// registration order, and the first to answer wins.
     pub fn block_entity_capability<T: ?Sized + 'static>(
         &mut self,
         key: &CapabilityKey<T>,
-        kind: &str,
+        kind: &super::BlockEntityTypeKey,
         provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(|p| &mut p.capabilities, key.name, kind, false, provider);
+        self.capability::<T, _>(
+            |p| &mut p.capabilities,
+            key.name,
+            ProviderTarget::BlockEntity(kind),
+            false,
+            provider,
+        );
     }
     /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
     /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
@@ -696,11 +794,17 @@ impl Registrar {
     pub fn block_entity_capability_before_game<T: ?Sized + 'static>(
         &mut self,
         key: &CapabilityKey<T>,
-        kind: &str,
+        kind: &super::BlockEntityTypeKey,
         provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(|p| &mut p.capabilities, key.name, kind, true, provider);
+        self.capability::<T, _>(
+            |p| &mut p.capabilities,
+            key.name,
+            ProviderTarget::BlockEntity(kind),
+            true,
+            provider,
+        );
     }
     /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
     /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
@@ -716,7 +820,7 @@ impl Registrar {
         self.capability::<T, _>(
             |p| &mut p.item_capabilities,
             key.name,
-            item,
+            ProviderTarget::Id(item),
             false,
             provider,
         );
@@ -729,7 +833,13 @@ impl Registrar {
         provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability::<T, _>(|p| &mut p.item_capabilities, key.name, item, true, provider);
+        self.capability::<T, _>(
+            |p| &mut p.item_capabilities,
+            key.name,
+            ProviderTarget::Id(item),
+            true,
+            provider,
+        );
     }
     /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
     /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
@@ -745,7 +855,7 @@ impl Registrar {
         self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
-            kind,
+            ProviderTarget::Id(kind),
             false,
             provider,
         );
@@ -762,7 +872,7 @@ impl Registrar {
         self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
-            kind,
+            ProviderTarget::Id(kind),
             true,
             provider,
         );
@@ -798,7 +908,7 @@ impl Registrar {
         &mut self,
         table: fn(&mut Parts) -> &mut Capabilities,
         name: &'static str,
-        id: &str,
+        target: ProviderTarget<'_>,
         before_game: bool,
         provider: Arc<P>,
     ) {
@@ -809,12 +919,18 @@ impl Registrar {
             ));
             return;
         }
-        if !namespaced(id) {
-            self.refused.push(format!(
-                "{me} answered {name} for {id:?}, which is not a namespaced id"
-            ));
-            return;
-        }
+        let id = match target {
+            ProviderTarget::BlockEntity(kind) => kind.id(),
+            ProviderTarget::Id(id) => {
+                if !namespaced(id) {
+                    self.refused.push(format!(
+                        "{me} answered {name} for {id:?}, which is not a namespaced id"
+                    ));
+                    return;
+                }
+                id
+            }
+        };
         let providers = table(&mut self.parts).entry(name).or_default();
         if let Some(other) = providers.values().flatten().next()
             && !other.provider.is::<Arc<P>>()
@@ -885,24 +1001,28 @@ impl Registrar {
             ));
             return false;
         }
-        let list = table(&mut self.parts).entry(id.into()).or_default();
-        if let Some(other) = list.iter().find(|a| a.kind == TypeId::of::<K>()) {
-            self.refused.push(format!(
-                "{name} is attached to {id} twice, by {} and {}",
-                other.mod_id, self.mod_id
-            ));
-            return false;
-        }
-        self.registered += 1;
-        list.push(Attached {
+        self.attach_known::<K, P>(table, id, part)
+    }
+
+    fn attach_known<K: 'static, P: ?Sized>(
+        &mut self,
+        table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
+        id: &str,
+        part: Arc<P>,
+    ) -> bool {
+        let part = Attached {
             mod_id: self.mod_id,
             mod_index: self.mod_index,
-            order: self.registered,
+            order: self.registered + 1,
             kind: TypeId::of::<K>(),
-            type_name: name,
+            type_name: type_name::<K>(),
             part,
-        });
-        true
+        };
+        let inserted = insert_part(table(&mut self.parts), id, part, &mut self.refused);
+        if inserted {
+            self.registered += 1;
+        }
+        inserted
     }
 }
 
@@ -919,6 +1039,7 @@ fn register_all(mods: &[ModEntry]) -> Registrar {
         registrar.mod_index = index;
         hooks.register(&mut registrar);
     }
+    registrar.expand_block_entity_parts();
     registrar
 }
 
@@ -945,6 +1066,7 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             keys: registrar.parts,
             tags: registrar.tags,
             block_entity_types: registrar.block_entity_types,
+            requested_types: registrar.requested_types,
             controllers: registrar.controllers,
             hook_bits: Vec::new(),
         }
@@ -978,6 +1100,10 @@ pub(crate) mod tests {
     use std::any::{TypeId, type_name};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+
+    fn type_key(id: &str) -> BlockEntityTypeKey {
+        BlockEntityTypeKey(id.into())
+    }
 
     /// The level the test worlds are.
     fn here() -> LevelRef {
@@ -1022,6 +1148,26 @@ pub(crate) mod tests {
             errors
                 .iter()
                 .all(|error| error.starts_with("invalid block entity type test:"))
+        );
+    }
+
+    #[test]
+    fn invalid_lookup_ids_refuse_registration_naming_the_requesting_mod() {
+        struct Invalid;
+        #[mod_api::__subscriptions]
+        impl Hooks for Invalid {
+            fn register(&self, r: &mut Registrar) {
+                for id in ["press", "minecraft:", "Upper:chest", "test:has space"] {
+                    r.block_entity_type_key(id);
+                }
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("lookup", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), 4);
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.starts_with("mod lookup: invalid block entity type"))
         );
     }
 
@@ -1145,18 +1291,19 @@ pub(crate) mod tests {
                 .block_entity_type("press_entity")
                 .blocks(&["test:press"])
                 .build();
-            r.block_entity_part(&kind, Press);
+            r.block_entity_part(&kind, Press).expect("native type");
             let hoard = r.block_entity_type("hoard").blocks(&["test:hoard"]).build();
-            r.block_entity_part(&hoard, Hoard);
+            r.block_entity_part(&hoard, Hoard).expect("native type");
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
             // block entity's are reached does: ahead of the game's.
-            r.block_entity_capability_before_game(&ITEMS, "test:pipe", |_, at| {
-                Some(Box::new(Pipe(at)))
-            });
-            r.block_entity_capability_before_game(&ITEMS, "test:greedy", |_, at| {
+            let pipe = r.block_entity_type_key("test:pipe");
+            r.block_entity_capability_before_game(&ITEMS, &pipe, |_, at| Some(Box::new(Pipe(at))));
+            let greedy = r.block_entity_type_key("test:greedy");
+            r.block_entity_capability_before_game(&ITEMS, &greedy, |_, at| {
                 Some(Box::new(Greedy(at)))
             });
-            r.block_entity_capability_before_game(&ITEMS, "test:item_overstates", |_, _| {
+            let item_overstates = r.block_entity_type_key("test:item_overstates");
+            r.block_entity_capability_before_game(&ITEMS, &item_overstates, |_, _| {
                 Some(Box::new(ItemOverstates))
             });
             r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _, ()| {
@@ -1192,13 +1339,14 @@ pub(crate) mod tests {
             });
             // `test:ordered`: one provider that declines, two that answer, and one ahead of the
             // game that answers only at x = 9.
-            r.block_entity_capability(&ITEMS, "test:ordered", |_, _| None);
-            r.block_entity_capability(&ITEMS, "test:ordered", |_, _| Some(Box::new(Marked(1))));
-            r.block_entity_capability(&ITEMS, "test:ordered", |_, _| Some(Box::new(Marked(2))));
-            r.block_entity_capability_before_game(&ITEMS, "test:ordered", |_, at| {
+            let ordered = r.block_entity_type_key("test:ordered");
+            r.block_entity_capability(&ITEMS, &ordered, |_, _| None);
+            r.block_entity_capability(&ITEMS, &ordered, |_, _| Some(Box::new(Marked(1))));
+            r.block_entity_capability(&ITEMS, &ordered, |_, _| Some(Box::new(Marked(2))));
+            r.block_entity_capability_before_game(&ITEMS, &ordered, |_, at| {
                 (at.pos[0] == 9).then(|| Box::new(Marked(3)) as _)
             });
-            r.block_entity_capability_before_game(&ITEMS, "test:ordered", |_, at| {
+            r.block_entity_capability_before_game(&ITEMS, &ordered, |_, at| {
                 (at.pos[0] >= 9).then(|| Box::new(Marked(4)) as _)
             });
             // `test:ordered_item` the same, the one ahead of the game answering for two items.
@@ -1218,7 +1366,8 @@ pub(crate) mod tests {
                 ("test:gives_more", Some(Lie::GivesMore)),
                 ("test:takes_more", Some(Lie::TakesMore)),
             ] {
-                r.block_entity_capability_before_game(&FLUIDS, id, move |_, at| {
+                let kind = r.block_entity_type_key(id);
+                r.block_entity_capability_before_game(&FLUIDS, &kind, move |_, at| {
                     Some(Box::new(ModTank { at, lie }))
                 });
             }
@@ -1226,13 +1375,13 @@ pub(crate) mod tests {
                 ("test:battery_gives_more", Lie::GivesMore),
                 ("test:battery_takes_more", Lie::TakesMore),
             ] {
-                r.block_entity_capability_before_game(&ENERGY, id, move |_, at| {
+                let kind = r.block_entity_type_key(id);
+                r.block_entity_capability_before_game(&ENERGY, &kind, move |_, at| {
                     Some(Box::new(ModBattery { at, lie }))
                 });
             }
-            r.block_entity_capability(&CHEMICALS, "test:chem_tank", |_, at| {
-                Some(Box::new(ChemTank(at)))
-            });
+            let chem_tank = r.block_entity_type_key("test:chem_tank");
+            r.block_entity_capability(&CHEMICALS, &chem_tank, |_, at| Some(Box::new(ChemTank(at))));
         }
     }
 
@@ -1362,8 +1511,8 @@ pub(crate) mod tests {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<&str> {
-            (pos == PIPE).then_some("test:pipe")
+        ) -> Option<BlockEntityTypeKey> {
+            (pos == PIPE).then(|| type_key("test:pipe"))
         }
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos == CHEST).then_some(1)
@@ -1950,8 +2099,8 @@ pub(crate) mod tests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<&str> {
-            self.overstates.then_some("test:item_overstates")
+        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
+            self.overstates.then(|| type_key("test:item_overstates"))
         }
         fn container_capacity(&self, _: BlockSide, slot: usize, _: &ItemStack) -> u32 {
             if self.output == Some(slot) {
@@ -2321,37 +2470,45 @@ pub(crate) mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
         fn register(&self, r: &mut Registrar) {
-            r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
-                Some(Box::new(ChemTank(at)))
-            });
+            let chem_vat = r.block_entity_type_key("test:chem_vat");
+            r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
         }
     }
+
+    const CAPABILITY_TYPES: &[&str] = &[
+        "pipe",
+        "greedy",
+        "item_overstates",
+        "ordered",
+        "tank",
+        "gives_more",
+        "takes_more",
+        "battery_gives_more",
+        "battery_takes_more",
+        "chem_tank",
+        "chem_vat",
+    ];
 
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
         fn register(&self, r: &mut Registrar) {
-            for id in ["chem_tank", "chem_vat"] {
+            for id in CAPABILITY_TYPES {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
                     .build();
             }
         }
-        fn blocks(&self, event: &mut BlocksEvent<'_>) {
+        fn blocks(&self, _context: &mod_api::RegistrationContext<'_>, event: &mut BlocksEvent<'_>) {
             event.blocks.extend(
-                [
-                    "test:gauge",
-                    "test:connector",
-                    "test:press",
-                    "test:hoard",
-                    "test:chem_tank",
-                    "test:chem_vat",
-                ]
-                .map(|id| horizon_mods::content::Block {
-                    id: id.into(),
-                    template: "minecraft:stone".into(),
-                    ..Default::default()
-                }),
+                ["gauge", "connector", "press", "hoard"]
+                    .into_iter()
+                    .chain(CAPABILITY_TYPES.iter().copied())
+                    .map(|id| horizon_mods::content::Block {
+                        id: format!("test:{id}"),
+                        template: "minecraft:stone".into(),
+                        ..Default::default()
+                    }),
             );
         }
     }
@@ -3616,14 +3773,15 @@ pub(crate) mod tests {
         r.mod_index = 1;
         r.place_provider("test:charms", Arc::new(Charms));
         r.place_provider("charms", Arc::new(Charms));
-        r.block_entity_capability(&ITEMS, "pipe", |_, at| Some(Box::new(Pipe(at))));
+        let invalid = r.block_entity_type_key("pipe");
+        r.block_entity_capability(&ITEMS, &invalid, |_, at| Some(Box::new(Pipe(at))));
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
         assert!(
             r.refused[0]
                 .contains("item places test:charms are provided twice, by first and second")
         );
         assert!(r.refused[1].contains("not a namespaced name"));
-        assert!(r.refused[2].contains("not a namespaced id"));
+        assert!(r.refused[2].contains("invalid block entity type \"pipe\""));
     }
 
     /// A mod declaring its own key under a name another mod's providers answer with another
@@ -3636,18 +3794,16 @@ pub(crate) mod tests {
         const UNNAMESPACED: CapabilityKey<dyn ResourceHandler<Chemical>> =
             CapabilityKey::new("chemical");
         let mut r = Registrar::new("first");
-        r.block_entity_capability(&CHEMICALS, "test:chem_tank", |_, at| {
-            Some(Box::new(ChemTank(at)))
-        });
+        let chem_tank = r.block_entity_type_key("test:chem_tank");
+        r.block_entity_capability(&CHEMICALS, &chem_tank, |_, at| Some(Box::new(ChemTank(at))));
         r.mod_id = "second";
         r.mod_index = 1;
-        r.block_entity_capability(&NOT_CHEMICALS, "test:chem_vat", |_, at| {
+        let chem_vat = r.block_entity_type_key("test:chem_vat");
+        r.block_entity_capability(&NOT_CHEMICALS, &chem_vat, |_, at| {
             Some(Box::new(ModTank { at, lie: None }))
         });
-        r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
-            Some(Box::new(ChemTank(at)))
-        });
-        r.block_entity_capability(&UNNAMESPACED, "test:chem_vat", |_, at| {
+        r.block_entity_capability(&CHEMICALS, &chem_vat, |_, at| Some(Box::new(ChemTank(at))));
+        r.block_entity_capability(&UNNAMESPACED, &chem_vat, |_, at| {
             Some(Box::new(ChemTank(at)))
         });
         assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
@@ -3712,8 +3868,8 @@ pub(crate) mod tests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<&str> {
-            Some("test:ordered")
+        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
+            Some(type_key("test:ordered"))
         }
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos[0] >= 8).then_some(27)
@@ -3791,8 +3947,8 @@ pub(crate) mod tests {
     /// Block entities of one type, or vanilla ones (none).
     struct TypeOf(Option<&'static str>);
     impl Backend for TypeOf {
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<&str> {
-            self.0
+        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
+            self.0.map(type_key)
         }
     }
     impl Host for TypeOf {
@@ -3985,8 +4141,8 @@ pub(crate) mod tests {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<&str> {
-            self.types.get(&pos).copied()
+        ) -> Option<BlockEntityTypeKey> {
+            self.types.get(&pos).map(|id| type_key(id))
         }
         fn fluid_tank_count(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             self.tanks.contains_key(&pos).then_some(1)
@@ -4292,8 +4448,8 @@ pub(crate) mod tests {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<&str> {
-            self.types.get(&pos).copied()
+        ) -> Option<BlockEntityTypeKey> {
+            self.types.get(&pos).map(|id| type_key(id))
         }
         fn energy_amount(&self, BlockSide { pos, .. }: BlockSide) -> Option<u32> {
             Some(self.batteries.get(&pos)?.0)
@@ -4393,6 +4549,34 @@ pub(crate) mod tests {
             .map(|a| a.type_name)
             .collect();
         assert_eq!(order, [type_name::<TagGauge>(), type_name::<Gauge>()]);
+    }
+
+    #[test]
+    fn a_vanilla_type_refuses_a_native_payload_part_at_registration() {
+        let mut r = Registrar::new("test");
+        let kind = r.block_entity_type_key("minecraft:chest");
+        assert_eq!(
+            r.block_entity_part(&kind, Press),
+            Err(BlockEntityPartError::VanillaType { kind }),
+        );
+        assert!(r.parts.block_entity_kinds.is_empty());
+        assert!(r.parts.blocks.is_empty());
+        assert!(r.parts.block_entities.is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_native_part_returns_its_typed_error_and_keeps_the_first() {
+        let mut r = Registrar::new("test");
+        let kind = r.block_entity_type("press").blocks(&["test:press"]).build();
+        r.block_entity_part(&kind, Press).unwrap();
+        assert_eq!(
+            r.block_entity_part(&kind, Press),
+            Err(BlockEntityPartError::Duplicate {
+                kind: kind.clone(),
+                part: type_name::<Press>()
+            }),
+        );
+        assert_eq!(r.parts.block_entity_kinds[kind.id()].len(), 1);
     }
 
     #[test]

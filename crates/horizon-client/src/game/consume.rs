@@ -91,9 +91,23 @@ impl Game<'_> {
         // with infinite materials, the hand when emptied, else the inventory
         // (ServerPlayer.handleExtraItemsCreatedOnUse) or a drop.
         self.consume_held();
-        if let Some(remainder) = &info.use_remainder
-            && !self.creative
-        {
+        self.apply_use_remainder(info.use_remainder.as_deref(), stack.count);
+    }
+    /// `ItemStack.applyAfterUseComponentSideEffects` uses the stack captured
+    /// before the item handler, even when that handler changes the hand.
+    pub(super) fn apply_after_use_components(&mut self, stack: &ItemStack) {
+        let remainder = self
+            .items()
+            .get(&stack.item)
+            .and_then(|info| info.use_remainder.clone());
+        self.apply_use_remainder(remainder.as_deref(), stack.count);
+        self.apply_use_cooldown(stack);
+    }
+    fn apply_use_remainder(&mut self, remainder: Option<&str>, count_before: u32) {
+        if self.creative || self.held().map_or(0, |stack| stack.count) >= count_before {
+            return;
+        }
+        if let Some(remainder) = remainder {
             let remainder = ItemStack::new(remainder, 1);
             if self.held().is_none() {
                 *self.held_mut() = Some(remainder);

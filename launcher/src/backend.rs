@@ -3120,6 +3120,14 @@ pub enum Msg {
     /// The owner gate's answer for the game about to start: the selected account's session
     /// file (none = offline) and why it plays offline, if it does.
     Session(Result<(Option<PathBuf>, Option<String>), crate::account::NoOwner>),
+    JarConsent {
+        jars: Vec<horizon_mods::manifest::JarRef>,
+        reply: std::sync::mpsc::Sender<bool>,
+    },
+    JarClient {
+        run: Option<String>,
+        prepared: Box<Result<Command, String>>,
+    },
     /// A modpack step's line (`modpacks`).
     PackLine(String),
     /// A modpack step ended: the pack as it now is.

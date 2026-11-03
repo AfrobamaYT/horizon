@@ -2721,9 +2721,39 @@ pub(crate) fn tick_effects(
             }
             _ => {}
         }
-        if !infinite && m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
-            let ticks = &mut m.extra.effects[i].1;
-            *ticks = if expired { 0 } else { *ticks - 1 };
+        if m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
+            if !expired {
+                if let Some(hidden) = m.extra.effect_chains.iter_mut().find(|e| e.id == effect) {
+                    hidden.tick_down();
+                }
+                if !infinite {
+                    m.extra.effects[i].1 -= 1;
+                }
+            } else {
+                m.extra.effects[i].1 = 0;
+            }
+            if !expired
+                && m.extra.effects[i].1 == 0
+                && let Some(chain) = m.extra.effect_chains.iter().position(|e| e.id == effect)
+            {
+                let mut hidden = m.extra.effect_chains.remove(chain);
+                if effect == "minecraft:absorption" {
+                    m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
+                }
+                m.extra.effects[i] = (effect, hidden.duration, hidden.amplifier);
+                m.extra.ambient_effects.retain(|e| *e != effect);
+                if hidden.ambient {
+                    m.extra.ambient_effects.push(effect);
+                }
+                m.extra.hidden_effects.retain(|e| *e != effect);
+                if !hidden.visible {
+                    m.extra.hidden_effects.push(effect);
+                }
+                if let Some(next) = hidden.hidden.take() {
+                    m.extra.effect_chains.push(*next);
+                }
+                m.effects_dirty = true;
+            }
         }
         // LivingEntity.tickEffects refreshes a surviving effect every 600 ticks.
         if m.extra
@@ -2735,20 +2765,7 @@ pub(crate) fn tick_effects(
         }
         i += 1;
     }
-    // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
-    for i in 0..m.extra.effects.len() {
-        let e = m.extra.effects[i];
-        if e.0 == "minecraft:absorption" && e.1 <= 0 && e.1 != -1 {
-            m.absorption = (m.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
-        }
-    }
     m.retain_effects(|e| e.1 > 0 || e.1 == -1);
-    m.extra
-        .hidden_effects
-        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
-    m.extra
-        .ambient_effects
-        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
     if m.effects_dirty {
         let invisible = m.has_effect("minecraft:invisibility");
         m.needs_sync |= m.invisible != invisible;

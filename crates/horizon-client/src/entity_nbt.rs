@@ -25,6 +25,41 @@ use std::{collections::HashMap, sync::Arc};
 fn string(s: &str) -> Tag {
     Tag::String(s.into())
 }
+
+fn hidden_effect_nbt(effect: &crate::effects::EffectInstance) -> Tag {
+    let mut fields = vec![("duration", Tag::Int(effect.duration))];
+    if effect.amplifier != 0 {
+        fields.push((
+            "amplifier",
+            Tag::Byte(effect.amplifier.clamp(0, 255) as u8 as i8),
+        ));
+    }
+    if effect.ambient {
+        fields.push(("ambient", Tag::Byte(1)));
+    }
+    if !effect.visible {
+        fields.push(("show_particles", Tag::Byte(0)));
+    }
+    fields.push(("show_icon", Tag::Byte(i8::from(effect.visible))));
+    if let Some(hidden) = &effect.hidden {
+        fields.push(("hidden_effect", hidden_effect_nbt(hidden)));
+    }
+    Tag::compound(fields)
+}
+
+fn hidden_effect_from_nbt(effect: &'static str, tag: &Tag) -> crate::effects::EffectInstance {
+    let mut instance = crate::effects::EffectInstance::new(
+        effect,
+        number(tag.get("duration")).unwrap_or(0) as i32,
+        number(tag.get("amplifier")).unwrap_or(0) as i32,
+    );
+    instance.ambient = number(tag.get("ambient")).is_some_and(|v| v != 0);
+    instance.visible = number(tag.get("show_particles")) != Some(0);
+    instance.hidden = tag
+        .get("hidden_effect")
+        .map(|hidden| Box::new(hidden_effect_from_nbt(effect, hidden)));
+    instance
+}
 /// Entity type ID (`id`).
 pub fn kind(tag: &Tag) -> Option<String> {
     horizon_client_core::identifier::normalize_id(&text(tag.get("id"))?)
@@ -482,6 +517,9 @@ pub fn mob_to_nbt(
                     e.push(("show_particles", Tag::Byte(0)));
                 }
                 e.push(("show_icon", Tag::Byte(i8::from(shown))));
+                if let Some(hidden) = m.extra.effect_chains.iter().find(|e| e.id == effect) {
+                    e.push(("hidden_effect", hidden_effect_nbt(hidden)));
+                }
                 Tag::compound(e)
             });
         map.insert("active_effects".into(), Tag::List(effects.collect()));
@@ -1469,6 +1507,12 @@ pub fn mob_from_nbt(
             let duration = number(e.get("duration")).unwrap_or(0) as i32;
             let amplifier = number(e.get("amplifier")).unwrap_or(0) as i32;
             m.load_effect(effect, duration, amplifier);
+            m.extra.effect_chains.retain(|e| e.id != effect);
+            if let Some(hidden) = e.get("hidden_effect") {
+                m.extra
+                    .effect_chains
+                    .push(hidden_effect_from_nbt(effect, hidden));
+            }
             // Details.CODEC: `show_particles` defaults to true.
             m.extra.hidden_effects.retain(|h| *h != effect);
             if number(e.get("show_particles")) == Some(0) {
@@ -4766,15 +4810,22 @@ mod sheep_nbt_tests {
             200,
             2,
         );
+        m.add_effect("minecraft:slowness", 90, 3);
         let tag = mob_to_nbt(&m, [1, 2, 3, 4], None, None);
         let Some(Tag::List(saved)) = tag.get("active_effects") else {
             panic!("no active_effects");
         };
+        assert_eq!(
+            number(saved[1].get("hidden_effect").unwrap().get("duration")),
+            Some(200)
+        );
         assert!(saved[0].get("amplifier").is_none());
         assert!(saved[1].get("amplifier").is_some());
         let back = mob_from_nbt(&tag, &types, 2, None).unwrap();
         assert_eq!(back.extra.effects[0].2, 0);
-        assert_eq!(back.extra.effects[1].2, 2);
+        assert_eq!(back.extra.effects[1].2, 3);
+        assert_eq!(back.extra.effect_chains[0].amplifier, 2);
+        assert_eq!(back.extra.effect_chains[0].duration, 200);
     }
 
     #[test]

@@ -39,11 +39,16 @@ jobs:
   changes:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     outputs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
+      # The ignored-tests shard matrix: every shard on main, the affected ones on a pull request (empty: none).
+      ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # ignored_shards.py diffs the pull request's full range, like the shard jobs do.
+          fetch-depth: 0
       - id: runner
         env:
           ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
@@ -51,6 +56,18 @@ jobs:
           EVENT: ${{ github.event_name }}
           SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+      - name: The ignored-tests shard matrix
+        id: matrix
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
+          else
+            python3 tools/ci/ignored_shards.py --matrix "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          fi
 
   pool-watch:
     needs: changes
@@ -197,11 +214,21 @@ jobs:
           cargo +stable test $JOBS --workspace --doc
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main's pushes and this
   # repository's own pull requests only, on Dyna's large runner where that data lives; a fork's pull request never
-  # runs here. tools/ci/ignored_tests.py fails on a new failure and on a known one that passes, and prints only test
-  # names and results: the data is Mojang's.
-  ignored-tests:
+  # runs here. One package per shard (the plan lives in tools/ci/ignored_shards.py, measured when it was cut: about
+  # 380s, 279s and 189s of tests), so the wall time stays under verify's; a pull request runs only the shards its
+  # changed crates can affect. tools/ci/ignored_tests.py fails on a new failure and on a known one that passes, and
+  # prints only test names and results: the data is Mojang's.
+  ignored-tests-shards:
     needs: changes
-    if: needs.changes.outputs.self_hosted == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    # The matrix holds only the shards to run, so an empty one (a pull request that needs
+    # none) skips the job instead of expanding to nothing, which GitHub refuses.
+    if: >-
+      needs.changes.outputs.self_hosted == 'true' &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      fromJSON(needs.changes.outputs.ignored_matrix).shard[0] != null
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
     runs-on: dyna-large
     timeout-minutes: 60
     permissions:
@@ -211,18 +238,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Does this pull request need Rust checks?
-        if: github.event_name == 'pull_request'
-        id: rust
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Install Dyna runner dependencies
-        if: steps.rust.outputs.required != 'false'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain
-        if: steps.rust.outputs.required != 'false'
         run: |
           if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
@@ -230,7 +248,6 @@ jobs:
           rustup toolchain install stable --profile minimal
       # Not every dyna-large runner has the data yet. A pull request's run skips the tests there; a push to main fails.
       - name: Link prepared vanilla data
-        if: steps.rust.outputs.required != 'false'
         id: data
         env:
           EVENT: ${{ github.event_name }}
@@ -248,12 +265,30 @@ jobs:
             ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
           done
       - name: Run the ignored tests that need prepared data
-        if: steps.rust.outputs.required != 'false' && steps.data.outputs.present != 'false'
+        if: steps.data.outputs.present != 'false'
         env:
           RUSTUP_TOOLCHAIN: stable
+          SHARD: ${{ matrix.shard }}
         run: |
           export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
-          python3 tools/ci/ignored_tests.py horizon-client horizon-client-lib horizon-client-render
+          python3 tools/ci/ignored_tests.py "$SHARD"
+  # The one check branch protection requires: green when every shard ran green or was skipped as unaffected.
+  ignored-tests:
+    needs: [changes, ignored-tests-shards]
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.outputs.self_hosted == 'true' &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every ignored-tests shard passed or was skipped
+        run: |
+          result="${{ needs.ignored-tests-shards.result }}"
+          case "$result" in
+            success | skipped) echo "ignored-tests shards: $result" ;;
+            *) echo "::error::ignored-tests shards: $result" && exit 1 ;;
+          esac
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).

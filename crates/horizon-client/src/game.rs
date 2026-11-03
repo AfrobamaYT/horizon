@@ -245,6 +245,7 @@ mod native_level_items;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
+mod native_living_effects;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -995,6 +996,8 @@ struct GameLevel<'w> {
     environment: &'w Environment,
     raining: bool,
     thundering: bool,
+    /// The world's enabled feature flags as this side knows them (`LevelReader.enabledFeatures`).
+    enabled_features: &'w [String],
     player_box: Option<([f64; 3], [f64; 3])>,
     /// The LAN guests in this level who trigger blocks (not spectators).
     guest_boxes: Vec<([f64; 3], [f64; 3])>,
@@ -4326,10 +4329,8 @@ impl Game<'_> {
         self.player_drop(thrown);
     }
     /// `Player.drop`: the statistics and a thrown item entity in front of the player.
-    pub(super) fn player_drop(&mut self, thrown: ItemStack) {
-        let Some(eye) = self.eye_position() else {
-            return;
-        };
+    pub(super) fn player_drop(&mut self, thrown: ItemStack) -> Option<u32> {
+        let eye = self.eye_position()?;
         // LivingEntity.drop: every drop swings the main hand, a menu's
         // THROW and a creative tab's drop included.
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
@@ -4338,46 +4339,39 @@ impl Game<'_> {
         self.award_custom_stat("drop", 1);
         let player = self.native_acting_id();
         self.native_item_dropped(player, &thrown.item, thrown.count);
-        self.throw_from_eyes(thrown, eye, true);
+        self.throw_from_eyes(thrown, eye, false, true)
     }
     /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
     /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
-    pub(super) fn drop_plain(&mut self, stack: ItemStack) {
+    pub(super) fn drop_plain(&mut self, stack: ItemStack) -> Option<u32> {
         if stack.count == 0 {
-            return;
+            return None;
         }
         // LivingEntity.drop swings the main hand for every drop (`PREDICTED` only keeps the
         // swing from being sent back to the player who made it).
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
-        if let Some(eye) = self.eye_position() {
-            self.throw_from_eyes(stack, eye, false);
-        }
+        let eye = self.eye_position()?;
+        self.throw_from_eyes(stack, eye, false, false)
     }
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
     /// along the view direction. `thrown_from_hand` (`drop(stack, true)`, the
     /// drop key) names the player as the thrower; `drop(stack, false)`, for
     /// what no longer fits in the inventory, does not.
-    fn throw_from_eyes(&mut self, thrown: ItemStack, eye: [f64; 3], thrown_from_hand: bool) {
-        let (yaw, pitch) = (
-            f64::from(self.yaw).to_radians(),
-            f64::from(self.pitch).to_radians(),
-        );
+    fn throw_from_eyes(
+        &mut self,
+        thrown: ItemStack,
+        eye: [f64; 3],
+        randomly: bool,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
         let r = &mut self.world.random;
-        let spread = f64::from(r.next_float()) * std::f64::consts::TAU;
-        let strength = 0.02 * f64::from(r.next_float());
-        let v = [
-            -yaw.sin() * pitch.cos() * 0.3 + spread.cos() * strength,
-            -pitch.sin() * 0.3 + 0.1 + f64::from(r.next_float() - r.next_float()) * 0.1,
-            yaw.cos() * pitch.cos() * 0.3 + spread.sin() * strength,
-        ];
-        self.spawn_item(thrown, [eye[0], eye[1] - 0.3, eye[2]], v, 40);
-        // A native mod can keep the item out of the level (native_entity_join_level).
-        if thrown_from_hand {
-            let uuid = self.acting_player_uuid();
-            if let Some(item) = self.just_spawned_item() {
-                item.thrower = Some(uuid);
-            }
-        }
+        let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
+        let y = eye[1] - f64::from(0.3f32);
+        self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
+        let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
+        let item = self.just_spawned_item()?;
+        item.thrower = uuid;
+        Some(item.id)
     }
     /// The UUID of the player acting: the guest whose turn it is, else the host.
     pub(super) fn acting_player_uuid(&mut self) -> [i32; 4] {
@@ -4805,6 +4799,10 @@ impl Game<'_> {
             },
             raining: rain > 0.2,
             thundering: thunder > 0.9,
+            enabled_features: self
+                .remote
+                .as_ref()
+                .map_or(&self.level.enabled_features, |remote| &remote.features),
             player_box,
             guest_boxes,
             player_collision,
@@ -6677,8 +6675,16 @@ impl Game<'_> {
         {
             let held = self.held().cloned();
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-            let mut block_answer = None;
-            if horizon_client::mod_api::has_part_hook(horizon_client::mod_api::HookId::UseItemOn)
+            let mut block_answer = self.use_item_on_block(
+                hit,
+                self.hand,
+                held.as_ref(),
+                horizon_client::mod_api::UsePhase::Block,
+            );
+            if block_answer.is_none()
+                && horizon_client::mod_api::has_part_hook(
+                    horizon_client::mod_api::HookId::UseItemOn,
+                )
                 && horizon_client::mod_api::parts("use_item_on")
                     .for_hook(horizon_client::mod_api::HookId::UseItemOn)
                     .is_some_and(|parts| !parts.block_state(state).is_empty())
@@ -6947,25 +6953,65 @@ impl Game<'_> {
         {
             return Ok(false);
         }
+        // ItemStack.useOn: adventure's predicate selects Item.useOn before
+        // its event and Part, not just before the eventual block placement.
+        if let Some(hit) = block_hit
+            && !self.may_build()
+            && !self.can_place_on_in_adventure(hit.pos)
+        {
+            if on_block {
+                return Ok(false);
+            }
+            block_hit = None;
+        }
         // Native mods, where ItemStack.useOn and Item.use start: the block
         // aimed at had its turn, and the item is off cooldown. A guest's
         // UseItemOn reaches only useOn, its UseItem only use.
         let mut claimed = false;
         if let Some(hit) = block_hit {
-            let (player, player_entity_id) = self.native_clicker();
-            let (hand, at) = (self.hand, hit.native());
-            self.native_use_on(
-                &stack,
-                hit.pos,
-                hit.face,
-                hand,
-                at,
-                player,
-                player_entity_id,
-                &mut claimed,
-            );
+            if let Some(answer) = self.use_item_on_block(
+                hit,
+                self.hand,
+                Some(&stack),
+                horizon_client::mod_api::UsePhase::ItemAfterBlock,
+            ) {
+                if answer.consumes_action() {
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &stack);
+                    if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if answer == Answer::Fail {
+                    self.use_failed = true;
+                    return Ok(true);
+                }
+                if on_block {
+                    return Ok(false);
+                }
+                block_hit = None;
+            } else {
+                let (player, player_entity_id) = self.native_clicker();
+                let (hand, at) = (self.hand, hit.native());
+                self.native_use_on(
+                    &stack,
+                    hit.pos,
+                    hit.face,
+                    hand,
+                    at,
+                    player,
+                    player_entity_id,
+                    &mut claimed,
+                );
+            }
         }
         if !claimed && !on_block {
+            if let Some(answer) = self.right_click_item(self.hand, &stack) {
+                if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                    self.swing_arm();
+                }
+                return Ok(answer.consumes_action());
+            }
             self.native_use_item(&stack, &mut claimed);
         }
         if claimed {
@@ -7119,8 +7165,9 @@ impl Game<'_> {
         // PlaceOnWaterBlockItem.use: the lily pad and frogspawn aim at the block
         // or water source the SOURCE_ONLY ray meets and are placed on the
         // position above it.
+        let water_placement = matches!(&*stack.item, "minecraft:lily_pad" | "minecraft:frogspawn");
         let water_hit;
-        let hit = if matches!(&*stack.item, "minecraft:lily_pad" | "minecraft:frogspawn") {
+        let hit = if water_placement {
             let Some(h) = self.pick_fluid() else {
                 return Ok(false);
             };
@@ -7138,8 +7185,8 @@ impl Game<'_> {
         if info.block.is_none() {
             return Ok(false);
         }
-        if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
-            // ItemStack.useOn passes in adventure mode; useItem eats.
+        if water_placement && !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
+            // The fluid-ray placement has its own target, selected by Item.use.
             return Ok(!on_block && self.start_eating(&info));
         }
         let face = match hit.face {
@@ -9477,13 +9524,19 @@ impl Game<'_> {
         }
     }
     /// What a slot shows: the crafting result slots are computed.
-    fn slot_view(&mut self, i: usize) -> Option<ItemStack> {
+    fn slot_view(&self, i: usize) -> Option<ItemStack> {
         match i {
             200 => self.craft_result(),
             309 if matches!(self.container_kind(), Some(BlockEntity::Crafter(_))) => {
                 self.crafter_result()
             }
-            _ => self.slot_mut(i).clone(),
+            i if i >= mount_menu::SADDLE => self.mount_slot(i).clone(),
+            i if i >= stations::INPUT => self.station_slot(i).clone(),
+            500..=503 => self.armor[i - 500].clone(),
+            504 => self.offhand.clone(),
+            i if i >= 300 => self.container_slot(i - 300).clone(),
+            100..=108 => self.craft_grid[i - 100].clone(),
+            _ => self.inventory[i].clone(),
         }
     }
     fn craft_result(&self) -> Option<ItemStack> {
@@ -9748,7 +9801,7 @@ impl Game<'_> {
                 && let Some(eye) = self.eye_position()
             {
                 // AbstractContainerMenu.dropOrPlaceInInventory: `drop(stack, false)`.
-                self.throw_from_eyes(rest, eye, false);
+                self.throw_from_eyes(rest, eye, false, false);
             }
         }
         self.craft_size = 2;
@@ -9864,7 +9917,9 @@ impl Game<'_> {
             // handleCreativeModeItemDrop: on a server the stack goes to it (SetCreativeModeSlot
             // to slot -1), which drops it; a local drop here would never reach the server.
             DisplayClick::Drop(stack) if self.remote.is_some() => self.remote_creative_throw(stack),
-            DisplayClick::Drop(stack) => self.player_drop(stack),
+            DisplayClick::Drop(stack) => {
+                self.player_drop(stack);
+            }
             _ => {}
         }
         // handleCreativeModeItemAdd / broadcastChanges: a swapped-in hotbar slot goes out now.
@@ -22067,7 +22122,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         }
     }
     mods::register_components(&vanilla_root)?;
-    mods::register_standalone_models();
+    mods::register_standalone_models(options.execution_role);
     let mut early_settings = Settings::load(&Game::options_path());
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.

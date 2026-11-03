@@ -12,7 +12,7 @@ use horizon_world::{
     heightmap::{HeightmapState, HeightmapType},
     worldgen::terrain::TerrainBlockStates,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// `DebugEntryLookingAt.RANGE`.
 const LOOKING_AT_RANGE: f64 = 20.0;
@@ -481,7 +481,7 @@ impl Game<'_> {
                 properties.iter().map(|(k, v)| (*k, v.as_str())),
             )
         } else {
-            overlay::tag_lines(fluid_tags(&self.options.resources), &name)
+            overlay::tag_lines(&self.items().fluid_tags, &name)
         }
     }
 
@@ -569,13 +569,4 @@ impl Game<'_> {
             chunks,
         }
     }
-}
-
-/// The fluid tags (`data/*/tags/fluid`), loaded once.
-fn fluid_tags(root: &std::path::Path) -> &'static HashMap<String, HashSet<String>> {
-    static TAGS: std::sync::OnceLock<HashMap<String, HashSet<String>>> = std::sync::OnceLock::new();
-    TAGS.get_or_init(|| {
-        horizon_client::items::load_tags(root, "fluid", &horizon_world::loot::PackOverlay::NONE)
-            .unwrap_or_default()
-    })
 }

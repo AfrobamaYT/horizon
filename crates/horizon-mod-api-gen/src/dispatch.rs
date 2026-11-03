@@ -107,6 +107,7 @@ pub(super) fn emit(
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
             });
         host_param::validate(hook, name, is_level, receiver_mut, ticks)?;
+        let context = host_param::context_param(hook, &mut args)?;
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
@@ -151,12 +152,23 @@ pub(super) fn emit(
         } else {
             String::new()
         };
-        let host = host_param::host_param(hook, receiver_mut, ticks).map(|param| {
-            (
-                fresh_name(if is_level { "level" } else { "host" }, &mut used),
-                param,
-            )
-        });
+        let host = context
+            .or_else(|| host_param::host_param(hook, receiver_mut, ticks))
+            .map(|param| {
+                (
+                    fresh_name(
+                        if hook.context.is_some() {
+                            "context"
+                        } else if is_level {
+                            "level"
+                        } else {
+                            "host"
+                        },
+                        &mut used,
+                    ),
+                    param,
+                )
+            });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match (api.get("scope"), api.get("key")) {

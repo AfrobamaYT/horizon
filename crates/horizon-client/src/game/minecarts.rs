@@ -782,9 +782,7 @@ impl Game<'_> {
     /// `AbstractMinecart`: `minecart_improvements` picks the smoother
     /// physics.
     pub(super) fn minecart_improvements(&self) -> bool {
-        self.remote
-            .as_ref()
-            .map_or(&self.level.enabled_features, |remote| &remote.features)
+        self.enabled_feature_ids()
             .iter()
             .any(|f| f == "minecraft:minecart_improvements")
     }

@@ -438,7 +438,10 @@ fn handle_method<'a>(
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
             syn::parse_quote!(host: &mut dyn ServerHost)
         }
-        Some(FnArg::Receiver(r)) if r.reference.is_some() => syn::parse_quote!(host: &dyn Host),
+        Some(FnArg::Receiver(r)) if r.reference.is_some() => match side {
+            HelperSide::Client => syn::parse_quote!(host: &dyn ClientHost),
+            HelperSide::Server | HelperSide::Both => syn::parse_quote!(host: &dyn Host),
+        },
         _ => return Err(format!("{name}: a {receiver} helper borrows Game")),
     };
     let takes_handle = matches!(
@@ -610,10 +613,16 @@ impl VisitMut for EventLifetimes {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HookContext {
+    Registration,
+}
+
 #[derive(Debug)]
 struct CatalogHook {
     entry: serde_json::Value,
     side: HelperSide,
+    context: Option<HookContext>,
 }
 
 impl std::ops::Deref for CatalogHook {
@@ -725,7 +734,18 @@ fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<Catalog
                 }
             }
         }
-        validated.push(CatalogHook { entry: hook, side });
+        let context = match hook.get("context") {
+            None => None,
+            Some(value) => Some(match value.as_str() {
+                Some("registration") => HookContext::Registration,
+                _ => return Err(format!("hook {name}: invalid phase context")),
+            }),
+        };
+        validated.push(CatalogHook {
+            entry: hook,
+            side,
+            context,
+        });
     }
     Ok(validated)
 }
@@ -1207,6 +1227,15 @@ mod tests {
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
         assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
+        let (_, client_code) = super::handle_method(
+            &read,
+            "entity_position",
+            "entity",
+            super::HelperSide::Client,
+            &types.handles,
+        )
+        .unwrap();
+        assert!(client_code.contains("host : & dyn ClientHost"));
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_level_set(&mut self, level: LevelRef) -> bool { todo!() }
         };
@@ -1401,10 +1430,12 @@ mod tests {
         let level = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
             side: super::HelperSide::Server,
+            context: None,
         };
         let game = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
             side: super::HelperSide::Both,
+            context: None,
         };
         use super::host_param::{HostParam, host_param};
         let param = |ty: &str, call| {
@@ -1434,6 +1465,7 @@ mod tests {
         let level_both = super::CatalogHook {
             entry: level.entry.clone(),
             side: super::HelperSide::Both,
+            context: None,
         };
         assert_eq!(
             host_param(&level_both, Some(false), false),
@@ -1456,6 +1488,7 @@ mod tests {
         let read = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
             side: super::HelperSide::Both,
+            context: None,
         };
         assert_eq!(
             host_param(&read, Some(false), false),
@@ -1464,6 +1497,7 @@ mod tests {
         let client = super::CatalogHook {
             entry: game.entry.clone(),
             side: super::HelperSide::Client,
+            context: None,
         };
         assert_eq!(
             host_param(&client, Some(false), false),
@@ -1476,6 +1510,7 @@ mod tests {
         let client_read = super::CatalogHook {
             entry: read.entry.clone(),
             side: super::HelperSide::Client,
+            context: None,
         };
         assert_eq!(
             super::host_param::validate(&client_read, "test", false, Some(false), false)

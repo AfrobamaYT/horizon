@@ -2,6 +2,9 @@
 //!
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
+mod jar;
+pub use jar::JarRef;
+
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -48,6 +51,9 @@ pub struct Manifest {
     /// Other native mods whose hooks must be available before this one.
     #[serde(default)]
     pub dependencies: std::collections::BTreeMap<String, Dependency>,
+    /// Original Java jars, layered in list order below this mod's own files.
+    #[serde(default)]
+    pub jar: Vec<JarRef>,
     /// Exact build pins and optional raw injections for a code mod.
     pub native: Option<Native>,
 }
@@ -337,6 +343,11 @@ pub struct Package {
     pub icon: Option<crate::icon::Icon>,
 }
 impl Package {
+    /// The kind of this validated package, independent of its install folder.
+    pub fn is_native(&self) -> bool {
+        self.manifest.native.is_some()
+    }
+
     /// Read a flat `.hmod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;

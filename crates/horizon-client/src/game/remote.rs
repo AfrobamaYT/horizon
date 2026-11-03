@@ -2882,7 +2882,7 @@ impl Game<'_> {
         }
     }
     /// Map a menu slot to Horizon's inventory screen slot ids.
-    fn menu_slot(menu: &str, slot: i32) -> Option<usize> {
+    pub(super) fn menu_slot(menu: &str, slot: i32) -> Option<usize> {
         let s = usize::try_from(slot).ok()?;
         // A container of `n` slots, then the inventory and the hotbar.
         let slots = |n: usize| -> Option<usize> {
@@ -7480,21 +7480,58 @@ impl Game<'_> {
             let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
             let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
             let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
-            let item_used = canceled.is_none() && use_item.or(true);
             let cooldown_forced = use_item == NativeTriState::True;
+            let item_used = canceled.is_none()
+                && use_item.or(true)
+                && held.as_ref().is_some_and(|stack| {
+                    if !self.may_build()
+                        && !self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
+                    {
+                        return false;
+                    }
+                    self.items().get(&stack.item).is_some_and(|info| {
+                        cooldown_forced
+                            || !self
+                                .cooldowns
+                                .is_on_cooldown(&horizon_client::cooldowns::group(
+                                    stack,
+                                    info.use_cooldown.as_ref(),
+                                ))
+                    })
+                });
+            let block_answer = if !spectator && block_used {
+                self.use_item_on_block(
+                    &hit,
+                    hand,
+                    held.as_ref(),
+                    horizon_client::mod_api::UsePhase::Block,
+                )
+            } else {
+                None
+            };
+            let vanilla_block = block_used && block_answer.is_none();
+            let seq = self.next_sequence();
             // ShelfBlock.useItemOn consumes a nonempty main-hand click client-side
             // without predicting the inventory swap or swinging.
             let shelf_reacts = hand == Hand::Main
                 && held.is_some()
-                && block_used
+                && vanilla_block
                 && self.shelf_hit(&hit).is_some();
-            let (result, changes) = if hand == Hand::Main && !spectator && block_used {
+            let (result, changes) = if let Some(answer) = block_answer {
+                if let Some(result) = super::native_hooks::block_use_result(answer) {
+                    (result, DryUse::default())
+                } else if hand == Hand::Main {
+                    self.remote_block_template(&hit, held.as_ref(), true)
+                } else {
+                    (InteractionResult::Pass, DryUse::default())
+                }
+            } else if hand == Hand::Main && !spectator && vanilla_block {
                 self.remote_block_reacts(&hit, held.as_ref())
             } else {
                 // useItemOn runs for the off hand too (useWithoutItem doesn't):
                 // RespawnAnchorBlock.useItemOn charges an anchor with its
                 // glowstone, SUCCESS.
-                let charges = block_used && self.anchor_takes(hit.pos, held.as_ref());
+                let charges = vanilla_block && self.anchor_takes(hit.pos, held.as_ref());
                 let result = if charges {
                     InteractionResult::Success
                 } else {
@@ -7502,18 +7539,10 @@ impl Game<'_> {
                 };
                 (result, DryUse::default())
             };
-            // DebugStickItem.useOn once the block passed: SUCCESS on the client
-            // too (the hand swings below); only the server changes the block.
-            let (result, changes) =
-                if debug_stick && item_used && !spectator && !result.consumes_action() {
-                    (InteractionResult::Success, DryUse::default())
-                } else {
-                    (result, changes)
-                };
             // AbstractCauldronBlock.useItemOn, either hand: CauldronInteractions
             // answers on the client as on the server and only the server acts,
             // so a bucket the cauldron takes is not used again (UseItem).
-            let result = if result.consumes_action() || spectator || !block_used {
+            let result = if result.consumes_action() || spectator || !vanilla_block {
                 result
             } else {
                 match self.cauldron_outcome(hit.pos, held.as_ref()) {
@@ -7522,12 +7551,11 @@ impl Game<'_> {
                     horizon_client::cauldron::Outcome::Pass => result,
                 }
             };
-            let reacts = result.consumes_action();
             // useItemOn on this client, unless a sneak with something in hand
             // skips it: RedStoneOreBlock's dust, and the wick smoke of a lit
             // candle an empty hand snuffs (CandleBlock.useItemOn) or a lit
             // candle cake (CandleCakeBlock.useItemOn).
-            if hand == Hand::Main && !spectator && block_used {
+            if hand == Hand::Main && !spectator && vanilla_block {
                 self.redstone_ore_particles(hit.pos);
                 let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
                 let name = self.block_name(hit.pos);
@@ -7544,6 +7572,35 @@ impl Game<'_> {
                     self.candle_smoke(hit.pos, state);
                 }
             }
+            let result = if !spectator
+                && vanilla_block
+                && !result.consumes_action()
+                && self.with_hand(hand, |g| g.predict_campfire_douse(&hit, held.as_ref(), seq))
+            {
+                InteractionResult::Success
+            } else {
+                result
+            };
+            let item_answer = if !spectator && !result.consumes_action() && item_used {
+                self.use_item_on_block(
+                    &hit,
+                    hand,
+                    held.as_ref(),
+                    horizon_client::mod_api::UsePhase::ItemAfterBlock,
+                )
+            } else {
+                None
+            };
+            let item_used =
+                item_used && !spectator && !result.consumes_action() && item_answer.is_none();
+            // DebugStickItem.useOn once the block passed: SUCCESS on the client
+            // too (the hand swings below); only the server changes the block.
+            let (result, changes) = if debug_stick && item_used {
+                (InteractionResult::Success, DryUse::default())
+            } else {
+                (result, changes)
+            };
+            let reacts = result.consumes_action();
             // ArmorStandItem.useOn runs in startPrediction before the packet
             // goes out (the server may spawn the stand at once).
             let stand_fits = item_used
@@ -7553,7 +7610,6 @@ impl Game<'_> {
                 && held
                     .as_ref()
                     .is_some_and(|s| self.armor_stand_spawn(&hit, s).is_some());
-            let seq = self.next_sequence();
             let cursor = [
                 (hit.point[0] - f64::from(hit.pos[0])) as f32,
                 (hit.point[1] - f64::from(hit.pos[1])) as f32,
@@ -7589,39 +7645,38 @@ impl Game<'_> {
             if let Some(r) = self.remote.as_mut() {
                 r.use_target = Some(hit.pos);
             }
+            if let Some(answer) = item_answer {
+                if answer == Answer::Success {
+                    self.with_hand(hand, Game::swing_arm);
+                }
+                return answer.consumes_action() || answer == Answer::Fail;
+            }
             if shelf_reacts {
                 return true;
             }
             if reacts {
                 self.predict_use(&changes, seq);
                 // LeverBlock.useWithoutItem on the client: the predicted pull puffs.
-                if &*self.block_name(hit.pos) == "minecraft:lever" {
-                    self.lever_puff(hit.pos);
+                if vanilla_block || block_answer == Some(Answer::TryWithEmptyHand) {
+                    if &*self.block_name(hit.pos) == "minecraft:lever" {
+                        self.lever_puff(hit.pos);
+                    }
+                    self.open_command_block_if_editable((hit.pos[0], hit.pos[1], hit.pos[2]));
+                    self.open_block_editor_if_editable((hit.pos[0], hit.pos[1], hit.pos[2]));
                 }
-                self.open_command_block_if_editable((hit.pos[0], hit.pos[1], hit.pos[2]));
-                self.open_block_editor_if_editable((hit.pos[0], hit.pos[1], hit.pos[2]));
                 // MultiPlayerGameMode.useItemOn: SUCCESS SwingSource.CLIENT
                 // (a chest, barrel, furnace, …). CONSUME does not swing.
-                if result.should_swing() {
+                if result.should_swing() && block_answer != Some(Answer::SuccessServer) {
                     self.with_hand(hand, Game::swing_arm);
                 }
-            } else if block_used
-                && self.with_hand(hand, |g| g.predict_campfire_douse(&hit, held.as_ref(), seq))
-            {
-                // CampfireBlock.useItemOn succeeded: this hand swings and the
-                // click ends, so a shield in the other hand is not raised.
-                self.with_hand(hand, Game::swing_arm);
-                return true;
             } else if item_used && held.as_ref().is_some_and(|s| &*s.item == "minecraft:brush") {
                 // BrushItem.useOn: brushing starts here (CONSUME, no swing); the
                 // server brushes and the dust is this client's own.
                 self.with_hand(hand, Game::start_using_item);
                 return true;
             } else if item_used
-                && held
-                    .as_ref()
-                    .is_some_and(|s| &*s.item == "minecraft:bone_meal")
-                && self.remote_bone_meal_succeeds(&hit)
+                && let Some(stack) = held.as_ref().filter(|s| &*s.item == "minecraft:bone_meal")
+                && self.with_hand(hand, |g| g.remote_bone_meal_succeeds(&hit, stack))
             {
                 // BoneMealItem.useOn succeeded on this client's level (SUCCESS;
                 // the server grows the plant): this hand swings and the click
@@ -7638,24 +7693,19 @@ impl Game<'_> {
                 .as_ref()
                 .filter(|_| item_used)
                 .filter(|s| s.item.ends_with("_spawn_egg"))
-                .filter(|_| {
-                    self.may_build()
-                        || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
-                })
             {
                 // SpawnEggItem.useOn on a client level: FAIL for a mob that
                 // cannot spawn (the click ends, no swing), else SUCCESS (swing).
                 // Either way no UseItem follows, so the server does not spawn
-                // a second mob from the fluid ray (ItemStack.useOn passes in
-                // adventure mode off can_place_on, which the filter above keeps).
+                // a second mob from the fluid ray. ItemStack.useOn's adventure
+                // predicate was checked before selecting this phase.
                 if self.spawn_egg_allowed(&stack.item) {
                     self.with_hand(hand, Game::swing_arm);
                 }
                 return true;
             } else if let Some(stack) = held.as_ref().filter(|_| item_used)
-                && (self.with_hand(hand, |g| {
-                    g.predict_item_on_block(stack, &hit, hand, cooldown_forced)
-                }) || self.predict_map_on_banner(stack, &hit))
+                && (self.with_hand(hand, |g| g.predict_item_on_block(stack, &hit))
+                    || self.predict_map_on_banner(stack, &hit))
             {
                 // Item.useOn succeeded here (InteractionResult.SUCCESS):
                 // this hand swings and the click ends, so the other hand
@@ -7668,16 +7718,6 @@ impl Game<'_> {
                     .as_ref()
                     .and_then(|stack| self.items().get(&stack.item).cloned())
                     .filter(|info| info.consumable.is_some());
-                // ItemStack.useOn passes in adventure mode unless the item may
-                // be placed on this block: useItem eats it (a block item without
-                // a consumable keeps ending the click here).
-                if !reacts
-                    && consumable.is_some()
-                    && !self.may_build()
-                    && !self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
-                {
-                    return false;
-                }
                 let placed = if reacts {
                     None
                 } else {
@@ -7723,31 +7763,12 @@ impl Game<'_> {
     /// A cushion succeeds where it may be placed and spawns on the server, a
     /// firework rocket wherever it may be used, and the server launches it.
     /// Whether the item's use succeeded, which ends the click.
-    /// `cooldown_forced`: RightClickBlock's useItem TRUE uses it whatever its
-    /// cooldown.
-    fn predict_item_on_block(
-        &mut self,
-        stack: &ItemStack,
-        hit: &super::Hit,
-        hand: Hand,
-        cooldown_forced: bool,
-    ) -> bool {
-        // FireworkRocketItem.useOn: SUCCESS on the client too, so neither
-        // UseItem nor the off hand follows. It passes while gliding (the use
-        // boosts instead), cooling down (MultiPlayerGameMode.performUseItemOn
-        // skips useOn) and in adventure mode off its can_place_on
-        // (ItemStack.useOn).
+    /// The caller has selected Item.useOn after cooldown and adventure gates.
+    fn predict_item_on_block(&mut self, stack: &ItemStack, hit: &super::Hit) -> bool {
+        // FireworkRocketItem.useOn: SUCCESS unless gliding, when Item.use
+        // boosts instead. The phase's cooldown/adventure gates already ran.
         if &*stack.item == "minecraft:firework_rocket" {
-            let cooling = !cooldown_forced
-                && self.items().get(&stack.item).is_some_and(|info| {
-                    let group = horizon_client::cooldowns::group(stack, info.use_cooldown.as_ref());
-                    self.cooldowns.is_on_cooldown(&group)
-                });
-            let gliding = self.player.as_ref().is_some_and(|p| p.fall_flying);
-            return !cooling
-                && !gliding
-                && (self.may_build()
-                    || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)));
+            return !self.player.as_ref().is_some_and(|p| p.fall_flying);
         }
         let at = [
             f64::from(hit.pos[0]) + 0.5,
@@ -7793,21 +7814,21 @@ impl Game<'_> {
 
     /// `MapItem.useOn` on this client: a map used on a banner is SUCCESS
     /// whatever its data says (the server toggles the marker, or fails
-    /// quietly), so this hand swings and the click ends. `ItemStack.useOn`
-    /// passes in adventure mode.
+    /// quietly), so this hand swings and the click ends. The caller applies
+    /// ItemStack.useOn's adventure predicate before selecting this phase.
     fn predict_map_on_banner(&self, stack: &ItemStack, hit: &super::Hit) -> bool {
         super::maps::map_id(stack).is_some()
-            && self.may_build()
             && self.block_in_tag("minecraft:banners", &self.block_name(hit.pos))
     }
 
-    /// `BoneMealItem.useOn` on this client's level (a copy: nothing grows
-    /// here): whether it succeeds.
-    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit) -> bool {
+    /// `BoneMealItem.useOn` with the acting hand's `stack` on this client's
+    /// level (a copy: nothing grows here): whether it succeeds.
+    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
         let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let face = horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize];
+        let (crop, _) = self.held_bonemeal(pos, stack);
         self.with_level(|b, level, _| {
-            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face)
+            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face, crop)
         })
     }
 
@@ -7888,6 +7909,17 @@ impl Game<'_> {
         if self.composter_takes(hit.pos, held) {
             return (InteractionResult::Success, DryUse::default());
         }
+        self.remote_block_template(hit, held, false)
+    }
+
+    /// The shared dry-level boundary for a normal block use or the empty
+    /// method requested by a canceled `BLOCK` phase's `TryWithEmptyHand`.
+    fn remote_block_template(
+        &mut self,
+        hit: &super::Hit,
+        held: Option<&ItemStack>,
+        without_item: bool,
+    ) -> (InteractionResult, DryUse) {
         use horizon_core::geometry::Direction;
         let face = match hit.face {
             [0, 1, 0] => Direction::Up,
@@ -7900,24 +7932,24 @@ impl Game<'_> {
         let player = self.use_context();
         self.with_level(|b, level, _| {
             let mut level = DryLevel::new(level);
-            let result = b.use_item_on(
-                &mut level,
-                &mut horizon_world::level::Ticks::default(),
-                horizon_core::geometry::BlockHit {
-                    block: horizon_core::position::BlockPos::new(
-                        hit.pos[0], hit.pos[1], hit.pos[2],
-                    ),
-                    direction: face,
-                    location: horizon_core::geometry::Vec3::new(
-                        hit.point[0],
-                        hit.point[1],
-                        hit.point[2],
-                    ),
-                    inside: hit.inside,
-                },
-                player,
-                held.map(|s| &*s.item),
-            );
+            let hit = horizon_core::geometry::BlockHit {
+                block: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+                direction: face,
+                location: horizon_core::geometry::Vec3::new(
+                    hit.point[0],
+                    hit.point[1],
+                    hit.point[2],
+                ),
+                inside: hit.inside,
+            };
+            let mut ticks = horizon_world::level::Ticks::default();
+            let result = if without_item {
+                use horizon_world::level::LevelAccess as _;
+                let state = level.block_state(hit.block);
+                b.use_without_item(&mut level, &mut ticks, state, hit, player)
+            } else {
+                b.use_item_on(&mut level, &mut ticks, hit, player, held.map(|s| &*s.item))
+            };
             (result, (level.changed.into_iter().collect(), level.sounds))
         })
     }
@@ -8147,6 +8179,13 @@ impl Game<'_> {
         let group = horizon_client::cooldowns::group(&held, info.use_cooldown.as_ref());
         if self.cooldowns.is_on_cooldown(&group) {
             return false;
+        }
+        if let Some(answer) = self.right_click_item(hand, &held) {
+            let success = answer == horizon_client::mod_api::NativeInteractionResult::Success;
+            if success {
+                self.with_hand(hand, Game::swing_arm);
+            }
+            return success;
         }
         // a mod's item used over time starts here too, as the server starts it.
         if self.with_hand(hand, |g| g.start_mod_use(&held)) {
@@ -10691,6 +10730,9 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 }
 
 #[cfg(test)]
+mod interaction_event_tests;
+
+#[cfg(test)]
 mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -10796,6 +10838,207 @@ mod tests {
         let before_replacement = menu.generation;
         menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
         assert_ne!(before_replacement, menu.generation);
+    }
+
+    #[test]
+    fn client_menu_slot_mapping_covers_inventory_and_containers() {
+        for (name, count, first, last) in [
+            ("inventory", 46, 200, 504),
+            ("minecraft:crafting", 46, 200, 8),
+            ("minecraft:generic_9x3", 63, 300, 8),
+            ("minecraft:hopper", 41, 300, 8),
+            ("minecraft:furnace", 39, 300, 8),
+            ("minecraft:brewing_stand", 41, 300, 8),
+        ] {
+            assert_eq!(super::Game::menu_slot(name, 0), Some(first));
+            assert_eq!(super::Game::menu_slot(name, count - 1), Some(last));
+            assert_eq!(super::Game::menu_slot(name, count), None);
+        }
+        assert_eq!(super::Game::menu_slot("minecraft:unknown", 0), None);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_menu_reads_follow_packets_and_lifetimes() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{
+            connection::Pipe,
+            item::Stack,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            assert!(
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .is_none()
+            );
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let menu = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(menu), Some(46));
+            assert_eq!(game.native_menu_slot(menu, 46), None);
+            assert_eq!(game.native_menu_slot(menu, 36), Some(None));
+            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 3));
+            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
+                slot: 0,
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_slot(menu, 36).unwrap().unwrap().count, 3);
+            game.handle_packet(C::SetCursorItem(play::SetCursorItem {
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_carried(menu).unwrap().unwrap().count, 3);
+            let crafting_id = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:crafting")
+                .unwrap();
+            let open = || {
+                C::OpenScreen(play::OpenScreen {
+                    container: 7,
+                    menu: crafting_id,
+                    title: Tag::String("Crafting".into()),
+                })
+            };
+            game.handle_packet(open()).unwrap();
+            assert_eq!(game.native_menu_slot_count(menu), None);
+            let crafting = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(crafting), Some(46));
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 1,
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_slot(crafting, 1).unwrap().unwrap().count,
+                3
+            );
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 0,
+                item: stone,
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_slot(crafting, 0).unwrap().unwrap().count,
+                3
+            );
+            game.handle_packet(open()).unwrap();
+            assert_eq!(game.native_menu_slot_count(crafting), None);
+            let crafting = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            game.handle_packet(C::Respawn(play::Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_slot_count(crafting), None);
+            let inventory = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_ne!(inventory, menu);
+            let chest_id = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:generic_9x3")
+                .unwrap();
+            game.handle_packet(C::OpenScreen(play::OpenScreen {
+                container: 7,
+                menu: chest_id,
+                title: Tag::String("Chest".into()),
+            }))
+            .unwrap();
+            let chest = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(chest), Some(63));
+            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 4));
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 2,
+                item: stone,
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_slot(chest, 2).unwrap().unwrap().count, 4);
+            assert_eq!(game.native_menu_slot(chest, 3), Some(None));
+            game.remote
+                .as_mut()
+                .unwrap()
+                .menu
+                .set(Some((7, "minecraft:unknown".into())));
+            assert!(
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .is_none()
+            );
+            assert_eq!(game.native_menu_slot_count(inventory), None);
+            assert_eq!(game.native_menu_slot_count(chest), None);
+            game.remote.as_mut().unwrap().menu.set(None);
+            let before_replacement = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            let mut other = spawn;
+            other.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&other, true, Reason::Other);
+            assert_eq!(game.native_menu_slot_count(before_replacement), None);
+            let before_logout = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            game.client_logging_out();
+            assert_eq!(game.native_menu_slot_count(before_logout), None);
+            assert!(
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .is_none()
+            );
+        });
     }
 
     #[test]
