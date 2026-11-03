@@ -47,7 +47,7 @@ fn subscriber_tick_benchmark() {
     installed.push(ModEntry::new("listener", Box::new(Listener)));
     install(installed.into());
     let mut host = TestHost;
-    dispatch_tick(HostSide::Server(&mut host)); // Prune defaults once, outside the timed loop.
+    dispatch_tick(HostSide::Server(&mut host)); // Warm the dispatch outside the timed loop.
     let iterations = 1_000_000;
     let start = Instant::now();
     for _ in 0..iterations {

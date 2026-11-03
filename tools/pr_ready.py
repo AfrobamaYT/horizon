@@ -77,6 +77,12 @@ in_shell() { if [ "$(uname)" = Linux ] && ! pkg-config --exists xkbcommon 2>/dev
 
 # Build-script inputs outside the crates: catalog-only edits still need to build and test their consumers.
 MOD_API_INPUTS = ("native-hooks.json", "tools/native-hook-fragments/")
+# The generated dispatch surface: edits here change what the dispatch tests compile and run. The registry is its
+# own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
+DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"
+DISPATCH_TEST_INPUTS = ("crates/horizon-mod-api-gen/", "crates/horizon-mod-api-macros/",
+                        "crates/horizon-client/src/mod_api", *MOD_API_INPUTS)
+MOD_REGISTRY = "crates/horizon-mod-registry/Cargo.toml"
 
 def is_doc(path):
     return path.endswith(".md")
@@ -385,6 +391,20 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
              skip=None if any(p.startswith(("crates/horizon-theme/", "xtask/")) for p in changed)
              else "theme untouched"),
     ]
+    dispatch_skip = None if any(path.startswith(DISPATCH_TEST_INPUTS) for path in changed) \
+        else "dispatch surface untouched"
+    registry_skip = None if any(path.startswith("crates/horizon-mod-registry/") for path in changed) \
+        else "mod registry untouched"
+    for name, manifest, skip in (("dispatch tests", DISPATCH_TESTS, dispatch_skip),
+                                 ("mod registry tests", MOD_REGISTRY, registry_skip)):
+        steps.extend([
+            Step(f"{name} clippy",
+                 f"CARGO_BUILD_JOBS=${{CARGO_BUILD_JOBS:-4}} cargo clippy --manifest-path {manifest}"
+                 " --all-targets --locked -- -D warnings", skip=skip),
+            Step(f"{name} tests",
+                 f"CARGO_BUILD_JOBS=${{CARGO_BUILD_JOBS:-4}} cargo test --manifest-path {manifest}"
+                 " --locked -- --test-threads=4", skip=skip, summary=tests_passed),
+        ])
     launcher_skip = None if launcher else "launcher untouched"
     for name, command in [("launcher rustfmt", "cargo fmt --check"),
                           ("launcher clippy", "cargo clippy --all-targets --locked $features -- -D warnings"),
