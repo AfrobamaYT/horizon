@@ -371,14 +371,53 @@ impl Game<'_> {
     fn lan_enchant_offers(&mut self, host: &LanHost, gi: usize, gs: &mut GuestStation) {
         let seed = host.hub.guests[gi].xp_seed;
         let bookcases = self.count_bookshelves(gs.pos);
-        let offers = horizon_client::stations::enchant_offers(
-            &self.stations().enchantments,
-            self.items(),
-            seed,
-            bookcases,
-            gs.menu.slot(0),
-        );
         let guest = &host.hub.guests[gi];
+        let offers = if horizon_client::mod_api::mods().is_empty() {
+            horizon_client::stations::enchant_offers(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                bookcases,
+                gs.menu.slot(0),
+            )
+        } else {
+            // EnchantmentLevelSetEvent for each row as getEnchantmentCost drew
+            // it; the offers are then made with the levels the mods left.
+            let mut drawn = [None; 3];
+            horizon_client::stations::enchant_offers_leveled(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                bookcases,
+                gs.menu.slot(0),
+                |row, cost| *drawn[row].insert(cost),
+            );
+            let mut levels = drawn.map(|cost| cost.unwrap_or(0));
+            if let Some(item) = gs.menu.slot(0) {
+                for (row, original) in drawn.iter().enumerate() {
+                    if let Some(original) = *original {
+                        self.native_enchantment_level_set(
+                            guest.uuid,
+                            guest.entity_id,
+                            gs.pos,
+                            row as i32,
+                            bookcases,
+                            item,
+                            original,
+                            &mut levels[row],
+                        );
+                    }
+                }
+            }
+            horizon_client::stations::enchant_offers_leveled(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                bookcases,
+                gs.menu.slot(0),
+                |row, _| levels[row],
+            )
+        };
         let mut costs = offers.costs;
         self.native_prepare_item_enchant(guest.uuid, &guest.name, gs.pos, &mut costs);
         let mut clues = offers.clues;
@@ -416,8 +455,14 @@ impl Game<'_> {
             return;
         };
         let g = &host.hub.guests[gi];
-        let (seed, creative, conn, uuid, name) =
-            (g.xp_seed, g.creative(), g.conn, g.uuid, g.name.clone());
+        let (seed, creative, conn, uuid, entity_id, name) = (
+            g.xp_seed,
+            g.creative(),
+            g.conn,
+            g.uuid,
+            g.entity_id,
+            g.name.clone(),
+        );
         let Some(enchanted) = horizon_client::stations::apply_enchantment(
             &self.stations().enchantments,
             self.items(),
@@ -430,10 +475,24 @@ impl Game<'_> {
         };
         let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
+        // The enchantments the item got, for PlayerEnchantItemEvent.
+        let given = (!horizon_client::mod_api::mods().is_empty()).then(|| {
+            horizon_client::stations::enchantment_list(
+                &self.stations().enchantments,
+                self.items(),
+                seed,
+                button,
+                gs.menu.data[button],
+                &item.item,
+            )
+        });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
         self.as_guest(host, conn, |game| {
             game.enchantment_performed(need);
             game.award_custom_stat("enchant_item", 1);
+            if let Some(given) = &given {
+                game.native_player_enchant_item(uuid, entity_id, &enchanted, given);
+            }
             // CriteriaTriggers.ENCHANTED_ITEM, with the levels it cost.
             game.trigger_enchanted_item(&enchanted, need);
         });

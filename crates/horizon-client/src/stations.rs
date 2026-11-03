@@ -86,6 +86,20 @@ pub fn enchant_offers(
     bookcases: i32,
     stack: Option<&ItemStack>,
 ) -> EnchantOffers {
+    enchant_offers_leveled(e, items, seed, bookcases, stack, |_, cost| cost)
+}
+/// [`enchant_offers`], with `level_set` given each row and its cost as
+/// `getEnchantmentCost` drew it, before a cost below the row is cleared:
+/// what it returns is the row's cost (NeoForge's `EnchantmentLevelSetEvent`).
+/// It is not asked for an item the table can't enchant.
+pub fn enchant_offers_leveled(
+    e: &Enchantments,
+    items: &Items,
+    seed: i32,
+    bookcases: i32,
+    stack: Option<&ItemStack>,
+    mut level_set: impl FnMut(usize, i32) -> i32,
+) -> EnchantOffers {
     let mut offers = EnchantOffers::default();
     let Some(stack) = stack else { return offers };
     // ItemStack.isEnchantable: enchantable component and no enchantments yet.
@@ -94,7 +108,8 @@ pub fn enchant_offers(
     }
     let mut random = LegacyRandom::new(i64::from(seed));
     for i in 0..3 {
-        offers.costs[i] = e.enchantment_cost(&mut random, i, bookcases, &stack.item);
+        let cost = e.enchantment_cost(&mut random, i, bookcases, &stack.item);
+        offers.costs[i] = level_set(i, cost);
         if offers.costs[i] < i as i32 + 1 {
             offers.costs[i] = 0;
         }
@@ -768,6 +783,35 @@ mod tests {
         let o = bookshelf_offsets();
         assert_eq!(o.len(), 32);
         assert!(o.contains(&[-2, 0, -2]) && o.contains(&[2, 1, 0]) && !o.contains(&[1, 0, 1]));
+    }
+
+    /// `EnchantmentLevelSetEvent`: each row is asked once, in order, with the
+    /// level `getEnchantmentCost` drew; a level below the row offers nothing,
+    /// and a changed level shows the clue of the list it gives.
+    #[test]
+    fn a_set_enchantment_level_makes_the_offer() {
+        let e = sample();
+        let items = sample_items();
+        let s = ItemStack::new("minecraft:diamond_sword", 1);
+        let plain = enchant_offers(&e, &items, 1234, 15, Some(&s));
+        let mut asked = Vec::new();
+        let set = enchant_offers_leveled(&e, &items, 1234, 15, Some(&s), |row, cost| {
+            asked.push((row, cost));
+            [cost, 1, 10][row]
+        });
+        assert_eq!(asked.iter().map(|a| a.0).collect::<Vec<_>>(), [0, 1, 2]);
+        assert_eq!(asked[2].1, plain.costs[2]);
+        assert_eq!(set.costs, [plain.costs[0], 0, 10]);
+        assert_eq!(
+            (set.clues[0].clone(), set.clues[1].clone()),
+            (plain.clues[0].clone(), None)
+        );
+        assert_eq!(set.clues[2], enchant_clue(&e, &items, 1234, 2, 10, &s));
+        // An item the table can't enchant isn't asked about.
+        let enchanted = sword(&[("minecraft:sharpness", 1)]);
+        enchant_offers_leveled(&e, &items, 1234, 15, Some(&enchanted), |_, _| {
+            panic!("asked about an item the table can't enchant")
+        });
     }
 
     #[test]

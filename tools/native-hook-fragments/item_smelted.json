@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "item_smelted",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_smelted",
+      "neoforge": "PlayerEvent.ItemSmeltedEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A player took a furnace's output (`native_item_smelted`).",
+  "doc_summary": "A server player took a furnace, blast furnace or smoker's output, where `FurnaceResultSlot.checkTakeAchievements` runs (a click, a shift-click or a throw): `native_item_smelted(player, player_entity_id, stack)`, with the player's UUID and entity id and the taken stack (`stack.count` is how many). Fires before `furnace_extract`. Server-side, not cancellable. Bundles need \"hooks\": @API:item_smelted@."
+}

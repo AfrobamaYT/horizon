@@ -4744,6 +4744,72 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_potion_brew_post(self, mod_api::mods(), pos, stacks);
     }
+    /// A server player took `stack` (the output, `stack.count` of it) from a
+    /// furnace, blast furnace or smoker's result slot
+    /// (`FurnaceResultSlot.checkTakeAchievements`), by a click, a shift-click
+    /// or a throw: `player` is their UUID and `player_entity_id` their network
+    /// id. Fires before `furnace_extract`. Server-side. @API:item_smelted@.
+    pub(super) fn native_item_smelted(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+    ) {
+        mod_api::dispatch_item_smelted(self, mod_api::mods(), player, player_entity_id, stack);
+    }
+    /// A server player enchanted `item` at an enchanting table
+    /// (`EnchantmentMenu.clickMenuButton`): `enchantments` are the ones it was
+    /// given, in order, as (id, level). `item` is the enchanted stack (an
+    /// enchanted book for a book). Fires after the levels are paid, before
+    /// `enchant_item`. Server-side. @API:player_enchant_item@.
+    pub(super) fn native_player_enchant_item(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        item: &ItemStack,
+        enchantments: &[(std::sync::Arc<str>, u32)],
+    ) {
+        mod_api::dispatch_player_enchant_item(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            item,
+            enchantments,
+        );
+    }
+    /// An enchanting table drew the level of offer `row` (0 to 2) for `item`
+    /// (`EnchantmentMenu.slotsChanged`, after `getEnchantmentCost`): `power`
+    /// is the bookshelves counted and `original_level` the level drawn. Change
+    /// `level` to change the offer; a level below `row + 1` offers nothing,
+    /// as vanilla's. Asked for each row in order, for the server player
+    /// `player` (UUID) and `player_entity_id` whose table it is, before
+    /// `prepare_item_enchant`. Server-side. @API:enchantment_level_set@.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn native_enchantment_level_set(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        row: i32,
+        power: i32,
+        item: &ItemStack,
+        original_level: i32,
+        level: &mut i32,
+    ) {
+        mod_api::dispatch_enchantment_level_set(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            row,
+            power,
+            item,
+            original_level,
+            level,
+        );
+    }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_campfire_start(self, mod_api::mods(), pos, item);

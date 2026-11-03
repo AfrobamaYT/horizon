@@ -370,12 +370,20 @@ impl Game<'_> {
             let guest = &host.hub.guests[gi];
             let output = items[2].as_ref();
             if let Some(output) = output {
+                let taken = output.count - count(menu.slot(2));
+                if !horizon_client::mod_api::mods().is_empty() {
+                    let stack = ItemStack {
+                        count: taken,
+                        ..output.clone()
+                    };
+                    self.native_item_smelted(guest.uuid, guest.entity_id, &stack);
+                }
                 self.native_furnace_extract(
                     guest.uuid,
                     &guest.name,
                     [pos.0, pos.1, pos.2],
                     &output.item,
-                    output.count - count(menu.slot(2)),
+                    taken,
                 );
             }
             self.award_furnace_recipes(pos, at);
