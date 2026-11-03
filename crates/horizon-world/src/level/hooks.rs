@@ -593,6 +593,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.level.dimension(),
             super::Dimension::Overworld | super::Dimension::Nether
         ) && let Some(shape) = self.find_empty_portal_shape(pos, true)
+            && self.level.allow_portal_spawn(pos, state, &shape)
         {
             self.create_portal_blocks(&shape);
             return;

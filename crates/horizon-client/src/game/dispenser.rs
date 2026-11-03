@@ -286,7 +286,7 @@ fn mob_can_dispenser_equip(m: &Mob, slot: Slot) -> bool {
     }
 }
 /// `getEquipSound`: the saddle overrides of pigs, striders, horses, camels and nautili.
-fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
+pub(super) fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
     if slot != Slot::Saddle {
         return default;
     }
@@ -964,9 +964,22 @@ impl Game<'_> {
         self.handle_mob_events(events)
     }
     /// A mob a bucket emptied: `setFromBucket` keeps it, then it calls out.
+    /// Fish and axolotls carry the flag itself (saved as `FromBucket`, read by
+    /// `requiresCustomPersistence`); the others stay persistent instead.
     pub(super) fn mob_placed(&mut self, id: u32) -> Result<()> {
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = true;
+            if matches!(
+                m.species(),
+                Species::Cod
+                    | Species::Salmon
+                    | Species::Pufferfish
+                    | Species::TropicalFish
+                    | Species::Axolotl
+            ) {
+                m.extra.from_bucket = true;
+            } else {
+                m.persistent = true;
+            }
         }
         self.mob_ambient(id)
     }

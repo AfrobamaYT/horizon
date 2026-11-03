@@ -142,6 +142,7 @@ pub use falling::Landing;
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{PlaceContext, PlaceOutcome, PlacementContext};
+pub use portal::PortalShape;
 pub use states::{BlockId, PropKey, StateTable};
 pub use tick::{Precipitation, PrecipitationKind, RandomTickMask};
 pub use ticks::Ticks;
@@ -374,17 +375,38 @@ pub trait LevelAccess {
     fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
         true
     }
-    /// Returns the new note, or None to cancel tuning.
+    /// Returns the new note, or None to cancel tuning. `instrument` is the
+    /// block's index in `data::INSTRUMENTS`.
     fn note_block_change(
         &self,
         _pos: BlockPos,
-        _instrument: &str,
+        _instrument: u8,
         _old: i32,
         new: i32,
     ) -> Option<i32> {
         Some(new)
     }
-    fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
+    /// `NoteBlock.playNote`: the note block at `pos` is about to play
+    /// `instrument` (an index into `data::INSTRUMENTS`) at `note` (0 to 24).
+    /// `by_player` is false for redstone, whose `playNote` has no player.
+    /// The level may change either; false stops the note.
+    fn note_block_play(
+        &self,
+        _pos: BlockPos,
+        _by_player: bool,
+        _instrument: &mut u8,
+        _note: &mut i32,
+    ) -> bool {
+        true
+    }
+    /// `BaseFireBlock.onPlace` found the empty frame `shape` around the fire
+    /// `state` at `pos`: whether the portal may fill it.
+    fn allow_portal_spawn(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _shape: &PortalShape,
+    ) -> bool {
         true
     }
     fn allow_bell_ring(&self, _pos: BlockPos) -> bool {

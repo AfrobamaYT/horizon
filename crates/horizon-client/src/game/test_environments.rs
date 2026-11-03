@@ -261,8 +261,10 @@ impl Game<'_> {
     /// `GameRules.setAll`.
     fn set_environment_rules(&mut self, rules: &[(String, Value)]) {
         for (name, value) in rules {
-            if let Some(rule) = gamerules::rule(name) {
-                self.ui.rules.set(rule.name, *value);
+            if let Some(rule) = gamerules::rule(name)
+                && self.ui.rules.set(rule.name, *value)
+            {
+                self.game_rule_changed(rule.name, *value);
             }
         }
         self.sync_rules();

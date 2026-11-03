@@ -283,9 +283,8 @@ API 41 adds bundles' data files (`native_data!`, `native_built_data`; "Data file
 API 42 adds the item entities near a block, for machines that pick up items as a hopper does:
 `native_item_entities(dimension, min, max)` lists those whose box meets `min`..`max` (vanilla's
 `Level.getEntitiesOfClass(ItemEntity.class, box)`), each with its entity ID, position, stack and pickup delay, and
-`native_set_item_entity(dimension, id, stack)` changes one's stack, or removes it when the stack is empty, as a hopper
-does with what it takes. Both act on the level in place, as `native_set_block` does. Bundles that use them need
-`"hooks": 42`.
+`ItemEntityRef::set_stack` changes one's nonempty stack; discarding an entity is a separate operation. The query acts on
+the level in place. Bundles that use it need `"hooks": 42`.
 
 API 43 adds `native_level_random(dimension)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
 `level.getRandom()`): a mod draws from the stream vanilla's explosions and block drops use, so its draws shift theirs
@@ -1021,7 +1020,7 @@ API 120 adds a server's recipes reach its Horizon clients, as NeoForge's `OnData
 
 API 121 adds `native_input_key(event, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats. event is the original winit::event::KeyEvent with physical/logical key, location, text, state and repeat; modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad/focus/control-socket input retains its existing native_key route. The legacy native_key hook is unchanged. Bundles need "hooks": 121.
 
-API 122 adds `native_mouse_scrolling(scroll, accumulated, buttons, cursor, modifiers, canceled)` fires with a player in gameplay and no open screen/prompt/sleeping UI, once at least one whole scroll step accumulates and before hotbar/spectator handling. scroll is x/y after discrete/sensitivity scaling (touchpad pixels normalized by 30), accumulated is the whole x/y pair, buttons are physical left/middle/right, cursor is the GUI position, and modifiers use GLFW bits. Cancel skips gameplay scrolling; accumulated whole steps remain consumed. Synthetic input skips the new hook. The legacy vertical native_wheel still runs first and can consume the event; screen-scroll hooks are unchanged. Bundles need "hooks": 122.
+API 122 adds `native_mouse_scrolling(scroll, accumulated, buttons, cursor, modifiers, canceled)` fires with a player in gameplay and no open screen/prompt/sleeping UI, after accumulation and before hotbar/spectator handling, including when no whole step has accumulated. scroll is x/y after discrete/sensitivity scaling (touchpad pixels normalized by 30), accumulated is the whole x/y pair, buttons are physical left/middle/right, cursor is the GUI position, and modifiers use GLFW bits. Cancel skips gameplay scrolling; accumulated whole steps remain consumed. Synthetic input follows the same gameplay scroll path; screen-scroll hooks are unchanged. Bundles need "hooks": 122.
 
 API 123 adds `native_screen_mouse_dragged_pre(screen, button, delta, modifiers, canceled)` runs before screen drag handlers for real nonzero pointer movements with a held button. The most recently pressed button is active until it releases; focus loss and splitscreen handoff clear it. Same screen exclusions and GLFW button/modifier encoding as the other screen input hooks. screen.mouse is the new GUI position; delta is movement in GUI pixels. Cancel skips screen drag handlers while retaining the new cursor position. Synthetic input and hover-only moves skip it. Bundles need "hooks": 123.
 
@@ -1316,8 +1315,6 @@ API 246 adds `native_world_border_center_changed()` is told after `/worldborder 
 
 API 247 adds `native_world_game_rule_change(player, name, rule, value)` is told after an operator changes a world game rule through the server's game rule screen, with its final value. Bundles need "hooks": 247.
 
-API 248 adds A note block is about to sound: `native_note_play(dimension, player, pos, instrument, note, cancel)` is asked when punched, used or powered. Set `cancel` to silence it; a canceled tuning interaction leaves the note unchanged. `player` is the acting server player when available. Bundles need "hooks": 248.
-
 API 249 adds A server player completed an advancement after progress was recorded; `advancement` is its identifier, such as `minecraft:story/mine_stone`. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 249.
 
 API 250 adds A server player's main-hand punch swing and attack-strength reset have happened: `native_player_attack_cooldown_reset(player, name)`. Helpers looking up the player through `self.lan` may find nothing during a guest packet. Bundles need "hooks": 250.
@@ -1330,7 +1327,6 @@ API 253 adds A server player caught a bucketable mob: `native_player_bucket_enti
 
 API 254 adds A server player's selected beacon effects were stored: `native_player_change_beacon_effect(player, name, pos, primary, secondary)`. Empty effect ids mean none is selected. Bundles need "hooks": 254.
 
-API 255 adds A server player's client option changed their dominant hand; `native_player_change_main_hand(player, name, left)` reports whether the left hand is dominant. Bundles need "hooks": 255.
 
 API 256 adds A server player counts as deeply asleep after 100 ticks in a bed: `native_player_deep_sleep(player, name)` fires once at that point. Helpers looking the guest up through `self.lan` may find nothing during its tick. Bundles need "hooks": 256.
 
@@ -1348,7 +1344,6 @@ API 262 adds An item cooldown about to start for a server player: `native_player
 
 API 263 adds A server player selected a different hotbar slot: `native_player_item_held(player, name, from_slot, to_slot, cancel)` is called after the slot range check and before the selected slot changes. Set `cancel` to keep the old slot; the client is sent that slot again. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 263.
 
-API 264 adds A server player changed their client language option (`native_player_locale_change(player, name, locale)`), after the new locale is stored. Bundles need "hooks": 264.
 
 API 265 adds A server player selected loom pattern button `pattern`, after the menu accepted it: `native_player_loom_pattern_select(player, name, pattern)`. Bundles need "hooks": 265.
 
@@ -1395,8 +1390,6 @@ API 285 adds The server synced changed motion to a player: `native_player_veloci
 API 286 adds `native_portal_create(dimension, pos)` is told after a Nether portal for dimension travel or the End arrival platform has been built, with its dimension and lower corner or platform origin. Bundles need "hooks": 286.
 
 API 287 adds A thrown splash or lingering potion finished applying its hit effects; the hook reports the potion item and impact position. Experience bottles are excluded. Bundles need "hooks": 287.
-
-API 288 adds An anvil result was prepared: `native_prepare_anvil(player, name, pos, result, cost)` is called for a server player at `pos`; change the result or level cost before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 288.
 
 API 289 adds A grindstone result was prepared: `native_prepare_grindstone(player, name, pos, result)` is called for a server player at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 289.
 
@@ -1462,7 +1455,7 @@ API 318 adds A player releases a bow: `native_arrow_loose(stack, has_ammo, charg
 
 API 319 adds an item frame or painting about to break: `native_hanging_break(player, kind, pos, cancel)` is heard before a server player's hit, a blast or the loss of its wall breaks an item frame, a glow item frame or a painting, with the hitting player (None for a blast or a lost wall). A mod sets `cancel` and it stays. The hitting player's state is swapped in. A hit that only takes a frame's item out, the game's own player and `/kill` are not asked. Bundles that use it need `"hooks": 319`.
 
-API 320 adds A criterion of a server player's advancement was granted or revoked after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets; `advancement` is its identifier, such as `minecraft:story/mine_stone`, `criterion` the criterion name and `granted` is false for a revoke. A grant or revoke that changes nothing is not heard. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 320.
+API 320 adds A criterion of a server player's advancement was granted or revoked after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets; `advancement` is its identifier, such as `minecraft:story/mine_stone`, `criterion` the criterion name and `progress_type` is `NativeProgressType::Grant` or `NativeProgressType::Revoke`. A grant or revoke that changes nothing is not heard. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 320.
 
 API 321 adds A statistic about to be awarded to a server player: `native_player_stat_award(player, name, stat_type, stat, value, cancel)`, with `stat_type` such as `minecraft:mined` or `minecraft:custom`, `stat` such as `minecraft:stone` or `minecraft:walk_one_cm`, and `value` the amount added. Set `cancel` to award nothing: the count and its scoreboard criteria stay as they were. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 321.
 
@@ -1499,8 +1492,6 @@ API 336 adds A boat or minecart joined the level at `pos`, after a player or dis
 API 337 adds A player is about to damage a boat or minecart: `native_vehicle_damage(kind, damage, cancel)` may change the damage or cancel it before the vehicle's damage and wobble change; the attack still completes. Bundles need "hooks": 337.
 
 API 338 adds A boat or minecart is about to be destroyed at `pos`: `native_vehicle_destroy(kind, pos)` is heard just before it is removed; TNT minecarts that prime instead are not heard. Bundles need "hooks": 338.
-
-API 339 adds A server player earned one criterion of an advancement, after its progress was recorded: `native_player_advancement_criterion_grant(player, name, advancement, criterion)`. Bundles need "hooks": 339.
 
 API 340 adds A guest's arm swing: `native_player_arm_swing(player, name, hand)` is called after the server handles the guest's `Punch` packet and resets attack strength. The current packet swings `mainhand`; the guest's state is swapped in. Bundles need "hooks": 340.
 
@@ -2018,8 +2009,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   find nothing during packet handling.
 - **`native_player_recipe_book_settings_change(player, name, book, open, filtering)`**: a server player's recipe
   book open or filter setting changed; `book` is the book type's protocol id. The player's state is not swapped in.
-- **`native_player_advancement_criterion_grant(player, name, advancement, criterion)`**: a server player earned
-  one advancement criterion, after its progress was recorded.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
   slash), vanilla's too and commands the player may not run, heard before anything looks at it, and each line of a
   quiet command batch. Set `canceled` and nothing runs; push lines to `replies` and the player gets them as system chat
@@ -2131,7 +2120,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_edit_book(player, name, pages, signing, cancel)`**: A server player book-and-quill edit or signing packet is about to be applied. `pages` is its page count and `signing` says it has a title. Set `cancel` to drop the packet.
 - **`native_player_shear_entity(player, name, entity_id, off_hand, cancel)`**: A server player is about to shear a sheep, mooshroom, snow golem or bogged. The hook gives the mob entity id and whether the shears are in the off hand. Set `cancel` to leave the mob and shears unchanged.
 - **`native_player_advancement_done(player, name, advancement)`**: A server player completed an advancement after its progress was recorded. `advancement` is its identifier, such as `minecraft:story/mine_stone`; helpers looking up the guest through `self.lan` may find nothing during packet handling.
-- **`native_player_advancement_progress(player, name, advancement, criterion, granted)`**: A criterion of a server player's advancement was granted or revoked, after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets. `advancement` is its identifier, such as `minecraft:story/mine_stone`, and `granted` is false for a revoke. A grant or revoke that changes nothing is not heard; helpers looking up the guest through `self.lan` may find nothing during packet handling.
+- **`native_player_advancement_progress(player, player_entity_id, name, advancement, criterion, progress_type)`**: A criterion of a server player's advancement was granted or revoked, after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets. `player` is the UUID and `player_entity_id` its entity ID; `advancement` is its identifier, such as `minecraft:story/mine_stone`, and `progress_type` is `NativeProgressType::Grant` or `NativeProgressType::Revoke`. The full advancement progress is not yet exposed (tracked on #29); the deferred first-tick/reload notification is also tracked on #29. A grant or revoke that changes nothing is not heard; helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_stat_award(player, name, stat_type, stat, value, cancel)`**: A statistic is about to be awarded to a server player, before its count and scoreboard criteria change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, or `minecraft:custom` and `minecraft:walk_one_cm`, and `value` is the amount. Set `cancel` to award nothing. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_riptide(player, name)`**: a server player launched with a riptide trident, after its velocity and spin are applied. The player's state is swapped in, though helpers that look them up through `self.lan` may find nothing during a guest packet.
 - **`native_player_fish(player, name, state, cancel)`**: a player's fishing rod, on a server: `state` 0 the cast, 1 a fish
@@ -2153,7 +2142,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_bucket_entity(player, name, entity_id, entity)`**: a server player caught a bucketable mob after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id.
 - **`native_player_change_beacon_effect(player, name, pos, primary, secondary)`**: a server player's beacon selection was stored. Effect values are ids, empty when none is selected.
 - **`native_player_deep_sleep(player, name)`**: a server player reached 100 ticks asleep in a bed and now counts as deeply asleep for the night-skip check. Helpers looking up the guest through `self.lan` may find nothing during its tick.
-- **`native_player_change_main_hand(player, name, left)`**: a server player's client options changed their dominant hand; `left` is true for left-handed. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_egg_throw(player, name)`**: a server player threw an egg after its projectile was launched and its use applied.
 - **`native_player_elytra_boost(player, name)`**: a server player used a firework rocket to boost while gliding, after the rocket was launched and consumed.
 - **`native_player_flower_pot_manipulate(player, name, pos, plant)`**: a server player put `plant` into the flower pot at `pos`, after its state changed and the item was consumed. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
@@ -2185,7 +2173,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_teleport_end_gateway(player, name, gateway, cancel)`**: a player is about to travel through the End gateway at `gateway`. Set `cancel` to leave them at the entrance; the gateway does not start its cooldown. The player is not swapped in, so helpers may find no guest through `self.lan`.
 - **`native_player_recipe_book_click(player, name, recipe, all)`**: a server player requests a known recipe be placed in their crafting grid through the recipe book. `all` is true for the shift click form. The player is not swapped in, so helpers may find no guest through `self.lan`.
 - **`native_player_exp_cooldown_change(player, name, ticks)`**: the player’s XP orb pickup cooldown changed, after its new value is stored. This includes the two tick delay after an orb is picked up and each tick it counts down. The player is not swapped in, so helpers may find no guest through `self.lan`.
-- **`native_player_locale_change(player, name, locale)`**: a server player changed their client language option. It fires after the new locale is stored. The player is not swapped in, so helpers may find no guest through `self.lan`.
 - **`native_entity_enter_block(entity, kind, pos, block)`**: a bee was stored in the beehive or nest at `pos`.
 - **`native_entity_change_block(entity, kind, pos, from, to)`**: a mob changed a block, after the new state was applied.
 - **`native_entity_break_door(entity, kind, pos)`**: a mob finished breaking a door at `pos`, after the block was removed.
@@ -2213,7 +2200,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_brewing_fuel(pos, fuel)`**: a brewing stand at `pos` consumed `fuel` and gained brewing fuel. Server-side.
 - **`native_enchant_item(player, name, pos, item, levels)`**: a player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. Guest state is not swapped in.
 - **`native_prepare_item_enchant(player, name, pos, costs)`**: enchanting offers were calculated at `pos`; change the three offer costs before they are sent to the player's menu. Guest state is not swapped in.
-- **`native_prepare_anvil(player, name, pos, result, cost)`**: an anvil result was prepared for a player at `pos`; change the result or level cost before it is sent to their menu. Guest state is not swapped in.
 - **`native_anvil_craft_pre(player, name, pos, craft, cancel)`**: a player took an anvil's result at `pos` (NeoForge's `AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` has the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Fires on the server only; the window's predicted take does not call it.
 - **`native_anvil_craft_post(player, name, pos, craft)`**: the levels, inputs and anvil wear of that take are done (NeoForge's `AnvilCraftEvent.Post`); a broken anvil is already air. `craft` is the same as in `native_anvil_craft_pre`. Not called when it cancelled.
 - **`native_prepare_grindstone(player, name, pos, result)`**: a grindstone result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
@@ -2378,8 +2364,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   and `to` are block state IDs. Set `cancel` to keep the old block.
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or
   snow, or add a snow layer at `pos`. `from` and `to` are block state IDs. Set `cancel` to keep the old state.
-- **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
-  sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to
   stop the ring and its raider reveal.
 - **`native_cauldron_level_changed(dimension, player, pos, from_level, to_level, reason, cancel)`** (on `GameLevel`):
@@ -3202,7 +3186,10 @@ once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox
 block update, and an item dropped at a block, thrown by a player (what a filled bucket's split no longer fits) or
 by an entity or split off an item entity. An abort puts every storage back quietly, so nothing outside saw the
 change. A panic unwinding out of the closure aborts that transaction as it passes, and the one around it stays open. `host.transaction` is the only way to open one: the raw `transaction_open` and `transaction_close` helpers take a `TransactionSeal` that only it makes. A handler keeps no journal of its own:
-its state is the game's, so the game's journal covers it.
+its state is the game's, so the game's journal covers it. Direct writes are not covered: an item entity's stack,
+`LivingRef::set_equipment`, and the player and armor-stand `slot_set` paths take effect and are final at once, even
+inside a transaction. Any equip/unequip event and equip sound from `set_equipment` also happen immediately; an
+abort does not undo them. This differs from writes through journaled capability handlers.
 
 `ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
 `Capabilities.Item.ENTITY`), read and written like any other place.

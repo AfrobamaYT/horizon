@@ -437,10 +437,21 @@ impl VanillaTerrain {
             })
             .collect();
         let fluid_ticks = chunk.terrain.fluid_ticks().pack(0).to_vec();
-        if !block_ticks.is_empty() || !fluid_ticks.is_empty() {
+        if !block_ticks.is_empty() || !fluid_ticks.is_empty() || !chunk.saved_root.is_empty() {
+            let attachments = horizon_world::attachments::attachment_compound(
+                chunk
+                    .saved_root
+                    .get(&horizon_world::attachments::ATTACHMENTS_KEY.into()),
+            )
+            .ok()
+            .flatten()
+            .map(|data| horizon_world::attachments::Attachments::from_nbt(data.clone()))
+            .unwrap_or_default();
             out.saved = Some(Arc::new(crate::save::ChunkExtras {
                 block_ticks,
                 fluid_ticks,
+                root: chunk.saved_root.clone(),
+                attachments,
                 ..Default::default()
             }));
         }
@@ -872,6 +883,30 @@ impl ChunkGenerator for VanillaTerrain {
     fn is_decorated(&self, proto: &Proto) -> bool {
         matches!(proto.downcast_ref::<VanillaProto>(), Some(VanillaProto::Ready(c)) if c.is_decorated())
     }
+    fn proto_status(&self, proto: &Proto) -> Option<horizon_world::chunk_status::ChunkStatus> {
+        let VanillaProto::Ready(chunk) = proto.downcast_ref::<VanillaProto>()? else {
+            return None;
+        };
+        Some(if chunk.is_decorated() {
+            horizon_world::chunk_status::ChunkStatus::Features
+        } else {
+            horizon_world::chunk_status::ChunkStatus::Terrain
+        })
+    }
+    fn proto_block(&self, proto: &Proto, [x, y, z]: [i32; 3]) -> Option<u32> {
+        let VanillaProto::Ready(chunk) = proto.downcast_ref::<VanillaProto>()? else {
+            return None;
+        };
+        let position = chunk.position();
+        if x.div_euclid(16) != position.x
+            || z.div_euclid(16) != position.z
+            || y < chunk.terrain.min_y()
+            || y >= chunk.terrain.min_y() + chunk.terrain.height()
+        {
+            return None;
+        }
+        Some(chunk.block(x, y, z).0)
+    }
     fn light_view(&self, proto: &Proto) -> Option<Chunk> {
         match proto.downcast_ref::<VanillaProto>() {
             Some(VanillaProto::Ready(chunk)) => Some(self.block_column(chunk)),
@@ -984,6 +1019,10 @@ impl ChunkGenerator for VanillaTerrain {
                 })
             }))
         };
+        chunk.saved_root = column
+            .saved
+            .as_deref()
+            .map_or_else(Default::default, |e| e.root.clone());
         if let Some(extras) = column.saved.as_deref() {
             *chunk.terrain.block_ticks_mut() = ticks(&extras.block_ticks, &|k| {
                 self.tick_states.get(k as usize).copied()

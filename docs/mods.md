@@ -403,6 +403,12 @@ feature already in the step is not added twice. Configured features use 26.3's `
 (registry `minecraft:worldgen/feature`), not the previously documented `worldgen/configured_feature/`.
 Files in the old directory are ignored with a warning naming the new one; move them before loading the mod.
 
+Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one object or a list with `type`,
+`weight`, `minCount` and `maxCount`) to each entity type's category, converting the count range to 26.3's `count`;
+`remove_spawns` removes `entity_types` from every category. `add_spawn_costs` sets `spawn_costs` from `spawn_cost`
+(`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
+accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
+
 A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
 a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
 [Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
@@ -423,12 +429,13 @@ load. Climate sets apply only to `biomes`, not `features`.
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
-naming a biome, biome tag, feature or feature tag the game doesn't have (another mod's, a `#c:` convention tag), or of a
-type not read yet (spawns and climate: `add_spawns`, `add_carvers`, a mod's own serializer), is skipped with a warning
+naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
+`#c:` convention tag), or of a type not read yet (`add_carvers`, a mod's own serializer), is skipped with a warning
 naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a type
-that is read (an unknown step, a missing field) stops the build, and the game starts without content mods ("content
-mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features` doesn't read a mod's
-`placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to it too.
+that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
+content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
+doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
+it too.
 
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,
