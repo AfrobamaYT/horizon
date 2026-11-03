@@ -8462,7 +8462,21 @@ impl Game<'_> {
         let click = self.block_click(hit, hand, stack);
         let (mut result, mut canceled) = (NativeInteractionResult::TryWithEmptyHand, false);
         self.native_use_item_on_block(&click, phase, &mut result, &mut canceled);
-        canceled.then_some(result)
+        if !canceled {
+            return None;
+        }
+        if phase == UsePhase::ItemAfterBlock
+            && result.consumes_action()
+            && let Some(stack) = stack
+        {
+            self.with_hand(hand, |game| {
+                if game.remote.is_none() {
+                    game.award_stat("used", &stack.item, 1);
+                }
+                game.apply_after_use_components(stack);
+            });
+        }
+        Some(result)
     }
     /// Air use only: a passing block or entity keeps its target, rather than
     /// becoming a `RightClickItem` interaction.
@@ -8494,8 +8508,12 @@ impl Game<'_> {
             player,
             player_entity_id,
         };
+        let instant = self.use_duration(stack) <= 0;
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_item(&click, &mut result, &mut canceled);
+        if canceled && instant && result.consumes_action() {
+            self.with_hand(hand, |game| game.apply_after_use_components(stack));
+        }
         canceled.then_some(result)
     }
     /// The shared context for a block's behaviour and the click event.
