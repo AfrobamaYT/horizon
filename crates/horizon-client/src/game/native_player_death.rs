@@ -57,11 +57,36 @@ mod tests {
     use super::super::Game;
     use horizon_client::mod_api::PlayerRef;
 
-    /// Opens the game to a LAN host with one placed guest (UUID 123, conn 1).
-    fn add_guest(game: &mut Game<'_>) -> PlayerRef {
-        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+    /// A placed guest record.
+    fn new_guest(conn: u32, uuid: u128) -> horizon_client::lan::guest::Guest {
+        use horizon_client::lan::{Joined, PlayerSender, guest::Guest};
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+        let (tx, _rx) = mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn,
+                uuid,
+                name: "guest".into(),
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::default()),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+            },
+            20,
+            [0.0; 3],
+            8,
+        );
+        guest.placed = true;
+        guest
+    }
+
+    /// Opens the game to a LAN host with one placed guest (UUID 123, conn 1).
+    fn add_guest(game: &mut Game<'_>) -> PlayerRef {
+        use horizon_client::lan::{NetConfig, hub::HubConfig};
 
         let settings = super::super::lan::LanSettings {
             port: 0,
@@ -87,24 +112,7 @@ mod tests {
             levels: Default::default(),
         };
         game.lan_host(settings, net, config).unwrap();
-        let (tx, _rx) = mpsc::channel();
-        let mut guest = Guest::new(
-            Joined {
-                conn: 1,
-                uuid: 123,
-                name: "guest".into(),
-                properties: Vec::new(),
-                info: ClientInformation::new(8),
-                brand: String::new(),
-                sender: PlayerSender::new(tx, Arc::default()),
-                latency: Arc::new(AtomicI32::new(0)),
-                address: "127.0.0.1:1".parse().unwrap(),
-            },
-            20,
-            [0.0; 3],
-            8,
-        );
-        guest.placed = true;
+        let guest = new_guest(1, 123);
         game.lan.as_mut().unwrap().hub.guests.push(guest);
         game.native_player_ref(123).unwrap()
     }
@@ -199,6 +207,43 @@ mod tests {
                 game.lan.as_ref().unwrap().hub.guests[0].last_death,
                 Some(("minecraft:overworld".into(), [1, 2, 3]))
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_death_location_survives_a_playerdata_save_and_load() {
+        use horizon_client::lan::playerdata;
+
+        with_game(|game| {
+            let player = add_guest(game);
+            let overworld = game.native_level("minecraft:overworld").unwrap();
+            assert!(player.set_last_death_location(game, Some((overworld, [4, 70, -9]))));
+
+            let world = std::env::temp_dir().join(format!(
+                "horizon-death-location-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+            ));
+            std::fs::create_dir_all(&world).unwrap();
+            playerdata::save(&game.lan.as_ref().unwrap().hub.guests[0], &world);
+
+            // A fresh record of the same player never died until it loads.
+            let mut fresh = new_guest(2, 123);
+            assert_eq!(fresh.last_death, None);
+            assert!(playerdata::load(&mut fresh, &world));
+            assert_eq!(
+                fresh.last_death,
+                Some(("minecraft:overworld".into(), [4, 70, -9]))
+            );
+
+            // Put in place of the saved one, it reads through the handle.
+            game.lan.as_mut().unwrap().hub.guests[0] = fresh;
+            assert_eq!(
+                player.last_death_location(&*game),
+                Some((overworld, [4, 70, -9]))
+            );
+            std::fs::remove_dir_all(&world).unwrap();
         });
     }
 
