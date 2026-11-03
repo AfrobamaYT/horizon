@@ -61,7 +61,7 @@ Content-only mods cannot declare nonempty dependencies yet
 ## Source paths
 
 A code package contains root `Cargo.toml`, optional `build.rs`, `.rs` and `.toml` files under `src/`,
-and root text files named `README*`, `LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*` or `.gitignore`.
+and root text files named `README*`, `LICENSE*`, `LICENCE*`, `COPYING*` or `NOTICE*`.
 The marked root `impl Hooks` uses `#[mod_api::horizon_mod]`; the attribute generates the factory
 ([Trait mods](../native-mods.md#trait-mods-draft)).
 
