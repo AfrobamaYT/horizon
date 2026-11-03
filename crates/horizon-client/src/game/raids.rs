@@ -281,8 +281,9 @@ impl Game<'_> {
         }
     }
     /// Reads the raids of the player's dimension from its file (the previous
-    /// dimension's saved first). Their randoms are seeded by `load_raids`, so
-    /// a mod reading raids before the first raid tick draws nothing.
+    /// dimension's saved first), as a level opens (`ServerLevel`'s
+    /// constructor). Their randoms are seeded by `load_raids` on the first
+    /// raid tick, at the same point in the world random as before.
     pub(super) fn read_raids(&mut self) {
         if self.raiding.loaded == Some(self.dim) {
             return;

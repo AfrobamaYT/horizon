@@ -9,16 +9,6 @@ use horizon_client::{
 };
 
 impl Game<'_> {
-    /// Reads the saved raids of the level in place if nothing has yet, so a
-    /// mod finds them before the first raid tick. Draws no random.
-    fn native_read_raids(&mut self, level: LevelRef) -> bool {
-        if self.remote.is_some() || !self.native_level_in_place(level) {
-            return false;
-        }
-        self.read_raids();
-        true
-    }
-
     /// The raid a handle names now, or None for a stale or foreign one.
     fn native_raid_data(&self, raid: RaidRef) -> Option<&Raid> {
         if !self.native_level_in_place(raid.level()) {
@@ -29,20 +19,15 @@ impl Game<'_> {
 
     /// `Raids.get(id)`: the raid saved under `id` in the level in place, if
     /// `Raids` still holds it (a stopped raid goes at its next tick).
-    pub(super) fn native_level_raid(&mut self, level: LevelRef, id: i32) -> Option<RaidRef> {
-        self.native_read_raids(level);
+    pub(super) fn native_level_raid(&self, level: LevelRef, id: i32) -> Option<RaidRef> {
         let raid = RaidRef::new(level, id);
         self.native_raid_data(raid).map(|_| raid)
     }
 
     /// `ServerLevel.getRaidAt(pos)`: the closest active raid whose centre is
     /// less than 96 blocks away (`Raids.getNearbyRaid`, 9216 squared).
-    pub(super) fn native_level_raid_at(
-        &mut self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<RaidRef> {
-        if !self.native_read_raids(level) {
+    pub(super) fn native_level_raid_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<RaidRef> {
+        if !self.native_level_in_place(level) {
             return None;
         }
         let (id, _) = self.raids_in_place()?.nearby(pos)?;
@@ -51,8 +36,8 @@ impl Game<'_> {
 
     /// Every raid `Raids` holds, in its iteration order, stopped ones
     /// included until their next tick. None for a level that is not in place.
-    pub(super) fn native_level_raids(&mut self, level: LevelRef) -> Option<Vec<RaidRef>> {
-        if !self.native_read_raids(level) {
+    pub(super) fn native_level_raids(&self, level: LevelRef) -> Option<Vec<RaidRef>> {
+        if !self.native_level_in_place(level) {
             return None;
         }
         Some(
@@ -66,7 +51,7 @@ impl Game<'_> {
 
     /// `Raider.getCurrentRaid`: the raid a raider belongs to, even a stopped
     /// one. None for a mob that is no raider or in no raid.
-    pub(super) fn native_mob_raid(&mut self, mob: MobRef) -> Option<RaidRef> {
+    pub(super) fn native_mob_raid(&self, mob: MobRef) -> Option<RaidRef> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
             return None;
         };
@@ -234,8 +219,9 @@ mod tests {
             game.world_root = root.clone();
             assert!(game.raid_command_create([10, 70, 10], 2));
             game.save_raids();
-            // The world opens again: nothing has read the raids yet.
+            // The world opens again and reads the raids, as `finish_open_world` does.
             game.raiding = Default::default();
+            game.read_raids();
             use horizon_core::random::RandomSource;
             let before = game.world.random.clone().next_long();
             let level = game.native_level(game.dim.id()).unwrap();

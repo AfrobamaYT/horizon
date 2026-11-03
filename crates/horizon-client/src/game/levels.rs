@@ -359,6 +359,8 @@ impl Game<'_> {
             if opened {
                 // The new streaming's radius and meshing options.
                 self.apply_settings();
+                // ServerLevel's constructor reads the level's raids.
+                self.read_raids();
                 self.native_level_opened(target);
             }
         }

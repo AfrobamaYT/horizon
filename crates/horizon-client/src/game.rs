@@ -12399,6 +12399,11 @@ impl Game<'_> {
         self.load_server_loot();
         // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
         // its chunks and players are.
+        // ServerLevel's constructor reads its Raids saved data before any
+        // server event; their randoms are seeded on the first raid tick.
+        if self.remote.is_none() {
+            self.read_raids();
+        }
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         self.bosses = Default::default();
