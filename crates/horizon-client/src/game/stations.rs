@@ -2946,6 +2946,7 @@ impl Game<'_> {
         let hooked = !horizon_client::mod_api::mods().is_empty();
         let stacks = (due && hooked).then(|| b.items.clone());
         let at = [pos.0, pos.1, pos.2];
+        let mut post = false;
         if due {
             // `doBrew`, with PotionBrewEvent.Pre before it and .Post after.
             let asked = stacks.map(|mut stacks| {
@@ -2965,34 +2966,37 @@ impl Game<'_> {
                 &mut out,
             );
             self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
-            if hooked && (out.brewed || cancelled) {
-                let mut stacks = b.items.clone();
-                self.native_potion_brew_post(at, &mut stacks);
-                if let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) {
-                    b.items = stacks;
-                }
-            }
+            post = hooked && (out.brewed || cancelled);
         }
-        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
-            return Ok(());
-        };
-        b.sync_bottles(&mut out);
         if consumed_fuel && let Some(item) = fuel_item {
             self.native_brewing_fuel(at, &item);
         }
         if let Some(ingredient) = ingredient {
             self.native_brewing_start(at, &ingredient);
         }
+        let (x, y, z) = pos;
+        if out.brewed {
+            self.native_brewing_complete(at);
+            self.play_at("minecraft:block.brewing_stand.brew", at, 1.0, 1.0);
+        }
+        for d in std::mem::take(&mut out.drops) {
+            self.pop_resource(at, d);
+        }
+        // PotionBrewEvent.Post ends `doBrew`, after its sound and the
+        // ingredient's remainder; the bottles' block state follows it.
+        if post && let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get(&pos) {
+            let mut stacks = b.items.clone();
+            self.native_potion_brew_post(at, &mut stacks);
+            if let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) {
+                b.items = stacks;
+            }
+        }
+        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+            return Ok(());
+        };
+        b.sync_bottles(&mut out);
         if out != brewing::BrewTick::default() {
-            let (x, y, z) = pos;
             self.world.modified.insert((x >> 4, z >> 4));
-            if out.brewed {
-                self.native_brewing_complete([x, y, z]);
-                self.play_at("minecraft:block.brewing_stand.brew", [x, y, z], 1.0, 1.0);
-            }
-            for d in out.drops {
-                self.pop_resource([x, y, z], d);
-            }
             if let Some(bottles) = out.bottles {
                 let state = self.world.block(x, y, z);
                 if let Some(mut s) = self.pack.assets.registry.state(state).cloned()

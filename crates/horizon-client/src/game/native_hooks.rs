@@ -4804,7 +4804,8 @@ impl Game<'_> {
     /// `BrewingStandBlockEntity.doBrew`), or `potion_brew_pre` was cancelled:
     /// `stacks` holds its five slots after the brew (or as the cancelling
     /// mods left them), and what the mods leave there is the stand's. Fires
-    /// before `brewing_complete`. Server-side. @API:potion_brew_post@.
+    /// last, as `doBrew` ends: after `brewing_complete`, the brew sound and
+    /// the ingredient's remainder dropping. Server-side. @API:potion_brew_post@.
     pub(super) fn native_potion_brew_post(
         &mut self,
         pos: [i32; 3],
@@ -4812,18 +4813,30 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_potion_brew_post(self, mod_api::mods(), pos, stacks);
     }
-    /// A server player took `stack` (the output, `stack.count` of it) from a
-    /// furnace, blast furnace or smoker's result slot
-    /// (`FurnaceResultSlot.checkTakeAchievements`), by a click, a shift-click
-    /// or a throw: `player` is their UUID and `player_entity_id` their network
-    /// id. Fires before `furnace_extract`. Server-side. @API:item_smelted@.
+    /// `FurnaceResultSlot.checkTakeAchievements` ran for a server player at a
+    /// furnace, blast furnace or smoker's result slot: `player` is their UUID
+    /// and `player_entity_id` their network id; `stack` and `amount_removed`
+    /// are what vanilla passes there (`getSmelting`, `getAmountRemoved`). A
+    /// click or a throw passes the taken stack and its count; a shift-click
+    /// passes the slot's stack as it was with the count moved, then what
+    /// stayed in the slot (`None` once it is empty) with 0; a hotbar swap
+    /// passes the taken stack with 0. Fires before `furnace_extract`.
+    /// Server-side. @API:item_smelted@.
     pub(super) fn native_item_smelted(
         &mut self,
         player: u128,
         player_entity_id: i32,
-        stack: &ItemStack,
+        stack: Option<&ItemStack>,
+        amount_removed: u32,
     ) {
-        mod_api::dispatch_item_smelted(self, mod_api::mods(), player, player_entity_id, stack);
+        mod_api::dispatch_item_smelted(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            stack,
+            amount_removed,
+        );
     }
     /// A server player enchanted `item` at an enchanting table
     /// (`EnchantmentMenu.clickMenuButton`): `enchantments` are the ones it was
