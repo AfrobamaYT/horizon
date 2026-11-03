@@ -23,7 +23,7 @@ use horizon_client::mod_api::{
     self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
     NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
+    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LogicalSide, NativeBlockClick,
@@ -554,6 +554,28 @@ impl GameLevel<'_> {
         mod_api::dispatch_is_signal_source(self, state, source);
     }
 
+    /// `BlockBehaviour.shouldRedstoneWireConnectTo`: set `connected` to say
+    /// whether redstone wire connects to the block `state` at `pos`.
+    /// `direction` points from the wire toward the neighbouring block, or is
+    /// None when the wire asks about the block above or below. `connected` holds vanilla's answer: change
+    /// it when the block is yours. Asked whenever wire settles its shape:
+    /// answer from `state` and `pos` without touching the world. When the
+    /// answer changes, and once the wire is placed, update its neighbours
+    /// (`native_update_signal_neighbors`). Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_should_redstone_wire_connect_to(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        connected: &mut bool,
+    ) {
+        mod_api::dispatch_should_redstone_wire_connect_to(
+            self, dimension, pos, state, direction, connected,
+        );
+    }
+
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
     /// that comparators read (how full or far along it is, as a composter's
     /// level), so they ask `native_analog_output`. Asked from inside the
@@ -584,6 +606,25 @@ impl GameLevel<'_> {
         output: &mut i32,
     ) {
         mod_api::dispatch_analog_output(self, dimension, pos, state, face, output);
+    }
+
+    /// `BlockEntity.preRemoveSideEffects` of a mod's block entity: an
+    /// authoritative server is removing `entity` from `pos`, where the block
+    /// `state` stood, and its updates may have side effects (not under flag
+    /// 256, `UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS`). Put in `drops` the stacks
+    /// it held that the game doesn't: they scatter as `Containers.dropItemStack`
+    /// scatters them, after the block entity's own container. The block entity
+    /// is still in place, so its attachments read as they were. Answered from
+    /// inside the level's write: don't change the world here.
+    #[inline(always)]
+    pub(super) fn native_pre_remove_side_effects(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        entity: &ModBlockEntity,
+        drops: &mut Vec<ItemStack>,
+    ) {
+        mod_api::dispatch_pre_remove_side_effects(self, pos, state, entity, drops);
     }
 
     /// An authoritative server's `ServerLevel.tickChunk` is about to
@@ -1419,6 +1460,13 @@ impl Game<'_> {
     /// player's integrated server included).
     pub(super) fn native_data_pack_files(&mut self, files: &mut Vec<(String, Vec<u8>)>) {
         mod_api::dispatch_data_pack_files(self, files);
+    }
+
+    /// Register server data reload listeners after packs are selected. The
+    /// host gives registry access at registration, as
+    /// `AddServerReloadListenersEvent.getRegistryAccess` does.
+    pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
+        mod_api::dispatch_add_server_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for
     /// `native_data_pack_files` (a world's first open and every `/reload`):
@@ -5290,6 +5338,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_dispense_item(self, dimension, pos, facing, stack, answer);
     }
+    /// `BlockBehaviour.useItemOn`: the block's own behaviour, with the
+    /// held item, on the server for each player. An answer replaces the
+    /// template's behaviour; `TryWithEmptyHand` tries `useWithoutItem` on
+    /// the main hand, and `Pass` goes on to the item's `useOn`.
+    pub(super) fn native_use_item_on(
+        &mut self,
+        state: BlockStateId,
+        click: &NativeBlockClick<'_>,
+        answer: &mut Option<NativeInteractionResult>,
+    ) {
+        mod_api::dispatch_use_item_on(self, state, click, answer);
+    }
     /// A player uses `stack` (right click) with `self.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
@@ -5721,6 +5781,20 @@ impl Game<'_> {
     /// `native_level_unload` follows. Server-side.
     pub(super) fn native_level_load(&mut self, dimension: &str) {
         mod_api::dispatch_level_load(self, dimension);
+    }
+    /// `dimension`'s level has loaded its saved chunk tickets (NeoForge's
+    /// `LoadingValidationCallback.validateTickets`), before its first tick and
+    /// after `native_level_load`, once for each open. `validation` holds the
+    /// calling mod's tickets, block owners and entity owners apart; a mod
+    /// removes the ones that no longer hold (a machine that is gone), and
+    /// they stop forcing their chunks. Asked only while a mod holds tickets
+    /// in the level. Server-side.
+    pub(super) fn native_chunk_tickets_validate(
+        &mut self,
+        dimension: &str,
+        validation: &mut horizon_client::mod_chunk_tickets::TicketValidation,
+    ) {
+        mod_api::dispatch_chunk_tickets_validate(self, dimension, validation);
     }
     /// `dimension`'s level closed (NeoForge's `LevelEvent.Unload`, posted after
     /// `level.close()` in `MinecraftServer.stopServer`), after its last save:
@@ -8202,6 +8276,23 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// The level behaviour's answer, or `None` to try `useWithoutItem`.
+/// `ServerPlayerGameMode.useItemOn` lets both FAIL and PASS go to the item.
+/// Both success swing sources swing on this server path.
+pub(super) fn block_use_result(
+    answer: NativeInteractionResult,
+) -> Option<horizon_world::level::InteractionResult> {
+    use horizon_world::level::InteractionResult;
+    match answer {
+        NativeInteractionResult::Success | NativeInteractionResult::SuccessServer => {
+            Some(InteractionResult::Success)
+        }
+        NativeInteractionResult::Consume => Some(InteractionResult::Consume),
+        NativeInteractionResult::TryWithEmptyHand => None,
+        _ => Some(InteractionResult::Pass),
+    }
+}
+
 /// What the mods answered a right click on a block (`right_click_block`).
 pub(super) enum BlockClickAnswer {
     /// Cancelled: this answers the click instead of the block and the item.
@@ -8242,22 +8333,7 @@ impl Game<'_> {
                 use_item,
             };
         }
-        let (player, player_entity_id) = self.native_clicker();
-        let side = if self.remote.is_some() {
-            LogicalSide::Client
-        } else {
-            LogicalSide::Server
-        };
-        let click = NativeBlockClick {
-            side,
-            dimension: self.dim.level(),
-            pos: hit.pos,
-            hit: hit.native(),
-            hand,
-            stack,
-            player,
-            player_entity_id,
-        };
+        let click = self.block_click(hit, hand, stack);
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_block(
             &click,
@@ -8273,6 +8349,29 @@ impl Game<'_> {
                 use_block,
                 use_item,
             }
+        }
+    }
+    /// The shared context for a block's behaviour and the click event.
+    pub(super) fn block_click<'a>(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&'a ItemStack>,
+    ) -> NativeBlockClick<'a> {
+        let (player, player_entity_id) = self.native_clicker();
+        NativeBlockClick {
+            side: if self.remote.is_some() {
+                LogicalSide::Client
+            } else {
+                LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos: hit.pos,
+            hit: hit.native(),
+            hand,
+            stack,
+            player,
+            player_entity_id,
         }
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
@@ -8431,7 +8530,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| g.placed)
+            .filter(|g| g.placed && g.participates_online())
             .map(|g| (g.uuid, g.name.clone()))
             .collect();
         for (player, name) in players {

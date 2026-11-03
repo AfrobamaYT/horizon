@@ -8,8 +8,10 @@ pub(super) struct HookSources {
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
     pub hook_ids: String,
+    pub hook_constants: String,
     pub hook_count: usize,
     pub render_hook_ids: String,
+    pub render_hook_constants: String,
     pub render_hook_count: usize,
 }
 
@@ -19,8 +21,10 @@ pub(super) fn emit(
     methods: &[syn::ItemFn],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
+    let mut hook_constants = String::new();
     let mut hook_count = 0;
     let mut render_hook_ids = String::new();
+    let mut render_hook_constants = String::new();
     let mut render_hook_count = 0;
     let mut traits = String::new();
     let mut dispatch = String::new();
@@ -202,18 +206,19 @@ pub(super) fn emit(
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
         let event = fresh_name("event", &mut used);
-        let event_type = format!(
-            "{}Event",
-            name.split('_')
-                .map(|word| word[..1].to_uppercase() + &word[1..])
-                .collect::<String>()
-        );
+        let event_type = format!("{}Event", hook_id(name));
         let hook_id = event_type.strip_suffix("Event").unwrap();
         if is_render {
             render_hook_ids.push_str(&format!("{hook_id},\n"));
+            render_hook_constants.push_str(&format!(
+                "pub const {name}: Option<super::RenderHookId> = Some(super::RenderHookId::{hook_id});\n"
+            ));
             render_hook_count += 1;
         } else {
             hook_ids.push_str(&format!("{hook_id},\n"));
+            hook_constants.push_str(&format!(
+                "pub const {name}: Option<super::HookId> = Some(super::HookId::{hook_id});\n"
+            ));
             hook_count += 1;
         }
         let mut trait_params = vec!["&self".to_owned()];
@@ -342,16 +347,8 @@ pub(super) fn emit(
                     "{method_source}fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
                 ));
         }
-        let (domain, id_enum) = if is_render {
-            ("Render", "RenderHookId")
-        } else {
-            ("Gameplay", "HookId")
-        };
-        let report = format!(
-            "horizon_client_core::subscribers::default_called(horizon_client_core::subscribers::Domain::{domain}, {id_enum}::{hook_id} as usize, self);"
-        );
         method_source.push_str(&format!(
-            "fn {name}({trait_params}){result} {{ {report} {unused} {default} }}\n"
+            "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
         ));
         traits.push_str(&method_source);
         dispatch.push_str(&format!(
@@ -433,8 +430,10 @@ pub(super) fn emit(
         part_traits,
         fills,
         hook_ids,
+        hook_constants,
         hook_count,
         render_hook_ids,
+        render_hook_constants,
         render_hook_count,
     })
 }

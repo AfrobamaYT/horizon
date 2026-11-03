@@ -32,6 +32,7 @@ type Pos = (i32, i32, i32);
 /// One open transaction.
 #[derive(Default)]
 pub(super) struct Level {
+    dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
     /// Each block's state before this transaction first wrote it.
@@ -45,8 +46,8 @@ pub(super) struct Level {
     mob_lengths: HashMap<u32, usize>,
     /// Each item entity's stack before this transaction first wrote it.
     item_entities: HashMap<u32, ItemStack>,
-    /// Each guest's menu storage before this transaction first wrote it, by UUID.
-    menus: HashMap<u128, KeptMenus>,
+    /// Each guest's menu storage before this transaction first wrote it, by connection.
+    menus: HashMap<u32, KeptMenus>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
     attachments: HashMap<Holder, Attachments>,
@@ -124,7 +125,10 @@ impl Game<'_> {
         self.transaction_close(commit);
     }
     fn transaction_open(&mut self) {
-        self.transactions.push(Level::default());
+        self.transactions.push(Level {
+            dimension: Some(self.dim),
+            ..Level::default()
+        });
     }
     /// Closes the innermost transaction: `commit` hands its changes to the one around it, or
     /// at the root makes them final and tells the world; otherwise every storage it wrote goes
@@ -133,6 +137,11 @@ impl Game<'_> {
         let Some(level) = self.transactions.pop() else {
             return;
         };
+        debug_assert_eq!(
+            level.dimension,
+            Some(self.dim),
+            "transaction closed in a different level"
+        );
         match (commit, self.transactions.last_mut()) {
             (true, Some(outer)) => {
                 for (pos, kept) in level.block_entities {
@@ -153,8 +162,8 @@ impl Game<'_> {
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
                 }
-                for (uuid, kept) in level.menus {
-                    outer.menus.entry(uuid).or_insert(kept);
+                for (conn, kept) in level.menus {
+                    outer.menus.entry(conn).or_insert(kept);
                 }
                 for (holder, kept) in level.attachments {
                     outer.attachments.entry(holder).or_insert(kept);
@@ -220,20 +229,27 @@ impl Game<'_> {
             carried: self.carried.clone(),
         });
     }
-    /// Keeps the menu storage of guest `uuid` as it is, if a transaction is open and hasn't yet.
-    pub(super) fn journal_menus(&mut self, uuid: u128) {
-        let Some(level) = self.transactions.last_mut() else {
+    /// Keeps `player`'s menu storage as it is, if a transaction is open and hasn't yet.
+    pub(super) fn journal_menus(&mut self, player: horizon_client::mod_api::PlayerRef) {
+        let Some(level) = self.transactions.last() else {
             return;
         };
-        let mut guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
-        let Some(g) = guests.find(|g| g.placed && g.uuid == uuid) else {
+        let Some(super::native_server::PlayerRead::Guest(g)) = self.player_handle_read(player)
+        else {
             return;
         };
-        level.menus.entry(uuid).or_insert_with(|| KeptMenus {
+        let conn = g.conn;
+        if level.menus.contains_key(&conn) {
+            return;
+        }
+        let kept = KeptMenus {
             ender_items: g.ender_items.clone(),
             craft_grid: g.craft_grid.clone(),
             native_menu: g.native_menu.clone(),
-        });
+        };
+        if let Some(level) = self.transactions.last_mut() {
+            level.menus.insert(conn, kept);
+        }
     }
     /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
     pub(super) fn journal_entity(&mut self, id: u32) {
@@ -345,12 +361,12 @@ impl Game<'_> {
         }
         // A crafting grid the transaction changed has its result made again, once for each
         // player however many writes it took (`InventoryMenu.slotsChanged`).
-        for (uuid, kept) in &level.menus {
+        for (conn, kept) in &level.menus {
             let mut guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
             let changed =
-                guests.any(|g| g.placed && g.uuid == *uuid && g.craft_grid != kept.craft_grid);
+                guests.any(|g| g.placed && g.conn == *conn && g.craft_grid != kept.craft_grid);
             if changed {
-                self.guest_craft_result(*uuid);
+                self.guest_craft_result(*conn);
             }
         }
         for (pos, kept) in level.block_entities {
@@ -418,7 +434,7 @@ impl Game<'_> {
             .iter_mut()
             .flat_map(|host| host.hub.guests.iter_mut());
         for g in guests {
-            if let Some(kept) = level.menus.get(&g.uuid).filter(|_| g.placed) {
+            if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
                 g.ender_items.clone_from(&kept.ender_items);
                 g.craft_grid.clone_from(&kept.craft_grid);
                 g.native_menu.clone_from(&kept.native_menu);
@@ -455,6 +471,45 @@ mod tests {
         },
     };
     use std::{sync::Arc, time::Instant};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_menu_write_outside_a_transaction_keeps_no_journal() {
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let player = game.native_player_ref(12).unwrap();
+            let menu = game.native_menu_ref(player).unwrap();
+            let stone = ItemStack::new("minecraft:stone", 4);
+            game.journal_menus(player);
+            *game.native_menu_storage(menu, 1).unwrap() = Some(stone.clone());
+            assert!(game.transactions.is_empty());
+            assert_eq!(menu.slot(game, 1), Some(Some(stone)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn menu_journals_keep_only_the_first_write_inside_a_transaction() {
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let player = game.native_player_ref(12).unwrap();
+            let menu = game.native_menu_ref(player).unwrap();
+            let stone = ItemStack::new("minecraft:stone", 4);
+            *game.native_menu_storage(menu, 1).unwrap() = Some(stone.clone());
+            let place = crate::mod_api::ItemPlace::MenuSlot { menu, slot: 1 };
+            let resource = ItemResource::of(&stone);
+            let aborted: Result<(), ()> = game.transaction(|game, tx| {
+                assert_eq!(place.insert(game, tx, &resource, 2), 2);
+                assert_eq!(place.insert(game, tx, &resource, 3), 3);
+                let journal = &game.transactions.last().unwrap().menus;
+                assert_eq!(journal.len(), 1);
+                assert_eq!(journal[&12].craft_grid[0], Some(stone.clone()));
+                assert_eq!(menu.slot(game, 1).unwrap().unwrap().count, 9);
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert!(game.transactions.is_empty());
+            assert_eq!(menu.slot(game, 1), Some(Some(stone)));
+        });
+    }
 
     fn insert(
         host: &mut dyn ServerHost,
@@ -1038,7 +1093,45 @@ mod mod_capability_tests {
             game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
             game.armor_stands.push(ArmorStand::new(14, Vec3::ZERO, 0.0));
             let guest = 0x5eed_u128;
-            game.guest_attachments.insert(guest, Default::default());
+            let config = horizon_client::lan::hub::HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 10,
+                simulation_distance: 10,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 20,
+                integrated: false,
+                levels: Default::default(),
+            };
+            game.lan_host(
+                super::super::lan::LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                },
+                horizon_client::lan::NetConfig {
+                    announce: false,
+                    ..horizon_client::lan::NetConfig::lan(0, "test".into(), 2)
+                },
+                config,
+            )
+            .unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let player_ref = game.native_fake_player(level, guest, "test").unwrap();
+            let conn = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.entity_id as u32 == player_ref.entity().id())
+                .unwrap()
+                .conn;
             let (stand, fresh, player) = (
                 Holder::Entity(13),
                 Holder::Entity(14),
@@ -1081,13 +1174,13 @@ mod mod_capability_tests {
             game.lan_acting_uuid = Some(guest);
             std::mem::swap(
                 &mut game.player_attachments,
-                game.guest_attachments.get_mut(&guest).unwrap(),
+                game.guest_attachments.get_mut(&conn).unwrap(),
             );
             let host: &mut dyn ServerHost = game;
             ENERGY.set(host, player, 70).unwrap();
             std::mem::swap(
                 &mut game.player_attachments,
-                game.guest_attachments.get_mut(&guest).unwrap(),
+                game.guest_attachments.get_mut(&conn).unwrap(),
             );
             game.lan_acting_uuid = None;
             game.transaction_close(false);

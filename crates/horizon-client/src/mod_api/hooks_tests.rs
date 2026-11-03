@@ -1,4 +1,5 @@
 use super::*;
+use crate::mod_api;
 
 #[test]
 #[ignore = "optimized hot-hook microbenchmark"]
@@ -8,8 +9,10 @@ fn subscriber_tick_benchmark() {
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
     struct Quiet;
+    #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
     struct Listener;
+    #[mod_api::__subscriptions]
     impl Hooks for Listener {
         fn tick(&self, _: crate::mod_api::HostSide, event: &mut TickEvent) {
             black_box(event);
@@ -66,11 +69,13 @@ fn subscriber_tick_benchmark() {
 }
 
 #[test]
-fn subscriber_guards_are_thread_local_for_one_installation() {
+fn eager_subscribers_are_shared_across_dispatch_threads() {
     use std::sync::Barrier;
     struct Quiet;
+    #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
     struct Listener;
+    #[mod_api::__subscriptions]
     impl Hooks for Listener {
         fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {}
     }
@@ -80,6 +85,18 @@ fn subscriber_guards_are_thread_local_for_one_installation() {
             ModEntry::new("listener", Box::new(Listener)),
         ]
         .into(),
+    );
+    assert!(
+        !installed
+            .subscribers
+            .contains_any(HookId::BabyEntitySpawn as usize)
+    );
+    assert_eq!(
+        installed
+            .subscribers
+            .indices(HookId::LootTableLoad as usize)
+            .collect::<Vec<_>>(),
+        [1]
     );
     let barrier = Barrier::new(2);
     std::thread::scope(|scope| {
@@ -110,6 +127,7 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
     impl Host for HostDouble {}
     impl ServerHost for HostDouble {}
     struct Counter(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
     impl Hooks for Counter {
         fn tick(&self, _: crate::mod_api::HostSide, _: &mut TickEvent) {
             self.0.fetch_add(1, Ordering::Relaxed);
@@ -155,6 +173,7 @@ fn movement_input_writes_back_all_fields() {
     impl ServerHost for TestHost {}
     impl ClientHost for TestHost {}
     struct Movement;
+    #[mod_api::__subscriptions]
     impl Hooks for Movement {
         fn movement_input(&self, _host: &dyn ClientHost, event: &mut MovementInputEvent) {
             event.forward = -0.5;
@@ -179,6 +198,7 @@ fn recipe_book_categories_accept_mod_declarations() {
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
     struct Categories;
+    #[mod_api::__subscriptions]
     impl Hooks for Categories {
         fn recipe_book_categories(
             &self,
