@@ -554,6 +554,28 @@ impl GameLevel<'_> {
         mod_api::dispatch_is_signal_source(self, state, source);
     }
 
+    /// `BlockBehaviour.shouldRedstoneWireConnectTo`: set `connected` to say
+    /// whether redstone wire connects to the block `state` at `pos`.
+    /// `direction` points from the wire toward the neighbouring block, or is
+    /// None when the wire asks about the block above or below. `connected` holds vanilla's answer: change
+    /// it when the block is yours. Asked whenever wire settles its shape:
+    /// answer from `state` and `pos` without touching the world. When the
+    /// answer changes, and once the wire is placed, update its neighbours
+    /// (`native_update_signal_neighbors`). Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_should_redstone_wire_connect_to(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        connected: &mut bool,
+    ) {
+        mod_api::dispatch_should_redstone_wire_connect_to(
+            self, dimension, pos, state, direction, connected,
+        );
+    }
+
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
     /// that comparators read (how full or far along it is, as a composter's
     /// level), so they ask `native_analog_output`. Asked from inside the
@@ -5316,6 +5338,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_dispense_item(self, dimension, pos, facing, stack, answer);
     }
+    /// `BlockBehaviour.useItemOn`: the block's own behaviour, with the
+    /// held item, on the server for each player. An answer replaces the
+    /// template's behaviour; `TryWithEmptyHand` tries `useWithoutItem` on
+    /// the main hand, and `Pass` goes on to the item's `useOn`.
+    pub(super) fn native_use_item_on(
+        &mut self,
+        state: BlockStateId,
+        click: &NativeBlockClick<'_>,
+        answer: &mut Option<NativeInteractionResult>,
+    ) {
+        mod_api::dispatch_use_item_on(self, state, click, answer);
+    }
     /// A player uses `stack` (right click) with `self.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
@@ -7645,6 +7679,10 @@ impl Game<'_> {
             log.push((pos[0], pos[1], pos[2]));
         }
     }
+    /// The applied client pause state, not whether a pause screen is open.
+    pub(super) fn native_is_paused(&self) -> bool {
+        self.pause
+    }
     /// Playing, with nothing over the world: keys and zoom apply.
     pub(super) fn native_playing(&self) -> bool {
         self.screen == Screen::Playing
@@ -8242,6 +8280,23 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// The level behaviour's answer, or `None` to try `useWithoutItem`.
+/// `ServerPlayerGameMode.useItemOn` lets both FAIL and PASS go to the item.
+/// Both success swing sources swing on this server path.
+pub(super) fn block_use_result(
+    answer: NativeInteractionResult,
+) -> Option<horizon_world::level::InteractionResult> {
+    use horizon_world::level::InteractionResult;
+    match answer {
+        NativeInteractionResult::Success | NativeInteractionResult::SuccessServer => {
+            Some(InteractionResult::Success)
+        }
+        NativeInteractionResult::Consume => Some(InteractionResult::Consume),
+        NativeInteractionResult::TryWithEmptyHand => None,
+        _ => Some(InteractionResult::Pass),
+    }
+}
+
 /// What the mods answered a right click on a block (`right_click_block`).
 pub(super) enum BlockClickAnswer {
     /// Cancelled: this answers the click instead of the block and the item.
@@ -8282,22 +8337,7 @@ impl Game<'_> {
                 use_item,
             };
         }
-        let (player, player_entity_id) = self.native_clicker();
-        let side = if self.remote.is_some() {
-            LogicalSide::Client
-        } else {
-            LogicalSide::Server
-        };
-        let click = NativeBlockClick {
-            side,
-            dimension: self.dim.level(),
-            pos: hit.pos,
-            hit: hit.native(),
-            hand,
-            stack,
-            player,
-            player_entity_id,
-        };
+        let click = self.block_click(hit, hand, stack);
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_block(
             &click,
@@ -8313,6 +8353,29 @@ impl Game<'_> {
                 use_block,
                 use_item,
             }
+        }
+    }
+    /// The shared context for a block's behaviour and the click event.
+    pub(super) fn block_click<'a>(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&'a ItemStack>,
+    ) -> NativeBlockClick<'a> {
+        let (player, player_entity_id) = self.native_clicker();
+        NativeBlockClick {
+            side: if self.remote.is_some() {
+                LogicalSide::Client
+            } else {
+                LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos: hit.pos,
+            hit: hit.native(),
+            hand,
+            stack,
+            player,
+            player_entity_id,
         }
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
@@ -9321,6 +9384,22 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_host_reads_current_pause_state() {
+        use super::super::execution_role::ExecutionRole;
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mod_api::ClientHost;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.pause = false;
+            assert!(!ClientHost::is_paused(game));
+            game.pause = true;
+            assert!(ClientHost::is_paused(game));
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {

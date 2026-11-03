@@ -726,21 +726,7 @@ pub fn mob_to_nbt(
             } else {
                 map.remove(&"Items".into());
             }
-            // Body and saddle are written with the other slots below.
-            let mut equipment = Vec::new();
-            // A helmet given to the mount (say by `/item ... armor.head`)
-            // keeps its own slot.
-            if let Some(helmet) = &m.extra.head {
-                equipment.push((
-                    "head",
-                    Tag::compound([("id", string(helmet)), ("count", Tag::Int(1))]),
-                ));
-            }
-            if equipment.is_empty() {
-                map.remove(&"equipment".into());
-            } else {
-                map.insert("equipment".into(), Tag::compound(equipment));
-            }
+            // The `equipment` compound is written below, for every mob.
             let modelled = [
                 ("minecraft:max_health", f64::from(m.attrs.max_health)),
                 ("minecraft:movement_speed", m.attrs.speed),
@@ -873,11 +859,11 @@ pub fn mob_to_nbt(
         "minecraft:allay" => {
             // InventoryCarrier: the fetched stack; the liked player memory.
             let mut inv = Vec::new();
-            if let (Some(item), n) = (&m.extra.main_hand, m.extra.ints[1])
+            if let (Some(item), n) = (m.extra.main_hand_id(), m.extra.ints[1])
                 && n > 0
             {
                 inv.push(Tag::compound([
-                    ("id", Tag::String(item.as_ref().into())),
+                    ("id", Tag::String(item.into())),
                     ("count", Tag::Int(n)),
                 ]));
             }
@@ -1010,18 +996,6 @@ pub fn mob_to_nbt(
             map.insert("Size".into(), Tag::Int(m.extra.size.max(1) - 1));
             map.insert("wasOnGround".into(), Tag::Byte(i8::from(m.extra.flag2)));
         }
-        // Skeletons are spawned holding a bow (finalizeSpawn); a mob loaded
-        // from NBT keeps only its saved equipment.
-        "minecraft:skeleton" | "minecraft:stray" | "minecraft:bogged"
-            if raw.is_none() && m.extra.main_hand.as_deref() == Some("minecraft:bow") =>
-        {
-            map.entry("equipment".into()).or_insert_with(|| {
-                Tag::compound([(
-                    "mainhand",
-                    Tag::compound([("id", string("minecraft:bow")), ("count", Tag::Int(1))]),
-                )])
-            });
-        }
         // Zombie and Skeleton.addAdditionalSaveData (a husk keeps Zombie's):
         // `ConversionTracker`'s conversion and affliction times, -1 when it is
         // not converting or not afflicted.
@@ -1153,111 +1127,30 @@ pub fn mob_to_nbt(
     }
     crate::mobs::raider::write_nbt(m, map);
     crate::mobs::riders::write_nbt(m, map);
-    // LivingEntity equipment: what the mob holds now.
+    // LivingEntity equipment: what the mob holds and wears now.
     {
-        let mut equipment = match map.get(&"equipment".into()) {
-            Some(Tag::Compound(c)) => c.clone(),
-            _ => horizon_world::nbt::Compound::new(),
-        };
-        for (index, (slot, item)) in [
-            ("mainhand", &m.extra.main_hand),
-            ("offhand", &m.extra.off_hand),
-            ("head", &m.extra.head),
-            ("chest", &m.extra.chest),
-            ("legs", &m.extra.legs),
-            ("feet", &m.extra.feet),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if slot == "mainhand"
-                && let Some(stack) = m.extra.main_hand_stack()
-            {
-                let mut stack = stack.clone();
-                if let Some(g) = crate::mobs::gear::gear(m) {
-                    stack.data_mut().enchantments = g.slots[index].clone();
-                    stack.data_mut().trim = g.trims[index].clone();
-                }
-                equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
-                continue;
+        let mut equipment = m.extra.equipment.clone();
+        let head = horizon_items::equipment::HEAD;
+        // Held and worn items are saved with their enchantments and trim.
+        for slot in horizon_items::equipment::MAINHAND..=head {
+            equipment[slot] = crate::mobs::finalize::item_stack(m, slot);
+        }
+        // The captain's ominous banner keeps its patterns.
+        if equipment[head].as_ref().is_some_and(|banner| {
+            &*banner.item == crate::mobs::raider::BANNER
+                && banner.extra.is_none()
+                && crate::mobs::raider::is_raider(m.species())
+        }) {
+            equipment[head] = Some(crate::mobs::raider::ominous_banner());
+        }
+        match equipment.write() {
+            Some(tag) => {
+                map.insert("equipment".into(), tag);
             }
-            // A worn piece or held item that kept its damage, name or
-            // components is saved with them.
-            if slot != "mainhand"
-                && item.is_some()
-                && let Some(stack) = crate::mobs::finalize::stored_stack(
-                    m,
-                    [
-                        crate::mobs::finalize::MAINHAND,
-                        crate::mobs::finalize::OFFHAND,
-                        crate::mobs::finalize::HEAD,
-                        crate::mobs::finalize::CHEST,
-                        crate::mobs::finalize::LEGS,
-                        crate::mobs::finalize::FEET,
-                    ][index],
-                )
-            {
-                equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
-                continue;
-            }
-            // Enchanted or trimmed gear is saved with its components.
-            if let (Some(id), Some(g)) = (item, crate::mobs::gear::gear(m))
-                && (!g.slots[index].is_empty() || g.trims[index].is_some())
-            {
-                let mut stack = crate::items::ItemStack::new(id, 1);
-                stack.data_mut().enchantments = g.slots[index].clone();
-                stack.data_mut().trim = g.trims[index].clone();
-                equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
-                continue;
-            }
-            match item {
-                Some(id) => {
-                    let keep = slot != "mainhand"
-                        && matches!(
-                            equipment.get(&slot.into()).and_then(|e| e.get("id")),
-                            Some(Tag::String(s)) if s.to_string_lossy() == **id
-                        );
-                    if slot == "head"
-                        && &**id == crate::mobs::raider::BANNER
-                        && crate::mobs::raider::is_raider(m.species())
-                    {
-                        // The captain's ominous banner keeps its patterns.
-                        let has_patterns = equipment
-                            .get(&slot.into())
-                            .and_then(|e| e.get("components"))
-                            .is_some();
-                        if !has_patterns {
-                            equipment.insert(
-                                slot.into(),
-                                crate::save::item_to_nbt(&crate::mobs::raider::ominous_banner()),
-                            );
-                        }
-                    } else if !keep {
-                        equipment.insert(
-                            slot.into(),
-                            Tag::compound([
-                                ("id", Tag::String(id.as_ref().into())),
-                                ("count", Tag::Int(1)),
-                            ]),
-                        );
-                    }
-                }
-                None => {
-                    equipment.remove(&slot.into());
-                }
+            None => {
+                map.remove(&"equipment".into());
             }
         }
-        horizon_items::equipment::put(
-            &mut equipment,
-            horizon_items::equipment::BODY,
-            m.extra.body_stack(),
-        );
-        horizon_items::equipment::put(
-            &mut equipment,
-            horizon_items::equipment::SADDLE,
-            m.saddle_item().as_ref(),
-        );
-        horizon_items::equipment::store(map, equipment);
     }
     tag
 }
@@ -1489,32 +1382,20 @@ pub fn mob_from_nbt(
     m.hurt_time = number(tag.get("HurtTime")).unwrap_or(0) as i32;
     // What it holds (equipment.mainhand / offhand), when saved.
     if let Some(eq) = tag.get("equipment") {
-        m.extra
-            .set_main_hand_stack(eq.get("mainhand").and_then(crate::save::item_from_nbt));
-        m.extra.off_hand = eq
-            .get("offhand")
-            .and_then(|i| text(i.get("id")))
-            .map(Into::into);
-        let slot = |key| eq.get(key).and_then(|i| text(i.get("id"))).map(Into::into);
-        m.extra.head = slot("head");
-        // Body and saddle: the one `equipment` codec.
-        let equipment = horizon_items::equipment::Equipment::read(eq);
-        m.extra
-            .set_body_stack(equipment.get(horizon_items::equipment::BODY).cloned());
-        m.set_saddle(equipment.get(horizon_items::equipment::SADDLE).cloned());
-        m.extra.chest = slot("chest");
-        m.extra.legs = slot("legs");
-        m.extra.feet = slot("feet");
+        // The hands, armour, body and saddle: the one `equipment` codec.
+        m.extra.equipment = horizon_items::equipment::Equipment::read(eq);
         // Their enchantments and trims.
-        for (index, key) in crate::mobs::gear::KEYS.iter().enumerate() {
-            if let Some(stack) = eq.get(key).and_then(crate::save::item_from_nbt) {
-                crate::mobs::gear::set(&mut m, index, stack.enchantments().to_vec());
+        // (`gear` slot order: hands, then head to feet.)
+        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
+        for (index, slot) in [MAINHAND, OFFHAND, HEAD, CHEST, LEGS, FEET]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(stack) = m.extra.slot_stack(slot) {
+                let levels = stack.enchantments().to_vec();
                 let trim = stack.data().and_then(|d| d.trim.clone());
+                crate::mobs::gear::set(&mut m, index, levels);
                 crate::mobs::gear::set_trim(&mut m, index, trim);
-                // The damage, name and components stay with the slot.
-                if index != crate::mobs::gear::MAIN {
-                    crate::mobs::gear::set_stack(&mut m, index, stack);
-                }
             }
         }
     } else {
@@ -3496,7 +3377,7 @@ mod tests {
         ]);
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert_eq!(m.extra.body_id(), Some("minecraft:diamond_horse_armor"));
-        assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(m.extra.head_id(), Some("minecraft:iron_helmet"));
         let saved = mob_to_nbt(&m, [0; 4], Some(&raw), None);
         let eq = saved.get("equipment").unwrap();
         let id = |key: &str| {
@@ -3546,7 +3427,7 @@ mod tests {
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert_eq!(m.extra.body_id(), Some("minecraft:wolf_armor"));
         assert_eq!(m.extra.body_damage(), 9);
-        assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(m.extra.head_id(), Some("minecraft:iron_helmet"));
     }
 
     fn fused_creeper(fuse: Option<i16>) -> (Mob, Tag) {
@@ -5944,7 +5825,10 @@ mod held_item_name_tests {
         assert_eq!(zombie.saddle_item(), Some(saddle));
         assert_eq!(zombie.equipment_stacks()[1], Some(offhand));
         let mut horse = Mob::new(1, Arc::clone(&types["minecraft:horse"]), Vec3::ZERO, 0.0);
-        horse.extra.head = Some("minecraft:iron_helmet".into());
+        horse.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:iron_helmet".into()),
+        );
         let mut armor = crate::items::ItemStack::new("minecraft:diamond_horse_armor", 3);
         armor.damage = 7;
         armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Body".into()));
@@ -5960,7 +5844,7 @@ mod held_item_name_tests {
         );
         let raw = mob_to_nbt(&horse, [1, 2, 3, 4], None, None);
         let mut horse = mob_from_nbt(&raw, &types, 2, None).unwrap();
-        assert_eq!(horse.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(horse.extra.head_id(), Some("minecraft:iron_helmet"));
         assert_eq!(horse.extra.body_id(), Some("minecraft:diamond_horse_armor"));
         assert_eq!(horse.equipment_stacks()[6], Some(armor.clone()));
         let mut chances = [0.0; 8];
@@ -6084,7 +5968,7 @@ mod held_item_name_tests {
         let saved = mob_to_nbt(&loaded, [1, 2, 3, 4], Some(&raw), None);
         let restored = mob_from_nbt(&saved, &types, 3, None).unwrap();
         assert_eq!(
-            restored.extra.main_hand.as_deref(),
+            restored.extra.main_hand_id(),
             Some("minecraft:diamond_sword")
         );
         assert!(

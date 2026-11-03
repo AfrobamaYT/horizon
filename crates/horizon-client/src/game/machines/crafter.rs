@@ -347,7 +347,7 @@ impl Game<'_> {
             menu.set_slot_state(i, enabled);
             Some(true)
         });
-        if let Some((container, _)) = self.remote.as_ref().and_then(|r| r.menu.clone()) {
+        if let Some((container, _)) = self.remote.as_ref().and_then(|r| r.menu.as_ref().cloned()) {
             self.send(S::ContainerSlotStateChanged(
                 play::ContainerSlotStateChanged {
                     slot: i as i32,

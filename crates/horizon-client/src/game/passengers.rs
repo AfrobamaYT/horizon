@@ -434,7 +434,7 @@ impl Game<'_> {
         let Some(d) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        if d.extra.main_hand.as_deref() != Some("minecraft:trident")
+        if d.extra.main_hand_id() != Some("minecraft:trident")
             || self.world.random.next_float() >= 0.5
         {
             return;
@@ -578,10 +578,17 @@ impl Game<'_> {
         let id = self.spawn_mob("minecraft:skeleton", at, true)?;
         let m = self.mobs.iter_mut().find(|m| m.id == id)?;
         m.invulnerable = TRAP_INVULNERABLE;
-        if m.extra.head.is_none() {
-            m.extra.head = Some("minecraft:iron_helmet".into());
+        if m.extra.head_id().is_none() {
+            m.extra.set_slot_id(
+                horizon_items::equipment::HEAD,
+                Some("minecraft:iron_helmet".into()),
+            );
         }
-        let (weapon, helmet) = (m.extra.main_hand.clone(), m.extra.head.clone());
+        let finalize = horizon_client::mobs::finalize::item;
+        let (weapon, helmet) = (
+            finalize(m, horizon_client::mobs::finalize::MAINHAND),
+            finalize(m, horizon_client::mobs::finalize::HEAD),
+        );
         let special = self.local_difficulty(at).special();
         // `SkeletonTrapGoal.enchant`: the weapon and the helmet, always.
         for (slot, item) in [

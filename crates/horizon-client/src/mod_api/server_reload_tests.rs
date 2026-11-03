@@ -156,14 +156,52 @@ fn retained_registration_follows_the_same_rules_as_plain_listeners() {
     let key = listeners
         .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
         .unwrap();
-    assert!(
-        listeners
-            .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
-            .is_err()
-    );
+    assert!(listeners
+        .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
+        .is_err());
     assert!(matches!(
         listeners.finish(),
         Err(ReloadOrderError::DuplicateObject { .. })
     ));
     drop(key);
+}
+
+#[test]
+fn add_listener_attributes_its_calls_to_the_registering_mod() {
+    struct Noop;
+    impl ServerReloadListener for Noop {
+        fn prepare(&self, _: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+            Ok(ServerReloadApply::new(|| {}))
+        }
+    }
+    let guard = crate::crash::enter_native_mod(crate::crash::NativeModCall {
+        id: "test_mod",
+        hook: "add_server_reload_listeners",
+        part: None,
+    });
+    let mut owned = ServerReloadListeners::new();
+    owned
+        .add_listener(id("test_mod:data"), files(), Arc::new(Noop))
+        .unwrap();
+    drop(guard);
+    let mut unowned = ServerReloadListeners::new();
+    unowned
+        .add_listener(id("game:data"), files(), Arc::new(Noop))
+        .unwrap();
+    let listener = owned
+        .finish()
+        .unwrap()
+        .listeners
+        .into_iter()
+        .find(|listener| listener.id == id("test_mod:data"))
+        .unwrap();
+    assert_eq!(listener.owner, Some("test_mod"));
+    let listener = unowned
+        .finish()
+        .unwrap()
+        .listeners
+        .into_iter()
+        .find(|listener| listener.id == id("game:data"))
+        .unwrap();
+    assert_eq!(listener.owner, None);
 }

@@ -12,7 +12,6 @@
 use crate::backend;
 use crate::browser::java;
 use crate::native_mods::{self, Bundle, INSTALLED};
-use horizon_mods::index::native as format;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -220,7 +219,7 @@ fn commit_of(api: Api, link: &Link, reference: &str) -> Result<String, String> {
     })?;
     found["sha"]
         .as_str()
-        .filter(|s| format::revision(s))
+        .filter(|s| horizon_mods::manifest::revision(s))
         .map(str::to_owned)
         .ok_or_else(|| format!("GitHub did not name the commit of {reference}."))
 }
@@ -398,9 +397,8 @@ fn checked(bytes: &[u8], dir: &Path) -> Result<Packed, String> {
     })
 }
 
-/// Every mod folder under `root`: a `horizon-mixin.toml`, or an unpacked `.hmod`
-/// (`horizon-native.json`), the rules of `native-build <folder>`. A mod's folder is not searched
-/// further.
+/// Every flat native project under `root`, using the same reader as native-build.
+/// A mod's folder is not searched further.
 pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     fn walk(dir: &Path, depth: usize, out: &mut Vec<Bundle>) -> Result<(), String> {
         if let Some(found) = native_mods::bundle_in(dir)? {
@@ -429,37 +427,13 @@ pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     }
     let mut found = Vec::new();
     walk(root, DEPTH, &mut found)?;
-    found.sort_by(|a, b| a.id.cmp(&b.id));
+    found.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
     Ok(found)
 }
 
-/// The `.hmod` of a mod folder, as bytes: its source (Rust, TOML and `data/`) with a manifest made
-/// from its `horizon-mixin.toml`, which must pin the Horizon commit it was made for
-/// (`[compatibility] horizon_revision`). An unpacked `.hmod` (`horizon-native.json`) keeps the
-/// pins and hook points its manifest names. The zip is the same for the same files.
+/// Deterministically package a validated flat mod project.
 pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
-    let horizon = bundle.horizon.clone().filter(|h| format::revision(h)).ok_or_else(|| {
-        format!(
-            "{} has no [compatibility] horizon_revision (40 hex digits): add the Horizon commit it was made for.",
-            bundle.id
-        )
-    })?;
-    let manifest = format::Manifest {
-        schema: 1,
-        id: bundle.id.clone(),
-        version: bundle.version.clone(),
-        game: crate::browser::GAME.into(),
-        horizon,
-        mixins: bundle
-            .mixins
-            .clone()
-            .unwrap_or_else(|| native_mods::MIXINS_REV.into()),
-    };
-    let root = bundle
-        .dir
-        .parent()
-        .ok_or("native source has no project root")?;
-    format::Bundle::pack_directory(root, &manifest)
+    horizon_mods::Package::pack_directory(&bundle.dir)
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
@@ -500,13 +474,13 @@ pub fn fetch(found: &Resolved) -> Result<Vec<Packed>, String> {
     let mods = find_mods(&top)?;
     if mods.is_empty() {
         return Err(format!(
-            "{} holds no native mod (a folder with horizon-mixin.toml, or an unpacked .hmod).",
+            "{} holds no native mod (horizon-mod.toml and Cargo.toml).",
             found.label()
         ));
     }
     let packed: Result<Vec<Packed>, String> = mods
         .iter()
-        .map(|m| checked(&pack(m)?, &dir).map_err(|e| format!("{}: {e}", m.id)))
+        .map(|m| checked(&pack(m)?, &dir).map_err(|e| format!("{}: {e}", m.manifest.id)))
         .collect();
     let _ = fs::remove_dir_all(dir.join("source"));
     packed

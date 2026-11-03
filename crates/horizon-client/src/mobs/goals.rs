@@ -2469,7 +2469,7 @@ impl Goal for RestrictSun {
         0
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.daylight && m.extra.head.is_none()
+        cx.w.daylight && m.extra.head_id().is_none()
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.ai.nav.avoid_sun = true;
@@ -2522,7 +2522,11 @@ impl Goal for FleeSun {
         MOVE
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        if m.ai.target.is_some() || !cx.w.daylight || m.fire_ticks <= 0 || m.extra.head.is_some() {
+        if m.ai.target.is_some()
+            || !cx.w.daylight
+            || m.fire_ticks <= 0
+            || m.extra.head_id().is_some()
+        {
             return false;
         }
         let (bx, by, bz) = (

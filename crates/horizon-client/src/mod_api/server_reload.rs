@@ -110,7 +110,9 @@ pub trait ServerReloadListener: Send + Sync + 'static {
     /// As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a
     /// listener that parses its files logs and skips one that won't parse,
     /// carrying the rest through; returning `Err` aborts the whole reload and
-    /// keeps every listener's previous data.
+    /// keeps every listener's previous data. A panic in `prepare` or the
+    /// returned apply is not recovered: it stops the server, and the crash
+    /// report names the listener and the mod that registered it.
     fn prepare(
         &self,
         context: &ServerReloadContext,
@@ -127,6 +129,41 @@ pub(crate) struct ServerListener {
     pub id: Identifier,
     pub converter: Option<FileToIdConverter>,
     pub listener: Arc<dyn ServerReloadListener>,
+    /// The registering mod's id, for crash attribution on its later calls; the
+    /// vanilla anchors have none.
+    pub owner: Option<&'static str>,
+}
+
+/// Crash attribution for one listener call. A returned `Err` is recovered by the
+/// reload; a panic in `prepare` or `apply` is fatal, and the report names the
+/// registering mod (through the native-mod mark) and the listener (through the
+/// report's details).
+pub(crate) struct ReloadMark {
+    _guard: Option<crate::crash::NativeModGuard>,
+}
+
+impl ReloadMark {
+    pub(crate) fn enter(
+        owner: Option<&'static str>,
+        listener: &Identifier,
+        phase: &'static str,
+    ) -> Self {
+        let _guard = owner.map(|id| {
+            crate::crash::enter_native_mod(crate::crash::NativeModCall {
+                id,
+                hook: phase,
+                part: None,
+            })
+        });
+        crate::crash::set_detail("Reload listener", listener.to_string());
+        Self { _guard }
+    }
+}
+
+impl Drop for ReloadMark {
+    fn drop(&mut self) {
+        crate::crash::clear_detail("Reload listener");
+    }
 }
 
 /// A read-only registry/graph view with registration methods, rebuilt on each
@@ -151,6 +188,7 @@ impl ServerReloadListeners {
                         id,
                         converter: None,
                         listener: Arc::new(Boundary),
+                        owner: None,
                     },
                 )
                 .unwrap();
@@ -181,7 +219,8 @@ impl ServerReloadListeners {
         converter: FileToIdConverter,
         listener: Arc<impl ServerReloadListener>,
     ) -> Result<(), ReloadOrderError> {
-        let result = self.insert(id, converter, listener);
+        let owner = crate::crash::current_native_mod();
+        let result = self.insert(id, converter, listener, owner);
         if let Err(error) = &result {
             self.failure.get_or_insert_with(|| error.clone());
         }
@@ -196,7 +235,8 @@ impl ServerReloadListeners {
         converter: FileToIdConverter,
         listener: Arc<T>,
     ) -> Result<ListenerKey<T>, ReloadOrderError> {
-        let result = self.insert(id.clone(), converter, listener.clone());
+        let owner = crate::crash::current_native_mod();
+        let result = self.insert(id.clone(), converter, listener.clone(), owner);
         if let Err(error) = &result {
             self.failure.get_or_insert_with(|| error.clone());
             return Err(error.clone());
@@ -213,6 +253,7 @@ impl ServerReloadListeners {
         id: Identifier,
         converter: FileToIdConverter,
         listener: Arc<dyn ServerReloadListener>,
+        owner: Option<&'static str>,
     ) -> Result<(), ReloadOrderError> {
         if let Some(registered_as) = self.get_name_lookup(listener.as_ref()) {
             return Err(ReloadOrderError::DuplicateObject {
@@ -226,6 +267,7 @@ impl ServerReloadListeners {
                 id: id.clone(),
                 converter: Some(converter),
                 listener,
+                owner,
             },
         )?;
         self.order

@@ -238,12 +238,21 @@ pub fn body_slot_species(s: Species) -> bool {
 /// The item a mob has in an `EquipmentSlot` (by name), with its enchantments.
 pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
     let (item, index) = match slot {
-        "mainhand" => (m.extra.main_hand.as_deref(), Some(gear::MAIN)),
-        "offhand" => (m.extra.off_hand.as_deref(), Some(gear::OFF)),
-        "head" => (m.extra.head.as_deref(), Some(gear::HEAD)),
-        "chest" => (m.extra.chest.as_deref(), Some(gear::CHEST)),
-        "legs" => (m.extra.legs.as_deref(), Some(gear::LEGS)),
-        "feet" => (m.extra.feet.as_deref(), Some(gear::FEET)),
+        "mainhand" => (m.extra.main_hand_id(), Some(gear::MAIN)),
+        "offhand" => (m.extra.off_hand_id(), Some(gear::OFF)),
+        "head" => (m.extra.head_id(), Some(gear::HEAD)),
+        "chest" => (
+            m.extra.slot_id(horizon_items::equipment::CHEST),
+            Some(gear::CHEST),
+        ),
+        "legs" => (
+            m.extra.slot_id(horizon_items::equipment::LEGS),
+            Some(gear::LEGS),
+        ),
+        "feet" => (
+            m.extra.slot_id(horizon_items::equipment::FEET),
+            Some(gear::FEET),
+        ),
         "body" => (m.extra.body_id(), None),
         "saddle" => {
             let saddle = m.saddle_item()?;
@@ -323,23 +332,25 @@ pub fn clear_slot(m: &mut Mob, slot: &str) {
             gear::MAIN
         }
         "offhand" => {
-            m.extra.off_hand = None;
+            m.extra
+                .set_slot_stack(horizon_items::equipment::OFFHAND, None);
             gear::OFF
         }
         "head" => {
-            m.extra.head = None;
+            m.extra.set_slot_stack(horizon_items::equipment::HEAD, None);
             gear::HEAD
         }
         "chest" => {
-            m.extra.chest = None;
+            m.extra
+                .set_slot_stack(horizon_items::equipment::CHEST, None);
             gear::CHEST
         }
         "legs" => {
-            m.extra.legs = None;
+            m.extra.set_slot_stack(horizon_items::equipment::LEGS, None);
             gear::LEGS
         }
         "feet" => {
-            m.extra.feet = None;
+            m.extra.set_slot_stack(horizon_items::equipment::FEET, None);
             gear::FEET
         }
         "body" => {
@@ -385,7 +396,7 @@ pub fn drop_chance(m: &Mob, slot: &str) -> f32 {
         // always drops; a body item elsewhere came from a command or a save.
         "saddle" => 2.0,
         "body" if body_slot_species(m.species()) => 2.0,
-        "head" if is_raider(m.species()) && m.extra.head.as_deref() == Some(raider::BANNER) => 2.0,
+        "head" if is_raider(m.species()) && m.extra.head_id() == Some(raider::BANNER) => 2.0,
         "mainhand" if m.species() == Species::Vex => 0.0,
         _ => DEFAULT_DROP_CHANCE,
     }
@@ -519,10 +530,7 @@ pub fn roll_death(
     // Allay: what it carries (`ints[1]` of the held item) is its inventory.
     let allay_load = (s == Species::Allay)
         .then(|| {
-            m.extra
-                .main_hand
-                .clone()
-                .map(|item| (item, m.extra.ints[1]))
+            super::finalize::item(m, super::finalize::MAINHAND).map(|item| (item, m.extra.ints[1]))
         })
         .flatten();
     if let Some(table) = death_loot_table(m, d.mob_drops) {
@@ -849,8 +857,14 @@ mod death_loot_table_tests {
         let run = |chosen: Option<f32>| {
             let kind = crate::mobs::sensor_scan_tests::kind();
             let mut m = Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
-            m.extra.main_hand = Some("minecraft:stick".into());
-            m.extra.feet = Some("minecraft:apple".into());
+            m.extra.set_slot_id(
+                horizon_items::equipment::MAINHAND,
+                Some("minecraft:stick".into()),
+            );
+            m.extra.set_slot_id(
+                horizon_items::equipment::FEET,
+                Some("minecraft:apple".into()),
+            );
             let mut sequences = RandomSequences::default();
             let rolled = roll_death(&mut m, &death, &mut sequences, &mut LegacyRandom::new(7));
             let mut asked = Vec::new();
@@ -923,7 +937,10 @@ mod slot_tests {
         let mut wolf = mob("minecraft:wolf", Species::Wolf);
         wolf.extra.set_body(Some("minecraft:wolf_armor".into()));
         wolf.extra.set_body_damage(9);
-        wolf.extra.head = Some("minecraft:iron_helmet".into());
+        wolf.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:iron_helmet".into()),
+        );
         let body = slot_item(&wolf, "body").unwrap();
         let head = slot_item(&wolf, "head").unwrap();
         assert_eq!(
