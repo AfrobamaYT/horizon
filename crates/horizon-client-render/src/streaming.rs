@@ -1718,7 +1718,11 @@ impl Streaming {
 
     /// Resume processing the same batch after the caller saves a late column.
     pub fn resume_plan_update(&mut self, world: &mut World, mut resume: PlanResume) -> PlanStep {
-        while let Some(done) = resume.deferred.next().or_else(|| resume.received.pop_front()) {
+        while let Some(done) = resume
+            .deferred
+            .next()
+            .or_else(|| resume.received.pop_front())
+        {
             match done {
                 Done::Proto(x, z, proto, decorated) => {
                     self.generation_scan.exhausted = false;
