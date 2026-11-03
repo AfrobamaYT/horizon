@@ -382,6 +382,7 @@ mod tests {
             joins: Joins,
             leaves: Arc<Mutex<Vec<u32>>>,
         }
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,

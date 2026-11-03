@@ -4,11 +4,12 @@
 
 The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visible, text)` runs at player and mob, armor stand, and item frame name decisions before shared geometry. Set `visible` to override vanilla and `text` to `Some` literal replacement text (NeoForge `RenderNameTagEvent`). Distance and entity availability still apply; the local player's tag is considered only when its own camera and settings gates allow it.
 
-Native mods are **mixin bundles** that change the game's own Rust source before it is compiled, with
-[horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon). A bundle
-is a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game (HEAD, BEFORE_CALL,
-RETURN, MODIFY_ARG, OVERWRITE...; the tool's README lists them). A port such as Veinminer is three HEAD hooks and
-one module. Start a mod from [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template).
+Native mods are Rust projects that implement the game's typed hook API (`impl Hooks`). Start with
+`cargo horizon-mod new my_mod --template native --horizon <commit>` ([Trait mods](#trait-mods-draft)).
+Each project has one `horizon-mod.toml`, with exact build pins in `[native]`, and ships as one `.hmod`.
+For the rare case the API does not cover, raw injections change the game's Rust source before it is compiled,
+using [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon).
+An injection is an escape hatch; request a typed hook for the behavior it needs.
 
 Native mods are native code with the player's rights, not sandboxed. They are always on in the launcher: there is no
 switch. The first install shows a trust notice, and every build waits behind a red warning; the registry lists one only
@@ -58,9 +59,9 @@ requires a farmer at work and `mob_griefing` enabled.
 
 ## Native mod source revisions
 
-A native mod targets one exact Horizon source revision: `[compatibility] horizon_revision` in its
-`horizon-mixin.toml`, and `horizon` in its `horizon-native.json`. Match the mod to the game revision it will run
-with, and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
+A native mod targets one exact Horizon source revision: `horizon` in its `horizon-mod.toml` `[native]` section.
+The same section pins `game` and the exact `mixins` commit. Match the mod to the game revision it will run with,
+and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
 building the mod unchanged.
 
 An installed native build with a missing or invalid build record must be rebuilt from an installed
@@ -109,6 +110,15 @@ the catalog, not a global API number, source comments or documentation histories
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
   after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
   instead of the item's use.
+
+- A block's own item-use behaviour, on the server for every player: attach a `BlockPart` and implement
+  `use_item_on(host, event) -> Option<NativeInteractionResult>`. `event.state` keys the per-state table;
+  `event.click` carries the level, position, hit, hand, stack and player. `Some` replaces the template's
+  `Block.useItemOn`: `Success`/`SuccessServer` consume and swing, `Consume` consumes without swinging,
+  `Pass`/`Fail` let the item try its `useOn`, and `TryWithEmptyHand` tries the block's `useWithoutItem`
+  on the main hand only. `None` leaves the template in charge. This is the block's behaviour, not
+  NeoForge's separate `UseItemOnBlockEvent` broadcast interceptor. The earlier `right_click_block`
+  event still decides whether the block is used at all.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
@@ -262,7 +272,7 @@ the catalog, not a global API number, source comments or documentation histories
   server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
   `native_item_dropped` (a throw; not the items scattered when a player dies) and `native_item_picked_up` (`canceled` leaves the stack on the ground). They name a player by UUID.
 
-- Bundles' data files (`native_data!`, `native_built_data`; "Data files" below).
+- [Server data reload listeners](#server-data-reload-listeners) read a mod's pack resources with datapack overrides, once per reload.
 
 - The item entities near a block, for machines that pick up items as a hopper does:
   `native_item_entities(dimension, min, max)` lists those whose box meets `min`..`max` (vanilla's
@@ -270,10 +280,12 @@ the catalog, not a global API number, source comments or documentation histories
   `ItemEntityRef::set_stack` changes one's nonempty stack; discarding an entity is a separate operation. The query acts on
   the level in place.
 
-- `native_level_random(dimension)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
+- `LevelRef::random(host)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
   `level.getRandom()`): a mod draws from the stream vanilla's explosions and block drops use, so its draws shift theirs
-  as a Java mod's would. It is `None` on a client of a server and for a level that isn't open: the Nether and the End
-  open when someone first goes there and close after 300 ticks with nobody in them.
+  as a Java mod's would. The draws are made at the call site on that level's real stream, also for a level parked while
+  the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
+  the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
+  restricted level hook, `LevelRandomHost::random` is the same stream.
 
 - The server starting and stopping, on the single player server thread and on a dedicated server:
   `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
@@ -318,48 +330,56 @@ the catalog, not a global API number, source comments or documentation histories
 
 ## A bundle
 
-A mod project keeps its native bundle in `native/`, with the exact filename `horizon-mixin.toml` required by
-horizon-mixins. The launcher stages its contents into the tool's `<mods>/<id>/` folder; the package has no id
-directory level. Besides its helpers and modules (horizon-mixins' README) it can
-have its own crate, data files and a post-build step (horizon-mixins 0.6.0). The test bundle
-[`launcher/tests/fixtures/native-crate-demo`](../launcher/tests/fixtures/native-crate-demo) uses all of them:
+The project and its `.hmod` have the same flat layout, with no mod-id directory level inside the archive:
 
+```text
+my_mod/
+  horizon-mod.toml        # the only manifest; mod identity and build pins
+  icon.png               # optional launcher icon
+  assets/my_mod/
+  data/my_mod/
+  Cargo.toml             # one crate; Cargo metadata is not mod identity
+  src/lib.rs             # impl Hooks
+  src/frame.rs           # optional raw injection helper
 ```
-native-crate-demo/
-  native/
-    horizon-mixin.toml
-    data/greeting.txt     # native_data!("crate_demo", "greeting.txt")
-    rust/
-      Cargo.toml          # [dependencies] crc32fast = "1"
-      data/salt.txt       # include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
-      src/lib.rs
-      src/frame.rs        # helper, compiled into the game
-      src/bin/bake.rs     # the post-build step
-```
+
+Without `Cargo.toml`, it is a content mod. Code requires both `Cargo.toml` and `[native]`;
+inconsistent declarations are refused. The mod's id and version come only from `horizon-mod.toml`,
+not Cargo's package name or version. An id is a plain `[a-z0-9_]{1,64}` name, also used as its resource namespace.
+A code mod has no `rust-toolchain.toml`: the pinned Horizon commit decides the toolchain that builds it.
+There is no input `native/` or `rust/` directory, `horizon-native.json` or hand-written `horizon-mixin.toml`.
+The launcher writes the tool's manifest and stages the crate itself; those internal paths are not package layouts.
+
+The manifest keeps the [content fields](mods.md#the-manifest), including the exact `api = "0.2"`
+contract and `capabilities = ["registries"]`. A code mod adds:
 
 ```toml
-[mod]
-id = "crate_demo"
-version = "0.1.0"
+[native]
+game = "26.3"
+horizon = "<exact 40-character lowercase Horizon commit>"
+mixins = "<exact 40-character lowercase horizon-mixins commit>"
+```
 
-[[injection]]
+The placeholders above must be replaced by exact commits; the native template fills them in.
+Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
+nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
+and code mods; the scaffold does not create one.
+
+Raw injections belong in the same manifest, for example:
+
+```toml
+[[native.injection]]
 id = "frame"
-hook = "frame"            # a name from native-hooks.json, instead of `target`
+hook = "frame"            # a name from native-hooks.json, instead of target
 hook_version = 1
 kind = "HEAD"
-helper = "rust/src/frame.rs"
+helper = "src/frame.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
-
-[[crate]]
-id = "engine"
-path = "rust"             # holds Cargo.toml; a non-dot path is required
-# dependent = "horizon-client"   (the default: the workspace package that depends on it)
-
-[[post_build]]
-crate = "engine"
-bin = "bake"
-args = []
 ```
+
+Each injection chooses exactly one of `hook` or `target`, and exactly one of `helper` or
+`trait_method`. A helper names a packaged `.rs` file under `src/`, or `build.rs`.
+A `trait_method` names a method implemented by the trait mod ([below](#trait-mods-draft)).
 
 ### Named hook points
 
@@ -386,7 +406,7 @@ without loaded mods.
 
 ### The build's warnings
 
-Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that
+Before it builds, the launcher reads the mods' `[[native.injection]]` lists and says three things in `native/build.log` that
 horizon-mixins only implies by its order. Two mods injecting at one place — the same function, kind, selector and
 ordinal; the places are the manifest's, horizon-mixins is the one that resolves a selector against the source:
 
@@ -421,27 +441,19 @@ The hook may be called many times a craft; the answer must be the same for the s
 
 ### The mod's crate
 
-A `[[crate]]` is a Cargo package of the bundle's, staged as `native-crates/<mod>/<crate>/` and added to the
-workspace's members and to the `[dependencies]` of its `dependent`, so helpers call it as
-`crate_demo_engine::checksum(…)`. Cargo compiles it once and keeps it: editing a helper, or switching another mod
-on or off, recompiles `horizon-client` but not the mod's crate, so the heavy code of a big mod belongs there and
-only the glue in helpers. A crate can't depend on `horizon-client` (Cargo forbids the cycle) or on any path or git
-crate, and has no `Cargo.lock`, `[workspace]` or build of its own. Horizon's own crates (`horizon-core`…) are path
-crates too, so they are refused the same way, on purpose for now: a mod names game types through its helpers, which
-are compiled into `horizon-client`; a stable API crate for mods' own crates is #3897.
+The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-client` for
+`mod_api`; the launcher links it into the generated game executable, rather than making the game
+library depend on the mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its game
+dependency to the staged game and resolves [mod dependencies](#dependencies-between-trait-mods).
+A project has no separate workspace or lock file. Arbitrary path and git dependencies are refused;
+the launcher supplies the checked paths needed for the game and declared mod dependencies.
 
-**Dependencies come from Horizon's `Cargo.lock`.** A crate names registry crates by version requirement
-(`crc32fast = "1"`, `{ version, features, default-features, optional }`); each must already be in Horizon's lock
-file in a version that matches, and builds in exactly that version. The lock file is the allow list: horizon-mixins
-refuses a crate the lock lacks (`E_CRATE_DEPENDENCY`) and writes the mod's crates into the staged lock without
-changing any other byte, so the game still builds with `--locked`. The launcher checks it again (every downloaded
-package of the staged lock as in Horizon's: name, version, source, checksum), and a feature that turns on a
-dependency the lock lacks fails at `cargo fetch --locked` with a message saying so. The build stops with:
-
-```
-horizon-mixins failed (exit status: 1). The end of its output, the whole of it in …/native/build.log:
-E_CRATE_DEPENDENCY: crate_lock needs rand ^0.9, which isn't in Horizon's Cargo.lock (…/horizon-mixin.toml)
-```
+**Dependencies come from Horizon's `Cargo.lock`.** In `Cargo.toml`, a mod names registry crates by
+version requirement (`crc32fast = "1"`, `{ version, features, default-features, optional }`); each
+must already be in Horizon's lock file in a matching version. The launcher checks every downloaded
+package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
+workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
+stops the build; the game still builds with `--locked`.
 
 ### Conditional data
 
@@ -571,48 +583,29 @@ and the recipe fails, as an unknown kind does.
 
 ### Data files
 
-A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
-module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
-`crate::native_data!` inside the lib). A mod's crate keeps its own data in its folder and
-reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
-both (`native/data/…`, `native/rust/data/…`).
+A mod has one top-level `data/` tree and one `assets/` tree, with the same namespace and
+content checks as a content mod. They are normal pack resources, not a second native-only data folder.
+[Server data reload listeners](#server-data-reload-listeners) register through
+`Hooks::add_server_reload_listeners`. Their `ServerReloadContext` lists namespaced IDs and reads the
+winning bytes from selected datapacks and the mod's own `data/`. Parse once in prepare and publish in
+apply, not on the tick. The original pack trees remain separate from the launcher's code-only
+horizon-mixins input.
 
-Both are compiled in: neither folder is beside the game when it runs. A file the game reads at run time is one a
-post-build step writes into `HORIZON_NATIVE_DATA_DIR` (below), copying it from `HORIZON_NATIVE_BUNDLE_DATA_DIR` or
-making it; the game finds it with `native_built_data("<mod>")` (None only when the game can't tell its own folder).
+Client-side asset reads in mod code come with client reload PR b; server listeners cannot read
+`assets/`. Packaged assets still participate in the game's normal resource packs.
 
-**What a native bundle holds.** `native/horizon-mixin.toml`, `.rs` and `.toml` files under `native/rust/`,
-files under `native/data/` and `native/rust/data/`, and text files (`README*`, `LICENSE*`, `LICENCE*`, `COPYING*`,
-`NOTICE*`, `.gitignore`) in `native/` or `native/rust/`. At most 512 native files and 64 MiB unpacked;
-anything else refuses the archive. Every declared source root is `rust`.
+Code-only bytes belong inside the crate: use Cargo's ordinary `build.rs` to generate a table in
+`OUT_DIR`, then compile it with `include_bytes!(concat!(env!("OUT_DIR"), "/table.bin"))`.
+They are not runtime pack resources and do not participate in resource reloads.
 
-**One `.hmod` for content and code.** A mod's content and its native code ship as one `.hmod`, and what is inside
-decides what happens: only `horizon-mod.toml` with `assets/` and `data/` is a content mod, nothing compiles; with
-`horizon-native.json` and `native/` (a bundle as above) it is a native mod, built into the game. Both may be in
-one file: `horizon-mod.toml`, `assets/` and `data/` are its content, checked as a content mod's
-(`horizon_mods::Content`) and left out of the build, and the two manifests name the same mod id. A `.hmod` with
-native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
-`horizon_mods::index::native::WASM_GONE`. Every rule of the file is in
-[api/mod-files.md](api/mod-files.md).
+**What a native bundle holds.** The one manifest, optional icon, root `Cargo.toml` and `build.rs`,
+`.rs` and `.toml` files under `src/`, `assets/` and `data/`, and root text files (`README*`, `LICENSE*`,
+`LICENCE*`, `COPYING*`, `NOTICE*`). Source and resource size limits are checked separately;
+anything else refuses the archive ([api/mod-files.md](api/mod-files.md)).
 
-### Post-build steps
-
-A `[[post_build]]` names a bin of one of the mod's crates. After the game compiles, the launcher builds it with the
-same profile into the same `native/target/`, then runs it (at low priority, in mod order) in the new build's version
-folder with:
-
-| Variable | What |
-|---|---|
-| `HORIZON_NATIVE_MOD` | the mod's id |
-| `HORIZON_NATIVE_VERSION_DIR` | the new build's version folder (also the working directory) |
-| `HORIZON_NATIVE_DATA_DIR` | `<version folder>/native-data/<mod>/`, created: what the game reads at run time with `native_built_data("<mod>")` (or `horizon_client::native_data::built`) |
-| `HORIZON_NATIVE_CACHE_DIR` | `<launcher data>/native/cache/<mod>/`, created, kept from one build to the next |
-| `HORIZON_NATIVE_BUNDLE_DATA_DIR` | the bundle's own `data/` as staged for the build (`native/stage/native-data/<mod>/`); read it, don't write it |
-
-Its output goes to `native/build.log`. A `native-post-build.json` that can't be read, or names a mod id that isn't
-one, stops the build instead of skipping the steps. When a step fails, so does the build ("crate_demo's post-build
-step failed …") and the version folder is removed. It runs on the player's computer like the rest of the mod's code: only the
-launcher runs it, never horizon-mixins.
+**One `.hmod` for content and code.** Without root `Cargo.toml`, nothing compiles. With it and `[native]`,
+the launcher builds the code and the game loads the same package's content through `horizon_mods::Content`.
+Both kinds use `horizon-mod.toml` for their identity. Executable `mod.wasm` files are unsupported.
 
 ## More hook capabilities
 
@@ -735,6 +728,10 @@ one, where vanilla gives the `by` one.
 - Nicknames for server mods: `native_set_nickname(uuid, Option<&str>)` shows a name in place of a player's in chat (their messages, `/me`, `/msg`) and the Tab list, the real name on hover and everywhere else; `native_text_allowed(text)` asks the server's chat filter. Both outside a player's hook.
 
 - Context-free block and item tag lookups from server hooks (`native_server_block_in_tag`, `native_server_item_in_tag`). They return `NotServer` on a client and `TagsUnavailable` before the world loads its tags. An unknown tag returns false; an empty stack tests `minecraft:air`.
+
+- A block part's `should_check_weak_power` adjusts whether a signal query reads indirect power through that block, for its position and input direction.
+
+- A block part's `should_redstone_wire_connect_to` adjusts whether redstone wire connects to that block for the given position and optional direction.
 
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
@@ -883,6 +880,7 @@ one, where vanilla gives the `by` one.
   its item pass through it, with `NativeLootDrops::used` set and the player named.
 
 - Server experience: `native_experience_orbs(dimension, min, max)` reads the experience orbs in a box; `PlayerRef::give_experience_points` gives points as an orb they touch does (Mending first), and `PlayerRef::give_levels` gives or, for a negative amount, takes levels.
+- Server player death location: `PlayerRef::last_death_location(host)` reads where the player last died as a `GlobalPos`, the dimension's key and the block (`Player.getLastDeathLocation`, saved as `LastDeathLocation`, which the recovery compass follows). The dimension is data: a death in a dimension that is not open still reads, and `host.level(&pos.dimension().to_string())` gives the level when it is. `GlobalPos::new` takes an `Identifier` and `dimension()` returns `&Identifier`, so dimension keys are validated before they enter the typed API. Players resolve as in the other `PlayerRef` reads, so the acting player works too. It is `None` for a player who never died, a stale handle, and a player who is not online or whose record is swapped out. `set_last_death_location(host, location)` stores a location or, for `None`, forgets it (`Player.setLastDeathLocation`); the client hears of it with the player's next respawn, as in vanilla. It returns false in the same cases and for a dead player (so inside `player_died` the read works and the write does not).
 
 - Lead drops to `native_loot_drops`: untying a lead or cutting it with shears (`used`), and the lead a mob a
   player killed while leashed drops on its next tick, naming the killer.
@@ -974,9 +972,10 @@ cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a li
 parses its files logs and skips one that will not parse, carrying the rest through. Returning
 `Err` from `prepare` — like any preparation, registration or ordering error — aborts the whole
 reload: all pending applies are dropped and the old mod data and vanilla function library are
-kept. The error names the namespaced listener and, for file errors, resource ID; world open
-fails, and `/reload` reports the failure. A failed `/datapack` change also preserves the
-selected packs on disk.
+kept. A panic in `prepare` or an apply is not recovered: it stops the server, and the crash
+report names the listener and the mod that registered it. The error names the namespaced
+listener and, for file errors, resource ID; world open fails, and `/reload` reports the
+failure. A failed `/datapack` change also preserves the selected packs on disk.
 
 `event.listeners.add_dependency(first, second)` orders named listeners. Both names must
 already be registered; unknown names fail immediately, and cycles fail after registration.
@@ -991,10 +990,11 @@ context or retained-listener lookup here.
 ```rust,ignore
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
-    AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier, ServerReloadApply,
-    ServerReloadContext, ServerReloadError, ServerReloadListener,
+    self, AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier,
+    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
 };
 
+#[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
     fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
@@ -1008,7 +1008,9 @@ impl ServerReloadListener for MachineData {
         Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
     }
 }
+#[derive(Default)]
 struct MyMod(Arc<MachineData>);
+#[mod_api::horizon_mod]
 impl Hooks for MyMod {
     fn add_server_reload_listeners(&self, _host: &dyn Host, event: &mut AddServerReloadListenersEvent<'_>) {
         event.listeners.add_listener(
@@ -1099,7 +1101,7 @@ reload registration path.
 
 - An item's use tick and release, as vanilla's `Item.onUseTick` and `releaseUsing` and NeoForge's `LivingEntityUseItemEvent.Tick` and `.Stop`. Each tick of a use, `native_living_entity_use_item_tick` may change the ticks left: at 0 or less, or on a cancel, the server finishes the use, as NeoForge's code does, and an item used on release stays frozen until let go. `native_on_use_tick` is what a mod's own item does then (cook, charge). When the player lets go early, `native_living_entity_use_item_stop` may skip the release, and `native_release_using` acts with the ticks left (a bow-like item shoots by its charge); setting `used` starts the item's cooldown. All four run on both sides, as vanilla's do, and take the using entity, None for a player; the tick and stop take the hand too. Change the world only where this game runs the world, not on a server's client.
 
-- `native_inventory(uuid, kind)`: a player's inventory (`Player`: 41 slots, main, armour, off hand; `Ender`: 27), live when they are on the server, else from their file, never while they log in or are dead; `native_move_stack((from, kind, slot), expected, (to, kind))`: one stack moved, checked against `expected`, where it fits whole, or nothing moves (at most one side a file, written first); `native_send_map(uuid, map_id, colors)`: a 128 x 128 map picture sent to a player, for a filled map with that `map_id`. What an operator's `/invsee` and a price chart on a map need.
+- `native_inventory(uuid, kind)`: a player's inventory (`Player`: 41 slots, main, armour, off hand; `Ender`: 27), live when they are on the server, else from their file, never while they log in, are dead, or have their inventory swapped out. Other guests' live inventories remain available during a turn; `native_move_stack((from, kind, slot), expected, (to, kind))`: one stack moved, checked against `expected`, where it fits whole, or nothing moves (at most one side a file, written first); `native_send_map(uuid, map_id, colors)`: a 128 x 128 map picture sent to a player, for a filled map with that `map_id`. What an operator's `/invsee` and a price chart on a map need.
 
 - A loot table's function and condition of a mod's own kind. The entry that names a `type` in a namespace outside `minecraft:` reaches `native_loot_function(kind, data, ctx, stack)` or `native_loot_condition(kind, data, ctx, holds)` when the table rolls. The context brings the entity, the damage, the player, the tool, the block, the luck, the biome and a seed from the roll's random. Both hooks answer in the tables the items engine rolls (block drops, entity drops, loot_table, interact_loot), where entity, damage, player and biome are None; the function hook there gets the stack as the main engine's (its item, count, damage, enchantments, potion and saved components) and takes back what it changes, but a function that asks for a map's structure search changes nothing there. An unclaimed function leaves the stack, an unclaimed condition fails, as unknown kinds do.
 
@@ -1604,17 +1606,18 @@ trusting native code is the player's decision, never an agent's.
    `sudo apt install build-essential pkg-config libasound2-dev libudev-dev`). SteamOS has GCC without the C
    library's headers, and a read-only system: native builds don't work there yet.
    `horizon-launcher rust status|install|remove`.
-2. **horizon-mixins**, at the commit the mods name (their `.hmod`'s `mixins`), else `native_mods::MIXINS_REV`,
+2. **horizon-mixins**, at the exact commit the mods name (`[native] mixins` in `horizon-mod.toml`),
    built once with that cargo (`cargo install --locked --git … --rev …`) into `native/tools/<commit>/`.
 3. **The source** of the pinned commit: GitHub's archive of it, once per commit (`native/source/<commit>/`, about
    63 MB unpacked), with the commit in `.horizon-revision`. Never the player's own checkout. Links in the
    archive are left out: the tool refuses them and nothing needs them to build.
-4. **Mixins.** The bundles are copied first, so the build and its key use that copy whatever happens to the
-   folder meanwhile. `horizon-mixins apply` stages the modded source; the launcher copies only the files that
-   changed into `native/stage/`, so Cargo, which goes by file times, recompiles only the crates the mods touch.
-   With mods' crates, their dependencies are checked against Horizon's `Cargo.lock` ("The mod's crate").
+4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
+   folder meanwhile. For raw injections the launcher writes `horizon-mixin.toml` and runs `horizon-mixins apply`.
+   It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
+   so Cargo, which goes by file times, recompiles only the crates the mods touch. Registry dependencies
+   are checked against Horizon's `Cargo.lock` ([The mod's crate](#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
-   horizon-client`, into `native/target/`, with one of three build profiles:
+   horizon-native-game`, into `native/target/`, with one of three build profiles:
 
    | Profile | Cargo profile | Use |
    |---|---|---|
@@ -1634,15 +1637,12 @@ trusting native code is the player's decision, never an agent's.
    them recompiles only `horizon-client`, and Cargo keeps both builds of it, so switching back finds the other
    still there. `release` has its own folder (`native/target/release/`). The first build in a folder builds every
    crate once (1½ to 3½ minutes measured through the launcher, depending on the machine); later builds reuse them.
-   Post-build steps build with the same
-   profile, reusing its crates. Cargo downloads the locked crates from crates.io (Horizon has no git
+   Cargo downloads the locked crates from crates.io (Horizon has no git
    dependencies). The compiler and the horizon-mixins build run at the lowest priority (`rust_toolchain::low_priority`:
    nice 19 and the idle I/O class on Linux, nice 19 on macOS, below-normal priority on Windows), so the desktop and a
    game in play stay smooth; on an otherwise idle computer they still use every core. The log is `native/build.log`;
    a failure shows its last lines (a horizon-mixins diagnostic in one line).
-6. **Post-build**: each mod's post-build program is built; it runs in the new version folder once that is copied
-   (next step), before the version counts as installed ("Post-build steps").
-7. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
+6. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
    included, cloned on APFS, Btrfs and ReFS) with the built game in place of its own, and a `native-mods.json`
    saying which release or Nightly it started from (`base`) and which commit, mods, horizon-mixins and Rust made
    it. The game lists its `mods` with their versions in a crash report's details (`Native Mods: id version, …`;
@@ -1704,12 +1704,12 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   branch that moves. A release with a `.hmod` asset installs that file (its SHA-256 is compared with the one GitHub
   lists). With no release or no such asset, the launcher fetches
   `codeload.github.com/<owner>/<repo>/tar.gz/<sha>` and looks in it for mods by the rules of
-  `native-build <folder>`: a folder with `horizon-mixin.toml`, or an unpacked `.hmod` (`horizon-native.json`).
-  Several mods: they are listed, and the player picks one or installs all. A source folder must pin the Horizon commit
-  (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hmod`.
+  `native-build <folder>`: a flat project with `horizon-mod.toml`, `[native]`, `Cargo.toml` and `src/`.
+  Several mods: they are listed, and the player picks one or installs all. Each source folder pins the Horizon commit
+  in `[native] horizon`; the launcher packs the checked project into a `.hmod`.
   Release packages must contain native code; content-only packages are rejected by this native installer.
 - **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
-  registry file (native source under `native/`, optional content, size limits, nothing run) before it is installed.
+  registry file (flat source and content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
@@ -1756,21 +1756,6 @@ source downloaded first):
 | That mod switched on again | under 1 s: the kept build plays again |
 | Nothing changed, rebuild | 1 s, nothing compiled |
 
-The test bundle `native-crate-demo` (its own crate on `crc32fast`, data files, the `frame` hook by name, a
-post-build step), measured the same way on 2026-10-30 (Rust already downloaded):
-
-| What | Time | Compiled |
-|---|---|---|
-| First build (horizon-mixins, the crates, the whole game) | 3 min 27 s; 2 min 24 s compiling the game | 343 crates |
-| A helper's code changed | 48 s (43 s compiling) | `horizon-client` only: the mod's crate is kept |
-| The mod's crate changed | 11 s (6 s compiling) | `crate-demo-engine`, then `horizon-client` |
-| Nothing changed | under 1 s | nothing |
-
-The same set with the `release` profile took 7 min 6 s for the first build and 2 min 34 s per rebuild (2 min 28 s of
-compiling `horizon-client`, mostly its link-time optimization). In play, a `fast` game drew the same frames per
-second as the Nightly's own `release` build (vsync-bound, about 112 FPS at 120 Hz), with about 0.1 ms more CPU per
-frame (0.57 to 0.68 ms against 0.51 to 0.54 ms).
-
 Measured before builds used `fast`, with the `release` profile, on 2026-10-28 on the Mac mini (M4 Pro, 14 cores) with Veinminer 0.3.0 on Nightly `83f15fa`,
 `CARGO_BUILD_JOBS=8` while other agents' builds ran (upper bounds):
 
@@ -1811,10 +1796,11 @@ each was built or last used): switching a mod off and on again plays the kept bu
 - **The registry** (horizon-rust/horizon-mods) lists them as their own kind, `native-mod`, only after a maintainer
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
-  review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hmod` contains `.rs` and `.toml` files and may contain data files under
-  `native/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
-  The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
-  `horizon-native.json`. `revoked.toml` takes a bad release down.
+  review (nothing is built or run by the registry; the player's launcher builds it behind its warning).
+  The `.hmod` contains the flat Rust project and may contain `assets/`, `data/` and an optional `icon.png`.
+  The launcher checks the bundle without running anything. Native code is trusted.
+  The file is pinned by SHA-256 like every registry file; its identity and exact build pins come from
+  `horizon-mod.toml`. `revoked.toml` takes a bad release down.
   A project's kind never changes.
 - **Isolation of data.** Native mods run only in the instance they are installed in, with its worlds, options and
   logs (the default Horizon instance's, when they are installed there); other instances play their own versions.
@@ -1838,8 +1824,8 @@ Builds a standalone dedicated-server engine into `DIR`, which must not exist yet
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.
 It reuses the pinned toolchain, source and horizon-mixins and compiles `--no-default-features` (no audio or
 controllers). `--version` pins the Horizon release/Nightly the
-export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources,
-`native-data/` and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
+export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources
+and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
 because it is copied outside the managed folders. On Windows use the printed `horizon-engine.exe` path.
 
@@ -2296,9 +2282,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   item helpers reach them. Not heard: the host of a LAN world.
 - `native_acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
   `native_right_click_block`, `native_use_on`, `native_destroy_block`...; None elsewhere);
-  `native_run_command(line)`, a command run as the server's console (level 4, no output), only where no player is
-  swapped in (`native_tick`, a menu hook): a teleport to another level (`execute in minecraft:the_nether run tp Alex 0
-  70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
+  `native_run_command(line)`, a command run as the server's console (level 4, no output), including during a guest's
+  turn. The acting player and other live guests are reachable; displaced outer players are excluded only on this
+  native path, without changing ordinary player or console command resolution. A teleport to another level
+  (`execute in minecraft:the_nether run tp Alex 0 70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
   `native_action_bar(uuid, text)`, a line over a player's hotbar, which also reaches the acting player inside their
   hook.
 - **`native_food_level_changed(player, name, from, to, cancel)`**: the food level of a player is about to change, on a
@@ -2470,9 +2457,11 @@ the server entity and level reads available on a client.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
-- `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
-  alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
-  read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
+- `level.block_state(host, pos)` returns a typed `BlockStateId` without allocating a state string. For text such as
+  `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
+  `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any
+  level the server has loaded, not only the one in place. A block in a chunk that isn't loaded or a `y` outside
+  the world's height reads as `None`.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
@@ -2480,36 +2469,56 @@ the server entity and level reads available on a client.
   blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
   `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
   is the world's own state: it is saved with the level and stays until `/forceload remove`.
-- `chunk.set_mod_forced(host, owner, forced, natural_spawning)` (NeoForge's `TicketController.forceChunk`, one implicit
-  controller per mod) holds or releases a chunk for the calling mod and returns whether its tickets changed. `owner` is a
-  `NativeTicketOwner`, `Block([x, y, z])` or `Entity(uuid)`. A ticket is scoped by mod, owner, chunk and
-  `natural_spawning`, so two owners in one chunk release separately, and one owner holds a plain and a natural-spawning
-  ticket on a chunk apart. The chunk stays loaded, entity ticking and saved, and its level keeps ticking, while any
-  ticket or `/forceload` holds it. With `natural_spawning`, the chunk joins the spawning chunks (`ChunkMap.collectSpawningChunks`, within 8 chunks of
+- Ticket controllers (NeoForge's `TicketController`, registered in `RegisterTicketControllersEvent`): a mod registers
+  each one once at startup, from `Hooks::register`, with `r.register_ticket_controller("quarry", validates)` and keeps the
+  `TicketController` it returns (it is `Copy`; `Hooks` methods take `&self`, so a `OnceLock` holds it). The id is the
+  calling mod's: `quarry` and `mymod:quarry` both become `mymod:quarry`, and another mod's namespace refuses the mods at
+  startup, as does an id registered twice (the error names the mod and the id). `validates` is whether the controller
+  validates its saved tickets (NeoForge's `LoadingValidationCallback`, below). The handle is only made by the registrar
+  and indexes the installed table, so a ticket call looks up no string. Another mod's controller does nothing.
+- `chunk.set_mod_forced(host, controller, owner, forced, natural_spawning)` (NeoForge's `TicketController.forceChunk`)
+  holds or releases a chunk through `controller` and returns whether its tickets changed. `owner` is a
+  `NativeTicketOwner`, `Block([x, y, z])` or `Entity(uuid)`. A ticket is scoped by controller, owner, chunk and
+  `natural_spawning`, so two owners in one chunk release separately, one owner holds a plain and a natural-spawning
+  ticket on a chunk apart, and two controllers of one mod never touch each other's. The chunk stays loaded, entity
+  ticking and saved, and its level keeps ticking, while any ticket or `/forceload` holds it. With `natural_spawning`, the
+  chunk joins the spawning chunks (`ChunkMap.collectSpawningChunks`, within 8 chunks of
   a player): it gets inhabited time, thunder and a spawn attempt. The local mob cap then lets mobs spawn there only
   while a non-spectator player is within 128 blocks of the chunk's centre, as in NeoForge, which does not patch
-  `LocalMobCapCalculator`. `chunk_tickets_validate`'s tickets and removals know this flag too (below). `level.mod_forced_chunks(host)` lists the calling mod's tickets as
+  `LocalMobCapCalculator`. `level.mod_forced_chunks(host, controller)` lists the controller's tickets as
   `(owner, [x, z], natural_spawning)`. Tickets are saved in `data/horizon/mod_chunk_tickets.dat`, never in vanilla's
-  `chunk_tickets.dat`; when a world loads, the tickets of a mod that isn't installed are discarded. Outside a mod's hook,
-  and for a stale handle or a chunk past the world's bounds, the calls return `false` or `None`.
-- `chunk_tickets_validate` (NeoForge's `LoadingValidationCallback.validateTickets`, server) fires once for each level
-  that opens, after `level_load`, before its first tick; it is told only while the level's save held mod tickets, and
-  only to mods that implement it. It is asked about the tickets read from the save when the level loaded, before they
-  take hold: a ticket a mod adds in `level_load` is not among them and is never removed by it. The tickets that
-  survive then force their chunks. `event.validation` shows the calling mod's own tickets:
-  `block_tickets()` gives each block position and `entity_tickets()` each entity UUID with a `TicketSet`, the chunks it
+  `chunk_tickets.dat`, under the controller's id. When a world loads, the tickets of an id no loaded mod registers are
+  dropped with a warning in the log, as NeoForge documents for a controller nobody registers; so are tickets from a
+  file written before controllers, which are keyed by mod id. Outside a mod's hook, for another mod's controller, and for
+  a stale handle or a chunk past the world's bounds, the calls return `false` or `None`.
+- `validate_tickets` (NeoForge's `LoadingValidationCallback.validateTickets`, server) fires for each level that opens,
+  after `level_load` and before its first tick, once for each controller registered with `validates` that has saved
+  tickets in the level, and only to mods that implement it. `event.controller` is the controller; its owning mod's
+  `event.validation` shows that controller's tickets read from the save when the level loaded, before they take hold
+  (NeoForge's `TicketHelper` is per controller): a ticket a mod adds in `level_load` is not among them and is never
+  removed by it, and a ticket of another controller is not shown. Every mod that implements the hook is called, but
+  only the owner's view holds anything; a controller without a validator keeps all of its tickets. The tickets that
+  survive then force their chunks. `block_tickets()` gives each block position and `entity_tickets()` each entity UUID
+  with a `TicketSet`, the chunks it
   holds apart by kind (`non_natural_spawning` and `natural_spawning`, as NeoForge's `TicketSet`). A plain and a
   natural-spawning ticket on one chunk are two tickets. `remove_block_tickets(pos)` and `remove_entity_tickets(uuid)`
   remove everything an owner holds, both kinds (and return how many); `remove_block_ticket(pos, chunk, natural_spawning)`
   and `remove_entity_ticket(uuid, chunk, natural_spawning)` remove the one kind they name and leave the other. A removed ticket never
-  forces its chunk and is left out of the next save. Every call acts as the calling mod: it cannot see or remove another
-  mod's tickets or removals.
+  forces its chunk and is left out of the next save.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
   slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
-  renders or sends them. Armor stands store the six armor and hand slots, and the dragon none yet.
+  renders or sends them. Armor stands and the dragon hold all eight slots in the same `Equipment`, saved in `equipment`
+  (omitted when empty). A stand keeps a body or saddle a mod writes (`setItemSlot` stores it; `ArmorStand.canUseSlot`
+  only stops a player equipping it), and pops it with the rest, after the other six slots, when it breaks. A write to a
+  stand or the dragon runs `LivingEntity.onEquipItem` like a mob's: the equip sound and the `equip` or `unequip` game
+  event, unless the entity has not ticked yet or the item did not change. `native_living_equipment_change` hears all
+  eight slots of a stand. `/item replace` keeps vanilla's predicate for a stand's or the dragon's chest, legs, feet, body
+  and saddle (an empty stack, or an item made for that slot; a stand's `canUseSlot` refuses body and saddle), while
+  `set_equipment` stays permissive. This is not full dragon equipment parity: the dragon keeps its equipment for mods and
+  saves, and does not drop it on death (the death drops are built on `Mob`, which the dragon is not).
 - `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened
   by mining fatigue, unless one is under way and past its first half (it returns whether one started). The players around
   see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing the hand asked for. Mobs and
@@ -2562,6 +2571,13 @@ the server entity and level reads available on a client.
   range, as `Level.playSound(null, entity, ...)` does. `/stopsound` and `/playsound` send through the same code. They
   return false for a stale handle or a player who isn't online. Looping, fading and a handle to a playing sound need
   client handles.
+- `living.health(host)` is `LivingEntity.getHealth` (Paper's `Damageable#getHealth`), `max_health` is
+  `getMaxHealth` (players and guests read their attribute map; an armor stand the fixed 20 the game seeds it
+  with — lava does not hurt it, and splash water reads the very field — and the dragon its 200, from their own
+  fields until live attribute maps cover them) and `alive` is `isAlive`
+  (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
+  player swap an outer player's displaced record is unavailable, and during a player's turn the other
+  players' handles read `None` until the hub is back.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2631,8 +2647,8 @@ whatever conditions the mod reads:
   `stack` against the item predicate under `key` as the game's own triggers read one: `items` (an id, a list or a
   `#tag`), `count`, the `potion_contents` and `damage` components, and the `enchantments` and `damage` predicates.
   Other components and predicates aren't checked. A missing key passes.
-- It reaches the acting player inside their hook, and any player on the server, in their own level, only where no
-  player is swapped in (`native_tick`, a menu hook), as `native_run_command`. True means the player was reached, not
+- It reaches the acting player inside their hook, and another live player on the server in their own level, including
+  during a guest's turn. A displaced outer player is unavailable. True means the player was reached, not
   that anything was granted. It returns false otherwise, when the player isn't on, and for a `minecraft:` trigger or a
   name without a namespace: the game fires vanilla's triggers from its own events.
 
@@ -2907,33 +2923,39 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Trait mods (draft)
 
-`cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
-`horizon-native.json`, top-level content manifest, assets and data directories, `native/horizon-mixin.toml`,
-pinned to that Horizon commit, and `native/rust/`, whose `hooks()` greets each player who joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
-as it is (`native-build <path>`) and packs it into a `.hmod`.
+`cargo horizon-mod new <path> --template native --horizon <commit>` requires an exact Horizon commit and
+writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
+and `data/` directories. The template greets each player who joins. Build it with
+`horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
+project into a `.hmod` without compiling it ([api/mod-files.md](api/mod-files.md)).
 
-A bundle declares its trait mod package by its path inside `native/`:
+The root Rust package depends on `horizon-client` for `mod_api`. Its root `src/lib.rs` marks one
+`impl Hooks` with the attribute:
 
-```toml
-[api]
-path = "rust"
+```rust,ignore
+use horizon_client::mod_api::{self, Hooks};
+
+#[derive(Default)]
+struct Mod;
+
+#[mod_api::horizon_mod]
+impl Hooks for Mod {
+    // Implement the hooks this mod needs.
+}
 ```
 
-A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest cannot declare both routes.
-`rust/` is required because the tool rejects a dot crate path. `cargo horizon-mod build` packages this project
-without moving its content into the native directory.
-
-The package may use only crates and versions in Horizon's `Cargo.lock`, like mixin crates.
-The folder contains a Rust package with a `horizon-client` dependency. Its library exports
-`pub fn hooks() -> Box<dyn horizon_client::mod_api::Hooks>`. The launcher links this package
-into a generated game executable and calls `hooks()` in dependency order (a mod after the mods it
-depends on, else in bundle order). The package is not a
-`[[crate]]`: it depends on the game instead of the game depending on it. A bundle with no
-injections, state, bridges, modules, mixin crates or post-build steps skips horizon-mixins.
+The attribute generates the `hooks()` factory and derives optional hook subscriptions from this impl.
+The mod type implements `Default`; do not write a second factory. Keep the marked impl at the crate root.
+Rustc's "cannot find function `hooks`" at the launcher's generated call means the marked implementation
+is not at the crate root. The launcher links this package into a generated game executable and calls
+the generated factory in dependency order (a mod after the mods it depends on, else in bundle order).
+A mod with no raw injections skips horizon-mixins; typed hooks need no injection declarations.
+Dependencies follow the pinned Horizon `Cargo.lock` rules in [The mod's crate](#the-mods-crate).
 
 ### Dependencies between trait mods
 
-A mod can publish functions and statics from its `[api]` package for another mod to call:
+A mod can publish functions and statics from its root crate for another mod to call.
+Declare dependencies in `horizon-mod.toml`, not `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -2941,14 +2963,15 @@ base_mod = "^1"
 extra_mod = { version = "^2", optional = true }
 ```
 
-Requirements use Cargo semver syntax and are checked against each installed bundle's `[mod] version`,
-not its Cargo package version. The dependent and every installed dependency need an `[api]` package.
+Requirements use Cargo semver syntax and are checked against each installed mod's `horizon-mod.toml`
+`version`, not its Cargo package version. The dependent and every installed dependency need a code crate.
+Nonempty dependencies on content-only mods are not supported yet.
 Missing required dependencies, incompatible versions and cycles stop the build with the mods named.
 An absent optional dependency is permitted; an installed optional dependency must match its requirement.
 
 The launcher adds a path dependency using the mod ID as the Cargo alias and the target's actual Cargo
-package name. In Rust, replace hyphens in the alias with underscores. Optional dependencies also get a
-Cargo feature named exactly as their mod ID, enabled only when that mod is installed. Guard calls with
+package name. Optional dependencies also get a Cargo feature named exactly as their mod ID, enabled
+only when that mod is installed. Guard calls with
 `#[cfg(feature = "extra_mod")]`. Do not define these dependencies or features yourself in Cargo.toml.
 Public statics must use appropriate synchronization for shared and reentrant hooks; private state in
 another mod's hook object is not exposed.
@@ -2962,17 +2985,17 @@ construction, the allocator and the canonical game identity. Source without this
 before staging trait mods: update the game first.
 
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
-and in the server thread's log line, with the bundle's `[mod] id`. Each entry passed to
+and in the server thread's log line, with the `horizon-mod.toml` id. Each entry passed to
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
 The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
 Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
 id for startup errors and hook panics. The game stops. Render hooks and trait injections
 are not named yet.
 
-A bundle with an `[api]` package may declare its own injection in the trait:
+A code mod may declare its own injection in the trait as a rare escape hatch:
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "before-tick"
 target = "horizon_client::game::example"
 kind = "HEAD"
@@ -2980,10 +3003,10 @@ trait_method = "before_tick"
 bindings = [{ name = "amount", ty = "&mut i32", value = "&mut *amount" }]
 ```
 
-The generated trait method is `inject_<mod_id>_<trait_method>` (hyphens in the mod id become
-underscores). Its event, as a catalog hook's, is that name in CamelCase plus `Event`
+The generated trait method is `inject_<mod_id>_<trait_method>`. Its event, as a catalog hook's,
+is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
-returned by that bundle's `hooks()`; it is called only for that bundle's object. Types must be
+returned by that mod's generated factory; it is called only for that mod's object. Types must be
 public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
 or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
 `Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
@@ -2995,7 +3018,7 @@ value passes through unchanged. A borrowed `$value` works only where Rust's elis
 one input. `cancellable` is HEAD-only. Other kinds are rejected. Do not specify `helper` on these entries.
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "points"
 target = "horizon_client::game::example"
 kind = "MODIFY_ARG"
@@ -3061,7 +3084,7 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
-`native_send_particles`. Whole-block writes wait for a
+`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events). Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -3076,40 +3099,40 @@ A helper is compiled inside its target, as a [Sponge Mixin](https://github.com/S
 into its target class, so it can use the typed API. On a `Game` method, bind the game and coerce it to `dyn Host`:
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
-helper = "count.rs"
+helper = "src/count.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 ```
+
+With the `COUNTER` declaration from [Server attachments](#server-attachments) in `src/count.rs`:
 
 ```rust
 fn count(game: &mut crate::game::Game<'_>) {
     let host: &mut dyn horizon_client::mod_api::Host = game;
     let holder = horizon_client::mod_api::Holder::Level;
-    if let Ok(old) = crate::game::example::COUNTER.get(&mut *host, holder) {
-        let _ = crate::game::example::COUNTER.set(host, holder, old + 1);
+    if let Ok(old) = COUNTER.get(&mut *host, holder) {
+        let _ = COUNTER.set(host, holder, old + 1);
     }
 }
 ```
 
-`COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in a `[[module]]` of the
-bundle (horizon-mixins' README): one with `file = "crates/horizon-client/src/game.rs"` and `name = "example"` is
-`crate::game::example`. `Game` is not an `AttachmentHost` itself, so the `dyn Host` coercion is the step that matters;
-any `Host` helper works on `host` too.
+`Game` is not an `AttachmentHost` itself, so the `dyn Host` coercion is the step that matters;
+the same host exposes typed helpers.
 
 On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
 `native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
 for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
-A trait injection gives the mod's `[api]` crate the same `Host` at that method. The `[api]` crate depends on
-horizon-client's library, not on the game executable that helpers and modules are compiled into, so it declares its
-own `AttachmentType<i32>` with the same `namespace` and `name`: the pair is the key, so both statics read one value.
+A trait injection gives the mod's root crate the same `Host` at that method. It depends on
+horizon-client's library, not on the game executable. For example, with `COUNTER` declared as the
+`AttachmentType<i32>` in [Server attachments](#server-attachments):
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
@@ -3123,7 +3146,7 @@ fn inject_example_count(&self, event: &mut InjectExampleCountEvent<'_>) {
 }
 ```
 
-The `[api]` crate reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists the
+The mod's crate reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists the
 limits). `hook` and `hook_version` work in place of `target`.
 
 The helper runs in every `Game` that calls its target, and attachments answer `MissingHolder` outside the server's game,
@@ -3133,6 +3156,9 @@ A catalog hook's trait method, event and return make up its `hook_version` contr
 ([Named hook points](#named-hook-points)). These per-hook contract versions are catalog metadata, not minimum game
 versions. Catalog hooks, `Host` calls and raw `target` injections all build against the
 [game's exact source revision](#native-mod-source-revisions). Rebuild the mod when that contract changes.
+
+Every `impl Hooks` and `impl RenderHooks` must have `#[mod_api::horizon_mod]`. The attribute derives
+subscriptions from the methods implemented in that block, so dispatch knows them at installation.
 
 ### Parts
 
@@ -3151,6 +3177,7 @@ impl BlockPart for Gauge {
     }
 }
 
+#[mod_api::horizon_mod]
 impl Hooks for MyMod {
     fn register(&self, r: &mut Registrar) {
         r.block_part("minecraft:stone", Gauge);
@@ -3243,7 +3270,7 @@ Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
 
 #### An entity's items
 
-`entity.capability(host, &ENTITY_ITEMS)` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
+`entity.capability(host, &ENTITY_ITEMS, ())` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
 stale handle and an entity outside the level in place. The game answers it for a player with their inventory
 (`PlayerInventoryWrapper`), indices as vanilla's `Inventory` numbers them: 0..36 the main inventory (0..9 the hotbar),
 36..40 the armour from feet to head, 40 the off hand. Each index is the player's `ItemPlace::PlayerSlot` and takes only
@@ -3253,13 +3280,13 @@ player by id or by tag), and bound armour comes off only in creative. `insert_an
 then into its empty slots, never the armour. For a chest or hopper minecart, a chest boat and a chested donkey, mule or
 llama the game answers with their container's slots (`ItemPlace::EntitySlot`). A handler kept past its entity's removal
 or its world's close reaches nothing. `r.entity_capability(&ENTITY_ITEMS,
-"mymod:robot", |host, robot| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
+"mymod:robot", |host, robot, ()| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
 game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
 
 ```rust
 // A trade: each offer is (index, the exact stack it must still hold). A stale offer or no
 // room for one aborts the transaction, and every move in it is put back.
-let (a, b) = (seller.capability(host, &ENTITY_ITEMS)?, buyer.capability(host, &ENTITY_ITEMS)?);
+let (a, b) = (seller.capability(host, &ENTITY_ITEMS, ())?, buyer.capability(host, &ENTITY_ITEMS, ())?);
 host.transaction(|host, tx| {
     for (from, to, offer) in [(&a, &b, &seller_offer), (&b, &a, &buyer_offer)] {
         for (index, stack) in offer {
@@ -3277,6 +3304,16 @@ host.transaction(|host, tx| {
     Ok(())
 })
 ```
+
+#### Entity energy and fluids
+
+`entity.capability(host, &ENTITY_ENERGY, side)` and `entity.capability(host, &ENTITY_FLUIDS, side)` reach a mod's
+entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` and `Capabilities.Fluid.ENTITY`), where
+`side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
+answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
+which is given that side and may answer differently for each. An entity capability's context is its key's second type:
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+between these and block or item handlers inside a transaction.
 
 #### A menu's slots
 
@@ -3381,10 +3418,10 @@ Reading or writing a minecart's slots unpacks its loot table with no player, as 
 #### A mod's own capability
 
 A mod can define a capability of its own, as Mekanism defines chemicals: a resource type and a key, published from
-its `[api]` package ([Dependencies between trait mods](#dependencies-between-trait-mods)) for other mods to use.
+its root crate ([Dependencies between trait mods](#dependencies-between-trait-mods)) for other mods to use.
 
 ```rust
-// chem-api's [api] package
+// The chemistry mod's root crate
 #[derive(Clone, PartialEq)]
 pub struct Chemical(pub String);
 pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> = CapabilityKey::new("chem_api:chemical");
@@ -3414,21 +3451,23 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{self, Hooks, Host, HostSide, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
 impl Host for HostDouble {}
 impl ServerHost for HostDouble {}
+#[derive(Default)]
 struct Counter(Arc<AtomicUsize>);
+#[mod_api::horizon_mod]
 impl Hooks for Counter {
-    fn tick(&self, _: &mut dyn ServerHost, _: &mut TickEvent) {
+    fn tick(&self, _: HostSide<'_>, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
 let count = Arc::new(AtomicUsize::new(0));
 let mods = [ModEntry::new("counter", Box::new(Counter(count.clone())))];
-with_mods(mods.into(), || dispatch_tick(&mut HostDouble));
+with_mods(mods.into(), || dispatch_tick(HostSide::Server(&mut HostDouble)));
 assert_eq!(count.load(Ordering::Relaxed), 1);
 ```
 
@@ -3450,7 +3489,7 @@ builds. These generated Rust files are not kept in the source tree or committed,
 is needed after a merge. Every hook needs a `mod_api` entry: the build fails naming any hook without one. A hook that stands in for a
 method a vanilla block, block entity, item or menu overrides also gets a `scope` and a `key`
 (`{"contract": "collect", "out": "output", "scope": "block", "key": "state"}`): the key is a
-`BlockStateId` (with a level host to name its block), an `&ItemStack`, a `ModBlockEntity` or an id `&str`, and
+`BlockStateId` (looked up directly by state for block parts), an `&ItemStack`, a `ModBlockEntity` or an id `&str`, and
 the generator also puts the method on that scope's part trait ([Parts](#parts)). A body that is neither the
 placeholder nor already calls the dispatch is an error, and the generator never changes it. Hooks that are
 free functions outside `Game` are wired by hand: those crates can't see the mod list, so each calls a callback
@@ -3576,6 +3615,10 @@ The following catalog hooks are not in the trait:
 The client `tooltip_color` hook changes the background and top and bottom border gradient colours as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered; no texture hook is offered.
 
 # Camera and collision reads
+
+`ClientHost::is_paused()` reads the applied client pause state, not whether a pause
+screen is open. A multiplayer game continues running while its pause screen is open.
+The pause-change pre hook sees the old state; the post hook sees the new state.
 
 The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
 

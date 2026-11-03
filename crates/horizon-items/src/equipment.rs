@@ -1,8 +1,7 @@
 //! `EntityEquipment`: the stack in each `EquipmentSlot` of a living entity,
-//! and its `equipment` compound (`EntityEquipment.CODEC`). The host player and
-//! LAN guests hold one (body and saddle) and save through it; a mob's
-//! equipment is still kept in `Extra` fields and read out as one
-//! (`Mob::equipment_stacks`).
+//! and its `equipment` compound (`EntityEquipment.CODEC`). A mob keeps all
+//! eight slots here; the host player and LAN guests keep body and saddle,
+//! and all of them save through it.
 use crate::item_nbt::{item_from_nbt, item_to_nbt};
 use crate::items::ItemStack;
 use horizon_world::nbt::{Compound, Tag};
@@ -20,6 +19,8 @@ pub const CHEST: usize = 4;
 pub const HEAD: usize = 5;
 pub const BODY: usize = 6;
 pub const SADDLE: usize = 7;
+/// The armour slots, head to feet.
+pub const ARMOR: [usize; 4] = [HEAD, CHEST, LEGS, FEET];
 
 /// A stack for each `EquipmentSlot`, indexed by ordinal. A player holder keeps
 /// only body and saddle here: its hands, armor and inventory live in the
@@ -69,6 +70,18 @@ impl Equipment {
         }
         (!compound.is_empty()).then_some(Tag::Compound(compound))
     }
+    /// Sets the `equipment` key of an entity's save compound from `write`,
+    /// removing a stale one when nothing is equipped.
+    pub fn store(&self, entity: &mut Compound) {
+        match self.write() {
+            Some(tag) => {
+                entity.insert("equipment".into(), tag);
+            }
+            None => {
+                entity.remove(&"equipment".into());
+            }
+        }
+    }
 }
 impl std::ops::Index<usize> for Equipment {
     type Output = Option<ItemStack>;
@@ -95,7 +108,7 @@ impl From<[Option<ItemStack>; 8]> for Equipment {
 }
 
 /// Sets or clears one slot of an `equipment` compound.
-pub fn put(compound: &mut Compound, slot: usize, stack: Option<&ItemStack>) {
+fn put(compound: &mut Compound, slot: usize, stack: Option<&ItemStack>) {
     let name = SLOT_NAMES[slot];
     match stack {
         Some(stack) => {
@@ -106,16 +119,6 @@ pub fn put(compound: &mut Compound, slot: usize, stack: Option<&ItemStack>) {
         }
     }
 }
-/// Stores an `equipment` compound in an entity's tag, or removes the key
-/// when it is empty (vanilla saves it only when something is equipped).
-pub fn store(entity: &mut Compound, equipment: Compound) {
-    if equipment.is_empty() {
-        entity.remove(&"equipment".into());
-    } else {
-        entity.insert("equipment".into(), Tag::Compound(equipment));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

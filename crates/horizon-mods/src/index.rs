@@ -542,20 +542,13 @@ impl Facts {
 pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
     match kind {
         Kind::NativeMod => {
-            let facts = native::Bundle::read(path)?.manifest.facts();
-            // A `.hmod` with content too: checked as the game reads it.
-            if Package::has_manifest(path) {
-                let m = Package::read(path)?.manifest;
-                crate::Content::read(path, &m)?;
-            }
-            Ok(facts)
+            let bundle = native::Bundle::read(path)?;
+            crate::Content::read(path, &bundle.manifest)?;
+            Ok(bundle.facts())
         }
         Kind::Mod => {
             if native::holds(path) {
-                return Err(format!(
-                    "it has native code ({}): it is a native-mod",
-                    native::MANIFEST
-                ));
+                return Err("it has native code: it is a native-mod".into());
             }
             let m = Package::read(path)?.manifest;
             crate::Content::read(path, &m)?;
