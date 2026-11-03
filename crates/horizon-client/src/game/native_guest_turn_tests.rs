@@ -153,6 +153,107 @@ fn another_guests_menu_and_push_work_during_a_turn() {
     });
 }
 
+/// Native services can reach B during A's turn without exposing displaced
+/// inventories or changing ordinary command resolution during nested turns.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn another_guests_services_work_during_a_turn() {
+    use super::{
+        commands::Target,
+        native_inventories::NativeInventoryKind::{Ender, Player},
+    };
+    use horizon_client::{advancements as adv, command::args::Selector, items::ItemStack};
+
+    with_guests(|game| {
+        let mut tree = adv::Tree::default();
+        tree.list.push(adv::Advancement {
+            id: "turns:probe".into(),
+            parent: None,
+            display: None,
+            criteria: vec![adv::Criterion {
+                name: "seen".into(),
+                trigger: "turns:probe".into(),
+                conditions: serde_json::Value::Null.into(),
+            }],
+            requirements: vec![vec!["seen".into()]],
+            rewards: Default::default(),
+        });
+        tree.by_id.insert("turns:probe".into(), 0);
+        tree.by_trigger.insert("turns:probe".into(), vec![(0, 0)]);
+        game.adv.tree = Arc::new(tree);
+        for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+            guest.advancements_loaded = true;
+        }
+        let stone = ItemStack::new("minecraft:stone", 4);
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guest_mut(13)
+            .unwrap()
+            .inventory[0] = Some(stone.clone());
+        let a = game.native_player_ref(12).unwrap();
+        game.as_guest(12, |game| {
+            assert_eq!(game.native_entity_target(a.entity()), Some(Target::Player));
+            assert_eq!(game.player_named("guest12"), Some(Target::Player));
+            assert!(game.native_inventory(12, Player).is_err());
+            assert_eq!(
+                game.native_inventory(13, Player).unwrap().slots[0],
+                Some(stone.clone())
+            );
+            game.native_move_stack((13, Player, 0), &stone, (13, Ender))
+                .unwrap();
+            assert_eq!(game.native_inventory(13, Player).unwrap().slots[0], None);
+            assert_eq!(
+                game.native_inventory(13, Ender).unwrap().slots[0],
+                Some(stone.clone())
+            );
+            assert!(game.native_trigger_criterion(13, "turns:probe", |_| true));
+            assert!(game.native_trigger_criterion(12, "turns:probe", |_| true));
+            assert!(game.native_run_command("give guest13 minecraft:diamond 2"));
+            assert!(game.native_run_command("give @a[name=guest13] minecraft:diamond 1"));
+            assert!(game.native_run_command("give guest12 minecraft:apple 1"));
+            assert_eq!(
+                game.inventory[0],
+                Some(ItemStack::new("minecraft:apple", 1))
+            );
+            game.as_guest(13, |game| {
+                assert!(game.native_inventory(12, Player).is_err());
+                assert!(game.native_inventory(13, Player).is_err());
+                assert!(!game.native_trigger_criterion(12, "turns:probe", |_| true));
+                assert!(!game.native_run_command("give guest12 minecraft:dirt 1"));
+                assert!(!game.native_run_command("give @a[name=guest12] minecraft:dirt 1"));
+                // The native-only filter is restored, including after failure:
+                // ordinary names, UUIDs and selectors still see the outer guest.
+                assert_eq!(game.player_named("guest12"), Some(Target::Guest(12)));
+                assert_eq!(game.target_by_uuid(12), Some(Target::Guest(12)));
+                assert!(
+                    game.player_candidates(&Selector {
+                        kind: 'a',
+                        ..Default::default()
+                    })
+                    .contains(&Target::Guest(12))
+                );
+                assert_eq!(game.player_named("guest13"), Some(Target::Player));
+            })
+            .unwrap();
+        })
+        .unwrap();
+        let host = game.lan.as_ref().unwrap();
+        assert!(
+            host.hub
+                .guest(12)
+                .unwrap()
+                .advancements
+                .has("turns:probe", "seen")
+        );
+        let b = host.hub.guest(13).unwrap();
+        assert!(b.advancements.has("turns:probe", "seen"));
+        assert_eq!(b.ender_items[0], Some(stone));
+        assert_eq!(b.inventory[0], Some(ItemStack::new("minecraft:diamond", 3)));
+    });
+}
+
 /// The body/saddle store and existing armor/offhand move with nested turns.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

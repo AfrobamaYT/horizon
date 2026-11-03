@@ -777,11 +777,11 @@ impl Game<'_> {
     /// level 4, from the overworld's spawn, with no output. A teleport to
     /// another level (`execute in minecraft:the_nether run tp Alex 0 70 0`)
     /// happens at the next tick's start, as the console's. Whether it ran
-    /// without failing. Only where no player's state is swapped in
-    /// (`native_tick`, `native_menu_clicked`): false inside a player's hook,
-    /// where the other players are out of reach.
+    /// without failing. During a guest's turn, live players (including the
+    /// acting player) are reachable; displaced outer players are excluded
+    /// from name, UUID and selector resolution on this path only.
     pub(super) fn native_run_command(&mut self, line: &str) -> bool {
-        if self.lan_acting.is_some() || self.lan.is_none() {
+        if self.lan.is_none() {
             return false;
         }
         let server = execute::Source {
@@ -789,7 +789,9 @@ impl Game<'_> {
             ..self.server_source()
         };
         let outer = self.command_source.replace(server);
+        let filter = std::mem::replace(&mut self.native_command_filter, true);
         let ok = self.as_console(|g| g.run_command(line));
+        self.native_command_filter = filter;
         self.command_source = outer;
         ok
     }

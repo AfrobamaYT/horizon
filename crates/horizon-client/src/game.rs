@@ -2831,6 +2831,7 @@ struct Game<'a> {
     cooldowns: horizon_client::cooldowns::Cooldowns,
     /// The source of a command run through /execute (the player otherwise).
     command_source: Option<commands::execute::Source>,
+    native_command_filter: bool,
     titles: titles::Titles,
     /// `Hud.toolHighlightTimer`: the selected item name.
     tool_highlight: horizon_client::hud_overlays::ToolHighlight,
@@ -19342,6 +19343,7 @@ impl<'a> Game<'a> {
             shield_cooldown: 0,
             cooldowns: Default::default(),
             command_source: None,
+            native_command_filter: false,
             titles: Default::default(),
             tool_highlight: Default::default(),
             saving_indicator: Default::default(),
