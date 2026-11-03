@@ -9,7 +9,7 @@
 //! work to the transaction around it; an abort puts every storage back quietly and drops the
 //! waiting work, which nothing outside had seen.
 //!
-//! Covered here: block entities (slots, saved compound, custom name, attachments), a hopper's cooldown and
+//! Covered here: block entities (slots, saved compound, custom name, lock, loot roll, attachments), a hopper's cooldown and
 //! cauldron block states. A block's tentative state is stored only (`World::set_stored`): the
 //! one real write, with its remesh, relight and logs, is at the root commit. A jukebox is
 //! told at the root commit from its record before and after, so a disc swapped in one
@@ -19,8 +19,8 @@
 //! the root commit too. An item entity's stack is kept on its first write; one emptied stays,
 //! empty, until the root commit removes it.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
-use horizon_client::items::ItemStack;
 use horizon_client::mod_api::TransactionSeal;
+use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_world::attachments::Attachments;
 use std::collections::HashMap;
 
@@ -31,9 +31,6 @@ type Pos = (i32, i32, i32);
 pub(super) struct Level {
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
-    /// Each block entity's custom name (`World::block_names`) before this transaction first
-    /// wrote it.
-    names: HashMap<Pos, Option<String>>,
     /// Each block's state before this transaction first wrote it.
     blocks: HashMap<Pos, BlockStateId>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
@@ -54,6 +51,10 @@ struct Kept {
     /// None where it had no map: an abort removes one a write made.
     attachments: Option<Attachments>,
     hopper: Option<HopperState>,
+    /// The custom name Horizon keeps beside the model (`World::block_names`).
+    name: Option<String>,
+    /// The container lock and loot table roll kept beside the model.
+    extras: BlockEntityExtras,
 }
 
 #[derive(Clone)]
@@ -121,9 +122,6 @@ impl Game<'_> {
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
-                for (pos, name) in level.names {
-                    outer.names.entry(pos).or_insert(name);
-                }
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
                 }
@@ -163,18 +161,9 @@ impl Game<'_> {
             entity: self.world.block_entities.get(&pos).cloned(),
             attachments: self.world.block_entities.attachments(pos).cloned(),
             hopper: self.hoppers.get(&pos).copied(),
+            name: self.world.block_names.get(&pos).cloned(),
+            extras: self.world.block_entity_extras(pos),
         });
-    }
-    /// Keeps the custom name of the block entity at `pos` as it is, if a transaction is open
-    /// and hasn't yet.
-    pub(super) fn journal_block_name(&mut self, pos: Pos) {
-        let Some(level) = self.transactions.last_mut() else {
-            return;
-        };
-        level
-            .names
-            .entry(pos)
-            .or_insert_with(|| self.world.block_names.get(&pos).cloned());
     }
     /// Keeps the inventory of the player whose state is in `Game` now, `uuid`, as it is, if a
     /// transaction is open and hasn't yet. Called inside `native_as_player`.
@@ -327,15 +316,14 @@ impl Game<'_> {
             self.world
                 .block_entities
                 .set_attachments(pos, kept.attachments);
+            match kept.name {
+                Some(name) => self.world.block_names.insert(pos, name),
+                None => self.world.block_names.remove(&pos),
+            };
+            self.world.set_block_entity_extras(pos, kept.extras);
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
-            };
-        }
-        for (pos, name) in level.names {
-            match name {
-                Some(name) => self.world.block_names.insert(pos, name),
-                None => self.world.block_names.remove(&pos),
             };
         }
         for (pos, state) in level.blocks {

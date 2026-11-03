@@ -88,9 +88,8 @@ impl Game<'_> {
     /// `y` and `z` in `data` are ignored. True when the data changed; false for a stale
     /// handle, a client, another level than the one in place, data nested too deep or that
     /// changes nothing, or a result the block entity can't load. Inside a transaction an
-    /// abort puts the block entity, its name and its attachments back. A container's `lock`
-    /// and a loot table roll are not journaled. API @API:block_entity_refs@.
-    pub(super) fn native_block_entity_set_data(
+    /// abort puts the block entity, its name, `lock`, loot table roll and attachments back. API @API:block_entity_refs@.
+    pub(super) fn native_block_entity_merge_data(
         &mut self,
         entity: BlockEntityRef,
         data: Compound,
@@ -120,7 +119,6 @@ impl Game<'_> {
             return false;
         }
         self.journal_block_entity(key);
-        self.journal_block_name(key);
         if !self.load_block_entity_data(key, &merged) {
             return false;
         }
@@ -186,7 +184,6 @@ impl Game<'_> {
             return false;
         }
         self.journal_block_entity(key);
-        self.journal_block_name(key);
         match self.world.block_entities.get_mut(&key) {
             Some(BlockEntity::Banner(banner)) => banner.name = name.map(str::to_owned),
             _ => {
@@ -330,15 +327,15 @@ mod tests {
             };
 
             // A merge loads the data, ignores the identity keys and keeps the rest.
-            assert!(chest.set_data(
+            assert!(chest.merge_data(
                 game,
                 compound(&format!("{{id:\"minecraft:furnace\",x:9,{}", &stick[1..]))
             ));
             assert_eq!(slot3(game), Some(3));
             assert_eq!(chest.kind(game), Some("minecraft:chest"));
             assert_eq!(chest.position(game), Some([0, 64, 0]));
-            assert!(!chest.set_data(game, compound(stick)), "no change");
-            assert!(chest.set_data(game, compound("{Items:[]}")));
+            assert!(!chest.merge_data(game, compound(stick)), "no change");
+            assert!(chest.merge_data(game, compound("{Items:[]}")));
             assert_eq!(slot3(game), None);
 
             // Names: a chest has one, a daylight detector does not.
@@ -358,7 +355,7 @@ mod tests {
             // An abort puts back data and name; a commit keeps them.
             let host: &mut dyn Host = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
-                assert!(chest.set_data(host, compound(stick)));
+                assert!(chest.merge_data(host, compound(stick)));
                 assert!(chest.set_name(host, Some("Gone")));
                 assert!(chest.set_changed(host));
                 Err(())
@@ -368,7 +365,7 @@ mod tests {
             assert!(game.transactions.is_empty());
             let host: &mut dyn Host = game;
             let committed: Result<(), ()> = host.transaction(|host, _| {
-                assert!(chest.set_data(host, compound(stick)));
+                assert!(chest.merge_data(host, compound(stick)));
                 assert!(chest.set_name(host, Some("Kept")));
                 Ok(())
             });
@@ -391,9 +388,51 @@ mod tests {
             // A removed block entity is a stale handle.
             game.world.block_entities.remove(&(0, 64, 0));
             assert!(!chest.set_changed(game));
-            assert!(!chest.set_data(game, compound(stick)));
+            assert!(!chest.merge_data(game, compound(stick)));
             assert!(!chest.set_name(game, Some("x")));
             assert_eq!(chest.name(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let chest = game.pack.assets.registry.default_state("minecraft:chest");
+            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            assert!(game.native_level_set_block(level, [0, 64, 0], chest.unwrap(), flags));
+            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            let key = (0, 64, 0);
+            let lock = compound("{lock:{items:\"minecraft:stick\"}}");
+            let table = compound("{LootTable:\"minecraft:chests/simple_dungeon\"}");
+            let before = game.world.block_entity_extras(key);
+
+            let host: &mut dyn Host = game;
+            let aborted: Result<(), ()> = host.transaction(|host, _| {
+                assert!(chest.merge_data(host, lock.clone()));
+                assert!(chest.merge_data(host, table.clone()));
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(game.world.block_entity_extras(key), before);
+            assert!(game.world.block_lock(key).is_none());
+
+            let host: &mut dyn Host = game;
+            let committed: Result<(), ()> = host.transaction(|host, _| {
+                assert!(chest.merge_data(host, lock.clone()));
+                assert!(chest.merge_data(host, table.clone()));
+                Ok(())
+            });
+            assert_eq!(committed, Ok(()));
+            assert!(game.world.block_lock(key).is_some());
+            assert_ne!(game.world.block_entity_extras(key), before);
         });
     }
 }
