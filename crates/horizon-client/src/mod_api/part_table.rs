@@ -134,9 +134,14 @@ struct TagParts {
 struct Installed {
     keys: Parts,
     tags: TagParts,
+    block_entity_types: Vec<super::BlockEntityTypeKey>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     hook_bits: Vec<bool>,
+}
+
+pub(crate) fn block_entity_types() -> &'static [super::BlockEntityTypeKey] {
+    installed().map_or(&[], |installed| &installed.block_entity_types)
 }
 
 /// The ticket controllers registered at startup.
@@ -564,6 +569,7 @@ pub struct Registrar {
     registered: usize,
     parts: Parts,
     tags: TagParts,
+    block_entity_types: Vec<super::BlockEntityTypeKey>,
     controllers: Vec<ControllerInfo>,
     refused: Vec<String>,
 }
@@ -576,9 +582,35 @@ impl Registrar {
             registered: 0,
             parts: Parts::default(),
             tags: TagParts::default(),
+            block_entity_types: Vec::new(),
             controllers: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    /// Declare a block entity type in this mod's namespace.
+    pub fn block_entity_type(&mut self, id: &str) -> super::BlockEntityTypeBuilder<'_> {
+        super::BlockEntityTypeBuilder {
+            id: format!("{}:{id}", self.mod_id),
+            registrar: self,
+            blocks: Vec::new(),
+        }
+    }
+
+    pub(super) fn register_block_entity_type(
+        &mut self,
+        id: String,
+        blocks: Vec<String>,
+    ) -> super::BlockEntityTypeKey {
+        if !horizon_mods::content::namespaced_id(&id) {
+            self.refused.push(format!("invalid block entity type {id}"));
+        }
+        let key = super::BlockEntityTypeKey(Arc::new(super::block_entity_type::BlockEntityType {
+            id,
+            blocks,
+        }));
+        self.block_entity_types.push(key.clone());
+        key
     }
 
     /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
@@ -603,17 +635,21 @@ impl Registrar {
     pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
         self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
     }
-    /// Attach `part` to the mod block entity type `kind` (the id a `block_entity` hook gives the
-    /// entity, `mymod:press`) and to `blocks`, the blocks that hold one. It answers the hooks
-    /// asked by the entity (`block_entity_tick`, `menu_button`), those asked by block
-    /// (`block_entity`, `screen`) and every block hook of those blocks.
-    pub fn block_entity_part<P: BlockEntityPart>(&mut self, kind: &str, blocks: &[&str], part: P) {
+    /// Attach a part to a block entity type and its valid blocks.
+    pub fn block_entity_part<P: BlockEntityPart>(
+        &mut self,
+        kind: &super::BlockEntityTypeKey,
+        part: P,
+    ) {
         let part = Arc::new(part);
-        if !self.attach::<P, dyn BlockEntityPart>(|p| &mut p.block_entity_kinds, kind, part.clone())
-        {
+        if !self.attach::<P, dyn BlockEntityPart>(
+            |p| &mut p.block_entity_kinds,
+            kind.id(),
+            part.clone(),
+        ) {
             return;
         }
-        for block in blocks {
+        for block in &kind.0.blocks {
             // Every block entity part is a block part too, so a second one is found there.
             if self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, part.clone()) {
                 self.attach::<P, dyn BlockEntityPart>(
@@ -908,6 +944,7 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
         Installed {
             keys: registrar.parts,
             tags: registrar.tags,
+            block_entity_types: registrar.block_entity_types,
             controllers: registrar.controllers,
             hook_bits: Vec::new(),
         }
@@ -968,6 +1005,26 @@ pub(crate) mod tests {
         fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
     }
 
+    #[test]
+    fn invalid_block_entity_type_paths_refuse_registration() {
+        struct Invalid;
+        #[mod_api::__subscriptions]
+        impl super::super::Hooks for Invalid {
+            fn register(&self, r: &mut Registrar) {
+                for path in ["", "other:press", "Uppercase", "has space"] {
+                    r.block_entity_type(path).build();
+                }
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), 4);
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.starts_with("invalid block entity type test:"))
+        );
+    }
+
     /// Connects redstone wire to its block from any side.
     struct Connector;
     #[mod_api::horizon_part]
@@ -981,7 +1038,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// The block entity of type `test:press_entity`, held by block `test:press`: it ticks, and
+    /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
     #[mod_api::horizon_part]
@@ -999,7 +1056,7 @@ pub(crate) mod tests {
             event.entity.data.push(1);
         }
     }
-    /// The gold a `test:hoard` block entity holds, kept beside it.
+    /// The gold a `doubler:hoard` block entity holds, kept beside it.
     pub(crate) const HOARD: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "hoard",
@@ -1008,11 +1065,11 @@ pub(crate) mod tests {
         copy_on_death: false,
         sync: false,
     };
-    /// How many times a `test:hoard` was asked about its removal.
+    /// How many times a `doubler:hoard` was asked about its removal.
     pub(crate) static HOARD_ASKED: std::sync::atomic::AtomicU32 =
         std::sync::atomic::AtomicU32::new(0);
-    /// The block entity of type `test:hoard`, held by block `test:press` as `test:press_entity`
-    /// is: when it is removed it gives back the gold its `HOARD` counts.
+    /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is
+    /// removed it gives back the gold its `HOARD` counts.
     struct Hoard;
     #[mod_api::horizon_part]
     impl BlockPart for Hoard {}
@@ -1084,8 +1141,13 @@ pub(crate) mod tests {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
-            r.block_entity_part("test:press_entity", &["test:press"], Press);
-            r.block_entity_part("test:hoard", &["test:press"], Hoard);
+            let kind = r
+                .block_entity_type("press_entity")
+                .blocks(&["test:press"])
+                .build();
+            r.block_entity_part(&kind, Press);
+            let hoard = r.block_entity_type("hoard").blocks(&["test:hoard"]).build();
+            r.block_entity_part(&hoard, Hoard);
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
             // block entity's are reached does: ahead of the game's.
             r.block_entity_capability_before_game(&ITEMS, "test:pipe", |_, at| {
@@ -2265,11 +2327,41 @@ pub(crate) mod tests {
         }
     }
 
+    struct FixtureContent;
+    #[mod_api::__subscriptions]
+    impl Hooks for FixtureContent {
+        fn register(&self, r: &mut Registrar) {
+            for id in ["chem_tank", "chem_vat"] {
+                r.block_entity_type(id)
+                    .blocks(&[&format!("test:{id}")])
+                    .build();
+            }
+        }
+        fn blocks(&self, event: &mut BlocksEvent<'_>) {
+            event.blocks.extend(
+                [
+                    "test:gauge",
+                    "test:connector",
+                    "test:press",
+                    "test:hoard",
+                    "test:chem_tank",
+                    "test:chem_vat",
+                ]
+                .map(|id| horizon_mods::content::Block {
+                    id: id.into(),
+                    template: "minecraft:stone".into(),
+                    ..Default::default()
+                }),
+            );
+        }
+    }
+
     /// The test mods, their parts installed, on a thread that runs a game.
     pub(crate) fn game_thread() -> super::super::Mods {
         let mods: super::super::Mods = vec![
             ModEntry::new("doubler", Box::new(Doubler)),
             ModEntry::new("chemist", Box::new(Chemist)),
+            ModEntry::new("test", Box::new(FixtureContent)),
         ]
         .into();
         super::super::install(mods.clone());
@@ -4313,14 +4405,14 @@ pub(crate) mod tests {
         };
         // The ticker is asked by block: the type id is not a block.
         assert!(ticks("test:press"));
-        assert!(!ticks("test:press_entity"));
+        assert!(!ticks("doubler:press_entity"));
         let tick = |kind: &str| {
             let mut entity = ModBlockEntity::new(kind.into(), Default::default());
             dispatch_block_entity_tick(&mut NoHost, [0, 64, 0], &mut entity);
             entity.data.len()
         };
         // The tick is asked by the entity's type, which differs from its block's id.
-        assert_eq!(tick("test:press_entity"), 1);
+        assert_eq!(tick("doubler:press_entity"), 1);
         assert_eq!(tick("test:press"), 0);
     }
 

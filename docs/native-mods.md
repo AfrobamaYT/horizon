@@ -302,8 +302,8 @@ the catalog, not a global API number, source comments or documentation histories
   (`ServerStoppingEvent`). Each start is followed by `native_world_lifecycle`'s `WorldOpenReady` or `WorldOpenFailed`,
   and each stop by `WorldCloseFinal`; a server whose loop fails reports `WorldCloseFailed` instead of stopping.
 
-- Mod block entities are sent to clients. Each mod block has a block entity type of its own, named after it, after
-  vanilla's; a client makes its copy of the block entity with `native_block_entity`, as the server does.
+- Mod block entities are sent to clients. Only declared types receive wire IDs after vanilla's, and several valid
+  blocks can share a type. Server and client use its declared identity; `native_block_entity` supplies only initial data.
   `native_block_entity_update_tag` gives what clients get of one (`BlockEntity.getUpdateTag`, read from the block entity
   alone): it is asked when a chunk holding it is sent and when its block changes, and the client merges it into the
   copy's `nbt`. A saved chunk sent past the view distance asks it on its own thread, so read only `entity`. Keep it to what clients show (a machine running, its facing, a tank's level), not a menu's progress:
@@ -3237,11 +3237,22 @@ adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `S
 level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
 `None` to keep the game's item.
 
-A block entity part names its block entity type and the blocks that hold one, as vanilla's
-`BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
-The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `pre_remove_side_effects`, `menu_button`,
-`menu_quick_move`)
-find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
+Declare a block entity type and its valid blocks during `Hooks::register`, then attach its part:
+
+```rust,ignore
+let press = r.block_entity_type("press")
+    .blocks(&["mymod:press", "mymod:big_press"])
+    .build();
+r.block_entity_part(&press, Press);
+```
+
+The builder qualifies the type ID with the registering mod's namespace. It owns the save ID, wire type
+and valid blocks; `block_entity` returns only initial `Compound` data (or none for an empty compound).
+Unknown blocks, duplicate types, overlapping membership and attempts to own a `minecraft:` block are
+refused at load. An explicitly declared mod template block uses its declared type; undeclared template
+blocks retain their vanilla behavior. Adding mod blocks to vanilla types is not supported by this builder.
+The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `pre_remove_side_effects`,
+`menu_button`, `menu_quick_move`) find it by that declared type; the others (`block_entity`, `screen`, the
 block hooks) by block.
 
 `r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
