@@ -1053,6 +1053,9 @@ struct GameLevel<'w> {
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
     native_particles: &'w mut Vec<lan_particles::QueuedParticle>,
+    /// The server sound-seed source (`Level.soundSeedGenerator`), when this
+    /// level's host is up: `native_play_sound` draws its seed there.
+    sound_seeds: Option<&'w horizon_client::lan::hub::Hub>,
 }
 struct PlayerCollision {
     y: f64,
@@ -4814,6 +4817,7 @@ impl Game<'_> {
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
             native_particles: &mut self.creatures.lan_particles,
+            sound_seeds: self.lan.as_ref().map(|host| &host.hub),
         };
         let result = f(self.res.behaviours(), &mut level, &mut self.block_ticks);
         self.flush_spill();
