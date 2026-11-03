@@ -84,7 +84,7 @@ impl Game<'_> {
     /// ServerRecipeBook.addRecipes/removeRecipes for the player in place: how
     /// many recipe book displays changed (a transmute recipe has one per
     /// material count).
-    fn change_recipes(&mut self, give: bool, recipes: &[String]) -> i32 {
+    pub(in crate::game) fn change_recipes(&mut self, give: bool, recipes: &[String]) -> i32 {
         let index = &world_stations!(self).recipe_index;
         if give {
             let (count, unlocked) = self.level.recipe_book.add_recipes(index, recipes);
