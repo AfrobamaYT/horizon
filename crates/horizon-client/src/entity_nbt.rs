@@ -1385,10 +1385,16 @@ pub fn mob_from_nbt(
         // The hands, armour, body and saddle: the one `equipment` codec.
         m.extra.equipment = horizon_items::equipment::Equipment::read(eq);
         // Their enchantments and trims.
-        for (index, key) in crate::mobs::gear::KEYS.iter().enumerate() {
-            if let Some(stack) = eq.get(key).and_then(crate::save::item_from_nbt) {
-                crate::mobs::gear::set(&mut m, index, stack.enchantments().to_vec());
+        // (`gear` slot order: hands, then head to feet.)
+        use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
+        for (index, slot) in [MAINHAND, OFFHAND, HEAD, CHEST, LEGS, FEET]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(stack) = m.extra.slot_stack(slot) {
+                let levels = stack.enchantments().to_vec();
                 let trim = stack.data().and_then(|d| d.trim.clone());
+                crate::mobs::gear::set(&mut m, index, levels);
                 crate::mobs::gear::set_trim(&mut m, index, trim);
             }
         }
