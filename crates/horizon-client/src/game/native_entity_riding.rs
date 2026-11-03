@@ -59,6 +59,7 @@ impl Game<'_> {
         self.native_entity_target(entity)?;
         let id = entity.id();
         let acting = self.lan_acting.filter(|_| self.player.is_some());
+        let mut acting_listed = false;
         let mut players: Vec<(u64, u32)> = self
             .lan
             .iter()
@@ -66,6 +67,7 @@ impl Game<'_> {
             .filter(|g| g.placed && g.dimension == self.dim.id())
             .filter(|g| {
                 let vehicle = if acting == Some(g.conn) {
+                    acting_listed = true;
                     self.riding
                 } else {
                     g.vehicle
@@ -75,6 +77,17 @@ impl Game<'_> {
             .map(|g| (g.vehicle_order, g.entity_id as u32))
             .collect();
         players.sort_unstable();
+        // A guest action can take the hub out of the game: the acting
+        // player, whose vehicle is in `riding` then, goes first, as
+        // `addPassenger` puts a player first.
+        if let Some(me) = self.lan_acting_entity
+            && self.lan_acting_uuid.is_some()
+            && !acting_listed
+            && self.player.is_some()
+            && self.riding == Some(id)
+        {
+            players.insert(0, (0, me));
+        }
         let mobs = self
             .mobs
             .iter()
@@ -108,15 +121,16 @@ impl Game<'_> {
         }
         self.native_vehicle_id(t).is_none()
     }
-    /// Gets every passenger off the entity (`Entity.ejectPassengers`).
-    /// False when nothing rode it, or for a stale handle. API
+    /// Gets every passenger off the entity (`Entity.ejectPassengers`), last
+    /// first as vanilla walks the list, so `mob_ride` hears them in its
+    /// order. False when nothing rode it, or for a stale handle. API
     /// @API:entity_riding@.
     pub(super) fn native_entity_eject_passengers(&mut self, entity: EntityRef) -> bool {
         let Some(passengers) = self.native_entity_passengers(entity) else {
             return false;
         };
         let mut any = false;
-        for p in passengers {
+        for p in passengers.into_iter().rev() {
             any |= self.native_entity_stop_riding(p);
         }
         any
