@@ -385,7 +385,10 @@ impl Game<'_> {
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
             host.hub.guests.iter().find(|guest| {
-                guest.placed && guest.participates_online() && guest.uuid == uuid && !self.lan_guest_swaps.contains(&guest.conn)
+                guest.placed
+                    && guest.participates_online()
+                    && guest.uuid == uuid
+                    && !self.lan_guest_swaps.contains(&guest.conn)
             })
         }) {
             return Some((PlayerRead::Guest(guest), guest.entity_id as u32));
