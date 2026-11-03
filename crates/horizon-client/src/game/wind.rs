@@ -415,6 +415,7 @@ impl Game<'_> {
                 interaction: "trigger_block",
                 damage_type: None,
                 source: None,
+                owner: None,
             };
             if self.explosion_start_cancelled(&start) {
                 return Ok(());

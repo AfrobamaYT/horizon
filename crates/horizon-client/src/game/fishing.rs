@@ -326,7 +326,7 @@ impl Game<'_> {
                 Some(hook.open_water),
             );
             self.world.random = random;
-            let mut caught: Vec<ItemStack> = items
+            let caught: Vec<ItemStack> = items
                 .into_iter()
                 .map(|stack| {
                     let mut item = ItemStack {
@@ -352,26 +352,23 @@ impl Game<'_> {
                     item
                 })
                 .collect();
-            // ItemFishedEvent, on the rolled catch: the mods may change it and
-            // the rod's damage, or cancel it.
+            // ItemFishedEvent, on the rolled catch: the mods may set the
+            // rod's damage, or cancel the catch.
             let mut rod_damage = if hook.on_ground { 2 } else { 1 };
             if let Some(player) = self.lan_acting_uuid
                 && !horizon_client::mod_api::mods().is_empty()
             {
-                let mut fished = horizon_client::mod_api::NativeItemFished {
+                let fished = horizon_client::mod_api::NativeItemFished {
                     hook: hook.id,
                     position: [hook.position.x, hook.position.y, hook.position.z],
-                    drops: caught,
-                    rod_damage,
+                    drops: &caught,
                 };
                 let mut cancel = false;
                 let entity_id = self.own_entity_id();
-                self.native_item_fished(player, entity_id, &mut fished, &mut cancel);
-                rod_damage = fished.rod_damage;
+                self.native_item_fished(player, entity_id, &fished, &mut rod_damage, &mut cancel);
                 if cancel {
                     return rod_damage.max(0) as u32;
                 }
-                caught = fished.drops;
             }
             for item in caught.iter().cloned() {
                 // FishingHook.retrieve: fish_caught for each catch in #minecraft:fishes.

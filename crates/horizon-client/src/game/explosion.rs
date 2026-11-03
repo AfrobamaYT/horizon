@@ -890,6 +890,7 @@ impl Game<'_> {
                 interaction: interaction_name,
                 damage_type: Some(damage_type),
                 source: self.combat.explosion_source,
+                owner: self.combat.explosion_owner,
             };
             if self.explosion_start_cancelled(&start) {
                 return Ok(());

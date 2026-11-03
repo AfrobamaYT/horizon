@@ -143,21 +143,21 @@ pub struct NativeExplosionStart<'a> {
     /// The mob that explodes (a creeper) or whose projectile does (a ghast's
     /// fireball, a wither's skull), when Horizon tracks one.
     pub source: Option<u32>,
+    /// The mob that owns that projectile (`getIndirectSourceEntity`), when
+    /// Horizon tracks one.
+    pub owner: Option<u32>,
 }
 
-/// A fishing catch, for `item_fished` (`ItemFishedEvent`): what the mods may
-/// change before the player gets it.
-#[derive(Clone, Debug)]
+/// A fishing catch, for `item_fished` (`ItemFishedEvent`).
+#[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
-pub struct NativeItemFished {
+pub struct NativeItemFished<'a> {
     /// The bobber's entity id and position.
     pub hook: u32,
     pub position: [f64; 3],
-    /// The items the fishing loot table rolled, for the player to receive.
-    pub drops: Vec<ItemStack>,
-    /// The damage the rod takes: vanilla's 1, or 2 with the bobber on the
-    /// ground.
-    pub rod_damage: i32,
+    /// The items the fishing loot table rolled, which the player receives
+    /// (`getDrops`: they can't be changed here; loot tables change them).
+    pub drops: &'a [ItemStack],
 }
 
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
@@ -1408,6 +1408,72 @@ mod tests {
         assert_eq!(stand.items[0], Some(awkward));
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
+
+    /// Keeps the cod: reads the catch, sets the rod's damage, and cancels a
+    /// catch with cod in it.
+    struct CodKeeper;
+
+    impl Hooks for CodKeeper {
+        fn item_fished(&self, _host: &mut dyn Host, event: &mut ItemFishedEvent<'_>) -> Flow {
+            event.rod_damage = 4;
+            let cod = event
+                .fished
+                .drops
+                .iter()
+                .any(|s| &*s.item == "minecraft:cod");
+            if cod { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+
+    /// Fails the test if a mod after a cancel is asked.
+    struct Unreached;
+
+    impl Hooks for Unreached {
+        fn item_fished(&self, _host: &mut dyn Host, _event: &mut ItemFishedEvent<'_>) -> Flow {
+            panic!("asked after a cancel");
+        }
+    }
+
+    /// `ItemFishedEvent`: a mod reads the catch and sets the rod's damage,
+    /// which stays whether or not it cancels; a cancel stops later mods.
+    #[test]
+    fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        let mut host = Reader {
+            block: "minecraft:water",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper), Box::new(Unreached)];
+        let ask = |host: &mut Reader, item: &str| {
+            let drops = [ItemStack::new(item, 1)];
+            let fished = NativeItemFished {
+                hook: 9,
+                position: [0.5, 62.0, 0.5],
+                drops: &drops,
+            };
+            let (mut rod_damage, mut cancel) = (1, false);
+            dispatch_item_fished(host, &mods, 7, 3, &fished, &mut rod_damage, &mut cancel);
+            (rod_damage, cancel)
+        };
+        assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper)];
+        let drops = [ItemStack::new("minecraft:salmon", 1)];
+        let fished = NativeItemFished {
+            hook: 9,
+            position: [0.5, 62.0, 0.5],
+            drops: &drops,
+        };
+        let (mut rod_damage, mut cancel) = (2, false);
+        dispatch_item_fished(
+            &mut host,
+            &mods,
+            7,
+            3,
+            &fished,
+            &mut rod_damage,
+            &mut cancel,
+        );
+        assert_eq!((rod_damage, cancel), (4, false));
     }
 
     /// Records what `player_brewed_potion` told it.
