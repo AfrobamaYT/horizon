@@ -3736,9 +3736,6 @@ impl Game<'_> {
                     {
                         m.extra.charged = charged;
                     }
-                    // The body slot (6: horse armour, llama carpet, harness)
-                    // is kept in `head`, as Horizon's own mobs do.
-                    let body = horizon_client::mobs::drops::head_is_body(m.species());
                     for (slot, item, stack) in items {
                         let e = &mut m.extra;
                         match slot {
@@ -3763,14 +3760,14 @@ impl Game<'_> {
                                 e.chest = item;
                                 e.armor[1] = stack;
                             }
-                            5 if !body => {
+                            5 => {
                                 e.head = item;
                                 e.armor[0] = stack;
                             }
-                            6 if body => {
-                                // A wolf's armor shows its cracks.
+                            6 => {
                                 e.body_damage = stack.as_ref().map_or(0, |s| s.damage as i32);
-                                e.head = item;
+                                e.body_extra = stack.and_then(|s| s.extra);
+                                e.body = item;
                             }
                             7 => m.set_saddle(stack),
                             _ => {}
