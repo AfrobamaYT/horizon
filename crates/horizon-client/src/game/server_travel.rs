@@ -964,16 +964,15 @@ mod tests {
                     minecarts::CartKind::Rideable,
                     Vec3::ZERO,
                 ));
-                let mut source = vec![game.carts.pop().unwrap()];
+                let source = game.dim;
+                game.enter_level(None, Dim::Nether).unwrap();
                 game.carts.push(minecarts::Minecart::new(
                     base + 2,
                     minecarts::CartKind::Rideable,
                     Vec3::ZERO,
                 ));
                 game.native_joins_flush(false, 0);
-                let cart =
-                    take_vehicle(&mut source, base + 1, Vec3::ZERO, 0.0, Vec3::ZERO).unwrap();
-                game.carts.push(cart);
+                game.arrive_vehicle(source, base + 1, Vec3::ZERO, 0.0);
                 game.native_joins_flush(false, 0);
                 game.native_joins_flush(false, 0);
                 assert_eq!(*joins.lock().unwrap(), vec![base + 2, base + 1]);
