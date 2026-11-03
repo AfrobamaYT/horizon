@@ -1174,7 +1174,7 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    [
+    ![
         m.extra.head_id(),
         m.extra.slot_id(horizon_items::equipment::CHEST),
         m.extra.slot_id(horizon_items::equipment::LEGS),
