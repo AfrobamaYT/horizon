@@ -80,8 +80,36 @@ mod tests {
         pub(super) struct NativeMod;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
+        #[derive(Default)]
         pub(super) struct ModBlockEntity {
-            pub(super) id: String,
+            id: String,
+            pub(super) data: Vec<i32>,
+        }
+        impl ModBlockEntity {
+            pub(super) fn new(id: &str) -> Self {
+                Self {
+                    id: id.into(),
+                    ..Default::default()
+                }
+            }
+            pub(super) fn id(&self) -> &str {
+                &self.id
+            }
+        }
+        pub(super) struct ModBlockEntityView<'a> {
+            id: &'a str,
+            pub(super) data: &'a mut Vec<i32>,
+        }
+        impl<'a> ModBlockEntityView<'a> {
+            pub(super) fn new(entity: &'a mut ModBlockEntity) -> Self {
+                Self {
+                    id: &entity.id,
+                    data: &mut entity.data,
+                }
+            }
+            pub(super) fn id(&self) -> &str {
+                self.id
+            }
         }
         pub(super) struct ModContainer;
         pub(super) struct MerchantOffer;
@@ -137,9 +165,37 @@ mod tests {
         Cancel,
     }
     trait Host {}
+    trait ServerHost: Host {}
+    trait ClientHost: Host {}
+    enum HostSide<'a> {
+        Server(&'a mut dyn ServerHost),
+        Client(&'a mut dyn ClientHost),
+    }
+    impl HostSide<'_> {
+        fn reborrow(&mut self) -> HostSide<'_> {
+            match self {
+                Self::Server(host) => HostSide::Server(&mut **host),
+                Self::Client(host) => HostSide::Client(&mut **host),
+            }
+        }
+    }
+    enum LevelSide<'a> {
+        Server(&'a dyn LevelHost),
+        Client(&'a dyn LevelHost),
+    }
+    impl LevelSide<'_> {
+        fn reborrow(&mut self) -> LevelSide<'_> {
+            match self {
+                Self::Server(host) => LevelSide::Server(*host),
+                Self::Client(host) => LevelSide::Client(*host),
+            }
+        }
+    }
     trait RenderHooks {}
     struct TestHost;
     impl Host for TestHost {}
+    impl ServerHost for TestHost {}
+    impl ClientHost for TestHost {}
     mod winit {
         pub mod event {
             pub struct KeyEvent;
@@ -265,10 +321,7 @@ mod tests {
         Parts
     }
     impl Parts {
-        fn block<'k>(
-            &self,
-            _: impl FnOnce() -> Option<&'k str>,
-        ) -> &'static [&'static dyn BlockPart] {
+        fn block_state(&self, _: BlockStateId) -> &'static [&'static dyn BlockPart] {
             &[]
         }
         fn block_entity<'k>(
@@ -381,7 +434,7 @@ mod tests {
         impl Hooks for Observer {
             fn player_advancement_progress(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut PlayerAdvancementProgressEvent<'_>,
             ) {
                 assert_eq!(event.player, 123);
@@ -420,29 +473,30 @@ mod tests {
         calls: Arc<Mutex<Vec<u32>>>,
     }
     impl Hooks for Mod {
-        fn menu_button(&self, _: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+        fn menu_button(&self, _: &mut dyn ServerHost, event: &mut MenuButtonEvent<'_>) {
             assert_eq!(event.context.player, 123);
             assert_eq!(event.context.player_entity_id, 42);
             assert_eq!(event.context.pos, [1, 2, 3]);
             assert_eq!(event.context.id, 9);
-            event.entity.id.push_str("-changed");
+            assert_eq!(event.entity.id(), "machine");
+            event.entity.data.push(9);
             *event.carried = Some(ItemStack {
                 item: "bucket".into(),
             });
         }
-        fn block_entity_submit(&self, _: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
+        fn block_entity_submit(&self, _: &dyn ClientHost, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
             event.draw.0.push(self.id);
         }
         fn living_entity_use_item_finish(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             event: &mut LivingEntityUseItemFinishEvent<'_>,
         ) {
             *event.result = None;
         }
-        fn mouse_button_pre(&self, _: &mut dyn Host, _: &mut MouseButtonPreEvent) -> Flow {
+        fn mouse_button_pre(&self, _: &mut dyn ClientHost, _: &mut MouseButtonPreEvent) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
@@ -456,7 +510,7 @@ mod tests {
         }
         fn living_entity_use_item_tick(
             &self,
-            _: &mut dyn Host,
+            _: HostSide,
             event: &mut LivingEntityUseItemTickEvent<'_>,
         ) -> Flow {
             event.duration -= 1;
@@ -476,13 +530,13 @@ mod tests {
                 .or_insert_with(|| serde_json::json!([]));
             value.as_array_mut().unwrap().push(self.id.into());
         }
-        fn level_tick_pre(&self, _: &mut dyn Host, _: &mut LevelTickPreEvent<'_>) {
+        fn level_tick_pre(&self, _: &mut dyn ServerHost, _: &mut LevelTickPreEvent<'_>) {
             self.calls.lock().unwrap().push(self.id);
         }
-        fn tooltip(&self, _: &dyn Host, event: &mut TooltipEvent<'_>) {
+        fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
             event.lines.push((Text, self.id));
         }
-        fn zoom(&self, _: &dyn Host, _: &mut ZoomEvent) -> Option<NativeZoom> {
+        fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<NativeZoom> {
             self.calls.lock().unwrap().push(self.id);
             Some(NativeZoom(self.id))
         }
@@ -502,7 +556,7 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn use_item_on(&self, _: &mut dyn Host, _: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
@@ -528,12 +582,11 @@ mod tests {
             pos: [1, 2, 3],
             id: 9,
         };
-        let mut entity = ModBlockEntity {
-            id: "machine".into(),
-        };
+        let mut entity = ModBlockEntity::new("machine");
         let mut carried = None;
         dispatch_menu_button(&mut TestHost, &context, &mut entity, &mut carried);
-        assert_eq!(entity.id, "machine-changed");
+        assert_eq!(entity.id(), "machine");
+        assert_eq!(entity.data, [9]);
         assert_eq!(carried.unwrap().item.as_ref(), "bucket");
     }
 
@@ -558,7 +611,7 @@ mod tests {
             [1, 2, 3],
             "example:machine",
             BlockStateId,
-            &ModBlockEntity { id: String::new() },
+            &ModBlockEntity::default(),
             &mut draw,
         );
         assert_eq!(draw.0, [1, 2]);
@@ -586,7 +639,7 @@ mod tests {
         assert_eq!((may_place, max_stack), (false, 1));
         let (mut duration, mut canceled) = (10, false);
         dispatch_living_entity_use_item_tick(
-            &mut TestHost,
+            HostSide::Server(&mut TestHost),
             &ItemStack::default(),
             None,
             Hand,
@@ -697,7 +750,11 @@ mod tests {
     fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
         struct Property;
         impl Hooks for Property {
-            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+            fn item_model_property(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ItemModelPropertyEvent<'_>,
+            ) {
                 if event.property == "example:charged" {
                     event.value = event.stack.count > 1;
                 }
@@ -740,7 +797,7 @@ mod tests {
         impl Hooks for Backstab {
             fn living_incoming_damage_v2(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut LivingIncomingDamageV2Event<'_>,
             ) -> Flow {
                 assert_eq!(event.causing, 7);
@@ -884,7 +941,7 @@ mod tests {
         install(mods.clone());
         calls.lock().unwrap().clear();
         let mut claimed = false;
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &ItemStack::default(),
             [0; 3],
@@ -898,7 +955,7 @@ mod tests {
         assert!(claimed);
         assert_eq!(*calls.lock().unwrap(), [1]);
         calls.lock().unwrap().clear();
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &ItemStack::default(),
             [0; 3],
