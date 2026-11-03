@@ -35,26 +35,10 @@ pub(super) fn strip(bundle: &Bundle) -> Result<(), String> {
 }
 
 /// Read and validate the trait package folder at the manifest boundary.
-pub(super) fn folder(dir: &Path, table: &toml::Value) -> Result<String, String> {
+pub(super) fn folder(dir: &Path) -> Result<String, String> {
     let manifest = dir.join(MANIFEST);
-    if !table
-        .as_table()
-        .is_some_and(|t| t.len() == 1 && t.contains_key("path"))
-    {
-        return Err(format!("{}: [api] accepts only path", manifest.display()));
-    }
-    let folder = table
-        .get("path")
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| format!("{}: [api] needs a path", manifest.display()))?;
+    let folder = horizon_mods::index::native::RUST;
     let relative = Path::new(folder);
-    // An absolute path would bypass the incoming copy when joined later.
-    if relative.is_absolute() {
-        return Err(format!(
-            "{}: invalid [api] path {folder:?}",
-            manifest.display()
-        ));
-    }
     let source = dir.join(relative);
     let root = dir
         .canonicalize()

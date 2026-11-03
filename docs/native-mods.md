@@ -577,7 +577,7 @@ and the recipe fails, as an unknown kind does.
 
 A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
 module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
-`crate::native_data!` inside the lib), since hook points API 41. A mod's crate keeps its own data in its folder and
+`crate::native_data!` inside the lib). A mod's crate keeps its own data in its folder and
 reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
 both (`native/data/…`, `native/rust/data/…`).
 
@@ -2813,7 +2813,7 @@ A bundle declares its trait mod package by its path inside `native/`:
 
 ```toml
 [api]
-path = "engine"
+path = "rust"
 ```
 
 A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest cannot declare both routes.

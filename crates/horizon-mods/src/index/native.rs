@@ -13,6 +13,7 @@ pub const MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
 pub enum SourceLayoutError {
     Root(String),
     Path,
+    ApiFields,
     BothRoutes,
     MultipleCrates,
 }
@@ -22,6 +23,7 @@ impl std::fmt::Display for SourceLayoutError {
         match self {
             Self::Root(path) => write!(f, "native source root must be rust, got {path:?}"),
             Self::Path => f.write_str("native manifest needs a string source path"),
+            Self::ApiFields => f.write_str("[api] accepts only path"),
             Self::BothRoutes => {
                 f.write_str("native manifest cannot declare both [api] and [[crate]] for rust")
             }
@@ -35,6 +37,12 @@ impl std::error::Error for SourceLayoutError {}
 /// The launcher and archive reader share the source-root boundary.
 pub fn check_source_layout(source: &toml::Table) -> Result<(), SourceLayoutError> {
     let api = source.get("api");
+    if api.is_some_and(|v| {
+        !v.as_table()
+            .is_some_and(|t| t.len() == 1 && t.contains_key("path"))
+    }) {
+        return Err(SourceLayoutError::ApiFields);
+    }
     let crates = source
         .get("crate")
         .map(|v| v.as_array().ok_or(SourceLayoutError::Path))
@@ -336,7 +344,7 @@ impl Bundle {
         }
         let prefix = SOURCE;
         for name in files.keys().filter(|n| n.as_str() != MANIFEST) {
-            let Some(rest) = name.strip_prefix(&prefix) else {
+            let Some(rest) = name.strip_prefix(prefix) else {
                 return Err(format!("unexpected native source: {name}"));
             };
             if !allowed(rest) {

@@ -670,10 +670,7 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
             })
         })
         .collect();
-    let api = value
-        .get("api")
-        .map(|table| api::folder(dir, table))
-        .transpose()?;
+    let api = value.get("api").map(|_| api::folder(dir)).transpose()?;
     let mixins_content = value
         .keys()
         .any(|key| !["mod", "compatibility", "api", "dependencies"].contains(&key.as_str()));
