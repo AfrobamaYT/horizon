@@ -9342,7 +9342,12 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
         use super::super::native_entity_refs::tests::with_game_at;
-        use horizon_client::{chunk::Chunk, containers::BlockEntity, mod_api::*, save};
+        use horizon_client::{
+            chunk::Chunk,
+            containers::BlockEntity,
+            mod_api::{self, *},
+            save,
+        };
         use std::{process::Command, sync::Arc};
 
         const CHILD: &str = "HORIZON_DECLARED_BE_GAME_CHILD";
