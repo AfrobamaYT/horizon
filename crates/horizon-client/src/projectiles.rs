@@ -50,14 +50,17 @@ pub fn unique_random(position: Vec3) -> horizon_core::random::LegacyRandom {
     use std::sync::atomic::{AtomicI64, Ordering};
     static UNIQUIFIER: AtomicI64 = AtomicI64::new(0x1F3D_5B79_A2C4_E681);
     const STEP: i64 = 1_181_783_497_276_652_981;
-    let step = UNIQUIFIER
-        .try_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
-            Some(
-                s.wrapping_mul(STEP)
-                    .wrapping_add(0x9E37_79B9_7F4A_7C15_u64 as i64),
-            )
-        })
-        .unwrap_or_default();
+    let mut current = UNIQUIFIER.load(Ordering::Relaxed);
+    let step = loop {
+        let next = current
+            .wrapping_mul(STEP)
+            .wrapping_add(0x9E37_79B9_7F4A_7C15_u64 as i64);
+        match UNIQUIFIER.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break next,
+            Err(actual) => current = actual,
+        }
+    };
     let mut z = (step as u64)
         ^ position.x.to_bits()
         ^ position.y.to_bits().rotate_left(21)
