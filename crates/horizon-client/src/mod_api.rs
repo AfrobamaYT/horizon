@@ -57,6 +57,7 @@ pub use horizon_world::{
     registry::BlockStateId,
 };
 pub use serde_json;
+
 use serde_json::{Map, Value};
 use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
@@ -518,6 +519,41 @@ pub enum NativeBlockShapeKind {
     Outline,
     /// Collision shape (`BlockState.getCollisionShape`).
     Collision,
+}
+
+/// A player's client options, as `ServerboundClientInformationPacket` carries them
+/// (vanilla's `ClientInformation`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeClientInfo {
+    pub language: String,
+    pub view_distance: i8,
+    /// 0 full, 1 system, 2 hidden.
+    pub chat_visibility: i32,
+    pub chat_colors: bool,
+    /// Skin layer bits (`PlayerModelPart`).
+    pub model_customisation: u8,
+    /// 0 left, 1 right.
+    pub main_hand: i32,
+    pub text_filtering: bool,
+    pub allows_listing: bool,
+    /// 0 all, 1 decreased, 2 minimal.
+    pub particle_status: i32,
+}
+
+impl From<&horizon_protocol::packets::configuration::ClientInformation> for NativeClientInfo {
+    fn from(i: &horizon_protocol::packets::configuration::ClientInformation) -> Self {
+        Self {
+            language: i.language.clone(),
+            view_distance: i.view_distance,
+            chat_visibility: i.chat_visibility,
+            chat_colors: i.chat_colors,
+            model_customisation: i.model_customisation,
+            main_hand: i.main_hand,
+            text_filtering: i.text_filtering,
+            allows_listing: i.allows_listing,
+            particle_status: i.particle_status,
+        }
+    }
 }
 
 /// An online player in one open server world, keyed by UUID.

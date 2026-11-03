@@ -128,6 +128,9 @@ mod tests {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
             }
+            pub mod mod_api {
+                pub struct NativeClientInfo;
+            }
             pub mod menu {
                 pub struct AnvilCraft;
                 pub struct AnvilUpdate;

@@ -2008,6 +2008,14 @@ impl Game<'_> {
                         self.native_player_locale_change(uuid, &name, &locale);
                     }
                 }
+                HostEvent::ClientInformation(conn, old) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        let old = horizon_client::mod_api::NativeClientInfo::from(&*old);
+                        let new = horizon_client::mod_api::NativeClientInfo::from(&g.info);
+                        self.native_client_information_updated(uuid, &name, &old, &new);
+                    }
+                }
                 HostEvent::PlayerLoaded(conn) => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());

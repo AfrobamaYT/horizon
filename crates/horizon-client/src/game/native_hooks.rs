@@ -5527,6 +5527,33 @@ impl Game<'_> {
     pub(super) fn native_player_locale_change(&mut self, player: u128, name: &str, locale: &str) {
         mod_api::dispatch_player_locale_change(self, mod_api::mods(), player, name, locale);
     }
+    /// NeoForge's `ClientInformationUpdatedEvent`: a server player's client sent new
+    /// client information (language, view distance, chat, skin parts, main hand,
+    /// filtering, listing, particles) in play. `old` and `new` are the values before and
+    /// after; they can be equal. The player is not swapped in. Server-side.
+    /// @API:client_information_updated@.
+    pub(super) fn native_client_information_updated(
+        &mut self,
+        player: u128,
+        name: &str,
+        old: &horizon_client::mod_api::NativeClientInfo,
+        new: &horizon_client::mod_api::NativeClientInfo,
+    ) {
+        mod_api::dispatch_client_information_updated(self, mod_api::mods(), player, name, old, new);
+    }
+    /// A server player's client sent a `custom` click action (a dialog button or a
+    /// text component's click event): its id and its payload as SNBT text, if any.
+    /// Vanilla only logs it. The player is not swapped in. Server-side.
+    /// @API:custom_click_action@.
+    pub(super) fn native_custom_click_action(
+        &mut self,
+        player: u128,
+        name: &str,
+        id: &str,
+        payload: Option<&str>,
+    ) {
+        mod_api::dispatch_custom_click_action(self, mod_api::mods(), player, name, id, payload);
+    }
     /// A server entity was moved by a same-level teleport command, after its
     /// position changed. `entity` is its network id; `from` and `to` are
     /// coordinates in `dimension`. This hook reports command teleports that

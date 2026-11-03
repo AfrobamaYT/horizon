@@ -1736,7 +1736,10 @@ impl Game<'_> {
         if host.hub.guests[gi].dead
             && !matches!(
                 packet,
-                S::ClientCommand(_) | S::ChatCommand(_) | S::ChatCommandSigned(_)
+                S::ClientCommand(_)
+                    | S::ChatCommand(_)
+                    | S::ChatCommandSigned(_)
+                    | S::CustomClickAction(_)
             )
         {
             return;
@@ -2447,6 +2450,15 @@ impl Game<'_> {
                 self.guest_far_terrain(host, conn, &p.data)
             }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
+            // MinecraftServer.handleCustomClickAction only logs it: the mods hear it.
+            S::CustomClickAction(p) => {
+                if !horizon_client::mod_api::mods().is_empty() {
+                    let g = &host.hub.guests[gi];
+                    let (uuid, name) = (g.uuid, g.name.clone());
+                    let payload = p.payload.as_ref().map(horizon_client::snbt::to_snbt);
+                    self.native_custom_click_action(uuid, &name, &p.id, payload.as_deref());
+                }
+            }
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {
                     self.ui.difficulty = if self.level.hardcore {

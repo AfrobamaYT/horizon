@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "client_information_updated",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_information_updated",
+      "neoforge": "ClientInformationUpdatedEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a server player's client sent new client information (`native_client_information_updated`).",
+  "doc_summary": "`native_client_information_updated(player, name, old, new)`, when a server player's client sends `ServerboundClientInformationPacket` in play: language, view distance, chat visibility and colours, skin parts, main hand, text filtering, server listing and particle status. `old` and `new` are `NativeClientInfo` values (`old` is the stored information before, `new` the one just stored); they can be equal. It fires after the new information is stored. Listen-only; configuration-phase packets are not reported (the player does not exist yet). Server-side. Bundles need \"hooks\": @API:client_information_updated@."
+}

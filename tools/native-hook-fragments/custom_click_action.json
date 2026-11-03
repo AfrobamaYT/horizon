@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "custom_click_action",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_custom_click_action",
+      "neoforge": "CustomClickActionEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a server player's client sent a custom click action (`native_custom_click_action`).",
+  "doc_summary": "`native_custom_click_action(player, name, id, payload)`, when a server player's client sends `ServerboundCustomClickActionPacket` in play: the `custom` click event of a dialog button or a text component. `id` is the resource location text, `payload` the optional tag as SNBT text (`None` when the client sent none). Vanilla only logs the packet. Listen-only. Server-side. Bundles need \"hooks\": @API:custom_click_action@."
+}
