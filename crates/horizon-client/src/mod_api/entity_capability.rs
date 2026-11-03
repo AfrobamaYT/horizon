@@ -2,8 +2,8 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    Capability, ComponentId, EntityProvider, EntityRef, Hand, Host, ItemPlace, ItemResource,
-    ProvidedBy, ResourceHandler, Tag, Transaction,
+    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource, ProvidedBy,
+    ResourceHandler, Tag, Transaction,
 };
 use std::marker::PhantomData;
 
@@ -37,13 +37,10 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
         default: Some(|host, entity| {
             if entity.kind(host)? != "minecraft:player" {
                 let size = host.entity_container_size(entity.id())?;
-                return Some(Box::new(ContainerItems {
-                    entity: entity.id(),
-                    size,
-                }));
+                return Some(Box::new(ContainerItems { entity, size }));
             }
             let player = entity.uuid(host)?;
-            Some(Box::new(PlayerItems(player)))
+            Some(Box::new(PlayerItems { entity, player }))
         }),
         handler: PhantomData,
     };
@@ -78,17 +75,24 @@ impl EntityRef {
     }
 }
 
+/// Whether `entity` is still there, in the level in place: a handler kept past the entity's
+/// removal or its world's close reaches nothing, as a new lookup would answer none.
+fn live(host: &dyn Host, entity: EntityRef) -> bool {
+    entity.level(host).is_some_and(|level| level.in_place(host))
+}
+
 /// The game's own [`ENTITY_ITEMS`] for a container entity: its `size` slots, each an
 /// [`ItemPlace::EntitySlot`], taking a stack of anything.
 struct ContainerItems {
-    entity: u32,
+    entity: EntityRef,
     size: usize,
 }
 
 impl ContainerItems {
-    fn place(&self, index: usize) -> Option<ItemPlace> {
-        (index < self.size).then_some(ItemPlace::EntitySlot {
-            entity: self.entity,
+    /// Index `index` as the entity's slot, while the entity is there.
+    fn place(&self, host: &dyn Host, index: usize) -> Option<ItemPlace> {
+        (index < self.size && live(host, self.entity)).then_some(ItemPlace::EntitySlot {
+            entity: self.entity.id(),
             slot: index,
         })
     }
@@ -99,13 +103,14 @@ impl ResourceHandler<ItemResource> for ContainerItems {
         self.size
     }
     fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
-        self.place(index)?.resource(host)
+        self.place(host, index)?.resource(host)
     }
     fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
-        self.place(index).map_or(0, |place| place.amount(host))
+        self.place(host, index)
+            .map_or(0, |place| place.amount(host))
     }
     fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
-        match self.place(index) {
+        match self.place(host, index) {
             Some(_) => max_stack(host, resource),
             None => 0,
         }
@@ -118,7 +123,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        let Some(place) = self.place(index) else {
+        let Some(place) = self.place(host, index) else {
             return 0;
         };
         let limit = max_stack(host, resource);
@@ -132,7 +137,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        self.place(index)
+        self.place(host, index)
             .map_or(0, |place| place.extract(host, tx, resource, amount))
     }
 }
@@ -142,13 +147,21 @@ const MAIN: usize = 36;
 const ARMOUR: [&str; 4] = ["feet", "legs", "chest", "head"];
 const OFF_HAND: usize = MAIN + ARMOUR.len();
 
-/// The game's own [`ENTITY_ITEMS`] for player `.0`: each index is the player's
-/// [`ItemPlace::PlayerSlot`], written in place and journaled, and takes only what fits there.
-struct PlayerItems(u128);
+/// The game's own [`ENTITY_ITEMS`] for `player`, the player `entity`: each index is the
+/// player's [`ItemPlace::PlayerSlot`], written in place and journaled, and takes only what
+/// fits there.
+struct PlayerItems {
+    entity: EntityRef,
+    player: u128,
+}
 
 impl PlayerItems {
+    /// Index `index` as the player's slot, while the player is there.
+    fn place(&self, host: &dyn Host, index: usize) -> Option<ItemPlace> {
+        live(host, self.entity).then(|| self.slot(index)).flatten()
+    }
     /// Index `index` as the player's slot, numbered as `native_inventory_tick` numbers them.
-    fn place(&self, index: usize) -> Option<ItemPlace> {
+    fn slot(&self, index: usize) -> Option<ItemPlace> {
         let slot = match index {
             OFF_HAND => -106,
             index if index > OFF_HAND => return None,
@@ -156,7 +169,7 @@ impl PlayerItems {
             index => index as i32,
         };
         Some(ItemPlace::PlayerSlot {
-            player: self.0,
+            player: self.player,
             slot,
         })
     }
@@ -193,7 +206,7 @@ fn max_stack(host: &dyn Host, resource: &ItemResource) -> u32 {
 
 /// Whether `resource` goes in the armour slot `slot` (`feet`...): its `equippable` names that
 /// slot and lets a player wear it (`ArmorSlot.mayPlace`, `Equippable.canBeEquippedBy`), its
-/// allowed entities a list or one id; a tag of entity types is read as not holding a player.
+/// allowed entities a list, one id, or a `#` tag of entity types holding the player.
 fn equips(host: &dyn Host, resource: &ItemResource, slot: &str) -> bool {
     let id = ComponentId::new("minecraft:equippable").expect("a component id");
     let Some(equippable) = resource.value(host, &id) else {
@@ -207,7 +220,11 @@ fn equips(host: &dyn Host, resource: &ItemResource, slot: &str) -> bool {
         && match equippable.get("allowed_entities") {
             None => true,
             Some(Tag::List(ids)) => ids.iter().any(|id| named(Some(id), "minecraft:player")),
-            entities => named(entities, "minecraft:player"),
+            Some(Tag::String(entities)) => match entities.to_string_lossy().strip_prefix('#') {
+                Some(tag) => host.entity_type_in_tag("minecraft:player", tag),
+                None => entities.to_string_lossy() == "minecraft:player",
+            },
+            _ => false,
         }
 }
 
@@ -216,10 +233,11 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         OFF_HAND + 1
     }
     fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
-        self.place(index)?.resource(host)
+        self.place(host, index)?.resource(host)
     }
     fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
-        self.place(index).map_or(0, |place| place.amount(host))
+        self.place(host, index)
+            .map_or(0, |place| place.amount(host))
     }
     fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
         match index
@@ -227,6 +245,8 @@ impl ResourceHandler<ItemResource> for PlayerItems {
             .and_then(|armour| ARMOUR.get(armour))
         {
             Some(slot) if !equips(host, resource, slot) => 0,
+            // `ArmorSlot.getMaxStackSize`.
+            Some(_) => max_stack(host, resource).min(1),
             _ if index > OFF_HAND => 0,
             _ => max_stack(host, resource),
         }
@@ -239,7 +259,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        let Some(place) = self.place(index) else {
+        let Some(place) = self.place(host, index) else {
             return 0;
         };
         let limit = self.capacity(host, index, resource);
@@ -253,8 +273,21 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        self.place(index)
-            .map_or(0, |place| place.extract(host, tx, resource, amount))
+        let Some(place) = self.place(host, index) else {
+            return 0;
+        };
+        // `ArmorSlot.mayPickup`: bound armour stays on outside creative.
+        let bound = resource
+            .to_stack(1)
+            .enchantment_level("minecraft:binding_curse")
+            > 0;
+        if (MAIN..OFF_HAND).contains(&index) && bound {
+            let player = host.player(self.player);
+            if player.and_then(|player| player.has_infinite_materials(host)) != Some(true) {
+                return 0;
+            }
+        }
+        place.extract(host, tx, resource, amount)
     }
     /// Where `Inventory.add` puts it: onto the same item in the selected slot, then in the off
     /// hand, then in the main inventory in order, then into its empty slots in order; never
@@ -266,15 +299,19 @@ impl ResourceHandler<ItemResource> for PlayerItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
+        if !live(host, self.entity) {
+            return 0;
+        }
         let limit = max_stack(host, resource);
-        let selected = ItemPlace::PlayerHand {
-            player: self.0,
-            hand: Hand::Main,
-        };
-        let same = [Some(selected), self.place(OFF_HAND)]
+        // The selected slot as a slot, not a hand: a creative player's hand takes anything.
+        let selected = host
+            .player(self.player)
+            .and_then(|player| player.selected_slot(host));
+        let same = [selected, Some(OFF_HAND)]
             .into_iter()
-            .chain((0..MAIN).map(|index| self.place(index)))
-            .flatten();
+            .flatten()
+            .chain(0..MAIN)
+            .filter_map(|index| self.slot(index));
         let mut went = 0;
         for place in same {
             if went < amount
@@ -285,7 +322,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
                 went += fill(host, tx, &place, resource, amount - went, limit);
             }
         }
-        for place in (0..MAIN).filter_map(|index| self.place(index)) {
+        for place in (0..MAIN).filter_map(|index| self.slot(index)) {
             if went < amount && place.stack(host).is_none() {
                 went += fill(host, tx, &place, resource, amount - went, limit);
             }

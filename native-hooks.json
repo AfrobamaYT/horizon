@@ -29,16 +29,8 @@
       "target": "horizon_client::game::native_mobs::Game<'_>::native_kill_mob", "side": "server"
     },
     {
-      "name": "remove_mob",
-      "target": "horizon_client::game::native_mobs::Game<'_>::native_remove_mob", "side": "server"
-    },
-    {
       "name": "summon",
       "target": "horizon_client::game::native_entities::Game<'_>::native_summon", "side": "server"
-    },
-    {
-      "name": "remove_entity",
-      "target": "horizon_client::game::native_entities::Game<'_>::native_remove_entity", "side": "server"
     },
     {
       "name": "server_players",
@@ -1294,6 +1286,7 @@
       "name": "loot_table_load", "side": "both",
       "version": 1,
       "target": "horizon_world::loot::native_loot_table_load",
+      "side": "server",
       "mod_api": {
         "contract": "collect",
         "out": "table"
@@ -2664,16 +2657,6 @@
       "name": "entity_toggle_glide",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_toggle_glide",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "entity_transform",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_transform",
       "neoforge": "none (NeoForge has no such event)",
       "side": "server",
       "mod_api": {
