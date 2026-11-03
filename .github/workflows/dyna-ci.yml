@@ -221,16 +221,26 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
           rustup toolchain install stable --profile minimal
+      # Not every dyna-large runner has the data yet. A pull request's run skips the tests there; a push to main fails.
       - name: Link prepared vanilla data
         if: steps.rust.outputs.required != 'false'
+        id: data
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
+          if [ ! -d /cache/horizon-local ]; then
+            echo "no prepared data on this runner ($RUNNER_NAME)"
+            if [ "$EVENT" = push ]; then exit 1; fi
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           mkdir -p .local
           for dir in minecraft datagen horizon-client tools; do
             test -d "/cache/horizon-local/$dir"
             ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
           done
       - name: Run the ignored tests that need prepared data
-        if: steps.rust.outputs.required != 'false'
+        if: steps.rust.outputs.required != 'false' && steps.data.outputs.present != 'false'
         env:
           RUSTUP_TOOLCHAIN: stable
         run: |
