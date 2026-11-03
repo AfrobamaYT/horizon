@@ -480,6 +480,9 @@ pub(super) struct Remote {
     pub(super) dimension: DimensionType,
     /// The level's key (`minecraft:overworld`): where its far terrain is kept.
     pub(super) level: String,
+    /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
+    /// of a world reports it once.
+    logged_out: bool,
     /// The level's hashed seed (login, respawn): the folder of its kept chunks
     /// (`server_terrain::level_dir`).
     pub(super) hashed_seed: i64,
@@ -794,6 +797,7 @@ impl Game<'_> {
             return Ok(());
         }
         self.join_world_rest()?;
+        self.client_logging_out();
         if let Err(error) = self.join_server(address, name, None, cookies, lan) {
             log::warn!("Horizon: could not join server: {error}");
             if self.title.is_none() {
@@ -989,6 +993,7 @@ impl Game<'_> {
             features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
+            logged_out: false,
             attachments: HashMap::new(),
             far_terrain: None,
             builtin,
@@ -1109,11 +1114,27 @@ impl Game<'_> {
         Ok(())
     }
 
+    /// Minecraft.disconnect's `ClientPlayerNetworkEvent.LoggingOut`: on
+    /// leaving a world, and on quitting the game from one. Once per
+    /// connection, whichever way out runs first.
+    pub(super) fn client_logging_out(&mut self) {
+        let Some(remote) = self.remote.as_mut().filter(|r| !r.logged_out) else {
+            return;
+        };
+        remote.logged_out = true;
+        let player = self
+            .player
+            .as_ref()
+            .map(|_| (remote.entity_id, remote.profile));
+        self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
+    }
+
     /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
     pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
         if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
             return self.begin_closing_save(false);
         }
+        self.client_logging_out();
         self.finish_perf();
         if reason.is_none() {
             // Leaving on purpose: nothing for auto-reconnect to retry.
@@ -3084,8 +3105,12 @@ impl Game<'_> {
                 }
                 self.send(S::ClientInformation(info));
                 self.remote_chat_login();
+                if let Some(remote) = &self.remote {
+                    self.native_client_player_logging_in(p.player_id, remote.profile);
+                }
             }
             C::Respawn(p) => {
+                let old_player = self.remote.as_ref().map(|r| (r.entity_id, r.profile));
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
@@ -3107,7 +3132,12 @@ impl Game<'_> {
                         r.own_invisible = false;
                     }
                 }
-                let dimension_changed = self.dim != Dim::from_id(&p.spawn.dimension);
+                // handleRespawn compares the levels' keys: a mod's level is
+                // its own dimension even where `Dim` has no name for it.
+                let dimension_changed = self
+                    .remote
+                    .as_ref()
+                    .is_some_and(|r| r.level != p.spawn.dimension);
                 let died = self.screen == Screen::Dead
                     || self
                         .player
@@ -3136,6 +3166,15 @@ impl Game<'_> {
                     r.camera = None;
                 }
                 self.capture(true);
+                if let Some((old_id, uuid)) = old_player {
+                    self.native_client_player_clone(
+                        old_id,
+                        self.own_entity_id(),
+                        uuid,
+                        died,
+                        dimension_changed,
+                    );
+                }
             }
             C::PlayerPosition(p) => self.remote_teleport(&p)?,
             C::PlayerRotation(p) => {

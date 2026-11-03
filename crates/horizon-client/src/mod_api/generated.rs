@@ -4575,6 +4575,36 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// After the client replaces its player on respawn or dimension change
+    /// (NeoForge's `ClientPlayerNetworkEvent.Clone`). Client-side.
+    /// @API:client_player_clone@.
+    fn client_player_clone(&self, host: &mut dyn Host, event: &mut ClientPlayerCloneEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The client accepted a play login and initialized its level and player
+    /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
+    /// is the server's entity ID. Client-side,
+    /// once per connection, including single player. @API:client_player_logging_in@.
+    fn client_player_logging_in(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerLoggingInEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before client disconnect teardown (NeoForge's
+    /// `ClientPlayerNetworkEvent.LoggingOut`). The player may be absent.
+    /// Client-side. @API:client_player_logging_out@.
+    fn client_player_logging_out(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerLoggingOutEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -15115,6 +15145,69 @@ pub fn dispatch_can_continue_sleeping(
             *may_continue = Some(replacement);
             break;
         }
+    }
+}
+/// What [`Hooks::client_player_clone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerCloneEvent {
+    pub old_id: i32,
+    pub new_id: i32,
+    pub uuid: u128,
+    pub died: bool,
+    pub dimension_changed: bool,
+}
+pub fn dispatch_client_player_clone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    old_id: i32,
+    new_id: i32,
+    uuid: u128,
+    died: bool,
+    dimension_changed: bool,
+) {
+    let mut event = ClientPlayerCloneEvent {
+        old_id,
+        new_id,
+        uuid,
+        died,
+        dimension_changed,
+    };
+    for mod_hook in super::entered(mods, "client_player_clone") {
+        mod_hook.client_player_clone(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_logging_in`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerLoggingInEvent {
+    pub player_id: i32,
+    pub uuid: u128,
+}
+pub fn dispatch_client_player_logging_in(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: i32,
+    uuid: u128,
+) {
+    let mut event = ClientPlayerLoggingInEvent { player_id, uuid };
+    for mod_hook in super::entered(mods, "client_player_logging_in") {
+        mod_hook.client_player_logging_in(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_logging_out`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerLoggingOutEvent {
+    pub player_id: Option<i32>,
+    pub uuid: Option<u128>,
+}
+pub fn dispatch_client_player_logging_out(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: Option<i32>,
+    uuid: Option<u128>,
+) {
+    let mut event = ClientPlayerLoggingOutEvent { player_id, uuid };
+    for mod_hook in super::entered(mods, "client_player_logging_out") {
+        mod_hook.client_player_logging_out(host, &mut event);
     }
 }
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
