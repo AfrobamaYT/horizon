@@ -844,6 +844,24 @@ impl PlayerMotion {
         }
         Ok(())
     }
+    /// `Player.readAdditionalSaveData`: the movement speed's base is the abilities' walking speed.
+    pub fn set_walking_speed_base(&mut self, speed: f32) -> Result<()> {
+        let key = self
+            .attributes
+            .key("minecraft:movement_speed")
+            .ok_or("missing movement speed")?;
+        let handle = self
+            .attributes
+            .get_instance(Some(key))
+            .map_err(attribute_error)?
+            .ok_or("player has no movement speed")?;
+        self.attributes
+            .edit(&handle, |value, observer| {
+                value.set_base_value(f64::from(speed), observer)
+            })
+            .map_err(attribute_error)?;
+        Ok(())
+    }
     pub fn set_sprinting(&mut self, sprinting: bool) -> Result<()> {
         self.sprinting = sprinting;
         self.set_sprint_modifier(sprinting)

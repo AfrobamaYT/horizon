@@ -31,12 +31,6 @@ pub(crate) struct NativeSidebar {
     pub(crate) lines: Vec<(Text, Option<Text>)>,
 }
 
-/// The fastest speed a mod may store in a player's abilities: 1000 times vanilla's 0.05 flying speed. It
-/// only stops a stray value from throwing the player millions of blocks in a tick; past about 0.45 a
-/// flying player moves more than 10 blocks a tick, and anyone but the single-player owner then meets the
-/// server's moved-too-quickly check (`ServerGamePacketListenerImpl.handleMovePlayer`).
-const ABILITY_SPEED_MAX: f32 = 50.0;
-
 /// The objective a mod's sidebar is sent as: the player's client only; the
 /// server's scoreboard never holds it.
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
@@ -451,10 +445,10 @@ impl Game<'_> {
     /// Stores a server player's `Abilities` and tells their client
     /// (`ServerPlayer.onUpdateAbilities`). They stay as written until the
     /// player's game mode changes (`GameType.updatePlayerAbilities`), and are
-    /// saved with the player. The speeds are cut to 0 to `ABILITY_SPEED_MAX`;
-    /// a speed that is not a number refuses the write. Returns false for a
+    /// saved with the player. A speed that is not finite refuses the write
+    /// (vanilla's setters take any float). Returns false for a
     /// stale or unavailable player, another player during a swap, and a speed
-    /// that is not a number.
+    /// that is not finite.
     pub(super) fn native_player_set_abilities(
         &mut self,
         player: PlayerRef,
@@ -469,8 +463,8 @@ impl Game<'_> {
             may_fly: abilities.may_fly,
             instabuild: abilities.instabuild,
             may_build: abilities.may_build,
-            flying_speed: abilities.fly_speed.clamp(0.0, ABILITY_SPEED_MAX),
-            walking_speed: abilities.walk_speed.clamp(0.0, ABILITY_SPEED_MAX),
+            flying_speed: abilities.fly_speed,
+            walking_speed: abilities.walk_speed,
         };
         if self.native_player_ref(player.uuid()) != Some(player) {
             return false;

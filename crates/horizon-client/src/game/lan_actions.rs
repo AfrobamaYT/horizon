@@ -398,6 +398,8 @@ impl Game<'_> {
                 // LivingEntity.readAdditionalSaveData: the saved attributes.
                 let _ =
                     m.apply_saved_attributes(g.saved.as_ref().and_then(|t| t.get("attributes")));
+                // The abilities' walking speed is the movement speed's base.
+                let _ = m.set_walking_speed_base(g.abilities.walking_speed);
             }
             // ServerPlayer.restoreFrom: a body that follows another takes its
             // attributes (a scale of 0.1 stays 0.1 after a respawn or a trip
@@ -1069,10 +1071,13 @@ impl Game<'_> {
             let conn = g.conn;
             host.hub
                 .set_game_mode(conn, new_mode, &self.world, Some(self.collision));
-        } else if let Some(now) = turn_abilities
+        }
+        // The turn's abilities: a mode change made in it set the flags first
+        // (`Game::set_mode`), then a mod's writes won, as in vanilla.
+        let g = &mut host.hub.guests[i];
+        if let Some(now) = turn_abilities
             && now != g.abilities
         {
-            // A mod's writes in the turn: stored, and told to the player's client.
             g.abilities = now;
             g.send(&g.abilities_packet());
         }

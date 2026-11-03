@@ -108,6 +108,9 @@ impl Game<'_> {
                 && let Some(p) = self.player.as_mut()
             {
                 p.flying = false;
+                if let Some(a) = self.acting_abilities.as_mut() {
+                    a.flying = false;
+                }
             }
         }
         if mode == GameMode::Spectator && self.screen == Screen::Inventory {

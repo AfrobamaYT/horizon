@@ -660,6 +660,15 @@ pub(super) mod tests {
                     10,
                 );
                 guest.placed = true;
+                if id == 12 {
+                    // A player loaded from a file saved with a walking speed.
+                    guest.abilities.walking_speed = 0.25;
+                    guest.loaded_body = Some(horizon_client::lan::guest::SavedBody {
+                        fire_ticks: 0,
+                        air: 300,
+                        fall_distance: 0.0,
+                    });
+                }
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
@@ -726,6 +735,15 @@ pub(super) mod tests {
                     "minecraft:stone"
                 );
                 assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+                // The loaded walking speed is the movement speed's base.
+                assert_eq!(
+                    game.player
+                        .as_mut()
+                        .unwrap()
+                        .attribute("minecraft:movement_speed")
+                        .unwrap(),
+                    f64::from(0.25f32)
+                );
                 // In the player's own turn the write reaches the body as well.
                 let mut a = game.native_player_abilities(player).unwrap();
                 a.may_fly = true;
@@ -737,6 +755,22 @@ pub(super) mod tests {
                 assert!(game.native_living(other).is_none());
             })
             .unwrap();
+            // A mode change in a turn, then a write in the same turn: the write wins.
+            game.as_guest(&mut host, 12, |game| {
+                let player = game.native_player_ref(12).unwrap();
+                assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+                let mut a = game.native_player_abilities(player).unwrap();
+                assert!(a.instabuild && a.may_fly);
+                a.fly_speed = 0.4;
+                a.walk_speed = 0.3;
+                assert!(game.native_player_set_abilities(player, a));
+            })
+            .unwrap();
+            let kept = host.hub.guest(12).unwrap();
+            assert_eq!(kept.game_mode, 1);
+            assert!(kept.abilities.instabuild);
+            assert_eq!(kept.abilities.flying_speed, 0.4);
+            assert_eq!(kept.abilities.walking_speed, 0.3);
             // The turn's write is stored in the guest's record.
             let stored = host.hub.guest(12).unwrap().abilities;
             assert!(stored.may_fly && stored.walking_speed == 0.3);
@@ -780,6 +814,18 @@ pub(super) mod tests {
             game.leave_guest(&mut host, nested);
             game.leave_guest(&mut host, swap);
             assert!(game.lan_guest_swaps.is_empty());
+            // A creative player forced into the default mode (survival) on joining
+            // gets that mode's abilities, not creative flight and instabuild.
+            host.hub.config.force_game_mode = true;
+            let g = host.hub.guest_mut(13).unwrap();
+            g.game_mode = 1;
+            g.abilities.update_for_mode(1);
+            g.abilities.walking_speed = 0.2;
+            game.lan_guest_joined(&mut host, 13, &[], [0.0, 64.0, 0.0]);
+            let g = host.hub.guest(13).unwrap();
+            assert_eq!(g.game_mode, 0);
+            assert!(!g.abilities.may_fly && !g.abilities.instabuild && g.abilities.may_build);
+            game.lan = Some(host);
         });
     }
 
