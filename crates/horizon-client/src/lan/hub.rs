@@ -822,19 +822,28 @@ impl Hub {
         self.config.simulation_distance = distance;
         self.broadcast(&C::SetSimulationDistance(play::Distance { distance }));
     }
-    /// Whether a guest is placed in the level in place (`config.dimension`).
+    /// Placed network players in join order.
+    pub fn online_players(&self) -> impl Iterator<Item = &Guest> {
+        self.guests
+            .iter()
+            .filter(|g| g.placed && g.participates_online())
+    }
+    /// The number of network guests, including those still joining.
+    pub fn online_count(&self) -> usize {
+        self.guests
+            .iter()
+            .filter(|g| g.participates_online())
+            .count()
+    }
+    /// Whether an online guest is placed in the level in place (`config.dimension`).
     pub fn here(&self, g: &Guest) -> bool {
-        g.placed && g.dimension == self.config.dimension
+        g.participates_online() && g.placed && g.dimension == self.config.dimension
     }
     /// `PlayerList.broadcastAll(packet, dimension)`: the players in the
     /// level in place.
     pub fn broadcast_level(&self, packet: &C) {
         let mut body = None;
-        for g in self
-            .guests
-            .iter()
-            .filter(|g| self.here(g) && g.participates_online())
-        {
+        for g in self.guests.iter().filter(|g| self.here(g)) {
             g.sender
                 .send(body.get_or_insert_with(|| packet.encode()).clone());
         }
@@ -913,9 +922,7 @@ impl Hub {
     /// gray commas (ComponentUtils.formatList).
     pub fn list_reply(&self, uuids: bool) -> Tag {
         let players: Vec<(u128, &str)> = self
-            .guests
-            .iter()
-            .filter(|g| g.placed)
+            .online_players()
             .map(|g| (g.uuid, g.name.as_str()))
             .collect();
         let format = |(uuid, name): (u128, &str)| {
@@ -1032,12 +1039,13 @@ impl Hub {
             .filter(|&j| {
                 let u = self.guests[j].uuid;
                 self.guests[j].placed
+                    && self.guests[j].participates_online()
                     && (self.hidden.contains_key(&u)
                         || self.guests.iter().any(|g| g.tab_hidden.contains(&u)))
             })
             .collect();
         for i in 0..self.guests.len() {
-            if !self.guests[i].placed {
+            if !self.guests[i].placed || !self.guests[i].participates_online() {
                 continue;
             }
             for &j in &candidates {
@@ -1180,6 +1188,9 @@ impl Hub {
         let Some(i) = self.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
+        if !self.guests[i].participates_online() {
+            return;
+        }
         let (name, uuid, entity_id, mode) = {
             let g = &self.guests[i];
             (g.name.clone(), g.uuid, g.entity_id, g.game_mode)
@@ -1229,7 +1240,11 @@ impl Hub {
             overlay: false,
         })
         .encode();
-        for g in self.guests.iter().filter(|g| g.placed && g.conn != conn) {
+        for g in self
+            .guests
+            .iter()
+            .filter(|g| g.placed && g.conn != conn && g.participates_online())
+        {
             if self.sees(g.permission, uuid) {
                 g.sender.send(joined.clone());
             }
@@ -1247,7 +1262,11 @@ impl Hub {
         // and a hidden newcomer out of theirs.
         let permission = self.guests[i].permission;
         let mut hidden = Vec::new();
-        for o in self.guests.iter().filter(|o| o.conn != conn && o.placed) {
+        for o in self
+            .guests
+            .iter()
+            .filter(|o| o.conn != conn && o.placed && o.participates_online())
+        {
             if !self.sees(permission, o.uuid) {
                 hidden.push(o.uuid);
                 continue;
@@ -1270,7 +1289,11 @@ impl Hub {
         })
         .encode();
         let level = self.hidden.get(&uuid).copied();
-        for g in self.guests.iter_mut().filter(|g| g.placed) {
+        for g in self
+            .guests
+            .iter_mut()
+            .filter(|g| g.placed && g.participates_online())
+        {
             if level.is_some_and(|l| g.permission < l) {
                 g.tab_hidden.insert(uuid);
             } else {
@@ -1761,7 +1784,7 @@ impl Hub {
                     let conns: Vec<u32> = self
                         .guests
                         .iter()
-                        .filter(|g| g.uuid == uuid)
+                        .filter(|g| g.uuid == uuid && g.participates_online())
                         .map(|g| g.conn)
                         .collect();
                     for conn in conns {
@@ -1779,14 +1802,16 @@ impl Hub {
         // here a second later, its connection is closed under the writer.
         if self.ticks.is_multiple_of(20) {
             for g in &self.guests {
-                if !g.left_reason.is_empty() && g.sender.timed_out() {
+                if g.participates_online() && !g.left_reason.is_empty() && g.sender.timed_out() {
                     g.sender.close();
                 }
             }
             let silent: Vec<u32> = self
                 .guests
                 .iter()
-                .filter(|g| g.left_reason.is_empty() && g.sender.timed_out())
+                .filter(|g| {
+                    g.participates_online() && g.left_reason.is_empty() && g.sender.timed_out()
+                })
                 .map(|g| g.conn)
                 .collect();
             for conn in silent {
@@ -1822,14 +1847,18 @@ impl Hub {
             // ServerTickRateManager broadcasts a change to the players there
             // are; one who joins later is sent the state as it is then
             // (`updateJoiningPlayer`).
-            if !self.guests.iter().any(|g| g.placed) {
+            if !self
+                .guests
+                .iter()
+                .any(|g| g.placed && g.participates_online())
+            {
                 self.ticking = (ctx.tick_rate, ctx.tick_frozen);
                 self.stepping = ctx.tick_steps.revision;
             }
             if !self
                 .guests
                 .iter()
-                .any(|g| g.dimension == self.config.dimension)
+                .any(|g| g.participates_online() && g.dimension == self.config.dimension)
             {
                 let _ = ctx.world.block_log.take();
                 let _ = ctx.world.light_log.take();
@@ -1876,6 +1905,7 @@ impl Hub {
         let latencies: Vec<_> = self
             .guests
             .iter()
+            .filter(|g| g.participates_online())
             .map(|g| (g.uuid, g.latency.load(Ordering::Relaxed)))
             .collect();
         // PlayerList.tick: UPDATE_LATENCY once `++sendAllPlayerInfoIn > 600`,
@@ -2738,7 +2768,7 @@ impl Hub {
         level.synced.clone_from(&self.synced);
         let mut outs = std::mem::take(&mut self.entity_out);
         let dimension = &self.config.dimension;
-        let here = |g: &Guest| g.placed && g.dimension == *dimension;
+        let here = |g: &Guest| g.participates_online() && g.placed && g.dimension == *dimension;
         outs.resize_with(self.guests.iter().filter(|g| here(g)).count(), Vec::new);
         // The prediction's replay excuses a client that may still have an entity that left it.
         let recording = self.recording();
@@ -3847,6 +3877,9 @@ impl Hub {
             param: mode as f32,
         }));
         g.send(&g.abilities());
+        if !g.participates_online() {
+            return;
+        }
         self.broadcast(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
             actions: 4,
             entries: vec![play::PlayerInfo {
@@ -3865,7 +3898,11 @@ impl Hub {
             Some(n) => self.nicknames.insert(uuid, n),
             None => self.nicknames.remove(&uuid),
         };
-        let Some(guest) = self.guests.iter().find(|g| g.uuid == uuid) else {
+        let Some(guest) = self
+            .guests
+            .iter()
+            .find(|g| g.uuid == uuid && g.participates_online())
+        else {
             return;
         };
         let display_name = self.tab_list_name(uuid, &guest.name);
