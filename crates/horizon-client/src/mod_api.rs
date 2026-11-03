@@ -1051,6 +1051,47 @@ impl LevelRef {
     }
 }
 
+/// A raid of a level (`Raid`), by the id `Raids` keeps it under, which the
+/// raids file saves. `level.raid_at(host, pos)`, `level.raids(host)`,
+/// `level.raid(host, id)` and `mob.raid(host)` make one. A handle resolves
+/// again on each call: it reads as `None` or `false` once the raid is gone,
+/// for a handle of an earlier open, for a level that is not in place, and on a
+/// client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RaidRef {
+    level: LevelRef,
+    id: i32,
+}
+
+impl RaidRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(level: LevelRef, id: i32) -> Self {
+        Self { level, id }
+    }
+    /// The level the raid belongs to.
+    pub fn level(self) -> LevelRef {
+        self.level
+    }
+    /// The raid's id in its level (the `raid` argument of the raid hooks).
+    pub fn id(self) -> i32 {
+        self.id
+    }
+}
+
+/// Where a raid stands (`Raid.RaidStatus`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeRaidStatus {
+    /// Waiting or fighting (`ONGOING`).
+    Ongoing,
+    /// Every wave was beaten (`VICTORY`).
+    Victory,
+    /// No villager is left or the time ran out (`LOSS`).
+    Loss,
+    /// Ended by `stop`, the `/raid stop` command or the `raids` rule (`STOPPED`).
+    Stopped,
+}
+
 /// A chunk position in an open level. A handle may be kept after unloading;
 /// reads resolve it again, returning `false` or `None` when it is no longer loaded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1697,8 +1738,11 @@ impl Installed {
             .iter()
             .map(|entry| (&*entry.hooks as &dyn std::any::Any).type_id())
             .collect();
-        let subscribers =
-            horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
+        let subscribers = horizon_client_core::subscribers::Subscribers::new(
+            horizon_client_core::subscribers::Domain::Gameplay,
+            generated::HOOK_COUNT,
+            mods.len(),
+        );
         Self {
             mods,
             subscribers,
