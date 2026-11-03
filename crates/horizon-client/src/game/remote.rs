@@ -1158,6 +1158,9 @@ impl Game<'_> {
         // A world is leaving either way: its icon attempt goes with it.
         self.world_icon = None;
         // Minecraft.disconnect: the client level goes.
+        if self.remote.is_some() {
+            self.forget_all_remote_columns();
+        }
         if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
             self.native_client_level_unload(&old);
         }
@@ -1901,6 +1904,7 @@ impl Game<'_> {
                     // clearClientLevel drops the client level now, so its
                     // unload comes before the configuration screen, not
                     // after the next login's load.
+                    self.forget_all_remote_columns();
                     if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
                         self.native_client_level_unload(&old);
                     }
@@ -2106,9 +2110,16 @@ impl Game<'_> {
         // server switched levels without closing the previous container.
         self.remote_close_local();
         self.screen = Screen::Playing;
-        let Some(r) = self.remote.as_mut() else {
+        let Some(r) = self.remote.as_ref() else {
             return;
         };
+        // handleRespawn keeps the ClientLevel only for the same level key:
+        // two levels sharing a dimension type are still two levels.
+        let same = keep_world && r.heard_level.as_deref() == Some(spawn.dimension.as_str());
+        if !same {
+            self.forget_all_remote_columns();
+        }
+        let r = self.remote.as_mut().unwrap();
         let dimension = r.registries.dimension(spawn.dimension_type);
         // The server's dimension type gives the level's shape, and its
         // chunks the shape's column.
@@ -2120,9 +2131,6 @@ impl Game<'_> {
             dimension.has_ceiling,
         )
         .unwrap_or_else(|_| super::Dim::from_id(&dimension.name).shape());
-        // handleRespawn keeps the ClientLevel only for the same level key:
-        // two levels sharing a dimension type are still two levels.
-        let same = keep_world && r.heard_level.as_deref() == Some(spawn.dimension.as_str());
         r.chunk_format = Arc::new(
             r.chunk_format
                 .with_dimension(&dimension)
@@ -2170,9 +2178,6 @@ impl Game<'_> {
                 self.world.day_time,
                 self.world.weather,
             );
-            let old = std::mem::take(&mut self.world.chunks);
-            let count = old.len();
-            horizon_client::chunk::free_columns(old, count);
             self.world = World::new(self.res.facts().air, spawn.seed);
             self.world.shape = shape;
             self.world.game_time = time;
@@ -2249,6 +2254,10 @@ impl Game<'_> {
             .collect();
         self.forget_remote_columns(&mut gone);
     }
+    fn forget_all_remote_columns(&mut self) {
+        let mut gone = self.world.chunks.keys().copied().collect();
+        self.forget_remote_columns(&mut gone);
+    }
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
     /// entities, each store once for all of them. Far terrain keeps them as they were last
@@ -2260,7 +2269,9 @@ impl Game<'_> {
         if gone.is_empty() {
             return;
         }
-        let freed = self.streaming.forget_columns(&mut self.world, gone);
+        let freed =
+            horizon_client::streaming::Streaming::take_remote_columns(&mut self.world, gone);
+        self.streaming.forget_columns(&mut self.world, gone);
         if let Some(lod) = &mut self.lod {
             for chunk in &freed {
                 lod.observe(chunk.clone(), self.res.facts());
@@ -10544,6 +10555,34 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn forgetting_and_closing_remote_columns_clear_their_data() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::{chunk::Chunk, containers::BlockEntity};
+        use std::sync::Arc;
+
+        with_game(|game| {
+            for x in 0..2 {
+                game.world
+                    .chunks
+                    .insert((x, 0), Arc::new(Chunk::empty(x, 0)));
+                game.world
+                    .block_entities
+                    .insert((x * 16, 64, 0), BlockEntity::Chest(vec![]));
+            }
+            let mut forgotten = [(0, 0)].into_iter().collect();
+            game.forget_remote_columns(&mut forgotten);
+            assert!(!game.world.chunks.contains_key(&(0, 0)));
+            assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
+            assert!(game.world.chunks.contains_key(&(1, 0)));
+            game.forget_remote_columns(&mut [(0, 0)].into_iter().collect());
+            game.forget_all_remote_columns();
+            assert!(game.world.chunks.is_empty());
+            assert!(game.world.block_entities.is_empty());
+        });
+    }
+
     use super::{
         chat_after_event, hold_server_fire, keep_client_state, remote_use_swings, synced_local_use,
     };
