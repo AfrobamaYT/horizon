@@ -1163,6 +1163,7 @@ mod tests {
 
     #[test]
     fn a_block_use_hears_the_hand_the_hit_and_the_player() {
+        mark_game_thread();
         let mods = [Box::new(OffHandTop) as Box<dyn Hooks>];
         let mut host = Reader {
             block: "minecraft:stone",
