@@ -849,7 +849,7 @@ fn rustfmt(code: &str) -> Result<Vec<u8>, String> {
 }
 
 /// The doc of [`BlockPart`], the first part trait in the generated file.
-const PART_DOCS: &str = "/// A block's part: code attached through [`Registrar`] to one block, a mod's own or vanilla's.\n/// Its methods are the scoped hooks', asked only for the blocks it is attached to, after\n/// every mod's [`Hooks`] method. They may run on the window's thread or the server thread.\n";
+const PART_DOCS: &str = "/// A block's part: code attached through [`Registrar`] to one block, a mod's own or vanilla's.\n/// Its methods are the scoped hooks', asked only for the blocks it is attached to: a scoped\n/// hook has no [`Hooks`] method. They may run on the window's thread or the server thread.\n";
 
 /// The crate whose generated sources are being built.
 #[derive(Clone, Copy)]
