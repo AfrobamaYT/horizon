@@ -678,19 +678,6 @@ impl Game<'_> {
             _ => {}
         }
     }
-    /// The player on the mob `mob`'s back, as its UUID and entity id: a
-    /// server's player, or this game's own.
-    fn mount_tamer(&self, mob: u32) -> Option<(u128, i32)> {
-        let guest = self.lan.as_ref().and_then(|h| {
-            h.hub
-                .guests
-                .iter()
-                .find(|g| g.vehicle == Some(mob))
-                .map(|g| (g.uuid, g.entity_id))
-        });
-        guest
-            .or_else(|| (self.riding == Some(mob)).then(|| (self.own_uuid(), self.own_entity_id())))
-    }
     /// `Entity.propagateFallToPassengers`: whoever rides the mob `mob` takes
     /// `causeFallDamage` of its fall, as the mount's own damage does. The local
     /// player, the server players and the mob on its back each get it, with
