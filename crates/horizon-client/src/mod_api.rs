@@ -598,6 +598,37 @@ pub struct NativeLifecycleContext {
     pub tick: NativeTickId,
 }
 
+/// Tool action requested by a block interaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ToolAbility {
+    AxeStrip,
+    AxeScrape,
+    AxeWaxOff,
+    ShovelFlatten,
+    ShovelDouse,
+    HoeTill,
+}
+
+/// Read-only context for a tool modification.
+#[non_exhaustive]
+pub struct ToolUse {
+    /// The acting entity ID, if present.
+    pub player: Option<u32>,
+    /// The hand holding the tool.
+    pub hand: crate::first_person::Hand,
+    /// The clicked block position.
+    pub pos: [i32; 3],
+    /// The clicked face's direction.
+    pub face: [i32; 3],
+    /// The click position in world coordinates.
+    pub click: [f64; 3],
+    /// The action being considered.
+    pub ability: ToolAbility,
+    /// Whether this is a simulation. Current vanilla calls pass false.
+    pub simulated: bool,
+}
+
 /// The ordered list of mods shared by the client and server.
 pub type Mods = Arc<[Box<dyn Hooks>]>;
 

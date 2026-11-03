@@ -82,6 +82,7 @@ mod tests {
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
         pub(super) struct NativeCommand;
         pub(super) struct NativeLifecycleContext;
+        pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
         pub(super) struct ServerTickPhase;

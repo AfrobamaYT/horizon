@@ -3712,6 +3712,7 @@ pub(crate) mod tests {
                 item_stacked_on_other: |_, _| {},
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
+                farmland_trample: |_, _, _, _, _| {},
                 has_mods: || false,
                 player_name_format: |_, _| {},
                 player_tab_list_name_format: |_, _, _| {},

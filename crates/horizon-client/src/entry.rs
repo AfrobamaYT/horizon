@@ -128,6 +128,16 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
+        farmland_trample: |entity, pos, state, distance, cancel| {
+            crate::mod_api::dispatch_farmland_trample(
+                crate::mod_api::mods(),
+                entity,
+                pos,
+                state,
+                distance,
+                cancel,
+            );
+        },
         has_mods: || !crate::mod_api::mods().is_empty(),
         player_name_format: |username, displayname| {
             crate::mod_api::dispatch_player_name_format(
