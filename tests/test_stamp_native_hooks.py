@@ -25,12 +25,12 @@ class StampTests(unittest.TestCase):
 
     def fragment(self, name):
         path = self.root / stamp.FRAGMENTS / f"{name}.json"
-        path.write_text(json.dumps({"hooks": [{"name": name, "target": f"target::{name}"}]}))
+        path.write_text(json.dumps({"hooks": [{"name": name, "target": f"target::{name}", "side": "server"}]}))
         return path
 
     def test_check_collection_order_and_idempotence(self):
         catalog = self.root / stamp.CATALOG
-        catalog.write_text('{"hooks": [{"name": "existing", "version": 3}]}\n')
+        catalog.write_text('{"hooks": [{"name": "existing", "version": 3, "side": "server"}]}\n')
         z = self.fragment("z")
         a = self.fragment("a")
         before = catalog.read_bytes()
@@ -92,7 +92,7 @@ class StampTests(unittest.TestCase):
                 with self.subTest(kind=kind, origin=origin):
                     for path in (self.root / stamp.FRAGMENTS).glob("*.json"):
                         path.unlink()
-                    entry = {"name": "same", "target": "target::same"}
+                    entry = {"name": "same", "target": "target::same", "side": "server"}
                     fragment = {"hooks": []}
                     fragment[kind] = [entry]
                     first = self.root / stamp.FRAGMENTS / "first.json"

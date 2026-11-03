@@ -7,13 +7,13 @@ new Host helpers in `helpers` as catalog entries. Example `example.json`:
 ```json
 {
   "hooks": [
-    {"name": "example", "target": "horizon_client::game::native_hooks::Game<'_>::native_example"}
+    {"name": "example", "target": "horizon_client::game::native_hooks::Game<'_>::native_example", "side": "server"}
   ]
 }
 ```
 
-A hook may also carry the catalog's optional `neoforge`, `fabric`, `paper`, `side`,
-`cancellable` and `mod_api` keys; the collector copies them into
+Every hook and helper requires a `side`. A hook may also carry the catalog's optional
+`neoforge`, `fabric`, `paper`, `cancellable` and `mod_api` keys; the collector copies them into
 `native-hooks.json`. Counterpart keys take a string or list of strings and may be
 omitted. New catalog contracts start at version 1; existing per-hook contract
 versions are unchanged by collection. These versions describe individual
