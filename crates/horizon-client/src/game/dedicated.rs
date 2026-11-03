@@ -1981,11 +1981,14 @@ impl Game<'_> {
     /// with the anticheat as its source, and the player is sent away with the ban's message.
     pub(super) fn anticheat_ban(
         &mut self,
-        hub: &mut horizon_client::lan::hub::Hub,
         uuid: u128,
         name: &str,
         reason: &str,
     ) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let hub = &mut host.hub;
         let Some(lists) = &self.server_lists else {
             // No ban list to add to: the anticheat's kick, so a flagged cheater still doesn't stay.
             log(
