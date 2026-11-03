@@ -8155,6 +8155,65 @@ mod breeding_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn first_chicken_breed_matches_without_mods_and_with_an_empty_mod() {
+        use crate::mod_api::{self, Hooks};
+        use horizon_client::mobs::{BreedExperience, MobEvent, goals::Breed};
+        use horizon_core::random::LegacyRandom;
+        struct Empty;
+        #[mod_api::hooks]
+        impl Hooks for Empty {}
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:chicken")
+                .unwrap()
+                .clone();
+            let mut mate = Mob::new(2, kind.clone(), Vec3::new(0.5, 64.0, 0.0), 0.0);
+            mate.extra.in_love = 600;
+            let others = [mate.seen(None)];
+            let run = || {
+                let world = MobWorld {
+                    others: &others,
+                    ..game.mob_world_base(&[])
+                };
+                assert!(!world.asks_baby_spawn);
+                let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                parent.random = LegacyRandom::new(123);
+                parent.persistent = true;
+                parent.extra.in_love = 600;
+                parent.extra.egg_time = 10_000;
+                parent.ai.targets.clear();
+                parent.ai.goals.clear();
+                parent.ai.goals.add(2, Breed::new(1.0));
+                let mut events = Vec::new();
+                let mut level_random = LegacyRandom::new(321);
+                for _ in 0..200 {
+                    // The fixture has no floor; keep the pair within breeding range.
+                    parent.position = Vec3::new(0.0, 64.0, 0.0);
+                    parent.tick(&world, &mut level_random, &mut events);
+                    if let Some(xp) = events.iter().find_map(|event| match event {
+                        MobEvent::Breed {
+                            experience: BreedExperience::Drawn(Some(xp)),
+                            ..
+                        } => Some(*xp),
+                        _ => None,
+                    }) {
+                        return (parent.random.state(), xp);
+                    }
+                    events.clear();
+                }
+                panic!("chickens did not breed");
+            };
+            let no_mods = mod_api::testing::with_mods(Vec::new().into(), run);
+            let empty = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
+            let unrelated = mod_api::testing::with_mods(empty, run);
+            assert_eq!(no_mods, unrelated);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn empty_mod_never_defers_breeding_xp() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
