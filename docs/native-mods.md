@@ -351,16 +351,15 @@ binding names a parameter, and a trait mod's event gains fields; a test that cal
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
-### Host-aware weapon damage (API next)
+### Host-aware weapon damage
 
-`living_incoming_damage_v2` is an additive hook; upstream v1 keeps its signature and firing point. **Fork migration:** mods that read the extra damage or knockback fields previously added to the fork's v1 hooks must move to the corresponding v2 hooks. Those fork-only fields are no longer present on v1.
-It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
+`living_incoming_damage_v2` receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
 and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
 levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
 It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before
 v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
 projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
-without loaded mods. The fragment `living_incoming_damage_v2.json` receives its API number at merge.
+without loaded mods.
 
 ### The build's warnings
 
@@ -505,10 +504,9 @@ mob's death loot; on other rolls `place` is `None`.
 
 ### Recipe book category declarations (first slice of #5501)
 
-The pending `recipe_book_categories` API fragment adds a declaration hook and a
-lookup helper. It has no API number until stamping; do not require a guessed
-hooks version. Trait mods import `RecipeBookCategory` from `horizon_client::mod_api`
-and append declarations in `Hooks::recipe_book_categories`:
+The `recipe_book_categories` hook declares recipe book categories. Trait mods import
+`RecipeBookCategory` from `horizon_client::mod_api` and append declarations in
+`Hooks::recipe_book_categories`:
 
 ```rust,ignore
 event.categories.push(RecipeBookCategory {
@@ -1813,21 +1811,19 @@ mod mixin or use it replaces in its design or PR.
 source targets. A contract includes the signature, call timing and behavior.
 Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
-Injections name them with `hook` and `hook_version` ("Named hook points" above); raw
-targets and the `hooks` metadata continue to work as before.
+Injections name them with `hook` and `hook_version` ("Named hook points" above).
 
 ### Knockback hook versions
 
-`living_knockback_v2` keeps `living_knockback` version 1 unchanged. Both already receive the raw strength before knockback resistance (v1 did before
-v2 existed). V2 adds three things: the attacker's network entity id (falling back to a known
+`living_knockback` and `living_knockback_v2` receive the raw strength before knockback resistance.
+V2 also supplies the attacker's network entity id (falling back to a known
 last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
 `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
 recorded only while a native mod is loaded), and armor-stand sweeps. V2 runs after v1 on
 their shared paths; cancellation from either prevents motion, so a trait mod that listens to
 both sees each hit twice and should pick one. Mob melee, player hits, sweeps and spears use the
 shared knockback path; direct velocity pushes (explosions, Punch arrows, hoglin throws) are not
-`LivingEntity.knockback` and do not fire it. The fragment assigns the new API number when
-stamped; the existing hook stays version 1.
+`LivingEntity.knockback` and do not fire it.
 
 ### Reading server blocks (draft)
 
@@ -2845,17 +2841,15 @@ fn inject_example_points(&self, event: &mut InjectExamplePointsEvent) {
 }
 ```
 
-Trait injections can target only functions in `horizon-client`;
-ordinary mixin helpers in other crates continue to work as before. The generated helper has the same priority and ordering as an
+Trait injections can target only functions in `horizon-client`; ordinary mixin helpers can target
+functions in other crates. The generated helper has the same priority and ordering as an
 ordinary helper of that mod: priority descending, mod id then injection id. It is not automatically
 ordered after other mixins. Catalog hooks retain the mixin-before-trait order below.
 
 The launcher and catalog build scripts share `horizon-mod-api-gen` for trait, event and helper generation.
-For game sources with that build dependency, the launcher stages declarations in
-`.horizon-mod-api-injections.json`; Cargo consumes them through `HORIZON_MOD_API_INJECTIONS` without
-editing generated Rust in the source tree. The declarations stay with cached mixin output. Older released
-sources without that build dependency still receive the same declarations in their committed generated
-trait. Neither path requires rustfmt during a player build.
+The launcher stages declarations in `.horizon-mod-api-injections.json`; Cargo consumes them through
+`HORIZON_MOD_API_INJECTIONS`. The declarations stay with cached mixin output, and generated Rust lives
+only in Cargo's `OUT_DIR`. A player build does not edit generated Rust in the source tree or run rustfmt.
 
 A linked trait mod implements `horizon_client::mod_api::Hooks`. Mixin injections run first.
 An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
