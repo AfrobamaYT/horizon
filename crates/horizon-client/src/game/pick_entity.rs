@@ -59,8 +59,8 @@ impl Game<'_> {
         if hits.iter().all(Option::is_none) {
             return None;
         }
-        let (eye, _) = self.aim()?;
         let block_distance = self.pick_unfiltered().map(|hit| {
+            let eye = self.aim().map(|(eye, _)| eye).unwrap_or_default();
             (0..3)
                 .map(|axis| (hit.point[axis] - eye[axis]).powi(2))
                 .sum::<f64>()
