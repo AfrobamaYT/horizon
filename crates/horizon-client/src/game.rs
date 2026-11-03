@@ -214,6 +214,7 @@ mod native_entity_data;
 mod native_entity_motion;
 mod native_entity_moves;
 mod native_entity_refs;
+mod native_entity_state;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
