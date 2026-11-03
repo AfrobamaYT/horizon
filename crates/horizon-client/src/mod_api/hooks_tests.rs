@@ -1,6 +1,106 @@
 use super::*;
 
 #[test]
+#[ignore = "optimized hot-hook microbenchmark"]
+fn subscriber_tick_benchmark() {
+    use std::{hint::black_box, time::Instant};
+    struct TestHost;
+    impl Host for TestHost {}
+    struct Quiet;
+    impl Hooks for Quiet {}
+    struct Listener;
+    impl Hooks for Listener {
+        fn tick(&self, _: &mut dyn Host, event: &mut TickEvent) {
+            black_box(event);
+        }
+    }
+    trait Before {
+        fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {}
+    }
+    impl Before for Quiet {}
+    impl Before for Listener {
+        fn tick(&self, _: &mut dyn Host, event: &mut TickEvent) {
+            black_box(event);
+        }
+    }
+    struct BeforeMod {
+        id: &'static str,
+        hooks: Box<dyn Before>,
+    }
+    let mut before: Vec<_> = (0..8)
+        .map(|_| BeforeMod {
+            id: "quiet",
+            hooks: Box::new(Quiet),
+        })
+        .collect();
+    before.push(BeforeMod {
+        id: "listener",
+        hooks: Box::new(Listener),
+    });
+    let mut installed: Vec<_> = (0..8)
+        .map(|_| ModEntry::new("quiet", Box::new(Quiet)))
+        .collect();
+    installed.push(ModEntry::new("listener", Box::new(Listener)));
+    install(installed.into());
+    let mut host = TestHost;
+    dispatch_tick(&mut host); // Prune defaults once, outside the timed loop.
+    let iterations = 1_000_000;
+    let start = Instant::now();
+    for _ in 0..iterations {
+        let mut event = TickEvent {};
+        for entry in black_box(&before) {
+            let _guard = mark_mod(entry.id, "tick");
+            entry.hooks.tick(&mut host, &mut event);
+        }
+    }
+    let baseline = start.elapsed().as_nanos() as f64 / f64::from(iterations);
+    let start = Instant::now();
+    for _ in 0..iterations {
+        dispatch_tick(black_box(&mut host));
+    }
+    let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
+    println!(
+        "tick dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns per call ({iterations} iterations)"
+    );
+}
+
+#[test]
+fn subscriber_guards_are_thread_local_for_one_installation() {
+    use std::sync::Barrier;
+    struct Quiet;
+    impl Hooks for Quiet {}
+    struct Listener;
+    impl Hooks for Listener {
+        fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {}
+    }
+    let installed = install(
+        vec![
+            ModEntry::new("quiet", Box::new(Quiet)),
+            ModEntry::new("listener", Box::new(Listener)),
+        ]
+        .into(),
+    );
+    let barrier = Barrier::new(2);
+    std::thread::scope(|scope| {
+        for _ in 0..2 {
+            let barrier = &barrier;
+            scope.spawn(move || {
+                TEST_MODS.set(Some(installed));
+                barrier.wait();
+                dispatch_loot_table_load("test", &mut serde_json::json!([]));
+            });
+        }
+    });
+    assert_eq!(
+        installed
+            .subscribers
+            .indices(HookId::LootTableLoad as usize)
+            .collect::<Vec<_>>(),
+        [1]
+    );
+}
+
+#[test]
 fn scoped_mods_dispatch_and_restore_after_panic() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use testing::with_mods;

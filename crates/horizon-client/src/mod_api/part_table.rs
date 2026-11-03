@@ -726,7 +726,7 @@ fn namespaced(id: &str) -> bool {
 pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     let installed = if let Some(first) = mods.first() {
         let mut registrar = Registrar::new(first.id);
-        for (index, hooks) in super::entered(mods, "register").enumerate() {
+        for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
             registrar.mod_id = mods[index].id;
             registrar.mod_index = index;
             hooks.register(&mut registrar);
