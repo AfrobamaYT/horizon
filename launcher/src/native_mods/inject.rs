@@ -225,14 +225,33 @@ mod tests {
     }
 
     #[test]
-    fn owner_dispatch_and_cancel_are_generated_from_bindings() {
+    fn owner_dispatch_and_cancel_use_full_order_after_tool_filtering() {
         let (root, bundle) = fixture(
             "cancel",
             "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\ncancellable = true\nbindings = [{ name = 'amount', ty = '&mut i32', value = '&mut *amount' }]\n",
         );
-        let injections = prepare(&[bundle], &root).unwrap();
-        let helper = fs::read_to_string(root.join("horizon-trait-injection-0.rs")).unwrap();
-        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        let original = fs::read(root.join(horizon_mods::manifest::MANIFEST)).unwrap();
+        let plain_root = super::super::tests::dir("inject-cancel-plain");
+        super::super::tests::write_bundle(&plain_root, "plain", "");
+        let plain = super::super::bundle_in(&plain_root).unwrap().unwrap();
+        let dispatch_order = [plain, bundle];
+        let mixin_input = root.with_extension("mixins");
+        let tool_mods = super::super::stage_mixins(&dispatch_order, &mixin_input).unwrap();
+        assert_eq!(tool_mods.len(), 1);
+        assert_eq!(tool_mods[0].manifest.id, "example");
+        assert!(!mixin_input.join("plain").exists());
+        let injections = super::prepare(&tool_mods, &root, &dispatch_order).unwrap();
+        let helper =
+            fs::read_to_string(tool_mods[0].dir.join("horizon-trait-injection-0.rs")).unwrap();
+        let manifest = fs::read_to_string(tool_mods[0].dir.join(MANIFEST)).unwrap();
+        assert_eq!(
+            fs::read(root.join(horizon_mods::manifest::MANIFEST)).unwrap(),
+            original
+        );
+        assert!(dispatch_order.iter().all(|bundle| {
+            !bundle.dir.join(MANIFEST).exists()
+                && !bundle.dir.join("horizon-trait-injection-0.rs").exists()
+        }));
         assert!(!manifest.contains("trait_method"));
         assert!(!manifest.contains("[api]"));
         let stage_dir = root.join("stage");
@@ -265,7 +284,7 @@ mod tests {
                 pub struct ModEntry {{ pub id: &'static str, pub hooks: Box<dyn Hooks> }}
                 pub fn mods() -> &'static [ModEntry] {{
                     static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
-                    MODS.get_or_init(|| vec![ModEntry {{ id: "owner", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
+                    MODS.get_or_init(|| vec![ModEntry {{ id: "plain", hooks: Box::new(Other) }}, ModEntry {{ id: "example", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
             }}
             {helper}
@@ -277,6 +296,8 @@ mod tests {
         "#
         );
         compile_and_run(&root, &program);
+        fs::remove_dir_all(mixin_input).unwrap();
+        fs::remove_dir_all(plain_root).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
