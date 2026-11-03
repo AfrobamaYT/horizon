@@ -249,8 +249,11 @@ impl Game<'_> {
     ///
     /// Players and mobs can ride a mob, boat or minecart. Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
-    /// vehicle, a cycle, or a canceled mount or dismount. `force` bypasses
-    /// the rider's normal admission checks, not storage limits.
+    /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicles and
+    /// minecarts store one passenger; boats store one mob and up to two
+    /// passengers in total. `force` bypasses normal admission checks, not
+    /// these storage limits. Player boarding cooldown and the strider's
+    /// eye-in-lava admission check are not yet represented by the game.
     pub(super) fn native_entity_start_riding(
         &mut self,
         entity: EntityRef,
