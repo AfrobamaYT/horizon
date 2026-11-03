@@ -3125,6 +3125,38 @@ mod same_vehicle_push_tests {
     use crate::mobs::world::with_test_world;
 
     #[test]
+    fn zombie_horse_sunburn_checks_body_not_head() {
+        assert!(with_test_world(&[], |world, types| {
+            let mut world = world.clone();
+            world.monsters_burn = true;
+            let mut horse = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:zombie_horse"].clone()),
+                Vec3::ZERO,
+                0.0,
+            );
+            horse.extra.head = Some("minecraft:iron_helmet".into());
+            let mut events = Vec::new();
+            for _ in 0..1000 {
+                burn_undead(&mut horse, &world, &mut events);
+            }
+            assert!(horse.fire_ticks > 0);
+            assert!(events.is_empty());
+            horse.fire_ticks = 0;
+            horse.extra.body = Some("minecraft:leather_horse_armor".into());
+            for _ in 0..1000 {
+                burn_undead(&mut horse, &world, &mut events);
+            }
+            assert_eq!(horse.fire_ticks, 0);
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, MobEvent::SunProtectionWear { .. }))
+            );
+        }));
+    }
+
+    #[test]
     fn leather_body_armor_prevents_freezing() {
         assert!(with_test_world(&[], |w, types| {
             let mut horse = Mob::new(
