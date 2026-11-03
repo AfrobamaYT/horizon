@@ -1621,6 +1621,42 @@ mod tests {
     }
 
     #[test]
+    fn a_dragon_back_at_its_defaults_is_sent() {
+        let mut e = state(0.0);
+        e.kind = "minecraft:ender_dragon".into();
+        // `lan_dragon_state` lists these; the values leave `meta` at them.
+        e.defaults = vec![
+            (9, serializer::FLOAT, Value::Float(1.0)),
+            (15, serializer::BYTE, Value::Byte(0)),
+            (16, serializer::INT, Value::Int(10)),
+        ];
+        e.meta = vec![
+            (9, serializer::FLOAT, Value::Float(150.0)),
+            (15, serializer::BYTE, Value::Byte(4)),
+            (16, serializer::INT, Value::Int(4)),
+        ];
+        let mut s = added(&e);
+        changes(&mut s, &e);
+        e.meta.clear();
+        let sent: Vec<_> = changes(&mut s, &e)
+            .into_iter()
+            .filter_map(|p| match p {
+                play::Clientbound::SetEntityData(d) => Some(d.values),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(
+            sent,
+            vec![
+                (9, serializer::FLOAT, Value::Float(1.0)),
+                (15, serializer::BYTE, Value::Byte(0)),
+                (16, serializer::INT, Value::Int(10)),
+            ]
+        );
+    }
+
+    #[test]
     fn a_value_back_at_a_listed_default_is_sent() {
         let mut e = state(0.0);
         e.defaults = vec![(16, serializer::BOOLEAN, Value::Bool(false))];
