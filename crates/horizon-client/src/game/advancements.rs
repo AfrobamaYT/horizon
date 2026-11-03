@@ -623,7 +623,7 @@ impl Game<'_> {
         criterion: &str,
         progress_type: NativeProgressType,
     ) {
-        if crate::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::PlayerAdvancementProgress) {
             return;
         }
         if let (Some(uuid), Some(entity_id), Some(name)) = (
