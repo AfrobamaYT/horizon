@@ -341,18 +341,6 @@
       "target": "horizon_client::game::native_menus::Game<'_>::native_close_menu", "side": "server"
     },
     {
-      "name": "fluid_insert",
-      "target": "horizon_client::game::machines::native_fluids::Game<'_>::native_fluid_insert", "side": "server"
-    },
-    {
-      "name": "fluid_extract",
-      "target": "horizon_client::game::machines::native_fluids::Game<'_>::native_fluid_extract", "side": "server"
-    },
-    {
-      "name": "move_fluids",
-      "target": "horizon_client::game::machines::native_fluids::Game<'_>::native_move_fluids", "side": "server"
-    },
-    {
       "name": "dimension",
       "target": "horizon_client::game::machines::native_items::Game<'_>::native_dimension", "side": "both"
     },
