@@ -676,6 +676,9 @@ impl Game<'_> {
     /// number of recipe displays taken back out because a mod refused their
     /// discovery.
     pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) -> usize {
+        if self.lan_acting_fake {
+            return 0;
+        }
         let mut allowed = Vec::with_capacity(unlocked.len());
         let mut refused = Vec::new();
         let mut taken_back = 0;
