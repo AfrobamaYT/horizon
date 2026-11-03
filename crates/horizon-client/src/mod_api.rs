@@ -1264,6 +1264,15 @@ pub enum ChunkStatus {
     Full,
 }
 
+/// A kind of light (`LightLayer`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LightLayer {
+    /// Light from emitting blocks (`BLOCK`).
+    Block,
+    /// Light from the sky (`SKY`).
+    Sky,
+}
+
 /// What an explosion a mod sets off does to blocks
 /// (`Level.ExplosionInteraction`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2443,6 +2452,22 @@ pub trait LevelHost {
     ) -> Option<BlockStateId> {
         unimplemented!("LevelHost::state_with_property")
     }
+    /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
+    /// It reads the game's own light query: above the build height the sky is 15 and below it 0,
+    /// and a chunk that isn't loaded reads as full sky and no block light. It never loads a chunk.
+    fn brightness(&self, _layer: LightLayer, _pos: [i32; 3]) -> i32 {
+        unimplemented!("LevelHost::brightness")
+    }
+    /// `BlockAndLightGetter.getRawBrightness(pos, darkening)`: the brighter of the block light
+    /// and the sky light less `sky_darken`. `CropBlock.randomTick` asks it with 0.
+    fn raw_brightness(&self, _pos: [i32; 3], _sky_darken: i32) -> i32 {
+        unimplemented!("LevelHost::raw_brightness")
+    }
+    /// `Level.isLoaded`: `pos` is inside the build height and its chunk is loaded. Asking never
+    /// loads the chunk.
+    fn is_loaded(&self, _pos: [i32; 3]) -> bool {
+        unimplemented!("LevelHost::is_loaded")
+    }
 }
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
@@ -2542,6 +2567,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod block_entity_type;
+pub use block_entity_type::{BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;
@@ -2550,8 +2577,8 @@ pub use part_table::{
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, install_parts, mark_game_thread, parts,
-    place_provider, providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, install_parts,
+    mark_game_thread, parts, place_provider, providers, resolve_parts,
 };
 
 mod generated {
@@ -3685,6 +3712,8 @@ mod tests {
             names: &names,
             trade: None,
             maps: None,
+            limited_crafting: false,
+            known_recipes: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);
         let seen = Arc::new(Mutex::new(Vec::new()));
