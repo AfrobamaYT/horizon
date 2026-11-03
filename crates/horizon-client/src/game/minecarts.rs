@@ -112,7 +112,7 @@ pub(super) struct Minecart {
     pub lerp_steps: Vec<horizon_protocol::packets::play::MinecartStep>,
     pub flipped: bool,
     /// `AbstractMinecart.onRails`: transitions into rails need a position snap.
-    on_rails: bool,
+    pub(super) on_rails: bool,
     pub(super) on_ground: bool,
     horizontal_collision: bool,
     /// The horizontal speed the cart wanted when the collision stopped it:
@@ -607,7 +607,7 @@ impl Game<'_> {
             self.cart_block_effects(c);
         }
     }
-    fn max_speed(&self, c: &Minecart) -> f64 {
+    pub(super) fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if c.in_water { 0.2 } else { 0.4 };
         if c.kind == CartKind::Furnace {
             base * if c.in_water { 0.75 } else { 0.5 }
@@ -785,7 +785,7 @@ impl Game<'_> {
     }
     /// `NewMinecartBehavior.getMaxSpeed`: the game rule over water's half,
     /// every cart alike (the old behavior's furnace bonus is its own).
-    fn max_speed_new(&self, c: &Minecart) -> f64 {
+    pub(super) fn max_speed_new(&self, c: &Minecart) -> f64 {
         f64::from(self.ui.rules.int("max_minecart_speed")) * if c.in_water { 0.5 } else { 1.0 }
             / 20.0
     }
@@ -1345,7 +1345,7 @@ impl Game<'_> {
             _ => {}
         }
     }
-    fn prime_cart(&mut self, c: &mut Minecart) {
+    pub(super) fn prime_cart(&mut self, c: &mut Minecart) {
         if !self.ui.rules.bool("tnt_explodes") {
             return;
         }

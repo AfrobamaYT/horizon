@@ -717,6 +717,41 @@ impl ItemEntityRef {
     }
 }
 
+/// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MinecartRef(EntityRef);
+
+impl MinecartRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
+/// Which minecart an entity is: one per vanilla `AbstractMinecart` subclass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeMinecartKind {
+    /// `Minecart`.
+    Rideable,
+    /// `MinecartChest`.
+    Chest,
+    /// `MinecartFurnace`.
+    Furnace,
+    /// `MinecartTNT`.
+    Tnt,
+    /// `MinecartHopper`.
+    Hopper,
+    /// `MinecartCommandBlock`.
+    CommandBlock,
+    /// `MinecartSpawner`.
+    Spawner,
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
