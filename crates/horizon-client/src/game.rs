@@ -1269,7 +1269,9 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         feature: Option<&'a str>,
     ) -> Option<std::borrow::Cow<'a, str>> {
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::BlockGrowFeature)
+        {
             return feature.map(std::borrow::Cow::Borrowed);
         }
         let mut feature = feature.map(str::to_owned);
@@ -1345,7 +1347,9 @@ impl LevelAccess for GameLevel<'_> {
         note: &mut i32,
     ) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::NoteBlockPlay)
+        {
             return true;
         }
         let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
@@ -1379,7 +1383,9 @@ impl LevelAccess for GameLevel<'_> {
         shape: &horizon_world::level::PortalShape,
     ) -> bool {
         let mut cancel = false;
-        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+        if self.native_authoritative
+            && crate::mod_api::listened(crate::mod_api::HookId::PortalSpawn)
+        {
             let b = shape.bottom_left;
             let shape = horizon_client::mod_api::NativePortalShape {
                 x_axis: shape.x_axis,
@@ -8104,7 +8110,7 @@ impl Game<'_> {
         let active = self.focused || self.agent_pointer;
         if active
             && grabbed
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::CalculatePlayerTurn)
             && let Some(remote) = &self.remote
         {
             self.native_calculate_player_turn(
@@ -14321,7 +14327,7 @@ impl Game<'_> {
                 scale: 1.0,
             };
             let mut canceled = false;
-            if !horizon_client::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::RenderHand) {
                 self.native_render_hand(&mut render, &mut canceled);
             }
             if canceled {
