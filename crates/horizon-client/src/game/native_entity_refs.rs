@@ -41,11 +41,8 @@ impl Game<'_> {
             .flat_map(|h| h.hub.guests.iter())
             .find(|g| g.placed && g.entity_id == id);
         if let Some(g) = player {
-            // A nested swap can leave other guests' records displaced.
-            return self
-                .lan_acting_uuid
-                .is_none()
-                .then_some(Target::Guest(g.conn));
+            // An outer guest in a nested swap has a displaced record.
+            return (!self.lan_guest_swaps.contains(&g.conn)).then_some(Target::Guest(g.conn));
         }
         match self.level_entity(id)? {
             Target::Mob(id) if !self.mobs.iter().any(|m| m.id == id && !m.removed) => None,
@@ -54,9 +51,9 @@ impl Game<'_> {
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None on a client, with no world open, or for no such entity
-    /// in the level in place or among the server's players. During a player
-    /// swap, only the acting player's handle resolves; other player records
-    /// may contain displaced state. API @API:entity_handles@.
+    /// in the level in place or among the server's players. During a nested
+    /// player swap, an outer player's displaced record is unavailable. API
+    /// @API:entity_handles@.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
         self.native_entity_target(entity).map(|_| entity)
@@ -580,9 +577,36 @@ pub(super) mod tests {
             let swap = game.enter_guest(&mut host, 12).unwrap();
             game.lan = Some(host);
             assert!(game.native_entity(12).is_some());
-            assert!(game.native_entity(13).is_none());
+            let other = game.native_entity(13).unwrap();
+            assert_eq!(other.position(game), Some([3.0, 64.0, 5.0]));
+            assert_eq!(other.uuid(game), Some(13));
+            assert_eq!(other.kind(game).as_deref(), Some("minecraft:player"));
+            let living = game.native_living(other).unwrap();
+            assert_eq!(
+                living
+                    .equipment(game, EquipmentSlot::MainHand)
+                    .unwrap()
+                    .item
+                    .as_ref(),
+                "minecraft:stone"
+            );
+            let player = game.native_player_ref(13).unwrap();
+            assert_eq!(player.entity, other);
+            assert_eq!(player.game_mode(game), Some(0));
             host = game.lan.take().unwrap();
+            let nested = game.enter_guest(&mut host, 13).unwrap();
+            game.lan = Some(host);
+            assert!(game.native_entity(12).is_none());
+            assert!(game.native_player_ref(12).is_none());
+            assert!(
+                game.native_living(horizon_client::mod_api::EntityRef::new(other.epoch(), 12))
+                    .is_none()
+            );
+            assert!(game.native_entity(13).is_some());
+            host = game.lan.take().unwrap();
+            game.leave_guest(&mut host, nested);
             game.leave_guest(&mut host, swap);
+            assert!(game.lan_guest_swaps.is_empty());
         });
     }
 
