@@ -1316,6 +1316,11 @@ mod tests {
         pub(super) struct NativeLifecycleContext;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
+        pub(super) struct NativePlayerFood;
+        #[derive(Clone, Copy)]
+        pub(super) struct LivingRef;
+        pub(super) struct EffectTickChange;
+        #[derive(Clone, Copy)]
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
