@@ -8662,7 +8662,7 @@ impl Game<'_> {
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
     /// native mod's.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
-        if let Some(kind) = horizon_client::containers::block_entity_types::type_for(name) {
+        if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
             let mut nbt = None;
             self.native_block_entity(name, &mut nbt);
             return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(

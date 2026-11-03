@@ -552,7 +552,7 @@ impl ChunkEncoder {
             builtin,
             biome_names,
             biome_registry,
-            crate::containers::block_entity_types::current(),
+            crate::block_entity_types::current(),
         )
     }
 
@@ -561,7 +561,7 @@ impl ChunkEncoder {
         builtin: &Builtin,
         biome_names: &[String],
         biome_registry: &[String],
-        declared: Option<&crate::containers::block_entity_types::BlockEntityTypes>,
+        declared: Option<&crate::block_entity_types::BlockEntityTypes>,
     ) -> Self {
         let types = builtin.get("minecraft:block_entity_type");
         let blocks = builtin.get("minecraft:block");
@@ -1601,7 +1601,7 @@ mod tests {
     /// Shared types are resolved per state; undeclared and stale entities stay off the wire.
     #[test]
     fn shared_block_entity_types_supply_chunks_updates_and_detached_encoders() {
-        use crate::containers::block_entity_types::BlockEntityTypes;
+        use crate::block_entity_types::BlockEntityTypes;
         let builtin = Builtin::parse(
             r#"{"minecraft:block_entity_type": {"entries": {
                 "minecraft:chest": {"protocol_id": 1},

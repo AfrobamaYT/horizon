@@ -920,10 +920,6 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     for key in ["id", "x", "y", "z"] {
         nbt.remove(&key.into());
     }
-    // Placing an item adds the (empty) component patch every block entity has.
-    if nbt.get(&"components".into()) == Some(&Tag::Compound(Compound::new())) {
-        nbt.remove(&"components".into());
-    }
     // `Slot` is a byte: 256 slots at most.
     let mut items = decode_items(nbt.get(&"Items".into()), 256);
     if nbt.get(&"Items".into()) == Some(&encode_items(&items)) {
@@ -954,7 +950,7 @@ pub fn decode_block_entity_for_block(
         crate::containers::BlockEntity::Mod(m) => Some(m.id()),
         _ => None,
     };
-    (actual == crate::containers::block_entity_types::type_for(block)).then_some(decoded)
+    (actual == crate::block_entity_types::type_for(block)).then_some(decoded)
 }
 
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
@@ -6452,7 +6448,7 @@ mod tests {
             );
             return;
         }
-        use crate::containers::block_entity_types::{self, BlockEntityTypes};
+        use crate::block_entity_types::{self, BlockEntityTypes};
         block_entity_types::install(BlockEntityTypes::new(
             [
                 ("test:press".into(), "test:machine".into()),

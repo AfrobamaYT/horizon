@@ -21,6 +21,11 @@ impl BlockEntityTypes {
     pub fn fits(&self, id: &str, block: &str) -> bool {
         self.type_for(block) == Some(id)
     }
+
+    /// Whether a mod declared the block entity type `id`.
+    pub fn declares(&self, id: &str) -> bool {
+        self.blocks.values().any(|declared| declared == id)
+    }
 }
 
 static TYPES: OnceLock<BlockEntityTypes> = OnceLock::new();
@@ -32,6 +37,12 @@ pub fn type_for(block: &str) -> Option<&'static str> {
 
 pub fn current() -> Option<&'static BlockEntityTypes> {
     TYPES.get()
+}
+
+/// Whether a mod declared the block entity type `id` (none before startup
+/// installs the table).
+pub fn declared(id: &str) -> bool {
+    current().is_some_and(|types| types.declares(id))
 }
 
 /// An identical setup is harmless; changing membership or wire IDs needs a restart.
