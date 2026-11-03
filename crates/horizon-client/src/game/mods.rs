@@ -122,6 +122,7 @@ pub(super) fn content_root(
         let candidate = ContentMod {
             id: m.id.clone(),
             content,
+            jars: Vec::new(),
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
             Ok(_) if announce => announced.push(announced_entry(m, path)),
@@ -148,7 +149,8 @@ pub(super) fn content_root(
             }
         }
     }
-    match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
+    let jar_store = horizon_client::logging::game_home().join("jars");
+    match mod_content::resource_root(root, &jar_store, &mods, &here.join(".horizon-cache")) {
         Ok(out) => {
             if announce {
                 horizon_protocol::mod_list::set_local(announced);

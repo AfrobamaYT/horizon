@@ -865,6 +865,12 @@ enum Merge {
 /// The key of a stacked blockstate file: its definitions, bottom first, each
 /// as the pack wrote it.
 pub const BLOCKSTATE_LAYERS: &str = "horizon:layers";
+/// Whether the packs merger stacks this file's every layer (atlases, lang,
+/// sounds, blockstates) instead of letting the topmost one win.
+pub fn merge_stacks(name: &str) -> bool {
+    merge_kind(name).is_some()
+}
+
 fn merge_kind(name: &str) -> Option<Merge> {
     let (_, rest) = name.strip_prefix("assets/")?.split_once('/')?;
     if rest == "sounds.json" {

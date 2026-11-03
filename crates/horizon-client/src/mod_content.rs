@@ -20,6 +20,7 @@ use horizon_mods::content::{
     Block, BlockShapes, Content, CreativeTab, EntityType, MenuType, MobEffect, Rarity,
     StateProperty,
 };
+use horizon_mods::manifest::JarRef;
 use horizon_world::nbt::{self, Compound, JavaString, Limits, Tag};
 use serde::{Deserialize, Serialize, de};
 use std::{
@@ -29,10 +30,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A content mod to put in the root: its id and content.
+/// A content mod to put in the root: its id, its content, and the Java jars
+/// it lists in manifest order — each an asset layer under the mod's own
+/// files, its file found by hash in `jar_store` (`docs/native-mods.md`).
 pub struct ContentMod {
     pub id: String,
     pub content: Content,
+    pub jars: Vec<JarRef>,
 }
 
 /// Leaves out a mod with an item whose `crafting_remainder` names an item the mod does not have:
@@ -789,6 +793,7 @@ pub fn accept_declared(
                     let candidate = ContentMod {
                         id: ns.clone(),
                         content,
+                        jars: Vec::new(),
                     };
                     accept_mod(mods, candidate, known).map_err(|e| e.to_string())
                 })
@@ -2450,9 +2455,18 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
     Ok(())
 }
 
-/// Builds the content root for `mods` over `base` in `out`. Returns the
-/// warnings for the log: the shared tags a mod replaced.
-pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>> {
+/// Builds the content root for `mods` over `base` in `out`: the tables a
+/// reload rewrites, then every mod's jars and own assets layered over them
+/// in order, the later mod over the earlier, a mod's files over its jars.
+/// Each jar's file is `<sha512>.jar` in `jar_store`, where the launcher
+/// puts it. Returns the warnings for the log: the shared tags a mod
+/// replaced, the jars that are not there.
+pub fn build(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    out: &Path,
+) -> Result<Vec<String>> {
     // Two mods owning one namespace would mix their files.
     for (i, a) in mods.iter().enumerate() {
         for b in &mods[..i] {
@@ -2468,7 +2482,13 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     // The overlay links to the base: a relative base would leave them dangling.
     let base = &std::path::absolute(base)?;
     let plan = Plan::new(base, mods)?;
-    let overlay = Overlay::new(base, out)?;
+    // The tables are written beside `out`: the asset layers mirror them as
+    // their base, and `out` is the root over them that the callers read.
+    let tables_root = out.with_file_name(format!(
+        "{}-tables",
+        out.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let overlay = Overlay::new(base, &tables_root)?;
     tables(base, &plan, &overlay)?;
     // Mod files, and every tag addition gathered per tag file.
     let mut tags: BTreeMap<String, TagMerge> = BTreeMap::new();
@@ -2476,11 +2496,15 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     let mut modifiers = Vec::new();
-    let mut atlases: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
     for m in mods {
         let declarations = format!("data/{}/horizon/", m.id);
         let mut reader = m.content.reader()?;
         for file in &m.content.files {
+            if file.starts_with("assets/") {
+                // The mod's own asset layer provides them, stacking the files
+                // every pack merges (atlases, lang, sounds, blockstates).
+                continue;
+            }
             let bytes = reader.read(file)?;
             let is_tag = file.starts_with("data/") && file.contains("/tags/");
             if is_tag && file.ends_with(".json") {
@@ -2493,16 +2517,6 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 let shared = !m.content.namespaces.iter().any(|n| n == ns);
                 let merge = tags.entry(file.clone()).or_default();
                 warnings.extend(merge.add(&m.id, file, replace, shared, values));
-            } else if file.starts_with("assets/minecraft/atlases/") && file.ends_with(".json") {
-                let doc: serde_json::Value =
-                    serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
-                let Some(sources) = doc.get("sources").and_then(serde_json::Value::as_array) else {
-                    return Err(format!("{}: {file}: no sources", m.id).into());
-                };
-                atlases
-                    .entry(file.clone())
-                    .or_default()
-                    .extend(sources.iter().cloned());
             } else if !file.starts_with(&declarations) {
                 overlay.write(file, &bytes)?;
                 if biomes::is_modifier(file) {
@@ -2526,14 +2540,6 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 }
             }
         }
-    }
-    // A reload appends every pack's sources for an atlas to the ones below it.
-    for (file, sources) in &atlases {
-        let vanilla = fs::read_to_string(base.join(file)).ok();
-        overlay.write(
-            file,
-            &crate::packs::append_atlas_sources(vanilla.as_deref(), sources, file)?,
-        )?;
     }
     // A tag naming an id nobody registers fails as a whole in vanilla, and
     // carried-over mods name blocks left out or other mods' ids: such
@@ -2720,7 +2726,63 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     {
         overlay.write(crate::content_identity::MARKER, b"1")?;
     }
+    // Every mod's jars and own assets as pack layers over the tables, in
+    // mod order: a later mod over an earlier one, a mod's files over its
+    // jars, and the stacked files (atlases, lang, sounds, blockstates)
+    // merged as packs merge them.
+    let mut layers = Vec::new();
+    for m in mods {
+        for jar in &m.jars {
+            let file = jar_store.join(format!("{}.jar", jar.sha512()));
+            if file.is_file() {
+                // A path both the jar and the mod's own files carry is the
+                // porting seam: the mod's file wins, and the log says so once.
+                if let Ok(zip) = crate::zip::Zip::open(&file) {
+                    for name in zip
+                        .names()
+                        .filter(|n| n.starts_with("assets/") && !crate::packs::merge_stacks(n))
+                    {
+                        if m.content.files.iter().any(|f| f == name) {
+                            warnings.push(format!(
+                                "mod {}: jar {} also provides {name}; the mod's own file wins",
+                                m.id,
+                                jar.id()
+                            ));
+                        }
+                    }
+                }
+                layers.push(crate::packs::Pack::mod_layer(
+                    format!("{}/{}", m.id, jar.id()),
+                    crate::packs::Source::Zip(file),
+                ));
+            } else {
+                warnings.push(format!(
+                    "mod {}: jar {} {} is not in the jar cache; the launcher downloads it",
+                    m.id,
+                    jar.id(),
+                    jar.version()
+                ));
+            }
+        }
+        if m.content.files.iter().any(|f| f.starts_with("assets/")) {
+            let source = m.content.source().to_owned();
+            layers.push(crate::packs::Pack::mod_layer(
+                m.id.clone(),
+                if source.is_dir() {
+                    crate::packs::Source::Dir(source)
+                } else {
+                    crate::packs::Source::Zip(source)
+                },
+            ));
+        }
+    }
     overlay.write(WARNINGS, warnings.join("\n").as_bytes())?;
+    let _ = fs::remove_dir_all(out);
+    if layers.is_empty() {
+        fs::rename(&tables_root, out)?;
+    } else {
+        crate::packs::build_overlay(&tables_root, &layers, out)?;
+    }
     Ok(warnings)
 }
 
@@ -2730,7 +2792,12 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
 /// The root is built once and kept: later starts with the same build, base
 /// and mod files reuse it. With ATM10's carried mods a build takes about
 /// 25 s and peaks above 3 GB, more than everything the game keeps.
-pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<PathBuf> {
+pub fn resource_root(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    cache: &Path,
+) -> Result<PathBuf> {
     if mods
         .iter()
         .all(|m| m.content.is_empty() && m.content.blocks.is_empty() && m.content.items.is_empty())
@@ -2738,14 +2805,14 @@ pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<P
         return Ok(base.to_owned());
     }
     let out = cache.join("mod-content");
-    let stamp = stamp(base, mods)?;
+    let stamp = stamp(base, jar_store, mods)?;
     if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
         return Ok(out);
     }
-    for warning in build(base, mods, &out)? {
+    for warning in build(base, jar_store, mods, &out)? {
         log::warn!("Horizon: {warning}");
     }
     fs::write(out.join(STAMP), stamp)?;
@@ -2761,7 +2828,7 @@ const STAMP: &str = "horizon-mod-content.stamp";
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
 /// in order. Files count by size and modification time, as build tools do.
-fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
+fn stamp(base: &Path, jar_store: &Path, mods: &[ContentMod]) -> Result<String> {
     use sha2::{Digest, Sha256};
     let meta = |path: &Path| -> Result<String> {
         let m = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -2776,7 +2843,7 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
             modified.as_nanos()
         ))
     };
-    let mut parts = vec!["horizon mod content 1".to_owned()];
+    let mut parts = vec!["horizon mod content 2".to_owned()];
     parts.push(meta(&std::env::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(
@@ -2789,6 +2856,17 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
     }
     for m in mods {
         parts.push(m.id.clone());
+        for jar in &m.jars {
+            // The cache file's state, so a jar the launcher downloads later
+            // rebuilds the root with its layer.
+            let cached = jar_store.join(format!("{}.jar", jar.sha512()));
+            parts.push(format!(
+                "jar {} {} {}",
+                jar.id(),
+                jar.sha512(),
+                meta(&cached).unwrap_or_else(|_| "not cached".into())
+            ));
+        }
         // What it declares, so blocks and items from code count too.
         parts.push(format!("{:?} {:?}", m.content.blocks, m.content.items));
         let source = m.content.source();

@@ -86,6 +86,7 @@ fn main() -> Result<()> {
         mods.push(ContentMod {
             id: package.manifest.id.clone(),
             content,
+            jars: Vec::new(),
         });
     }
     mods.sort_by(|a, b| a.id.cmp(&b.id));
@@ -95,7 +96,7 @@ fn main() -> Result<()> {
         let what = what.to_owned();
         move |e: Box<dyn std::error::Error>| format!("{what}: {e}")
     };
-    mod_content::build(base, &mods, &root).map_err(step("content root"))?;
+    mod_content::build(base, Path::new(""), &mods, &root).map_err(step("content root"))?;
     let built = began.elapsed().as_secs_f64();
     let assets = Assets::load(&root).map_err(step("assets"))?;
     let registry = assets.registry;

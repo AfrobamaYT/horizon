@@ -585,6 +585,16 @@ native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
 `horizon_mods::index::native::WASM_GONE`. Every rule of the file is in
 [api/mod-files.md](api/mod-files.md).
 
+**Pack order.** A content mod's resources reach the game as pack layers, and the order is fixed. From top to
+bottom: the player's resource packs, then each content mod with every Java jar it lists under its own files — a
+later mod (its files or its jars) over an earlier one — then vanilla. Within one mod, the mod's own files win over
+its jars for the same path (the log lists each such path once at load); the files every pack stacks (atlases,
+lang, sounds, blockstates) merge across vanilla, the jars and the mods in that same order instead of being
+replaced. A jar may use any namespace, so a port can ship the original `assets/` untouched while the mod's own
+files override single paths. Only a jar's `assets/` is layered; nothing else in it is read. Jars are found in the
+jar cache (`<game home>/jars/<sha512>.jar`, which the launcher fills), are read once per resource reload, and a
+jar that is not in the cache is skipped with a warning until the launcher downloads it.
+
 ### Post-build steps
 
 A `[[post_build]]` names a bin of one of the mod's crates. After the game compiles, the launcher builds it with the
