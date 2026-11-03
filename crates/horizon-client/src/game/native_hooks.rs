@@ -666,15 +666,9 @@
 //! and their being given (`native_on_effect_added`,
 //! `native_mob_effect_added`).
 //!
-//! API 55 adds moving a block's fluids to another block (`native_move_fluids`, in
-//! `machines/native_fluids.rs`: what the target refuses goes back into the
-//! source, whole thirds kept).
-//!
 //! API 54 adds fluid tanks on a mod block's block entity
-//! (`native_block_entity_fluids`), and the fluid helpers in
-//! `machines/native_fluids.rs`: `native_fluid_tanks`,
-//! `native_fluid_insert`, `native_fluid_extract`, which also read and
-//! change a cauldron.
+//! (`native_block_entity_fluids`), which the game's `FLUIDS` answers
+//! (`machines/native_fluids.rs`), with a cauldron's.
 //!
 //! API 53 adds entities leaving a level (`native_entity_leave_level`), for
 //! every kind the join hook tells (see API 47).

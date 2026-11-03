@@ -60,7 +60,7 @@ impl Game<'_> {
     }
     /// Whether this game simulates a world: a client's copy has no places to write.
     fn places_simulated(&self) -> bool {
-        self.serving.is_some() || self.options.dedicated.is_some()
+        self.is_logical_server()
     }
     /// The slot of the player in place that `place` names.
     fn player_place(&mut self, place: &ItemPlace) -> Option<&mut Option<ItemStack>> {
