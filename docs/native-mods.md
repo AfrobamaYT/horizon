@@ -3045,7 +3045,8 @@ index holds when it holds that (`capacity`, none where it may not go), and `inse
 `&Transaction` and answer how much moved. There is no `simulate`: a write happens in a transaction
 (`host.transaction(|host, tx| …)`, below), and to try one, abort it. `move_resources(host, &from, &to, filter, max,
 tx)` (NeoForge's `ResourceHandlerUtil.move`) moves what `filter` accepts, up to `max`, index by index out of `from`
-into wherever `to` takes it, each move all or nothing: what `to` won't take stays put. Hoppers use a mod's handler
+into wherever `to` takes it, each move all or nothing: what `to` won't take stays put. It answers how much moved, or
+`Overanswered` (below). Hoppers use a mod's handler
 where one is registered, each move in a transaction of its own. A mod's own capability is a
 `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
@@ -3148,31 +3149,24 @@ host.transaction(|host, tx| {
 
 #### A block's fluids
 
-Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
-millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
-fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
-components. The game's own answer is a mod block's tanks by side (`block_entity_fluids`) and a cauldron, one tank
-of 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity and is answered by
-position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
-discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
-components are dropped. A mod block's saved tanks take no fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a
-handler in a `LevelRef`'s level, as `ITEMS`' are found. `host.transfer_fluids(level, from, from_side, to, to_side, max)` moves
-one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, until a round moves
-nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
-whole, then the source really gives with that request and the target is filled with exactly what came out. A
-handler whose real calls answer as its simulations never loses fluid and is never warned.
+Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered as items are, by a
+`ResourceHandler<FluidResource>` in millibuckets. A `FluidResource` is a fluid id and its data components, without
+an amount, kept as an item stack's are (a potion fluid's contents; water and lava have none), and a tank fills only
+from empty or with the same fluid and the same components. A `FluidStack` is one with an amount, as tanks keep it
+(`resource.to_stack(amount)`, `FluidResource::of(&stack)`). The game's own answer is a mod block's tanks by side
+(`block_entity_fluids`) and a cauldron, one tank of 1000 mB that holds water in thirds and lava only whole; a
+cauldron has no block entity and is answered by position, and a powder snow cauldron holds no fluid. A cauldron
+takes water and lava whatever their components and discards them, as NeoForge's `CauldronFluidContent` does, so
+what comes out of it is plain: the one place a fluid's components are dropped. A mod block's saved tanks take no
+fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a handler in a `LevelRef`'s level, as
+`ITEMS`' are found, and `move_resources` moves fluids as it moves items. A move the target takes only part of is
+undone and tried again with that part, so a cauldron, which gives whole thirds and never more than asked, gives
+what fits: asked for a bucket with room for 500 mB, it gives one level, 334 mB.
 
-A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
-mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
-to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
-broken handler can void.
-
-The game never trusts an answer past what it asked, offered or simulated. An item handler answering more than it
-was asked has its move undone, in its transaction. A fluid handler's real extract must give the fluid, with the
-components, that its simulation showed: another is given back and nothing comes out. A leftover larger than the
-offer counts as the offer, and what an extract gives beyond the request goes back into its tank or, as above, is
-lost with a warning. Either is a mod bug, warned once naming the mod; a broken handler can't make a move overflow,
-duplicate items or panic the game.
+The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
+move undone, in its transaction, and is warned once naming the mod, and `move_resources` returns `Overanswered`
+naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so neither end keeps
+any of it: a broken handler can't make a move overflow, duplicate or lose items or fluid, or panic the game.
 
 `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
