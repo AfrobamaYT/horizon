@@ -9,6 +9,7 @@
 //! server thread's), never on a client's.
 use super::{Dim, Game, commands::execute, lan::LanHost};
 // Their old home, for mixin code that names them here.
+use horizon_client::mod_api::LevelRef;
 pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     command::{ArgType, Dispatcher},
@@ -274,7 +275,7 @@ fn register_dispatcher(dispatcher: &mut Dispatcher, tree: &Value) {
 }
 
 /// The live player body, or a guest record outside a player swap.
-enum PlayerRead<'a> {
+pub(super) enum PlayerRead<'a> {
     Acting {
         mode: i32,
         body: Option<&'a PlayerMotion>,
@@ -361,7 +362,137 @@ impl PlayerRead<'_> {
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// Resolve an online UUID on this server. During a nested player swap,
+    /// Create or retrieve a connectionless player for the level currently in place.
+    pub(super) fn native_fake_player(
+        &mut self,
+        level: LevelRef,
+        uuid: u128,
+        name: &str,
+    ) -> Option<PlayerRef> {
+        if !self.native_level_in_place(level)
+            || !self.lan_guest_swaps.is_empty()
+            || !horizon_client::lan::conn::valid_name(name)
+        {
+            return None;
+        }
+        let epoch = self.native_lifecycle.epoch()?;
+        if self
+            .level
+            .player_uuid
+            .map(horizon_client::lan::playerdata::ints_uuid)
+            == Some(uuid)
+        {
+            return None;
+        }
+        let host = self.lan.as_ref()?;
+        if host
+            .hub
+            .guests
+            .iter()
+            .any(|g| g.uuid == uuid && g.participates_online())
+        {
+            return None;
+        }
+        if let Some(g) = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == uuid && g.dimension == level.dimension())
+        {
+            return (g.name == name).then_some(PlayerRef {
+                entity: crate::mod_api::EntityRef::new(epoch, g.entity_id as u32),
+                uuid,
+            });
+        }
+        let id = self.next_entity.checked_add(1)?;
+        let entity_id = i32::try_from(id).ok()?;
+        let motion = PlayerMotion::new(
+            self.motion,
+            horizon_core::geometry::Vec3::new(0.0, 0.0, 0.0),
+        )
+        .ok()?;
+        let host = self.lan.as_mut()?;
+        let conn = host.hub.lan.shared.next_id()?;
+        let mut guest = Guest::connectionless(conn, uuid, name.into(), entity_id, [0.0; 3], motion);
+        guest.dimension = level.dimension().to_owned();
+        host.hub.guests.push(guest);
+        host.play
+            .insert(conn, super::lan_actions::GuestPlay::default());
+        self.next_entity = id;
+        Some(PlayerRef {
+            entity: crate::mod_api::EntityRef::new(epoch, id),
+            uuid,
+        })
+    }
+
+    /// Discard state belonging to an already removed connectionless guest.
+    pub(super) fn cleanup_fake_player(&mut self, host: &mut super::lan::LanHost, guest: &Guest) {
+        host.play.remove(&guest.conn);
+        host.poses.remove(&guest.conn);
+        host.mob_players.retain(|_, conn| *conn != guest.conn);
+        self.destroying.remove(&guest.entity_id);
+        self.guest_combat.remove(&guest.conn);
+        self.guest_attachments.remove(&guest.conn);
+    }
+
+    /// Remove a fake without treating it as a disconnect or saving it.
+    pub(super) fn native_player_remove_fake(&mut self, player: PlayerRef) -> bool {
+        if self.native_lifecycle.epoch() != Some(player.entity.epoch())
+            || !self.lan_guest_swaps.is_empty()
+        {
+            return false;
+        }
+        let Some(mut host) = self.lan.take() else {
+            return false;
+        };
+        let index = host.hub.guests.iter().position(|g| {
+            !g.participates_online()
+                && g.uuid == player.uuid
+                && g.entity_id as u32 == player.entity.id()
+                && host
+                    .hub
+                    .holder_guest(g.uuid, &g.dimension)
+                    .is_some_and(|owner| owner.conn == g.conn)
+        });
+        let removed = if let Some(index) = index {
+            let guest = host.hub.guests.remove(index);
+            self.cleanup_fake_player(&mut host, &guest);
+            true
+        } else {
+            false
+        };
+        self.lan = Some(host);
+        removed
+    }
+
+    /// Drop the fake players belonging to a level as it closes.
+    pub(super) fn remove_level_fake_players(&mut self, dimension: &str) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        let mut i = 0;
+        while i < host.hub.guests.len() {
+            let g = &host.hub.guests[i];
+            if !g.participates_online() && g.dimension == dimension {
+                let guest = host.hub.guests.remove(i);
+                self.cleanup_fake_player(&mut host, &guest);
+            } else {
+                i += 1;
+            }
+        }
+        self.lan = Some(host);
+    }
+
+    /// Whether a live player handle names a connectionless actor.
+    pub(super) fn native_player_is_fake(&self, player: PlayerRef) -> Option<bool> {
+        match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } => Some(self.lan_acting_fake),
+            PlayerRead::Guest(guest) => Some(!guest.participates_online()),
+        }
+    }
+
+    /// Resolve a real online player by UUID, never a fake. A fake is reached
+    /// through the handle returned by its factory. During a nested player swap,
     /// outer players whose records are displaced return None.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
@@ -373,7 +504,7 @@ impl Game<'_> {
     }
 
     fn player_lookup(&self, uuid: u128) -> Option<(PlayerRead<'_>, u32)> {
-        if self.lan_acting_uuid == Some(uuid) {
+        if self.lan_acting_uuid == Some(uuid) && !self.lan_acting_fake {
             return Some((
                 PlayerRead::Acting {
                     mode: self.mode_id(),
@@ -385,7 +516,10 @@ impl Game<'_> {
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
             host.hub.guests.iter().find(|guest| {
-                guest.placed && guest.uuid == uuid && !self.lan_guest_swaps.contains(&guest.conn)
+                guest.placed
+                    && guest.participates_online()
+                    && guest.uuid == uuid
+                    && !self.lan_guest_swaps.contains(&guest.conn)
             })
         }) {
             return Some((PlayerRead::Guest(guest), guest.entity_id as u32));
@@ -411,10 +545,31 @@ impl Game<'_> {
         None
     }
 
-    fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
+    pub(super) fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
         (self.native_lifecycle.epoch()? == player.entity.epoch()).then_some(())?;
-        let (read, id) = self.player_lookup(player.uuid)?;
-        (id == player.entity.id()).then_some(read)
+        if self.lan_acting_fake
+            && self.lan_acting_uuid == Some(player.uuid)
+            && self.lan_acting_entity == Some(player.entity.id())
+        {
+            return Some(PlayerRead::Acting {
+                mode: self.mode_id(),
+                body: self.player.as_ref(),
+                abilities: self.acting_abilities,
+            });
+        }
+        if let Some((read, id)) = self.player_lookup(player.uuid)
+            && id == player.entity.id()
+        {
+            return Some(read);
+        }
+        let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
+            guest.placed
+                && !guest.participates_online()
+                && guest.uuid == player.uuid
+                && guest.entity_id as u32 == player.entity.id()
+                && !self.lan_guest_swaps.contains(&guest.conn)
+        })?;
+        Some(PlayerRead::Guest(guest))
     }
 
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
@@ -436,7 +591,7 @@ impl Game<'_> {
             return false;
         }
         let mut changed = false;
-        self.native_as_player(player.uuid, |game| {
+        self.native_as_player_handle(player, |game| {
             changed = game.set_game_mode(super::game_mode::mode_from_id(mode.id()));
         }) && changed
     }
@@ -465,11 +620,11 @@ impl Game<'_> {
             flying_speed: abilities.fly_speed,
             walking_speed: abilities.walk_speed,
         };
-        if self.native_player_ref(player.uuid()) != Some(player) {
+        if self.player_handle_read(player).is_none() {
             return false;
         }
         let mut stored_here = false;
-        self.native_as_player(player.uuid(), |game| {
+        self.native_as_player_handle(player, |game| {
             let Some(slot) = game.acting_abilities.as_mut() else {
                 return;
             };
@@ -563,14 +718,14 @@ impl Game<'_> {
         self.native_send_all(uuid, vec![packet])
     }
     fn native_send_all(&mut self, uuid: u128, packets: Vec<C>) -> bool {
-        if self.lan_acting_uuid == Some(uuid) {
+        if self.lan_acting_uuid == Some(uuid) && !self.lan_acting_fake {
             self.guest_packets.extend(packets);
             return true;
         }
         let Some(host) = &self.lan else {
             return false;
         };
-        let Some(g) = host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid) else {
+        let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) else {
             return false;
         };
         for packet in &packets {
@@ -654,7 +809,7 @@ impl Game<'_> {
         let Some(host) = &mut self.lan else {
             return false;
         };
-        if !host.hub.guests.iter().any(|g| g.placed && g.uuid == uuid) {
+        if !host.hub.online_players().any(|g| g.uuid == uuid) {
             return false;
         }
         if ignored {
@@ -695,7 +850,7 @@ impl Game<'_> {
         let Some(host) = &mut self.lan else {
             return false;
         };
-        if !host.hub.guests.iter().any(|g| g.placed && g.uuid == uuid) {
+        if !host.hub.online_players().any(|g| g.uuid == uuid) {
             return false;
         }
         host.hub.set_nickname(uuid, nickname.map(str::to_owned));
@@ -886,6 +1041,33 @@ impl Game<'_> {
         orb.age = age.unwrap_or(orb.age);
         true
     }
+    pub(super) fn native_as_player_handle(
+        &mut self,
+        player: PlayerRef,
+        f: impl FnOnce(&mut Self),
+    ) -> bool {
+        let Some(read) = self.player_handle_read(player) else {
+            return false;
+        };
+        let conn = match read {
+            PlayerRead::Acting { .. } => None,
+            PlayerRead::Guest(g) if !g.dead => Some(g.conn),
+            PlayerRead::Guest(_) => return false,
+        };
+        let Some(conn) = conn else {
+            if self
+                .player
+                .as_ref()
+                .is_none_or(|p| p.health.health() <= 0.0)
+            {
+                return false;
+            }
+            f(self);
+            return true;
+        };
+        self.as_guest(conn, f).is_some()
+    }
+
     /// Runs `f` with the player `uuid`'s state in place: theirs already when
     /// they are the acting player (the host, or a guest swapped in), else a
     /// guest's through `as_guest`, including within another guest's turn.
@@ -907,9 +1089,8 @@ impl Game<'_> {
         };
         let conn = host
             .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && !g.dead && g.uuid == uuid)
+            .holder_guest(uuid, self.dim.id())
+            .filter(|g| !g.dead)
             .map(|g| g.conn);
         conn.and_then(|conn| self.as_guest(conn, f)).is_some()
     }

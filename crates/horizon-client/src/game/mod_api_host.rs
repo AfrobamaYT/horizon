@@ -50,10 +50,10 @@ fn world_attachments(
 impl Game<'_> {
     /// A guest's attachments back in their record, for `playerdata` to save.
     pub(super) fn guest_attachments_into(
-        attachments: &std::collections::HashMap<u128, horizon_world::attachments::Attachments>,
+        attachments: &std::collections::HashMap<u32, horizon_world::attachments::Attachments>,
         guest: &mut horizon_client::lan::guest::Guest,
     ) {
-        guest.attachments = attachments.get(&guest.uuid).cloned().unwrap_or_default();
+        guest.attachments = attachments.get(&guest.conn).cloned().unwrap_or_default();
     }
 
     /// Whether entity `id` is in the level, as a holder of attachments: one walk
@@ -148,10 +148,13 @@ impl Game<'_> {
             if self.lan_acting_uuid == Some(uuid) {
                 return Ok(&mut self.player_attachments);
             }
-            return self
-                .guest_attachments
-                .get_mut(&uuid)
-                .ok_or(AttachmentError::MissingHolder);
+            let conn = self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
+                .map(|guest| guest.conn)
+                .ok_or(AttachmentError::MissingHolder)?;
+            return Ok(self.guest_attachments.entry(conn).or_default());
         }
         world_attachments(&mut self.world, holder)
     }
