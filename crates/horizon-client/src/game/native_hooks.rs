@@ -2582,13 +2582,9 @@ impl Game<'_> {
     pub(super) fn native_mouse_button_post(&mut self, button: i32, pressed: bool, modifiers: u32) {
         mod_api::dispatch_mouse_button_post(self, mod_api::mods(), button, pressed, modifiers);
     }
-    /// Wheel steps while playing: set `claimed` to keep them from the hotbar.
-    pub(super) fn native_wheel(&mut self, steps: f32, claimed: &mut bool) {
-        mod_api::dispatch_wheel(self, mod_api::mods(), steps, claimed);
-    }
-    /// Gameplay scrolling after whole steps accumulate, before hotbar/spectator handling.
+    /// Gameplay scrolling after accumulation, before hotbar/spectator handling.
     /// `scroll` is scaled x/y, `accumulated` whole x/y steps, `buttons` left/middle/right,
-    /// and `cursor` the GUI position. Cancel skips gameplay scrolling; synthetic input skips it.
+    /// and `cursor` the GUI position. Cancel skips gameplay scrolling.
     pub(super) fn native_mouse_scrolling(
         &mut self,
         scroll: [f64; 2],
@@ -10715,12 +10711,6 @@ impl Game<'_> {
     pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
         let name = keybinds::mouse_name(button);
         self.native_key(&name, pressed);
-    }
-    /// Wheel steps while playing: whether a native mod took them.
-    pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {
-        let mut claimed = false;
-        self.native_wheel(steps, &mut claimed);
-        claimed
     }
     /// A native mod's command.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {

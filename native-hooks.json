@@ -609,15 +609,6 @@
       }
     },
     {
-      "name": "wheel",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_wheel",
-      "mod_api": {
-        "contract": "cancel",
-        "out": "claimed"
-      }
-    },
-    {
       "name": "command",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_command",
