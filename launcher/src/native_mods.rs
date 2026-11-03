@@ -573,7 +573,11 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
         .check()
         .map_err(|e| format!("{}: {e}", path.display()))?;
     let found = bundle(&dir.join("mixins").join(&native.id), Some(native.mixins))?;
-    if found.horizon.as_ref().is_some_and(|pinned| *pinned != native.horizon) {
+    if found
+        .horizon
+        .as_ref()
+        .is_some_and(|pinned| *pinned != native.horizon)
+    {
         return Err(format!(
             "{}: {NATIVE_MANIFEST} pins Horizon {}, its {MANIFEST} {}.",
             native.id,
