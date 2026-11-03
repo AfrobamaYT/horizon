@@ -174,7 +174,7 @@ fn installs_checked_turns_on_and_removes() {
     let index = sample();
     let home = scratch("install");
     let p = hud(&index);
-    let done = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap();
+    let done = install_from(&index, true, &p, &home, &|_, _| {}).unwrap();
     assert_eq!(done[0].file, "horizon-mods/coords_hud.hmod");
     assert!(done[0].skipped.is_empty());
     assert_eq!(done[0].verdict.as_deref(), Some("Verified"));
@@ -252,7 +252,7 @@ fn installs_a_shader_pack_into_shaderpacks() {
     let home = scratch("shader");
     let p = project_of(index.project("glow").unwrap()).unwrap();
     assert_eq!(p.support(), super::super::Support::Works);
-    let done = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap();
+    let done = install_from(&index, true, &p, &home, &|_, _| {}).unwrap();
     assert_eq!(done[0].file, "shaderpacks/glow-1.0.0.hshader");
     assert_eq!(done[0].kind, Kind::Shader);
     assert!(home.join("shaderpacks/glow-1.0.0.hshader").is_file());
@@ -273,7 +273,7 @@ fn installs_a_shader_pack_into_shaderpacks() {
     assert!(!home.join("shaderpacks/glow-1.0.0.hshader").exists());
     // A file of the same name the registry didn't put there is left alone.
     fs::write(home.join("shaderpacks/glow-1.0.0.hshader"), b"mine").unwrap();
-    let e = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap_err();
+    let e = install_from(&index, true, &p, &home, &|_, _| {}).unwrap_err();
     assert_eq!(
         e,
         "shaderpacks/glow-1.0.0.hshader is already there: move it away first."
@@ -324,7 +324,7 @@ fn registry_versions_run_when_made_for_this_game() {
         let p = index.project(id).unwrap();
         p.versions
             .iter()
-            .map(|x| version_of(&index, p, x, None))
+            .map(|x| version_of(&index, p, x))
             .collect()
     };
     assert_eq!(
@@ -355,24 +355,6 @@ fn owner_links_only_take_github_logins() {
     ] {
         assert!(!github_login(bad), "{bad}");
     }
-}
-
-/// A version that calls mod API functions the game doesn't have is marked and skipped.
-#[test]
-fn versions_for_a_newer_horizon_are_not_installed() {
-    let mut index = sample();
-    index.projects[0].versions[0].api_level = Some(1);
-    let p = index.project("coords_hud").unwrap();
-    let e = newest(&index, p, Some(0)).unwrap_err();
-    assert_eq!(
-        e,
-        "Coordinates HUD needs a newer Horizon than the game you play: update it first."
-    );
-    assert!(newest(&index, p, Some(1)).is_ok());
-    assert!(newest(&index, p, None).is_ok());
-    // The browser marks the unsupported code API level.
-    let v = version_of(&index, p, &p.versions[0], Some(0));
-    assert_eq!(v.blocked.as_deref(), Some(NEEDS_NEWER));
 }
 
 #[test]
