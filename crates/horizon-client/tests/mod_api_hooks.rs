@@ -1,9 +1,11 @@
 //! A mod crate's view of the mod API: `Hooks` is implemented with the names `mod_api` exports.
 //! The test is that this file builds with the exported event types.
-use horizon_client::mod_api::{ClientHost, Hooks, InputKeyEvent, ModEntry, winit};
+use horizon_client::mod_api::{self, ClientHost, Hooks, InputKeyEvent, ModEntry, winit};
 
+#[derive(Default)]
 struct Keys;
 
+#[mod_api::horizon_mod]
 impl Hooks for Keys {
     fn input_key(&self, _host: &mut dyn ClientHost, event: &mut InputKeyEvent<'_>) {
         let _: &winit::event::KeyEvent = event.event;
@@ -12,5 +14,5 @@ impl Hooks for Keys {
 
 #[test]
 fn a_mod_implements_the_key_hooks() {
-    let _: ModEntry = ModEntry::new("keys", Box::new(Keys));
+    let _: ModEntry = ModEntry::new("keys", hooks());
 }

@@ -35,8 +35,8 @@ pub use crate::game::{
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
-    BlockSpriteArrays, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent,
-    wgpu,
+    BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
+    WorldDrawnEvent, render_hook_ids, wgpu,
 };
 pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
@@ -1849,25 +1849,24 @@ pub type Mods = Arc<[ModEntry]>;
 pub(crate) struct Installed {
     mods: Mods,
     subscribers: horizon_client_core::subscribers::Subscribers,
-    types: Box<[std::any::TypeId]>,
 }
 
 impl Installed {
     fn new(mods: Mods) -> Self {
-        let types = mods
-            .iter()
-            .map(|entry| (&*entry.hooks as &dyn std::any::Any).type_id())
-            .collect();
+        let subscriptions = mods.iter().enumerate().flat_map(|(index, entry)| {
+            entry
+                .hooks
+                .subscribed()
+                .iter()
+                .flatten()
+                .map(move |hook| (index, *hook as usize))
+        });
         let subscribers = horizon_client_core::subscribers::Subscribers::new(
-            horizon_client_core::subscribers::Domain::Gameplay,
             generated::HOOK_COUNT,
             mods.len(),
+            subscriptions,
         );
-        Self {
-            mods,
-            subscribers,
-            types,
-        }
+        Self { mods, subscribers }
     }
 }
 
@@ -1889,7 +1888,8 @@ fn installed() -> Option<&'static Installed> {
 /// Scoped trait-mod installation for tests, enabled by the `testing` feature.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
-    use super::{Installed, Mods, TEST_MODS};
+    use super::ticket_controller::TEST_CONTROLLERS;
+    use super::{Installed, Mods, TEST_MODS, TicketController};
 
     /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
     ///
@@ -1902,9 +1902,24 @@ pub mod testing {
                 TEST_MODS.set(self.0);
             }
         }
+        let controllers: &'static [_] =
+            Box::leak(super::part_table::registered_controllers(&mods).into_boxed_slice());
         let installed = Box::leak(Box::new(Installed::new(mods)));
         let _restore = Restore(TEST_MODS.replace(Some(installed)));
+        let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
         f()
+    }
+
+    /// The ticket controller with this id that the mods of the enclosing `with_mods` registered.
+    pub fn ticket_controller(id: &str) -> Option<TicketController> {
+        TicketController::from_id(id)
+    }
+
+    struct RestoreControllers(Option<&'static [super::ticket_controller::ControllerInfo]>);
+    impl Drop for RestoreControllers {
+        fn drop(&mut self) {
+            TEST_CONTROLLERS.set(self.0);
+        }
     }
 }
 
@@ -1939,6 +1954,16 @@ pub(crate) fn listened(hook: generated::HookId) -> bool {
     installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
+/// Whether an installed mod subscribes to an injected hook.
+#[doc(hidden)]
+pub fn subscribed_by(index: usize, hook: Option<generated::HookId>) -> bool {
+    hook.is_some_and(|hook| {
+        installed().is_some_and(|installed| {
+            index < installed.mods.len() && installed.subscribers.contains(hook as usize, index)
+        })
+    })
+}
+
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
 fn entered_registration<'a>(mods: &'a [ModEntry], hook: &'static str) -> Entered<'a> {
@@ -1955,22 +1980,13 @@ fn entered(
 ) -> impl Iterator<Item = &'static dyn Hooks> {
     installed().into_iter().flat_map(move |installed| {
         let mut crash_guard = None;
-        let mut subscriber_guard = None;
         installed
             .subscribers
             .indices(hook_id as usize)
             .map(move |index| {
-                drop(subscriber_guard.take());
                 drop(crash_guard.take());
                 let entry = &installed.mods[index];
                 let hooks = &*entry.hooks;
-                subscriber_guard = Some(horizon_client_core::subscribers::enter(
-                    &installed.subscribers,
-                    hook_id as usize,
-                    index,
-                    (hooks as *const dyn Hooks).cast(),
-                    installed.types[index],
-                ));
                 crash_guard = Some(mark_mod(entry.id, hook));
                 hooks
             })
@@ -2139,8 +2155,10 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 ///
 /// A mutable client hook can use client services:
 /// ```
-/// use horizon_client::mod_api::{ClientHost, Hooks, InputKeyEvent};
+/// use horizon_client::mod_api::{self, ClientHost, Hooks, InputKeyEvent};
+/// #[derive(Default)]
 /// struct ScreenMod;
+/// #[mod_api::horizon_mod]
 /// impl Hooks for ScreenMod {
 ///     fn input_key(&self, host: &mut dyn ClientHost, _: &mut InputKeyEvent<'_>) {
 ///         host.mod_screen_open("example");
@@ -2210,9 +2228,9 @@ pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&m
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
-/// A player's right click on a block, for `right_click_block`
-/// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
-/// `useItemOn` starts, on the clicking client and on the server.
+/// A player's right click on a block, shared by the block's use behaviours
+/// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
+/// event hears it once per hand on the clicking client and on the server.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct NativeBlockClick<'a> {
@@ -2248,7 +2266,8 @@ pub enum NativeInteractionResult {
     /// `PASS`: nothing happens and the click goes on.
     #[default]
     Pass,
-    /// `TRY_WITH_EMPTY_HAND`: passes, as `PASS` does here.
+    /// `TRY_WITH_EMPTY_HAND`: for a block's `use_item_on`, try its
+    /// `use_without_item` next, on the main hand only.
     TryWithEmptyHand,
 }
 impl NativeInteractionResult {
@@ -2261,6 +2280,7 @@ impl NativeInteractionResult {
 /// NeoForge's `TriState`: force a part of an action off or on, or leave it
 /// to vanilla.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeTriState {
     False,
     #[default]
@@ -2414,6 +2434,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod ticket_controller;
+pub use ticket_controller::TicketController;
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,
@@ -2430,6 +2452,40 @@ mod generated {
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+/// Internal test-fixture attribute for modules with multiple hook sets; mods use `#[mod_api::horizon_mod]`.
+#[doc(hidden)]
+pub use horizon_mod_api_macros::__subscriptions;
+/// Mark a hook implementation and derive its subscriptions.
+///
+/// On `impl Hooks`, also exports `pub fn hooks()` using the mod's `Default`
+/// implementation. Put that impl at the crate root so the launcher finds it.
+/// On `impl RenderHooks`, derives subscriptions without another export.
+///
+/// An implementation without the attribute does not compile:
+/// ```compile_fail
+/// use horizon_client::mod_api::Hooks;
+/// struct Mod;
+/// impl Hooks for Mod {}
+/// ```
+/// Rustc rejects a misspelled trait method (E0407):
+/// ```compile_fail,E0407
+/// use horizon_client::mod_api::{self, Hooks};
+/// #[derive(Default)]
+/// struct Mod;
+/// #[mod_api::horizon_mod]
+/// impl Hooks for Mod {
+///     fn baby_entity_spwan(&self) {}
+/// }
+/// ```
+/// Two mod markers in one module define the same export:
+/// ```compile_fail,E0428
+/// use horizon_client::mod_api::{self, Hooks};
+/// #[derive(Default)] struct A;
+/// #[derive(Default)] struct B;
+/// #[mod_api::horizon_mod] impl Hooks for A {}
+/// #[mod_api::horizon_mod] impl Hooks for B {}
+/// ```
+pub use horizon_mod_api_macros::horizon_mod;
 
 #[cfg(test)]
 pub(crate) use part_table::tests as part_tests;
@@ -2440,6 +2496,7 @@ mod hooks_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api;
     use std::sync::Mutex;
 
     #[test]
@@ -2453,9 +2510,11 @@ mod tests {
     }
 
     struct Quiet;
+    #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
 
     struct Broken;
+    #[mod_api::__subscriptions]
     impl Hooks for Broken {
         fn component_types(&self, _event: &mut ComponentTypesEvent<'_>) {
             panic!("a broken mod");
@@ -2510,6 +2569,7 @@ mod tests {
             offset: f32,
             cancel: bool,
         }
+        #[mod_api::__subscriptions]
         impl Hooks for HandMod {
             fn render_hand(
                 &self,
@@ -2576,6 +2636,7 @@ mod tests {
     /// Claims a use on stone, after telling the player what the block is.
     struct Probe;
 
+    #[mod_api::__subscriptions]
     impl Hooks for Probe {
         fn use_on(&self, host: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
@@ -2593,6 +2654,7 @@ mod tests {
     #[test]
     fn conversion_post_reports_both_entities_once() {
         struct Observer(Arc<Mutex<Vec<(u32, String, u32, String)>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn living_conversion_post(
                 &self,
@@ -2638,6 +2700,7 @@ mod tests {
     #[test]
     fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
         struct XpHook(bool);
+        #[mod_api::__subscriptions]
         impl Hooks for XpHook {
             fn player_xp_change(
                 &self,
@@ -2667,6 +2730,7 @@ mod tests {
 
     struct MorePhantoms;
 
+    #[mod_api::__subscriptions]
     impl Hooks for MorePhantoms {
         fn player_spawn_phantoms(
             &self,
@@ -2696,6 +2760,7 @@ mod tests {
     /// Asks the host to tell a player without anyone having implemented it.
     struct Chatty;
 
+    #[mod_api::__subscriptions]
     impl Hooks for Chatty {
         fn use_on(&self, host: &mut dyn ServerHost, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
@@ -2763,6 +2828,7 @@ mod tests {
     #[test]
     fn player_turn_mods_receive_identity_and_chain_changes() {
         struct Turn;
+        #[mod_api::__subscriptions]
         impl Hooks for Turn {
             fn calculate_player_turn(
                 &self,
@@ -2824,6 +2890,7 @@ mod tests {
 
     struct Backstab;
 
+    #[mod_api::__subscriptions]
     impl Hooks for Backstab {
         fn living_incoming_damage_v2(
             &self,
@@ -2903,6 +2970,7 @@ mod tests {
     #[test]
     fn mining_events_identify_the_player_and_keep_mod_decisions() {
         struct MiningProbe(Arc<Mutex<Vec<u32>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for MiningProbe {
             fn player_harvest_check(
                 &self,
@@ -2985,6 +3053,7 @@ mod tests {
     /// Takes a click with the off hand on a block's top half.
     struct OffHandTop;
 
+    #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
         fn use_on(&self, _: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
@@ -3100,6 +3169,7 @@ mod tests {
     /// Cancels every brew and leaves its own slots; records what it saw.
     struct BrewSwapper(Arc<Mutex<Vec<String>>>);
 
+    #[mod_api::__subscriptions]
     impl Hooks for BrewSwapper {
         fn potion_brew_pre(
             &self,
@@ -3124,6 +3194,7 @@ mod tests {
     /// Edits the slots in `PotionBrewEvent.Pre` without cancelling.
     struct BrewEditor;
 
+    #[mod_api::__subscriptions]
     impl Hooks for BrewEditor {
         fn potion_brew_pre(
             &self,
@@ -3217,6 +3288,7 @@ mod tests {
     /// Writes down every game rule change and level save it hears.
     struct Recorder(Arc<Mutex<Vec<String>>>);
 
+    #[mod_api::__subscriptions]
     impl Hooks for Recorder {
         fn game_rule_changed(
             &self,
@@ -3239,6 +3311,7 @@ mod tests {
     #[test]
     fn game_rule_change_reports_optional_actor() {
         struct ActorRecorder(Arc<Mutex<Vec<Option<(u128, i32, String)>>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for ActorRecorder {
             fn game_rule_changed(
                 &self,
@@ -3355,6 +3428,7 @@ mod tests {
     /// catch with cod in it.
     struct CodKeeper;
 
+    #[mod_api::__subscriptions]
     impl Hooks for CodKeeper {
         fn item_fished(&self, _host: &mut dyn ServerHost, event: &mut ItemFishedEvent<'_>) -> Flow {
             event.rod_damage = 4;
@@ -3370,6 +3444,7 @@ mod tests {
     /// Fails the test if a mod after a cancel is asked.
     struct Unreached;
 
+    #[mod_api::__subscriptions]
     impl Hooks for Unreached {
         fn item_fished(
             &self,
@@ -3421,6 +3496,7 @@ mod tests {
     /// Records what `player_brewed_potion` told it.
     struct BrewWatcher(Arc<Mutex<Vec<(u128, i32, ItemStack)>>>);
 
+    #[mod_api::__subscriptions]
     impl Hooks for BrewWatcher {
         fn player_brewed_potion(
             &self,

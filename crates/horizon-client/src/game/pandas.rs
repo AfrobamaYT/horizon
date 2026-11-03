@@ -36,7 +36,7 @@ impl Game<'_> {
                 e.pickup_delay == 0 && g.panda_eats_from_ground(&e.stack.item)
             };
             // Mob.aiStep: the items within the box grown by (1, 0, 1).
-            if griefing && m.can_pick_up_loot() && m.extra.main_hand.is_none() {
+            if griefing && m.can_pick_up_loot() && m.extra.main_hand_id().is_none() {
                 let reach = m.bounds().inflate(Vec3::new(1.0, 0.0, 1.0));
                 let taken = self
                     .dropped
@@ -105,7 +105,7 @@ impl Game<'_> {
             panda::try_to_sit(m);
             panda::start_eating(m);
             // What it held falls, unless the player has infinite materials.
-            if let Some(held) = m.extra.main_hand.clone()
+            if let Some(held) = m.extra.main_hand_id().map(str::to_owned)
                 && !creative
             {
                 dropped = Some(ItemStack::new(&held, panda::held_count(m)));
@@ -166,7 +166,10 @@ impl Game<'_> {
             .filter(|m| m.species() == Species::Panda)
         {
             let (crumbs, sneeze) = panda::effects(m);
-            if let (Some(crumbs), Some(item)) = (crumbs, m.extra.main_hand.clone()) {
+            if let (Some(crumbs), Some(item)) = (
+                crumbs,
+                horizon_client::mobs::finalize::item(m, horizon_client::mobs::finalize::MAINHAND),
+            ) {
                 bites.push((item, crumbs));
             }
             sneezes.extend(sneeze);

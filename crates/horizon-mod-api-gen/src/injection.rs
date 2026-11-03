@@ -121,6 +121,9 @@ impl TraitInjection {
                 let Some(owner) = crate::mod_api::mods().get(#owner) else {
                     return #absent;
                 };
+                if !crate::mod_api::subscribed_by(#owner, crate::mod_api::hook_ids::#name) {
+                    return #absent;
+                }
                 #result
             }
         }
