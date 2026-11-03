@@ -23,7 +23,8 @@ use horizon_client::mod_api::{
     self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
     NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, ToolUse, WorldPhase,
+    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse,
+    WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LogicalSide, NativeBlockClick,
@@ -5748,19 +5749,21 @@ impl Game<'_> {
     pub(super) fn native_level_load(&mut self, dimension: &str) {
         mod_api::dispatch_level_load(self, dimension);
     }
-    /// `dimension`'s level has loaded its saved chunk tickets (NeoForge's
-    /// `LoadingValidationCallback.validateTickets`), before its first tick and
-    /// after `native_level_load`, once for each open. `validation` holds the
-    /// calling mod's tickets, block owners and entity owners apart; a mod
-    /// removes the ones that no longer hold (a machine that is gone), and
-    /// they stop forcing their chunks. Asked only while a mod holds tickets
-    /// in the level. Server-side.
-    pub(super) fn native_chunk_tickets_validate(
+    /// `dimension`'s level has loaded the saved chunk tickets of `controller`
+    /// (NeoForge's `LoadingValidationCallback.validateTickets`), before its
+    /// first tick and after `native_level_load`, once for each open and each
+    /// controller registered with a validator that has tickets in the level.
+    /// `validation` holds that controller's tickets, block owners and entity
+    /// owners apart; the mod that owns the controller removes the ones that no
+    /// longer hold (a machine that is gone), and they stop forcing their
+    /// chunks. Server-side.
+    pub(super) fn native_validate_tickets(
         &mut self,
         dimension: &str,
+        controller: TicketController,
         validation: &mut horizon_client::mod_chunk_tickets::TicketValidation,
     ) {
-        mod_api::dispatch_chunk_tickets_validate(self, dimension, validation);
+        mod_api::dispatch_validate_tickets(self, dimension, controller, validation);
     }
     /// `dimension`'s level closed (NeoForge's `LevelEvent.Unload`, posted after
     /// `level.close()` in `MinecraftServer.stopServer`), after its last save:

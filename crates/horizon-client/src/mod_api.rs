@@ -1889,7 +1889,8 @@ fn installed() -> Option<&'static Installed> {
 /// Scoped trait-mod installation for tests, enabled by the `testing` feature.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
-    use super::{Installed, Mods, TEST_MODS};
+    use super::ticket_controller::TEST_CONTROLLERS;
+    use super::{Installed, Mods, TEST_MODS, TicketController};
 
     /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
     ///
@@ -1902,9 +1903,24 @@ pub mod testing {
                 TEST_MODS.set(self.0);
             }
         }
+        let controllers: &'static [_] =
+            Box::leak(super::part_table::registered_controllers(&mods).into_boxed_slice());
         let installed = Box::leak(Box::new(Installed::new(mods)));
         let _restore = Restore(TEST_MODS.replace(Some(installed)));
+        let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
         f()
+    }
+
+    /// The ticket controller with this id that the mods of the enclosing `with_mods` registered.
+    pub fn ticket_controller(id: &str) -> Option<TicketController> {
+        TicketController::from_id(id)
+    }
+
+    struct RestoreControllers(Option<&'static [super::ticket_controller::ControllerInfo]>);
+    impl Drop for RestoreControllers {
+        fn drop(&mut self) {
+            TEST_CONTROLLERS.set(self.0);
+        }
     }
 }
 
@@ -2414,6 +2430,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod ticket_controller;
+pub use ticket_controller::TicketController;
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,

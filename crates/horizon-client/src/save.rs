@@ -2429,7 +2429,7 @@ pub struct SaveDir {
     /// What older chunks are upgraded with, found on the first one read.
     datafix_context: OnceLock<Option<DatafixContext>>,
 }
-fn mod_ticket_to_nbt(ticket: &ModTicket) -> Tag {
+fn mod_ticket_to_nbt(ticket: &ModTicket, controller: &str) -> Tag {
     let owner = match ticket.owner {
         TicketOwner::Block(pos) => ("block", Tag::IntArray(pos.to_vec())),
         TicketOwner::Entity(uuid) => (
@@ -2438,7 +2438,7 @@ fn mod_ticket_to_nbt(ticket: &ModTicket) -> Tag {
         ),
     };
     Tag::compound([
-        ("mod", Tag::String(ticket.mod_id.as_str().into())),
+        ("controller", Tag::String(controller.into())),
         ("owner", Tag::compound([owner])),
         (
             "chunk_pos",
@@ -2450,8 +2450,9 @@ fn mod_ticket_to_nbt(ticket: &ModTicket) -> Tag {
         ),
     ])
 }
-fn mod_ticket_from_nbt(tag: &Tag) -> Option<ModTicket> {
-    let Some(Tag::String(mod_id)) = tag.get("mod") else {
+/// A saved ticket: the id of the controller that held it, and the ticket without its slot.
+fn mod_ticket_from_nbt(tag: &Tag) -> Option<(String, ModTicket)> {
+    let Some(Tag::String(controller)) = tag.get("controller") else {
         return None;
     };
     let owner = tag.get("owner")?;
@@ -2466,13 +2467,16 @@ fn mod_ticket_from_nbt(tag: &Tag) -> Option<ModTicket> {
     let Some(Tag::IntArray(pos)) = tag.get("chunk_pos") else {
         return None;
     };
-    let mod_id = mod_id.to_string().ok()?;
-    (pos.len() == 2).then(|| ModTicket {
-        mod_id,
-        owner,
-        chunk: (pos[0], pos[1]),
-        // Tickets saved without the flag don't force natural spawning.
-        natural_spawning: matches!(tag.get("natural_spawning"), Some(Tag::Byte(b)) if *b != 0),
+    let controller = controller.to_string().ok()?;
+    (pos.len() == 2).then(|| {
+        let ticket = ModTicket {
+            controller: 0,
+            owner,
+            chunk: (pos[0], pos[1]),
+            // Tickets saved without the flag don't force natural spawning.
+            natural_spawning: matches!(tag.get("natural_spawning"), Some(Tag::Byte(b)) if *b != 0),
+        };
+        (controller, ticket)
     })
 }
 fn is_forced_ticket(ticket: &Tag) -> bool {
@@ -2620,20 +2624,55 @@ impl SaveDir {
     }
     /// The chunk tickets of mods (`data/horizon/mod_chunk_tickets.dat`), kept
     /// out of vanilla's `chunk_tickets.dat` because vanilla decodes its ticket
-    /// types through a registry. A ticket that doesn't read is skipped.
-    pub fn load_mod_tickets(&self) -> Vec<ModTicket> {
+    /// types through a registry. Each is saved under its controller's id;
+    /// `slot_of` gives the slot of an id a loaded mod registered. A ticket of
+    /// any other id (a mod that is gone, or a file from before controllers) is
+    /// dropped with a warning, as NeoForge drops a controller nobody registers,
+    /// and one that doesn't read is skipped.
+    pub fn load_mod_tickets(&self, slot_of: impl Fn(&str) -> Option<u32>) -> Vec<ModTicket> {
         let Some(root) = read_dat(&self.mod_tickets_path()) else {
             return Vec::new();
         };
         let Some(Tag::List(tickets)) = root.get("data").and_then(|data| data.get("tickets")) else {
             return Vec::new();
         };
-        tickets.iter().filter_map(mod_ticket_from_nbt).collect()
+        let mut dropped = std::collections::BTreeSet::new();
+        let loaded = tickets
+            .iter()
+            .filter_map(|tag| {
+                let Some((controller, ticket)) = mod_ticket_from_nbt(tag) else {
+                    log::warn!("Dropping a saved mod chunk ticket that has no readable controller");
+                    return None;
+                };
+                let Some(slot) = slot_of(&controller) else {
+                    dropped.insert(controller);
+                    return None;
+                };
+                Some(ModTicket {
+                    controller: slot,
+                    ..ticket
+                })
+            })
+            .collect();
+        for controller in dropped {
+            log::warn!(
+                "Dropping the saved chunk tickets of ticket controller {controller}: no loaded mod registers it"
+            );
+        }
+        loaded
     }
-    /// Save the tickets of mods; nothing while there are none and never were.
-    pub fn save_mod_tickets(&self, tickets: &ModTickets) -> Result<()> {
+    /// Save the tickets of mods under their controllers' ids (`id_of` gives the id of a slot);
+    /// nothing while there are none and never were.
+    pub fn save_mod_tickets(
+        &self,
+        tickets: &ModTickets,
+        id_of: impl Fn(u32) -> Option<&'static str>,
+    ) -> Result<()> {
         let path = self.mod_tickets_path();
-        let list: Vec<Tag> = tickets.to_save().map(mod_ticket_to_nbt).collect();
+        let list: Vec<Tag> = tickets
+            .to_save()
+            .filter_map(|t| Some(mod_ticket_to_nbt(t, id_of(t.controller)?)))
+            .collect();
         if list.is_empty() && !path.exists() {
             return Ok(());
         }
