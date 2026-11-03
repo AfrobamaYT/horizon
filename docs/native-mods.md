@@ -985,7 +985,17 @@ listeners run after vanilla by default, in registration order; an explicit depen
 `functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
 `get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
 objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
-context or retained-listener lookup here.
+context here.
+
+`event.listeners.add_retained_listener(id, converter, listener)` also keeps the listener object
+for other hooks, the counterpart of NeoForge's `addRetainedListener`: it returns a typed
+`ListenerKey<T>` that reads the object back from any server hook through
+`host.reload_resources().listener(&key)` — an `Arc<T>` of the live object the last successful
+reload installed, as NeoForge's `ReloadableServerResources.getListener`. Registration rules and
+prepare/apply semantics are `add_listener`'s. Retention follows the reload: a new reload
+registers fresh objects and the store is replaced whole by the first successful apply, so a key
+held across a reload keeps addressing the new object. Before the first successful reload, or
+for a key whose id or type does not match a registration, `listener` gives `None`.
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
@@ -2511,7 +2521,15 @@ the server entity and level reads available on a client.
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
   slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
-  renders or sends them. Armor stands store the six armor and hand slots, and the dragon none yet.
+  renders or sends them. Armor stands and the dragon hold all eight slots in the same `Equipment`, saved in `equipment`
+  (omitted when empty). A stand keeps a body or saddle a mod writes (`setItemSlot` stores it; `ArmorStand.canUseSlot`
+  only stops a player equipping it), and pops it with the rest, after the other six slots, when it breaks. A write to a
+  stand or the dragon runs `LivingEntity.onEquipItem` like a mob's: the equip sound and the `equip` or `unequip` game
+  event, unless the entity has not ticked yet or the item did not change. `native_living_equipment_change` hears all
+  eight slots of a stand. `/item replace` keeps vanilla's predicate for a stand's or the dragon's chest, legs, feet, body
+  and saddle (an empty stack, or an item made for that slot; a stand's `canUseSlot` refuses body and saddle), while
+  `set_equipment` stays permissive. This is not full dragon equipment parity: the dragon keeps its equipment for mods and
+  saves, and does not drop it on death (the death drops are built on `Mob`, which the dragon is not).
 - `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened
   by mining fatigue, unless one is under way and past its first half (it returns whether one started). The players around
   see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing the hand asked for. Mobs and
@@ -3083,7 +3101,7 @@ so check `is_loaded` first. `LevelRandomHost` provides vanilla's `Level.random` 
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
-`native_send_particles`. Whole-block writes wait for a
+`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events). Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -3269,7 +3287,7 @@ Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
 
 #### An entity's items
 
-`entity.capability(host, &ENTITY_ITEMS)` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
+`entity.capability(host, &ENTITY_ITEMS, ())` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
 stale handle and an entity outside the level in place. The game answers it for a player with their inventory
 (`PlayerInventoryWrapper`), indices as vanilla's `Inventory` numbers them: 0..36 the main inventory (0..9 the hotbar),
 36..40 the armour from feet to head, 40 the off hand. Each index is the player's `ItemPlace::PlayerSlot` and takes only
@@ -3279,13 +3297,13 @@ player by id or by tag), and bound armour comes off only in creative. `insert_an
 then into its empty slots, never the armour. For a chest or hopper minecart, a chest boat and a chested donkey, mule or
 llama the game answers with their container's slots (`ItemPlace::EntitySlot`). A handler kept past its entity's removal
 or its world's close reaches nothing. `r.entity_capability(&ENTITY_ITEMS,
-"mymod:robot", |host, robot| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
+"mymod:robot", |host, robot, ()| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
 game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
 
 ```rust
 // A trade: each offer is (index, the exact stack it must still hold). A stale offer or no
 // room for one aborts the transaction, and every move in it is put back.
-let (a, b) = (seller.capability(host, &ENTITY_ITEMS)?, buyer.capability(host, &ENTITY_ITEMS)?);
+let (a, b) = (seller.capability(host, &ENTITY_ITEMS, ())?, buyer.capability(host, &ENTITY_ITEMS, ())?);
 host.transaction(|host, tx| {
     for (from, to, offer) in [(&a, &b, &seller_offer), (&b, &a, &buyer_offer)] {
         for (index, stack) in offer {
@@ -3303,6 +3321,16 @@ host.transaction(|host, tx| {
     Ok(())
 })
 ```
+
+#### Entity energy and fluids
+
+`entity.capability(host, &ENTITY_ENERGY, side)` and `entity.capability(host, &ENTITY_FLUIDS, side)` reach a mod's
+entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` and `Capabilities.Fluid.ENTITY`), where
+`side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
+answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
+which is given that side and may answer differently for each. An entity capability's context is its key's second type:
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+between these and block or item handlers inside a transaction.
 
 #### A menu's slots
 

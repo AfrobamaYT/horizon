@@ -310,4 +310,8 @@ impl horizon_client::mod_api::LevelWriteHost for LevelTicks<'_, &mut super::Game
         self.level
             .native_send_particles(options, state, at, spread, speed, count)
     }
+
+    fn level_event(&mut self, id: i32, pos: [i32; 3], data: i32) -> bool {
+        self.level.native_level_event(id, pos, data)
+    }
 }

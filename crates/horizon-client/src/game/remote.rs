@@ -9407,6 +9407,14 @@ impl Game<'_> {
         self.send(S::ContainerClose(play::ContainerClose { container: id }));
         self.remote_close_local();
     }
+    fn remote_reject_container(&mut self, container: i32) {
+        self.remote_close_local();
+        if self.screen == Screen::Inventory {
+            self.screen = Screen::Playing;
+            self.capture(true);
+        }
+        self.send(S::ContainerClose(play::ContainerClose { container }));
+    }
     fn remote_close_local(&mut self) {
         // `Gui.setScreen` clears the focus of the screen it takes down: the
         // container's keyboard focus must not outlive it (a Tab bound to the
@@ -9590,9 +9598,7 @@ impl Game<'_> {
             ))),
             _ => {
                 // Unsupported menu: tell the server we closed it.
-                self.send(S::ContainerClose(play::ContainerClose {
-                    container: p.container,
-                }));
+                self.remote_reject_container(p.container);
                 self.chat_line(
                     horizon_client::text::Text::literal(format!(
                         "(Horizon cannot show {menu} screens yet)"
@@ -9646,9 +9652,7 @@ impl Game<'_> {
     fn remote_open_mount(&mut self, p: play::MountScreenOpen) {
         let columns = usize::try_from(p.columns).unwrap_or(0).min(5);
         if !self.open_remote_mount_menu(p.entity as u32, columns) {
-            self.send(S::ContainerClose(play::ContainerClose {
-                container: p.container,
-            }));
+            self.remote_reject_container(p.container);
             return;
         }
         if let Some(r) = self.remote.as_mut() {
@@ -10675,6 +10679,50 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn rejected_menu_packets_retire_the_previous_client_menu() {
+        use super::super::{
+            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+        };
+        use horizon_client::items::ItemStack;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{Clientbound as C, MountScreenOpen, OpenScreen},
+        };
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuTest").unwrap();
+            for packet in [
+                C::OpenScreen(OpenScreen {
+                    container: 7,
+                    menu: -1,
+                    title: Tag::String("unsupported".into()),
+                }),
+                C::MountScreenOpen(MountScreenOpen {
+                    container: 7,
+                    columns: 0,
+                    entity: i32::MAX,
+                }),
+            ] {
+                let remote = game.remote.as_mut().unwrap();
+                remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+                let generation = remote.menu.generation;
+                game.screen = Screen::Inventory;
+                game.carried = Some(ItemStack::new("minecraft:stone", 1));
+                game.handle_packet(packet).unwrap();
+                let remote = game.remote.as_ref().unwrap();
+                assert!(remote.menu.as_ref().is_none());
+                assert_ne!(remote.menu.generation, generation);
+                assert!(game.carried.is_none());
+                assert!(game.screen == Screen::Playing);
+            }
+        });
+    }
+
     /// `LivingEntity.handleEntityEvent(55)` is `swapHandItems`: the whole
     /// stacks trade hands, not just their ids.
     #[test]
@@ -10751,7 +10799,10 @@ mod tests {
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
-        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{Clientbound, Respawn, SpawnInfo},
+        };
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -10775,8 +10826,31 @@ mod tests {
             game.enter_remote_dimension(&spawn, false, Reason::Other);
             let joined = game.native_lifecycle.epoch().unwrap();
             let old = EntityRef::new(joined, 12);
-            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+            let open_generation = remote.menu.generation;
+            game.handle_packet(Clientbound::Respawn(Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
             assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+            let remote = game.remote.as_mut().unwrap();
+            assert!(remote.menu.as_ref().is_none());
+            assert_ne!(remote.menu.generation, open_generation);
+            let inventory_generation = remote.menu.generation;
+            game.handle_packet(Clientbound::Respawn(Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+            let remote = game.remote.as_mut().unwrap();
+            assert!(remote.menu.as_ref().is_none());
+            assert_ne!(remote.menu.generation, inventory_generation);
+            remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
+            assert_ne!(remote.menu.generation, open_generation);
+            assert_ne!(remote.menu.generation, inventory_generation);
 
             // A different level key replaces the world even with the same
             // dimension type; IDs can be reused but old handles cannot.
