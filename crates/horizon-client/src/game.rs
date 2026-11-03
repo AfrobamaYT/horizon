@@ -1458,13 +1458,7 @@ impl LevelAccess for GameLevel<'_> {
     ) -> bool {
         let mut connected = vanilla;
         if self.native_authoritative {
-            self.native_can_connect_redstone(
-                self.dimension,
-                pos,
-                state,
-                direction,
-                &mut connected,
-            );
+            self.native_can_connect_redstone(self.dimension, pos, state, direction, &mut connected);
         }
         connected
     }

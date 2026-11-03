@@ -554,7 +554,7 @@ impl GameLevel<'_> {
         mod_api::dispatch_is_signal_source(self, state, source);
     }
 
-    /// `BlockBehaviour.shouldRedstoneWireConnectTo`: set `connected` to say
+    /// `RedstoneWireBlock.shouldConnectTo`: set `connected` to say
     /// whether redstone wire connects to the block `state` at `pos`,
     /// `direction` the side the wire reaches it by (None when it asks about
     /// the block above or below). `connected` holds vanilla's answer: change

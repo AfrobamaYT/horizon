@@ -1185,13 +1185,21 @@ fn wire_connects_only_to_the_block_that_answers_can_connect_redstone() {
     w.set(BlockPos::new(6, 1, 0), glass);
     let pos = BlockPos::new(5, 1, 0);
     let connection = |w: &mut World<'_>| {
-        w.f.behaviours.sim(&mut w.level, &mut w.ticks).wire_connection_state(wire, pos)
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .wire_connection_state(wire, pos)
     };
     let before = connection(&mut w);
-    assert_eq!(w.f.registry.state(before).unwrap().properties["east"], "none");
+    assert_eq!(
+        w.f.registry.state(before).unwrap().properties["east"],
+        "none"
+    );
     w.level.wire_connect.insert(BlockPos::new(6, 1, 0), true);
     let connected = connection(&mut w);
-    assert_eq!(w.f.registry.state(connected).unwrap().properties["east"], "side");
+    assert_eq!(
+        w.f.registry.state(connected).unwrap().properties["east"],
+        "side"
+    );
     w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
     assert_eq!(connection(&mut w), before);
 }

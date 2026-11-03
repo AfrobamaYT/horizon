@@ -1997,6 +1997,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn redstone_connection_is_scoped_to_the_attached_block() {
+        game_thread();
+        resolve(&[]).unwrap();
+        for (state, expected) in [(1, true), (2, false)] {
+            let mut connected = false;
+            dispatch_can_connect_redstone(
+                &Level,
+                LevelDimension::Overworld,
+                BlockPos::new(0, 64, 0),
+                BlockStateId(state),
+                Some(Direction::East),
+                &mut connected,
+            );
+            assert_eq!(connected, expected);
+        }
+    }
+
+    #[test]
     fn a_state_without_parts_answers_none_and_keeps_the_global_hook() {
         game_thread();
         resolve(&[]).unwrap();
