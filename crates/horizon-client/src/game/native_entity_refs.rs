@@ -270,10 +270,11 @@ impl Game<'_> {
                 subject: None,
             },
             context: CollisionContext::empty(false),
-            registry: self.pack.assets.registry,
             clip_data: Some(super::explosion::ClipData {
                 facts: self.res.facts(),
                 behaviours: self.res.behaviours(),
+                tables: &self.pack.context.tables,
+                registry: self.pack.assets.registry,
             }),
         };
         let mode = match blocks {
@@ -750,6 +751,44 @@ pub(super) mod tests {
                     .clip(game, from, to, Block::Collider, Fluid::None)
                     .is_none()
             );
+            use horizon_world::world_ray::RayWorld;
+            let mut ordinary = super::super::explosion::ColliderRays {
+                scene: horizon_client::collisions::SceneCollisions {
+                    world: &game.world,
+                    binding: game.collision,
+                    subject: None,
+                },
+                context: horizon_world::collision_context::CollisionContext::empty(false),
+                clip_data: None,
+            };
+            assert!(
+                ordinary
+                    .interaction_shape(
+                        horizon_world::registry::BlockStateId(u32::MAX),
+                        horizon_core::position::BlockPos::new(0, 0, 0)
+                    )
+                    .unwrap()
+                    .is_empty()
+            );
+            let plant = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:dandelion")
+                .unwrap();
+            game.world.set(4, 64, 4, plant).unwrap();
+            let facts = game.res.facts().get(plant);
+            assert!(facts.outline_offset);
+            let offset = game.pack.context.tables.offset(plant, 4, 4).unwrap();
+            assert_ne!(offset[0], 0.0);
+            let b = facts.outline[0];
+            let y = 64.0 + offset[1] + (b[1] + b[4]) / 2.0;
+            let z = 4.0 + offset[2] + (b[2] + b[5]) / 2.0;
+            let plant_hit = level
+                .clip(game, [3.0, y, z], [5.0, y, z], Block::Outline, Fluid::None)
+                .unwrap();
+            assert_eq!(plant_hit.block, [4, 64, 4]);
+            assert!((plant_hit.location[0] - (4.0 + offset[0] + b[0])).abs() < 1e-9);
             let cauldron = game
                 .pack
                 .assets

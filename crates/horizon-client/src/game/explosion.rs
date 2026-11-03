@@ -31,15 +31,16 @@ use std::{cmp::Ordering, io};
 
 /// `Level.clip` with `ClipContext.Block.COLLIDER`, no fluids and the
 /// collision context of the entity whose exposure is measured.
-pub(super) struct ClipData<'a> {
+pub(super) struct ClipData<'a, 'r> {
     pub facts: &'a horizon_client::blocks::BlockFacts,
     pub behaviours: &'a horizon_world::level::Behaviours,
+    pub tables: &'a horizon_client::mesher::MeshTables,
+    pub registry: &'r horizon_world::registry::BlockRegistry,
 }
 pub(super) struct ColliderRays<'a, 'r> {
     pub scene: SceneCollisions<'a, 'r>,
     pub context: CollisionContext<'static>,
-    pub registry: &'r horizon_world::registry::BlockRegistry,
-    pub clip_data: Option<ClipData<'a>>,
+    pub clip_data: Option<ClipData<'a, 'r>>,
 }
 impl RayWorld for ColliderRays<'_, '_> {
     type Error = io::Error;
@@ -69,7 +70,16 @@ impl RayWorld for ColliderRays<'_, '_> {
                 return Err(io::Error::other("dynamic ray shape unsupported"));
             }
             if mode == RayBlockMode::Outline {
-                return super::perspective::ray_shape_from_boxes(&data.facts.get(state).outline);
+                let facts = data.facts.get(state);
+                let shape = super::perspective::ray_shape_from_boxes(&facts.outline)?;
+                let offset = super::perspective::outline_offset(
+                    data.tables,
+                    state,
+                    p.x,
+                    p.z,
+                    facts.outline_offset,
+                );
+                return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
             }
         }
         let binding = self.scene.binding;
@@ -78,7 +88,10 @@ impl RayWorld for ColliderRays<'_, '_> {
             .map_err(|e| io::Error::other(format!("{e:?}")))
     }
     fn interaction_shape(&mut self, state: BlockStateId, _: BlockPos) -> io::Result<VoxelShape> {
-        super::perspective::ray_interaction_shape(self.registry, state)
+        match &self.clip_data {
+            Some(data) => super::perspective::ray_interaction_shape(data.registry, state),
+            None => Ok(VoxelShape::empty()),
+        }
     }
     fn fluid_is_source(&mut self, _: ()) -> io::Result<bool> {
         Ok(false)
@@ -264,7 +277,6 @@ impl Game<'_> {
         // ClipContext(..., entity): the entity standing at the box's bottom.
         let mut rays = ColliderRays {
             clip_data: None,
-            registry: self.pack.assets.registry,
             scene: SceneCollisions {
                 world: &self.world,
                 binding: self.collision,

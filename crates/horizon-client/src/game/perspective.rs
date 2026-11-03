@@ -30,6 +30,20 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub(super) fn outline_offset(
+    tables: &horizon_client::mesher::MeshTables,
+    state: BlockStateId,
+    x: i32,
+    z: i32,
+    follows_offset: bool,
+) -> [f64; 3] {
+    if follows_offset {
+        tables.offset(state, x, z).unwrap_or([0.0; 3])
+    } else {
+        [0.0; 3]
+    }
+}
+
 pub(super) fn ray_shape_from_boxes(boxes: &[[f64; 6]]) -> io::Result<VoxelShape> {
     let mut shape = VoxelShape::empty();
     for b in boxes {
@@ -291,7 +305,6 @@ impl Game<'_> {
                     binding: self.collision,
                     subject: None,
                 },
-                registry: self.pack.assets.registry,
                 context,
                 clip_data: None,
             },
