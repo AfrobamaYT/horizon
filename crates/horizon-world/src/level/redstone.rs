@@ -221,9 +221,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- redstone wire ----
 
-    fn should_wire_connect_to(&self, state: BlockStateId, direction: Option<Direction>) -> bool {
+    fn should_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        has_hook: bool,
+    ) -> bool {
         let b = self.b;
-        match b.data(state).class {
+        let vanilla = match b.data(state).class {
             Class::RedstoneWire => true,
             Class::Observer => direction == Some(b.facing(state)),
             Class::Repeater => {
@@ -231,6 +237,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 direction == Some(facing) || direction == Some(facing.opposite())
             }
             _ => self.is_signal_source(state) && direction.is_some(),
+        };
+        if has_hook {
+            self.level
+                .adjust_should_redstone_wire_connect_to(pos, state, direction, vanilla)
+        } else {
+            vanilla
         }
     }
     /// `RedstoneWireBlock.canSurvive` and `updateShape`'s down face: the block
@@ -246,6 +258,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         pos: BlockPos,
         direction: Direction,
         can_connect_up: bool,
+        has_hook: bool,
     ) -> &'static str {
         let b = self.b;
         let relative_pos = rel(pos, direction);
@@ -253,7 +266,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if can_connect_up {
             let placeable_above =
                 b.instance_of(relative, Class::TrapDoor) || self.wire_can_survive_on(relative_pos);
-            if placeable_above && self.should_wire_connect_to(self.state(above(relative_pos)), None)
+            let above_pos = above(relative_pos);
+            if placeable_above
+                && self.should_wire_connect_to(above_pos, self.state(above_pos), None, has_hook)
             {
                 return if b.is_face_sturdy(relative, direction.opposite()) {
                     "up"
@@ -262,9 +277,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 };
             }
         }
-        if !self.should_wire_connect_to(relative, Some(direction))
+        let below_pos = below(relative_pos);
+        if !self.should_wire_connect_to(relative_pos, relative, Some(direction), has_hook)
             && (self.is_redstone_conductor(relative, relative_pos)
-                || !self.should_wire_connect_to(self.state(below(relative_pos)), None))
+                || !self.should_wire_connect_to(below_pos, self.state(below_pos), None, has_hook))
         {
             "none"
         } else {
@@ -299,6 +315,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `RedstoneWireBlock.getConnectionState`.
     pub(crate) fn wire_connection_state(&self, state: BlockStateId, pos: BlockPos) -> BlockStateId {
+        self.wire_connection_state_with_hook(
+            state,
+            pos,
+            self.level.has_redstone_wire_connection_hook(),
+        )
+    }
+    fn wire_connection_state_with_hook(
+        &self,
+        state: BlockStateId,
+        pos: BlockPos,
+        has_hook: bool,
+    ) -> BlockStateId {
         let b = self.b;
         let table = &b.table;
         let was_dot = self.wire_is_dot(state);
@@ -310,7 +338,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let can_up = self.wire_can_connect_up(pos);
         for direction in HORIZONTAL {
             if !self.wire_connected(result, direction) {
-                let side = self.wire_connecting_side(pos, direction, can_up);
+                let side = self.wire_connecting_side(pos, direction, can_up, has_hook);
                 result = table.set_text(result, self.direction_prop(direction), side);
             }
         }
@@ -356,7 +384,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Direction::Up => self.wire_connection_state(state, pos),
             _ => {
-                let side = self.wire_connecting_side(pos, direction, self.wire_can_connect_up(pos));
+                let has_hook = self.level.has_redstone_wire_connection_hook();
+                let side = self.wire_connecting_side(
+                    pos,
+                    direction,
+                    self.wire_can_connect_up(pos),
+                    has_hook,
+                );
                 let key = self.direction_prop(direction);
                 if (side != "none") == self.wire_connected(state, direction)
                     && !self.wire_is_cross(state)
@@ -365,7 +399,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 } else {
                     let power = b.table.int(state, b.props.power);
                     let cross = b.table.set_text(self.wire_cross_state(power), key, side);
-                    self.wire_connection_state(cross, pos)
+                    self.wire_connection_state_with_hook(cross, pos, has_hook)
                 }
             }
         }

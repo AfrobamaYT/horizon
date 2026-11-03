@@ -875,6 +875,7 @@ mod tests {
     fn a_trade_hook_fired_by_a_real_select_can_write_the_open_trade() {
         use horizon_client::mod_api::{self, Hooks, TradeSelectEvent};
         struct Observer(Seen);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn trade_select(&self, host: &mut dyn ServerHost, event: &mut TradeSelectEvent<'_>) {
                 let merchant = event

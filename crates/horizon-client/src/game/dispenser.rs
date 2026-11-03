@@ -238,12 +238,9 @@ pub(super) fn body_equipment_species(s: Species) -> bool {
 pub(super) fn mob_slot_item(m: &Mob, slot: Slot) -> Option<Arc<str>> {
     let x = &m.extra;
     match slot {
-        Slot::MainHand => x.main_hand.clone(),
-        Slot::OffHand => x.off_hand.clone(),
-        Slot::Feet => x.feet.clone(),
-        Slot::Legs => x.legs.clone(),
-        Slot::Chest => x.chest.clone(),
-        Slot::Head => x.head.clone(),
+        Slot::MainHand | Slot::OffHand | Slot::Feet | Slot::Legs | Slot::Chest | Slot::Head => {
+            horizon_client::mobs::finalize::item(m, slot as usize)
+        }
         Slot::Body => x.body_stack().map(|s| s.item.clone()),
         Slot::Saddle => m.saddle_item().map(|s| s.item),
     }

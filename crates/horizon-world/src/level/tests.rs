@@ -62,6 +62,9 @@ pub(crate) struct TestLevel {
     /// `analog_states` (`adjust_has_analog_output`).
     pub analog: HashMap<BlockPos, i32>,
     pub analog_states: HashSet<BlockStateId>,
+    /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
+    /// redstone wire connects there.
+    pub wire_connect: HashMap<BlockPos, bool>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -90,6 +93,7 @@ impl TestLevel {
             weak_power_directions: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
+            wire_connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -126,6 +130,18 @@ impl LevelAccess for TestLevel {
     ) -> bool {
         self.weak_power_directions.borrow_mut().push(direction);
         self.weak_power.get(&pos).copied().unwrap_or(vanilla)
+    }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        !self.wire_connect.is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -1205,6 +1221,36 @@ fn weak_power_hook_controls_indirect_signal_at_its_block() {
     assert_eq!(signal(&mut w), 0);
     w.level.weak_power.clear();
     assert_eq!(signal(&mut w), 15);
+}
+
+#[test]
+fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to() {
+    let mut w = world!();
+    w.floor(0, 20, "stone");
+    let wire = w.id("redstone_wire", &[]);
+    let glass = w.id("glass", &[]);
+    w.set(BlockPos::new(4, 1, 0), glass);
+    w.set(BlockPos::new(5, 1, 0), wire);
+    w.set(BlockPos::new(6, 1, 0), glass);
+    let pos = BlockPos::new(5, 1, 0);
+    let connection = |w: &mut World<'_>| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .wire_connection_state(wire, pos)
+    };
+    let before = connection(&mut w);
+    assert_eq!(
+        w.f.registry.state(before).unwrap().properties["east"],
+        "none"
+    );
+    w.level.wire_connect.insert(BlockPos::new(6, 1, 0), true);
+    let connected = connection(&mut w);
+    assert_eq!(
+        w.f.registry.state(connected).unwrap().properties["east"],
+        "side"
+    );
+    w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
+    assert_eq!(connection(&mut w), before);
 }
 
 #[test]
