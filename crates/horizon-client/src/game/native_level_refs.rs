@@ -410,13 +410,15 @@ mod tests {
     }
 
     use horizon_client::mod_api::{
-        Hooks, ModEntry, Registrar, ServerHost, TicketController, ValidateTicketsEvent, testing,
+        self, Hooks, ModEntry, Registrar, ServerHost, TicketController, ValidateTicketsEvent,
+        testing,
     };
     use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
 
     /// Registers three controllers: `quarry` and `drill` validate, `plain` doesn't. `quarry`'s
     /// validation prunes the block at [1, 64, 1]; each validation tells what it was shown.
     struct Machines;
+    #[mod_api::__subscriptions]
     impl Hooks for Machines {
         fn register(&self, r: &mut Registrar) {
             r.register_ticket_controller("quarry", true);
@@ -441,6 +443,7 @@ mod tests {
     }
     /// Registers one validating controller, and prunes everything it is shown.
     struct Other;
+    #[mod_api::__subscriptions]
     impl Hooks for Other {
         fn register(&self, r: &mut Registrar) {
             r.register_ticket_controller("vault", true);
@@ -887,6 +890,7 @@ mod tests {
         });
         // No mod listens: the tickets stay as loaded.
         struct Idle;
+        #[mod_api::__subscriptions]
         impl Hooks for Idle {
             fn register(&self, r: &mut Registrar) {
                 r.register_ticket_controller("quarry", true);

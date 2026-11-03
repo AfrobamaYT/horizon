@@ -450,7 +450,7 @@ pub fn charge_ticks(m: &Mob) -> i32 {
     25 - 5 * super::gear::level(m, super::gear::MAIN, "minecraft:quick_charge") as i32
 }
 fn holding_crossbow(m: &Mob) -> bool {
-    m.extra.main_hand.as_deref() == Some("minecraft:crossbow")
+    m.extra.main_hand_id() == Some("minecraft:crossbow")
 }
 
 /// `CrossbowItem.setCharged`: the loaded arrow lives in the stack's
@@ -744,7 +744,7 @@ pub fn anim_pose(m: &Mob, s: &State, p: &mut Poses, pose: ArmPose) {
     }
     match pose {
         ArmPose::Attacking => {
-            if m.extra.main_hand.is_none() {
+            if m.extra.main_hand_id().is_none() {
                 // animateZombieArms + bobArms
                 let swing = s.swing;
                 let a = (swing * PI).msin();

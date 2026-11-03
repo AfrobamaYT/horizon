@@ -234,7 +234,10 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     if m.extra.flag {
         p.xrot("body", 0.0);
         // setArmsCharging
-        let (right, left) = (m.extra.main_hand.is_some(), m.extra.off_hand.is_some());
+        let (right, left) = (
+            m.extra.main_hand_id().is_some(),
+            m.extra.off_hand_id().is_some(),
+        );
         if !right && !left {
             p.xrot("right_arm", -1.221_730_5);
             p.yrot("right_arm", PI / 12.0);

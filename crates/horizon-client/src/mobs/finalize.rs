@@ -947,13 +947,8 @@ pub fn set_baby(m: &mut Mob, baby: bool) {
 
 /// `EquipmentSlot` names (the `drops::SLOTS` order).
 pub const SLOT_NAMES: [&str; 8] = super::drops::SLOTS;
-pub const MAINHAND: usize = 0;
-pub const OFFHAND: usize = 1;
-pub const FEET: usize = 2;
-pub const LEGS: usize = 3;
-pub const CHEST: usize = 4;
-pub const HEAD: usize = 5;
-const SADDLE: usize = 7;
+pub use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
+const SADDLE: usize = horizon_items::equipment::SADDLE;
 /// The `gear` slot of an `EquipmentSlot`.
 fn gear_slot(slot: usize) -> usize {
     match slot {
@@ -967,37 +962,21 @@ fn gear_slot(slot: usize) -> usize {
 }
 pub fn item(m: &Mob, slot: usize) -> Option<Arc<str>> {
     match slot {
-        MAINHAND => m.extra.main_hand.clone(),
-        OFFHAND => m.extra.off_hand.clone(),
-        FEET => m.extra.feet.clone(),
-        LEGS => m.extra.legs.clone(),
-        CHEST => m.extra.chest.clone(),
-        HEAD => m.extra.head.clone(),
-        SADDLE => m.extra.saddled().then(|| Arc::from("minecraft:saddle")),
+        MAINHAND..=HEAD | SADDLE => m.extra.slot_stack(slot).map(|s| s.item.clone()),
         _ => None,
     }
 }
 /// The whole stack a mob keeps in `slot` (damage, name, components, count,
 /// enchantments and trim), when it kept more than the item id.
 pub fn stored_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
-    let id = item(m, slot)?;
+    if slot > HEAD {
+        return None;
+    }
+    let mut stack = m.extra.slot_stack(slot)?.clone();
+    if stack.damage == 0 && stack.count <= 1 && stack.extra.is_none() {
+        return None;
+    }
     let index = gear_slot(slot);
-    let mut stack = if slot == MAINHAND {
-        m.extra.main_hand_stack()?.clone()
-    } else {
-        let armor = match slot {
-            HEAD => m.extra.armor[0].as_ref(),
-            CHEST => m.extra.armor[1].as_ref(),
-            LEGS => m.extra.armor[2].as_ref(),
-            FEET => m.extra.armor[3].as_ref(),
-            _ => None,
-        };
-        armor.filter(|s| s.item == id).cloned().or_else(|| {
-            gear::gear(m)?.stacks[index]
-                .clone()
-                .filter(|s| s.item == id)
-        })?
-    };
     if let Some(g) = gear::gear(m) {
         if !g.slots[index].is_empty() {
             stack.data_mut().enchantments = g.slots[index].clone();
@@ -1032,36 +1011,19 @@ pub fn set_item_stack(m: &mut Mob, slot: usize, stack: crate::items::ItemStack) 
             stack.data().and_then(|d| d.trim.clone()),
         );
     }
-    if slot == MAINHAND {
-        m.extra.set_main_hand_stack(Some(stack));
-    } else if slot <= HEAD {
-        gear::set_stack(m, gear_slot(slot), stack);
+    if slot <= HEAD {
+        m.extra.set_slot_stack(slot, Some(stack));
     }
 }
 /// `setItemSlot` with a fresh stack (enchantments cleared).
 pub fn set_item(m: &mut Mob, slot: usize, id: &str) {
-    let v = Some(Arc::from(id));
     match slot {
-        MAINHAND => m.extra.set_main_hand(v),
-        OFFHAND => m.extra.off_hand = v,
-        FEET => m.extra.feet = v,
-        LEGS => m.extra.legs = v,
-        CHEST => m.extra.chest = v,
-        HEAD => m.extra.head = v,
+        MAINHAND..=HEAD => m.extra.set_slot_id(slot, Some(Arc::from(id))),
         SADDLE => {
             m.extra.set_saddled(true);
             return;
         }
         _ => return,
-    }
-    if let Some(index) = match slot {
-        HEAD => Some(0),
-        CHEST => Some(1),
-        LEGS => Some(2),
-        FEET => Some(3),
-        _ => None,
-    } {
-        m.extra.armor[index] = None;
     }
     gear::set(m, gear_slot(slot), Vec::new());
 }
@@ -1140,7 +1102,7 @@ pub fn halloween_head(m: &mut Mob, random: &mut impl RandomSource, halloween: bo
     if !(zombie(m.species()) || skeleton(m.species())) {
         return;
     }
-    if m.extra.head.is_none() && halloween && random.next_float() < 0.25 {
+    if m.extra.head_id().is_none() && halloween && random.next_float() < 0.25 {
         let head = if random.next_float() < 0.1 {
             "minecraft:jack_o_lantern"
         } else {
@@ -1510,7 +1472,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
     }
     fn drowned(&mut self, m: &mut Mob, g: Option<Group>, reason: Reason) -> Option<Group> {
         let g = self.zombie(m, g, reason);
-        if m.extra.off_hand.is_none() && self.float() < 0.03 {
+        if m.extra.off_hand_id().is_none() && self.float() < 0.03 {
             set_item(m, OFFHAND, "minecraft:nautilus_shell");
             set_drop_chance(m, OFFHAND, 2.0);
         }
@@ -1520,7 +1482,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             m.position.z.floor() as i32,
         ];
         if matches!(reason, Reason::Natural | Reason::Structure)
-            && m.extra.main_hand.as_deref() == Some("minecraft:trident")
+            && m.extra.main_hand_id() == Some("minecraft:trident")
             && self.float() < 0.5
             && !m.is_baby()
             && !self

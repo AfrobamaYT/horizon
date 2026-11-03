@@ -9,7 +9,7 @@ use horizon_world::nbt::{Limits, NamedTag, parse_snbt, read_named, write_named};
 const UUID: [i32; 4] = [1, 2, 3, 4];
 
 /// (file, mob id, species, the SNBT a save of that mob holds).
-const CASES: [(&str, &str, Species, &str); 3] = [
+const CASES: [(&str, &str, Species, &str); 4] = [
     (
         "zombie_armor",
         "minecraft:zombie",
@@ -27,6 +27,12 @@ const CASES: [(&str, &str, Species, &str); 3] = [
         "minecraft:llama",
         Species::Llama,
         r#"{id:"minecraft:llama",Pos:[0.5d,64.0d,0.5d],Tame:1b,Strength:3,Variant:1,equipment:{body:{id:"minecraft:red_carpet",count:1}}}"#,
+    ),
+    (
+        "zombie_hands_enchanted_armor",
+        "minecraft:zombie",
+        Species::Zombie,
+        r#"{id:"minecraft:zombie",Pos:[0.5d,64.0d,0.5d],equipment:{mainhand:{id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":40,"minecraft:custom_name":"Biter","minecraft:enchantments":{"minecraft:sharpness":3,"minecraft:fire_aspect":1}}},offhand:{id:"minecraft:shield",count:1,components:{"minecraft:damage":12}},head:{id:"minecraft:diamond_helmet",count:1,components:{"minecraft:damage":9,"minecraft:enchantments":{"minecraft:protection":4,"minecraft:unbreaking":2}}},chest:{id:"minecraft:iron_chestplate",count:1,components:{"minecraft:damage":30,"minecraft:enchantments":{"minecraft:thorns":1}}},legs:{id:"minecraft:chainmail_leggings",count:1,components:{"minecraft:damage":3}},feet:{id:"minecraft:leather_boots",count:1,components:{"minecraft:dyed_color":255,"minecraft:damage":5,"minecraft:enchantments":{"minecraft:feather_falling":3}}}}}"#,
     ),
 ];
 
