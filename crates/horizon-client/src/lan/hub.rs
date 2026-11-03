@@ -809,6 +809,13 @@ impl Hub {
         self.config.simulation_distance = distance;
         self.broadcast(&C::SetSimulationDistance(play::Distance { distance }));
     }
+    /// The number of network guests, including those still joining.
+    pub fn online_count(&self) -> usize {
+        self.guests
+            .iter()
+            .filter(|g| g.participates_online())
+            .count()
+    }
     /// Whether an online guest is placed in the level in place (`config.dimension`).
     pub fn here(&self, g: &Guest) -> bool {
         g.participates_online() && g.placed && g.dimension == self.config.dimension
@@ -4417,6 +4424,7 @@ mod tests {
         fake.kind = super::super::guest::GuestKind::Fake;
         fake.placed = true;
         hub.guests.push(fake);
+        assert_eq!(hub.online_count(), 1);
         hub.guests[0].sent_chunks.insert((2, 0));
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 100;

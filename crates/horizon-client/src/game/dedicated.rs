@@ -1117,13 +1117,7 @@ impl Game<'_> {
                 crashed = Some(panic_message(payload.as_ref()));
                 break;
             }
-            let players = self.lan.as_ref().map_or(0, |h| {
-                h.hub
-                    .guests
-                    .iter()
-                    .filter(|g| g.participates_online())
-                    .count()
-            });
+            let players = self.lan.as_ref().map_or(0, |h| h.hub.online_count());
             // Vanilla reads pauseWhenEmptySeconds on every tick, so management changes take effect
             // without restarting the server.
             let pause_after = state.pause_when_empty_seconds.wrapping_mul(20);
