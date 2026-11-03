@@ -131,6 +131,37 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn moves_and_pushes_a_live_mob() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let entity = game.native_entity(12).unwrap();
+            assert!(entity.teleport_to(game, [5.0, 70.0, -3.0], Some([90.0, 120.0])));
+            assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
+            assert_eq!(entity.rotation(game), Some([90.0, 90.0]));
+            assert_eq!(entity.head_yaw(game), Some(90.0));
+            let before = entity.velocity(game).unwrap();
+            assert!(entity.push(game, [1.0, 2.0, -1.0]));
+            assert_eq!(
+                entity.velocity(game),
+                Some([before[0] + 1.0, before[1] + 2.0, before[2] - 1.0])
+            );
+            assert!(!entity.teleport_to(game, [f64::NAN, 0.0, 0.0], None));
+            assert!(!entity.push(game, [0.0, f64::INFINITY, 0.0]));
+        });
+    }
+
+    #[test]
     fn a_yaw_faces_vanillas_direction() {
         assert_eq!(super::facing(0.0), "south");
         assert_eq!(super::facing(90.0), "west");
