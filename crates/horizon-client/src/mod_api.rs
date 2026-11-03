@@ -507,6 +507,22 @@ impl From<LivingRef> for EntityRef {
     }
 }
 
+/// A dropped item entity of the open world, narrowed with `host.item_entity`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ItemEntityRef(EntityRef);
+
+impl ItemEntityRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
