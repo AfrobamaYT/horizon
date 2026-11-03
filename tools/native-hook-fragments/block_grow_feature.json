@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "block_grow_feature",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_grow_feature",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "BlockGrowFeatureEvent",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A block is about to grow into a feature (`native_block_grow_feature`).",
+  "doc_summary": "A block is about to grow into a feature: `native_block_grow_feature(dimension, pos, feature, cancel)` can cancel or replace the nullable feature key; `level.random()` exposes the growth RNG. Bundles need \"hooks\": @API:block_grow_feature@."
+}
