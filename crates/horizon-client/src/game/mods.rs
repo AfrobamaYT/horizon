@@ -2,7 +2,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};
-use crate::mod_api::RegistrationContext;
+use crate::mod_api::{RegistrationContext, RegistrationPhase};
 use horizon_client::mod_list::{self, Installed};
 use horizon_world::{
     item_defaults::ItemData,
@@ -47,7 +47,10 @@ fn builtin_registries(root: &Path) -> horizon_client::Result<horizon_protocol::r
 /// treats as no custom components, and `registries.json` isn't read.
 pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Result<()> {
     let mut names = Vec::new();
-    Game::native_component_types(&RegistrationContext::new(), &mut names);
+    Game::native_component_types(
+        &RegistrationContext::new(RegistrationPhase::Components),
+        &mut names,
+    );
     if names.is_empty() {
         return Ok(());
     }
@@ -72,8 +75,14 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
-        Game::native_items(&RegistrationContext::new(), &mut items);
+        Game::native_blocks(
+            &RegistrationContext::new(RegistrationPhase::Blocks),
+            &mut blocks,
+        );
+        Game::native_items(
+            &RegistrationContext::new(RegistrationPhase::Items),
+            &mut items,
+        );
         let types = crate::mod_api::block_entity_types()
             .iter()
             .map(|kind| horizon_mods::content::BlockEntityType {
@@ -101,7 +110,10 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
         return None;
     }
     let mut names = Vec::new();
-    Game::native_standalone_models(&RegistrationContext::new(), &mut names);
+    Game::native_standalone_models(
+        &RegistrationContext::new(RegistrationPhase::StandaloneModels),
+        &mut names,
+    );
     Some(names)
 }
 
@@ -471,6 +483,7 @@ mod tests {
                 context: &RegistrationContext<'_>,
                 event: &mut StandaloneModelsEvent<'_>,
             ) {
+                assert_eq!(context.phase(), RegistrationPhase::StandaloneModels);
                 assert_eq!(
                     context.mods().ids().collect::<Vec<_>>(),
                     ["registration_test"]
