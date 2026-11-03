@@ -657,6 +657,19 @@ fn install_version(
     let mut list = installed::Installed::load(home);
     let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == p.id;
     let old = list.entries.iter().find(|e| ours(e)).cloned();
+    if old.as_ref().is_some_and(|o| {
+        o.kind != project.kind
+            || (o
+                .file
+                .starts_with(&format!("{}/", crate::native_mods::INSTALLED))
+                != native
+                && project.kind == Kind::Mod)
+    }) {
+        return Err(format!(
+            "{} has a different installed kind: remove it before installing this version.",
+            p.name
+        ));
+    }
     if old.as_ref().is_some_and(|o| o.version == v.version) {
         return Ok(old.expect("checked"));
     }

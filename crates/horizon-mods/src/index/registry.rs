@@ -583,6 +583,14 @@ pub struct Review {
     pub notes: Vec<String>,
 }
 
+/// Reject a change to a published project's kind.
+pub fn check_kind(id: &str, old: &Kind, new: &Kind) -> Result<(), String> {
+    if old != new {
+        return Err(format!("{id}: its kind can't change"));
+    }
+    Ok(())
+}
+
 /// Compares the entries of a pull request (`head`) with `main`'s (`base`):
 /// a published file never changes and is never removed (take it down in
 /// `revoked.toml`), a project's kind never changes, and changes by someone who
@@ -607,8 +615,8 @@ pub fn review(base: &[Entry], head: &[Entry], author: &str) -> Review {
                 old.owners.join(", ")
             ));
         }
-        if new.kind != old.kind {
-            r.errors.push(format!("{}: its kind can't change", old.id));
+        if let Err(error) = check_kind(&old.id, &old.kind, &new.kind) {
+            r.errors.push(error);
         }
         for v in &old.versions {
             match new.versions.iter().find(|w| w.version == v.version) {

@@ -138,6 +138,24 @@ fn searches_by_kind_and_words() {
 }
 
 #[test]
+fn update_rejects_a_changed_kind_without_removing_the_installed_file() {
+    let mut index = sample();
+    let home = scratch("changed-kind");
+    put(&index, true, &home).unwrap();
+    let project = index
+        .projects
+        .iter_mut()
+        .find(|p| p.id == "coords_hud")
+        .unwrap();
+    project.kind = index::Kind::NativeMod;
+    let p = index.project("coords_hud").unwrap();
+    let error = install_version(&index, true, p, &p.versions[0], &home, &|_, _| {}).unwrap_err();
+    assert!(error.contains("different installed kind"), "{error}");
+    assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
 fn removing_native_mod_does_not_remove_a_separate_content_file() {
     let index = sample();
     let home = scratch("native-remove");
