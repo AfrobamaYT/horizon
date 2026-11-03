@@ -212,7 +212,7 @@ pub fn ridden(m: &mut Mob) {
 /// (`executeRidersJump`). Returns whether the jump was taken.
 pub fn on_player_jump(m: &mut Mob, data: i32) -> bool {
     // `if (isSaddled() && dashCooldown <= 0) playerJumpPendingScale = ...`
-    if !m.extra.saddled || m.extra.anim_ticks > 0 {
+    if !m.extra.saddled() || m.extra.anim_ticks > 0 {
         return false;
     }
     let Some(rider) = m.rider.as_mut() else {
