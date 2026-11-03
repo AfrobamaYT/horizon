@@ -344,6 +344,8 @@ mod spectator;
 mod spill;
 mod splash_water;
 mod split;
+#[cfg(test)]
+mod stand_equipment_change_tests;
 mod startup_menu;
 mod station_control;
 mod stations;
