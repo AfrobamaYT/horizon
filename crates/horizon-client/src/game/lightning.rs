@@ -738,8 +738,8 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn conversion_post_reads_original_and_lightning_outcome() {
         use horizon_client::mod_api::{
-            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, Host, LivingConversionPostEvent,
-            LivingConversionPreEvent, MODS,
+            BackendToken, EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, Host,
+            LivingConversionPostEvent, LivingConversionPreEvent, MODS,
         };
         use std::sync::{
             Mutex,
@@ -794,12 +794,12 @@ mod tests {
                 let mushrooms = host
                     .level("minecraft:overworld")
                     .and_then(|level| {
-                        host.level_entities_in(level, [-10.0, 60.0, -10.0], [20.0, 70.0, 20.0])
+                        level.entities_in(host, [-10.0, 60.0, -10.0], [20.0, 70.0, 20.0])
                     })
                     .unwrap()
                     .into_iter()
                     .filter_map(|entity| host.item_entity(entity))
-                    .filter_map(|item| host.item_entity_stack(item))
+                    .filter_map(|item| item.stack(host))
                     .filter(|stack| stack.item.ends_with("mushroom"))
                     .count();
                 self.seen.lock().unwrap().push(SeenConversion {

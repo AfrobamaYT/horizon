@@ -1283,6 +1283,23 @@ pub(crate) mod tests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+        // Entity 1 is the player, 2 a pig, 3 a mod's robot, 4 a player in another level.
+        fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+            let kind = [
+                "minecraft:player",
+                "minecraft:pig",
+                "test:robot",
+                "minecraft:player",
+            ];
+            kind.get(entity.id().checked_sub(1)? as usize)
+                .map(|&kind| kind.into())
+        }
+        fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+            Some(match entity.id() {
+                4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
+                _ => here(),
+            })
+        }
         fn entity_container_size(&self, _: u32) -> Option<usize> {
             None
         }
@@ -1295,6 +1312,9 @@ pub(crate) mod tests {
         }
     }
     impl BackendMut for Player {
+        fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+            Some(u128::from(entity.id()))
+        }
         fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
             match place {
                 ItemPlace::PlayerHand { player: 1, .. } => self.main_hand.clone(),
@@ -1337,29 +1357,9 @@ pub(crate) mod tests {
         }
     }
     impl Host for Player {
-        // Entity 1 is the player, 2 a pig, 3 a mod's robot, 4 a player in another level.
-        fn entity_kind(&self, entity: EntityRef) -> Option<String> {
-            let kind = [
-                "minecraft:player",
-                "minecraft:pig",
-                "test:robot",
-                "minecraft:player",
-            ];
-            kind.get(entity.id().checked_sub(1)? as usize)
-                .map(|&kind| kind.into())
-        }
-        fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
-            Some(u128::from(entity.id()))
-        }
         fn player(&self, uuid: u128) -> Option<PlayerRef> {
             let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
             Some(PlayerRef { entity, uuid })
-        }
-        fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-            Some(match entity.id() {
-                4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
-                _ => here(),
-            })
         }
         fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
             let helmet = item == "minecraft:iron_helmet";
