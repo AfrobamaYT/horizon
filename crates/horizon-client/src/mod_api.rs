@@ -2127,8 +2127,10 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 ///
 /// A mutable client hook can use client services:
 /// ```
-/// use horizon_client::mod_api::{ClientHost, Hooks, InputKeyEvent};
+/// use horizon_client::mod_api::{self, ClientHost, Hooks, InputKeyEvent};
+/// #[derive(Default)]
 /// struct ScreenMod;
+/// #[mod_api::horizon_mod]
 /// impl Hooks for ScreenMod {
 ///     fn input_key(&self, host: &mut dyn ClientHost, _: &mut InputKeyEvent<'_>) {
 ///         host.mod_screen_open("example");
