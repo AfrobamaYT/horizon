@@ -1536,6 +1536,26 @@ impl Hub {
         self.teleport_relative(i, Some(position), relatives);
     }
 
+    /// A command's teleport to `position` (`ServerGamePacketListenerImpl.teleport`
+    /// with `TeleportCommand.performTeleport`'s relatives): the motion of a
+    /// relative axis is kept (`Relative.DELTA_*`, from `Relative.direction`),
+    /// an absolute axis is a zero change.
+    pub fn teleport_command(&mut self, i: usize, position: [f64; 3], delta: [bool; 3]) {
+        use play::relative::{DELTA_X, DELTA_Y, DELTA_Z};
+        let mut relatives = 0;
+        if delta[0] {
+            relatives |= DELTA_X;
+        }
+        if delta[1] {
+            relatives |= DELTA_Y;
+        }
+        if delta[2] {
+            relatives |= DELTA_Z;
+        }
+        self.guests[i].above_ground_ticks = 0;
+        self.teleport_relative(i, Some(position), relatives);
+    }
+
     /// ServerGamePacketListenerImpl.teleport with `relatives`: the rotation
     /// and motion they name are sent as zero changes.
     fn teleport_relative(&mut self, i: usize, position: Option<[f64; 3]>, relatives: i32) {
@@ -4442,6 +4462,36 @@ mod tests {
             }
         }
         sent
+    }
+
+    /// The relatives of the position packets the guest was sent.
+    fn sent_position_relatives(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<i32> {
+        let mut sent = Vec::new();
+        while let Ok(out) = rx.try_recv() {
+            let crate::lan::Out::Packet(body) = out else {
+                continue;
+            };
+            let mut r = horizon_protocol::buf::Reader::new(&body);
+            let id = r.varint().unwrap();
+            if let Ok(C::PlayerPosition(p)) = C::decode(id, r.rest()) {
+                sent.push(p.relatives);
+            }
+        }
+        sent
+    }
+
+    /// A command's teleport carries its relative axes as the position
+    /// packet's DELTA flags (`TeleportCommand.performTeleport` builds them
+    /// with `Relative.direction`, and `ServerPlayer.teleport` passes them to
+    /// `ClientboundPlayerPositionPacket`): a relative axis keeps its motion
+    /// on the client, an absolute axis is a zero change.
+    #[test]
+    fn a_command_teleport_carries_its_relative_axes() {
+        use play::relative::{DELTA_X, DELTA_Z};
+        let (mut hub, rx) = hub_with_a_guest();
+        hub.teleport_command(0, [10.5, 70.0, 10.5], [true, false, true]);
+        hub.teleport_command(0, [12.5, 70.0, 12.5], [false; 3]);
+        assert_eq!(sent_position_relatives(&rx), vec![DELTA_X | DELTA_Z, 0]);
     }
 
     /// `TransferCommand.transfer`: the target's client is sent the play-state

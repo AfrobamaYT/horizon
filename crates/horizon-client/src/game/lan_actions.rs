@@ -1019,6 +1019,8 @@ impl Game<'_> {
                 }));
             }
             let teleported = std::mem::take(&mut m.teleported);
+            let teleported_delta = m.teleported_delta;
+            m.teleported_delta = [false; 3];
             let moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
             g.motion = Some(Box::new(m));
             // Entity.teleportTo takes a rider out of its vehicle.
@@ -1039,7 +1041,13 @@ impl Game<'_> {
                 }));
             }
             if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
-                host.hub.teleport(i, Some(at));
+                // A command's teleport carries its relative axes as the
+                // packet's DELTA flags; any other move is absolute.
+                if teleported {
+                    host.hub.teleport_command(i, at, teleported_delta);
+                } else {
+                    host.hub.teleport(i, Some(at));
+                }
             }
         }
         let g = &mut host.hub.guests[i];
