@@ -651,11 +651,8 @@ impl Game<'_> {
                             .find(|g| g.vehicle == Some(mob))
                             .map(|g| g.conn)
                     });
-                    if let Some(conn) = rider
-                        && let Some(mut host) = self.lan.take()
-                    {
-                        self.as_guest(&mut host, conn, |g| g.dismount_mount());
-                        self.lan = Some(host);
+                    if let Some(conn) = rider {
+                        self.as_guest(conn, |g| g.dismount_mount());
                     }
                 }
                 // RunAroundLikeCrazyGoal.tick: entity event 6, smoke.
@@ -698,13 +695,8 @@ impl Game<'_> {
                 .map(|g| g.conn)
                 .collect()
         });
-        if !guests.is_empty()
-            && let Some(mut host) = self.lan.take()
-        {
-            for conn in guests {
-                self.guest_hit_by(&mut host, conn, |g| g.rider_fall_damage(distance, modifier));
-            }
-            self.lan = Some(host);
+        for conn in guests {
+            self.guest_hit_by(conn, |g| g.rider_fall_damage(distance, modifier));
         }
         let rider = self
             .mobs
