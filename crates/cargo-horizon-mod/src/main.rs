@@ -366,6 +366,62 @@ mod tests {
     }
 
     #[test]
+    fn native_build_and_check_share_the_content_executable_boundary() {
+        use horizon_mods::manifest::ContentFileError;
+        use std::io::Write;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("native-content-contract-{}", std::process::id()));
+        let path = dir.join("mixed");
+        let _ = std::fs::remove_dir_all(&dir);
+        new(&[
+            path.display().to_string(),
+            "--template".into(),
+            "native".into(),
+            "--horizon".into(),
+            "0123456789abcdef0123456789abcdef01234567".into(),
+        ])
+        .unwrap();
+        let asset = "assets/mixed/program.bin";
+        std::fs::create_dir_all(path.join("assets/mixed")).unwrap();
+        std::fs::write(path.join(asset), b"ordinary asset").unwrap();
+        // Only selected content ships, not the Git project's executable hooks.
+        std::fs::create_dir_all(path.join(".git/hooks")).unwrap();
+        std::fs::write(path.join(".git/hooks/pre-commit"), b"#!/bin/sh\nexit 0\n").unwrap();
+        let hmod = build_in(&path).unwrap();
+        let kind = check::kind_of(&hmod).unwrap();
+        assert!(check::check(&hmod, kind.clone(), None, None).is_ok());
+
+        // Model an externally supplied archive with executable bytes under an asset name.
+        let original = std::fs::read(&hmod).unwrap();
+        let mut input = zip::ZipArchive::new(std::io::Cursor::new(original)).unwrap();
+        let mut output = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+        for i in 0..input.len() {
+            let mut entry = input.by_index(i).unwrap();
+            let name = entry.name().unwrap().into_owned();
+            output.start_file(&name, options).unwrap();
+            if name == asset {
+                output.write_all(b"MZ-not-an-asset").unwrap();
+            } else {
+                std::io::copy(&mut entry, &mut output).unwrap();
+            }
+        }
+        std::fs::write(&hmod, output.finish().unwrap().into_inner()).unwrap();
+        let expected = ContentFileError::Executable(asset.into()).to_string();
+        assert_eq!(
+            check::check(&hmod, kind, None, None).err().unwrap(),
+            expected
+        );
+        std::fs::remove_file(&hmod).unwrap();
+        std::fs::write(path.join(asset), b"MZ-not-an-asset").unwrap();
+        assert_eq!(build_in(&path).unwrap_err(), expected);
+        assert!(!hmod.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn the_native_template_packs_into_an_hmod_the_registry_accepts() {
         let dir = std::env::temp_dir().join(format!("horizon-mod-native-{}", std::process::id()));
         let path = dir.join("machine-mod");

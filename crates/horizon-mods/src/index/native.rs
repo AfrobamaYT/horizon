@@ -268,7 +268,14 @@ impl Bundle {
             .map_err(|e| e.to_string())?;
         zip.write_all(&serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
+        let has_content = files
+            .iter()
+            .any(|(name, _)| name == crate::manifest::MANIFEST);
         for (name, bytes) in files {
+            if has_content {
+                crate::manifest::check_file(name, 0, || Ok(bytes.as_slice()))
+                    .map_err(|e| e.to_string())?;
+            }
             zip.start_file(name, options).map_err(|e| e.to_string())?;
             zip.write_all(bytes).map_err(|e| e.to_string())?;
         }
