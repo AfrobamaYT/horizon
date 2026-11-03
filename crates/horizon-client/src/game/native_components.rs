@@ -20,13 +20,16 @@ impl std::fmt::Display for NativeComponentError {
 impl std::error::Error for NativeComponentError {}
 
 impl Game<'_> {
-    /// Whether item `item` has component `component` by default, in its prototype
-    /// (`Item.components().has`): `minecraft:max_damage` on an iron sword, data packs' and
-    /// native mods' changes included. False for an unknown item. API @API:item_components@.
-    pub(super) fn native_item_has_component(&self, item: &str, component: &str) -> bool {
-        self.items()
-            .get(item)
-            .is_some_and(|item| item.components.iter().any(|id| id == component))
+    /// Item `item`'s default value of component `component`, in its prototype
+    /// (`Item.components().get`): `minecraft:max_damage` on an iron sword is `250`, data
+    /// packs' and native mods' changes included. Read from the item report's JSON, so a
+    /// number is an `Int`, `Long` or `Double` and a boolean a `Byte`. None where the item
+    /// hasn't the component, and for an unknown item. API @API:item_components@.
+    pub(super) fn native_item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
+        let prototype = self.pack.item_renderer.models.prototypes.get(item)?;
+        Some(horizon_client::scoreboard::json_to_tag(
+            prototype.get(component)?,
+        ))
     }
 }
 

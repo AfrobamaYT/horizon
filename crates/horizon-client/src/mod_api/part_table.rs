@@ -1331,9 +1331,17 @@ pub(crate) mod tests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
-        fn item_has_component(&self, item: &str, component: &str) -> bool {
-            item == "minecraft:iron_sword"
-                && ["minecraft:max_damage", "minecraft:damage"].contains(&component)
+        fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
+            // An iron sword's, as its item report gives them.
+            let default = match component {
+                "minecraft:max_damage" => Tag::Int(250),
+                "minecraft:damage" => Tag::Int(0),
+                "minecraft:enchantable" => {
+                    Tag::Compound([("value".into(), Tag::Int(14))].into_iter().collect())
+                }
+                _ => return None,
+            };
+            (item == "minecraft:iron_sword").then_some(default)
         }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
@@ -1947,7 +1955,7 @@ pub(crate) mod tests {
         let plain = place.resource(host).unwrap();
         let damage = ComponentId::new("minecraft:damage").unwrap();
         assert_eq!(plain.component(&damage), None);
-        let worn = plain.with_component(&damage, Tag::Int(5));
+        let worn = plain.with_component(host, &damage, Tag::Int(5));
         assert_eq!(worn.component(&damage), Some(Tag::Int(5)));
         // Aborted, nothing changed; committed, one sword of the two is worn and splits off.
         let aborted = host.transaction(|host, tx| {
@@ -1962,7 +1970,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_removed_default_component_is_recorded_in_the_patch_and_a_set_one_drops_the_removal() {
+    fn a_removed_default_component_is_recorded_in_the_patch_and_a_default_set_one_is_dropped() {
         game_thread();
         let shelf_ = shelf([None, None, None]);
         let host: &dyn Host = &shelf_;
@@ -1986,14 +1994,31 @@ pub(crate) mod tests {
         assert_ne!(unbreakable, sword);
         assert_eq!(unbreakable.component(&max_damage), None);
         // Set again, the removal goes and the value is the patch's own.
-        let set = unbreakable.with_component(&max_damage, Tag::Int(10));
+        let set = unbreakable.with_component(host, &max_damage, Tag::Int(10));
         assert_eq!(patch(&set), ["minecraft:max_damage"]);
         assert_eq!(set.component(&max_damage), Some(Tag::Int(10)));
         // A component the item hasn't by default only loses the stack's own value.
         let data = ComponentId::new("minecraft:custom_data").unwrap();
-        let tagged = sword.with_component(&data, Tag::Compound(Compound::new()));
+        let tagged = sword.with_component(host, &data, Tag::Compound(Compound::new()));
         assert_ne!(tagged, sword);
         assert_eq!(tagged.without_component(host, &data), sword);
+        // Set to the item's default, a component keeps no value of the stack's own, as vanilla's
+        // `set` drops it: the stack is the plain item, whatever NBT type the mod wrote.
+        assert_eq!(set.with_component(host, &max_damage, Tag::Int(250)), sword);
+        assert_eq!(
+            unbreakable.with_component(host, &max_damage, Tag::Short(250)),
+            sword
+        );
+        let enchantable = ComponentId::new("minecraft:enchantable").unwrap();
+        let value = |v| Tag::Compound([("value".into(), v)].into_iter().collect());
+        assert_eq!(
+            sword.with_component(host, &enchantable, value(Tag::Byte(14))),
+            sword
+        );
+        assert_ne!(
+            sword.with_component(host, &enchantable, value(Tag::Int(15))),
+            sword
+        );
     }
 
     #[test]

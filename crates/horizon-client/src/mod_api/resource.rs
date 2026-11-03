@@ -60,24 +60,31 @@ impl ItemResource {
             .get(id.as_str())
             .cloned()
     }
-    /// This item with component `id` set to `value` (`ItemResource.with`), a removal of it
-    /// dropped. A stack changes where it lives by an exchange of one of it for this:
-    /// `place.exchange(host, tx, &changed, 1)`, which splits it off a bigger stack, in the
+    /// This item with component `id` set to `value` (`ItemResource.with`, as vanilla's
+    /// `PatchedDataComponentMap.set`): a removal of it dropped, and the stack's own value too
+    /// where `value` is the item's default (`host.item_default_component`), so the stack is
+    /// the plain item again. A stack changes where it lives by an exchange of one of it for
+    /// this: `place.exchange(host, tx, &changed, 1)`, which splits it off a bigger stack, in the
     /// transaction.
-    pub fn with_component(&self, id: &ComponentId, value: Tag) -> Self {
-        self.patched(id, Some((JavaString::from(id.as_str()), value)))
+    pub fn with_component(&self, host: &dyn Host, id: &ComponentId, value: Tag) -> Self {
+        let default = host.item_default_component(self.item(), id.as_str());
+        let own = !default.is_some_and(|default| same_value(&default, &value));
+        self.patched(id, own.then(|| (JavaString::from(id.as_str()), value)))
     }
     /// This item without component `id` (`ItemResource.without`, as vanilla's
     /// `PatchedDataComponentMap.remove`): its own value dropped and, where the item has the
-    /// component by default (`host.item_has_component`), a removal recorded in its patch
+    /// component by default (`host.item_default_component`), a removal recorded in its patch
     /// (`"!minecraft:max_damage": {}`), saved and sent as vanilla's are.
     pub fn without_component(&self, host: &dyn Host, id: &ComponentId) -> Self {
-        let removal = host.item_has_component(self.item(), id.as_str()).then(|| {
-            (
-                JavaString::from(format!("!{}", id.as_str()).as_str()),
-                Tag::Compound(Compound::new()),
-            )
-        });
+        let removal = host
+            .item_default_component(self.item(), id.as_str())
+            .is_some()
+            .then(|| {
+                (
+                    JavaString::from(format!("!{}", id.as_str()).as_str()),
+                    Tag::Compound(Compound::new()),
+                )
+            });
         self.patched(id, removal)
     }
     /// This item with its patch's entries for `id`, a value or a removal, replaced by `entry`.
@@ -98,6 +105,49 @@ impl ItemResource {
             damage,
             extra,
         })
+    }
+}
+
+/// Whether `a` and `b` are one component value as its codec reads them, the item report's
+/// JSON form beside a mod's NBT: numbers by value (a `Float` at `f32` precision, a boolean's
+/// `Byte` as 0 or 1), an array as the list of its numbers, and lists and compounds entry by
+/// entry.
+fn same_value(a: &Tag, b: &Tag) -> bool {
+    let number = |tag: &Tag| match *tag {
+        Tag::Byte(v) => Some((f64::from(v), false)),
+        Tag::Short(v) => Some((f64::from(v), false)),
+        Tag::Int(v) => Some((f64::from(v), false)),
+        Tag::Long(v) => Some((v as f64, false)),
+        Tag::Float(bits) => Some((f64::from(f32::from_bits(bits)), true)),
+        Tag::Double(bits) => Some((f64::from_bits(bits), false)),
+        _ => None,
+    };
+    let list = |tag: &Tag| -> Option<Vec<Tag>> {
+        Some(match tag {
+            Tag::List(items) => items.clone(),
+            Tag::ByteArray(items) => items.iter().map(|&v| Tag::Byte(v as i8)).collect(),
+            Tag::IntArray(items) => items.iter().map(|&v| Tag::Int(v)).collect(),
+            Tag::LongArray(items) => items.iter().map(|&v| Tag::Long(v)).collect(),
+            _ => return None,
+        })
+    };
+    if let (Some((a, a_float)), Some((b, b_float))) = (number(a), number(b)) {
+        return if a_float || b_float {
+            a as f32 == b as f32
+        } else {
+            a == b
+        };
+    }
+    if let (Some(a), Some(b)) = (list(a), list(b)) {
+        return a.len() == b.len() && a.iter().zip(&b).all(|(a, b)| same_value(a, b));
+    }
+    match (a, b) {
+        (Tag::Compound(a), Tag::Compound(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| same_value(a, b)))
+        }
+        _ => a == b,
     }
 }
 

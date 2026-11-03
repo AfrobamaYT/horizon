@@ -3126,10 +3126,12 @@ holding the change and splits off, and the other stays as it was.
 A stack's components change the same way, where it lives (NeoForge's `ItemResource.with` and `without`). A component
 is named by a `ComponentId`, checked once as a namespaced id (`ComponentId::new("minecraft:damage")`, None for
 `Damage` or `!minecraft:food`). `resource.component(&id)` reads the stack's own value in its patch as saved;
-`resource.with_component(&id, value)` sets it, and `resource.without_component(host, &id)` removes the component as
-vanilla's `PatchedDataComponentMap.remove` does: the stack's own value goes, and where the item has the component by
-default (`host.item_has_component(item, id)`) a removal (`"!minecraft:max_damage": {}`) is recorded in the patch.
-An exchange of one puts the changed item in place: `place.exchange(host, tx, &place.resource(host)?.with_component(&damage,
+`resource.with_component(host, &id, value)` sets it as vanilla's `PatchedDataComponentMap.set` does, keeping no value
+of the stack's own where `value` is the item's default (`host.item_default_component(item, id)`, numbers compared by
+value), and `resource.without_component(host, &id)` removes the component as `remove` does: the stack's own value
+goes, and where the item has the component by default a removal (`"!minecraft:max_damage": {}`) is recorded in the
+patch.
+An exchange of one puts the changed item in place: `place.exchange(host, tx, &place.resource(host)?.with_component(host, &damage,
 Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
