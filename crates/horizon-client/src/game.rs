@@ -15583,14 +15583,16 @@ impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
         self.save.save_forced_chunks(&self.streaming.forced)?;
-        self.streaming.save(&mut self.world, wait);
+        let protos = self.streaming.prepare_save(&mut self.world, wait);
+        self.native_proto_snapshots(&protos);
+        self.streaming.finish_save(protos, wait);
         let keys: Vec<_> = self.world.modified.iter().copied().collect();
-        self.native_full_chunk_saves(&keys);
         self.save.save_attachments(&self.world.attachments)?;
         for key in &keys {
             self.world.modified.remove(key);
         }
         let chunks = self.with_entities(keys.iter().filter_map(|k| self.world.chunks.get(k)));
+        self.native_full_chunk_snapshots(&chunks);
         self.save
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         // Prepare entities while the chunk writer runs, then use one barrier.
@@ -16975,9 +16977,11 @@ impl Game<'_> {
         let plan = horizon_client::spans::time("streaming_plan", || {
             self.streaming.plan_update(&mut self.world)
         });
-        self.native_full_chunk_saves(plan.unloading());
+        let (commit, protos) = self.streaming.prepare_commit(&mut self.world, plan);
+        self.native_proto_snapshots(&protos);
+        self.streaming.submit_protos(protos);
         let (uploads, unloaded) = horizon_client::spans::time("streaming", || {
-            self.streaming.finish_update(&mut self.world, plan)
+            self.streaming.complete_commit(&mut self.world, commit)
         });
         self.streaming.extra.truncate(areas);
         let dirty: Vec<_> = unloaded
@@ -16986,6 +16990,7 @@ impl Game<'_> {
             .cloned()
             .collect();
         let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
+        self.native_full_chunk_snapshots(&modified);
         if !modified.is_empty()
             && let Err(e) = horizon_client::spans::time("save_chunks", || {
                 self.save
