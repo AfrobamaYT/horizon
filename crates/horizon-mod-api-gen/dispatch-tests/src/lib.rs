@@ -80,8 +80,36 @@ mod tests {
         pub(super) struct NativeMod;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
+        #[derive(Default)]
         pub(super) struct ModBlockEntity {
-            pub(super) id: String,
+            id: String,
+            pub(super) data: Vec<i32>,
+        }
+        impl ModBlockEntity {
+            pub(super) fn new(id: &str) -> Self {
+                Self {
+                    id: id.into(),
+                    ..Default::default()
+                }
+            }
+            pub(super) fn id(&self) -> &str {
+                &self.id
+            }
+        }
+        pub(super) struct ModBlockEntityView<'a> {
+            id: &'a str,
+            pub(super) data: &'a mut Vec<i32>,
+        }
+        impl<'a> ModBlockEntityView<'a> {
+            pub(super) fn new(entity: &'a mut ModBlockEntity) -> Self {
+                Self {
+                    id: &entity.id,
+                    data: &mut entity.data,
+                }
+            }
+            pub(super) fn id(&self) -> &str {
+                self.id
+            }
         }
         pub(super) struct ModContainer;
         pub(super) struct MerchantOffer;
@@ -419,7 +447,8 @@ mod tests {
             assert_eq!(event.context.player_entity_id, 42);
             assert_eq!(event.context.pos, [1, 2, 3]);
             assert_eq!(event.context.id, 9);
-            event.entity.id.push_str("-changed");
+            assert_eq!(event.entity.id(), "machine");
+            event.entity.data.push(9);
             *event.carried = Some(ItemStack {
                 item: "bucket".into(),
             });
@@ -522,12 +551,11 @@ mod tests {
             pos: [1, 2, 3],
             id: 9,
         };
-        let mut entity = ModBlockEntity {
-            id: "machine".into(),
-        };
+        let mut entity = ModBlockEntity::new("machine");
         let mut carried = None;
         dispatch_menu_button(&mut TestHost, &context, &mut entity, &mut carried);
-        assert_eq!(entity.id, "machine-changed");
+        assert_eq!(entity.id(), "machine");
+        assert_eq!(entity.data, [9]);
         assert_eq!(carried.unwrap().item.as_ref(), "bucket");
     }
 
@@ -552,7 +580,7 @@ mod tests {
             [1, 2, 3],
             "example:machine",
             BlockStateId,
-            &ModBlockEntity { id: String::new() },
+            &ModBlockEntity::default(),
             &mut draw,
         );
         assert_eq!(draw.0, [1, 2]);

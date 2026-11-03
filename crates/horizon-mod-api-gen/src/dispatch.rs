@@ -186,7 +186,7 @@ pub(super) fn emit(
                     "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
-                        format!("block_entity_kind(|| Some(&*{key}.id))")
+                        format!("block_entity_kind(|| Some({key}.id()))")
                     }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
@@ -225,7 +225,13 @@ pub(super) fn emit(
         let collected = output.as_ref().filter(|_| contract == "collect");
         for (name, ty) in args.iter().chain(collected) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
-            let (field, scalar) = lifetimes.field(ty);
+            let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
+            let field_ty = if mutable_entity {
+                syn::parse_quote!(ModBlockEntityView<'_>)
+            } else {
+                (**ty).clone()
+            };
+            let (field, scalar) = lifetimes.field(&field_ty);
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
                 "pub(super)"
             } else {
@@ -238,6 +244,8 @@ pub(super) fn emit(
             if scalar {
                 inits.push(format!("{name}: *{name}"));
                 write_back.push_str(&format!("*{name} = {event}.{name};"));
+            } else if mutable_entity {
+                inits.push(format!("{name}: ModBlockEntityView::new({name})"));
             } else {
                 inits.push(name.clone());
             }
