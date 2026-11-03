@@ -156,9 +156,11 @@ fn retained_registration_follows_the_same_rules_as_plain_listeners() {
     let key = listeners
         .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
         .unwrap();
-    assert!(listeners
-        .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
-        .is_err());
+    assert!(
+        listeners
+            .add_retained_listener(id("one:kept"), files(), Arc::new(Boundary))
+            .is_err()
+    );
     assert!(matches!(
         listeners.finish(),
         Err(ReloadOrderError::DuplicateObject { .. })

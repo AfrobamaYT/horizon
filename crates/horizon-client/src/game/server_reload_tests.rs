@@ -177,7 +177,7 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             assert_eq!(*live.lock().unwrap(), 8);
             let old_function = game.fns.store.functions["reload_test:keep"].clone();
             let old_selection = std::fs::read(world.join("datapacks.json")).unwrap();
-            let old_enabled = game.fns.enabled.clone();
+            let old_enabled = game.fns.enabled().to_vec();
             let old_vanilla_disabled = game.cmds.vanilla_disabled;
             write(&data, "4");
             write(&function, "say new");
@@ -204,7 +204,8 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
                 old_selection
             );
             assert_eq!(
-                game.fns.enabled, old_enabled,
+                game.fns.enabled(),
+                old_enabled,
                 "the refused change publishes nothing"
             );
             assert_eq!(
@@ -438,6 +439,7 @@ impl ServerReloadListener for RetainedData {
         }))
     }
 }
+#[mod_api::__subscriptions]
 impl Hooks for RetainedData {
     fn add_server_reload_listeners(
         &self,
