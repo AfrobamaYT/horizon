@@ -5,6 +5,15 @@ pub enum DamageStat {
     DealtAbsorbed,
     Taken,
 }
+/// What a hit's armor and magic reductions did before the health: the damage that
+/// entered `actuallyHurt`, and how much `getDamageAfterArmorAbsorb` and
+/// `getDamageAfterMagicAbsorb` (enchantment protection and resistance) took off it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DamageSteps {
+    pub original: f32,
+    pub armor: f32,
+    pub magic: f32,
+}
 pub trait DamageWorld {
     type Error;
     type Attacker: Copy;
@@ -27,6 +36,21 @@ pub trait DamageWorld {
     fn health(&mut self) -> Result<f32, Self::Error>;
     fn set_health(&mut self, value: f32) -> Result<(), Self::Error>;
     fn damage_event(&mut self) -> Result<(), Self::Error>;
+    /// The damage left after the armor and magic reductions (above 0), before the
+    /// absorption hearts take their share: it may change `damage`. The default does nothing.
+    fn damage_pre(&mut self, _steps: DamageSteps, _damage: &mut f32) -> Result<(), Self::Error> {
+        Ok(())
+    }
+    /// The health has just lost `dealt` (not 0), after `absorbed` went to the absorption
+    /// hearts. The default does nothing.
+    fn damage_post(
+        &mut self,
+        _steps: DamageSteps,
+        _absorbed: f32,
+        _dealt: f32,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 pub(crate) fn positive(value: f32) -> f32 {
     if value.is_nan() {
@@ -69,8 +93,17 @@ pub(crate) fn actually_hurt_after_immunity_check<W: DamageWorld>(
     damage: f32,
     player: bool,
 ) -> Result<(), W::Error> {
-    let damage = world.after_armor(damage)?;
-    let damage = world.after_magic(damage)?;
+    let original = damage;
+    let after_armor = world.after_armor(damage)?;
+    let mut damage = world.after_magic(after_armor)?;
+    let steps = DamageSteps {
+        original,
+        armor: original - after_armor,
+        magic: after_armor - damage,
+    };
+    if damage > 0.0 {
+        world.damage_pre(steps, &mut damage)?;
+    }
     let remaining = positive(damage - world.absorption()?);
     let absorption = world.absorption()? - (damage - remaining);
     world.set_absorption(absorption)?;
@@ -100,5 +133,6 @@ pub(crate) fn actually_hurt_after_immunity_check<W: DamageWorld>(
         let absorption = world.absorption()?;
         world.set_absorption(absorption - remaining)?;
     }
-    world.damage_event()
+    world.damage_event()?;
+    world.damage_post(steps, absorbed, remaining)
 }

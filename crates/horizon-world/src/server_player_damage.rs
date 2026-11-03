@@ -8,7 +8,7 @@ use crate::{
     compression::invalid,
     damage_reduction::{self, Bypass, DamageReductionWorld},
     food::FoodData,
-    living_damage::{self, DamageStat, DamageWorld},
+    living_damage::{self, DamageStat, DamageSteps, DamageWorld},
     player_health::{PlayerAttributeHealth, PlayerFloatIds, PlayerHealthError},
     synced_floats::{DataError, Observer, SyncedFloats},
 };
@@ -63,6 +63,19 @@ pub trait ServerDamageEnvironment<A: HealthAttributes = EntityAttributes>:
     fn level_is_client(&mut self) -> Result<bool, EnvError<Self>>;
     fn record_damage(&mut self, amount: f32) -> Result<(), EnvError<Self>>;
     fn damage_event(&mut self) -> Result<(), EnvError<Self>>;
+    /// `DamageWorld::damage_pre`. The default does nothing.
+    fn damage_pre(&mut self, _steps: DamageSteps, _damage: &mut f32) -> Result<(), EnvError<Self>> {
+        Ok(())
+    }
+    /// `DamageWorld::damage_post`. The default does nothing.
+    fn damage_post(
+        &mut self,
+        _steps: DamageSteps,
+        _absorbed: f32,
+        _dealt: f32,
+    ) -> Result<(), EnvError<Self>> {
+        Ok(())
+    }
 }
 pub struct ServerPlayerDamage<'a, E, A: HealthAttributes = EntityAttributes> {
     attributes: &'a mut A,
@@ -280,6 +293,21 @@ impl<A: HealthAttributes, E: ServerDamageEnvironment<A>> DamageWorld
     fn damage_event(&mut self) -> Result<(), Self::Error> {
         self.environment
             .damage_event()
+            .map_err(ServerDamageError::Environment)
+    }
+    fn damage_pre(&mut self, steps: DamageSteps, damage: &mut f32) -> Result<(), Self::Error> {
+        self.environment
+            .damage_pre(steps, damage)
+            .map_err(ServerDamageError::Environment)
+    }
+    fn damage_post(
+        &mut self,
+        steps: DamageSteps,
+        absorbed: f32,
+        dealt: f32,
+    ) -> Result<(), Self::Error> {
+        self.environment
+            .damage_post(steps, absorbed, dealt)
             .map_err(ServerDamageError::Environment)
     }
 }

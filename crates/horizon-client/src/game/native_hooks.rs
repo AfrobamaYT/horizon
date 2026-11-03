@@ -888,7 +888,7 @@ use horizon_client::{
     extras_hud::Corners,
     fast_hash::FxHashMap,
     first_person::Hand,
-    health::{HurtSource, Hurting, Knock, ShieldBlock},
+    health::{DamageSteps, HurtSource, Hurting, Knock, ShieldBlock},
     hud::{HudBatch, rgba},
     items::ItemStack,
     keybinds,
@@ -8215,6 +8215,62 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// NeoForge's `LivingDamageEvent.Pre`: `LivingEntity.actuallyHurt` of entity `entity` of
+    /// type `kind` (`minecraft:player`, `minecraft:zombie`) has taken `original` damage from
+    /// `source` (named as `native_living_incoming_damage` names it) down by `armor` (armor and
+    /// toughness) and `magic` (enchantment protection, Resistance) to `new_damage`, which is above 0,
+    /// and the absorption hearts have not taken their share yet. Change `new_damage` and the
+    /// absorption and the health follow it; 0 or less takes no health. A value that is not a
+    /// number is put back as it was. It fires for players and mobs; a wolf whose armor takes the
+    /// hit, the ender dragon and armor stands do not fire it. No `self`, as
+    /// `native_living_shield_block`: the game is in the middle of the hit.
+    pub(super) fn native_living_damage_pre(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        original: f32,
+        armor: f32,
+        magic: f32,
+        new_damage: &mut f32,
+    ) {
+        mod_api::dispatch_living_damage_pre(
+            mod_api::mods(),
+            entity,
+            kind,
+            source,
+            original,
+            armor,
+            magic,
+            new_damage,
+        );
+    }
+    /// NeoForge's `LivingDamageEvent.Post`: the health of entity `entity` of type `kind` has just
+    /// lost `damage` (not 0) from `source` after `native_living_damage_pre`, the absorption hearts
+    /// having taken `absorbed` of it first. `original`, `armor` and `magic` are
+    /// `native_living_damage_pre`'s. It only listens, and fires where the pre hook does. No
+    /// `self`, as `native_living_damage_pre`.
+    pub(super) fn native_living_damage_post(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        original: f32,
+        armor: f32,
+        magic: f32,
+        absorbed: f32,
+        damage: f32,
+    ) {
+        mod_api::dispatch_living_damage_post(
+            mod_api::mods(),
+            entity,
+            kind,
+            source,
+            original,
+            armor,
+            magic,
+            absorbed,
+            damage,
+        );
+    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -8423,6 +8479,41 @@ pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
         &mut cancel,
     );
     cancel
+}
+
+/// `native_living_damage_pre` for the damage code (`health::DAMAGE_PRE`).
+pub(super) fn damage_pre(hurting: Hurting<'_>, steps: DamageSteps, damage: &mut f32) {
+    if mod_api::mods().is_empty() {
+        return;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    Game::native_living_damage_pre(
+        entity,
+        kind,
+        &source,
+        steps.original,
+        steps.armor,
+        steps.magic,
+        damage,
+    );
+}
+
+/// `native_living_damage_post` for the damage code (`health::DAMAGE_POST`).
+pub(super) fn damage_post(hurting: Hurting<'_>, steps: DamageSteps, absorbed: f32, damage: f32) {
+    if mod_api::mods().is_empty() {
+        return;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    Game::native_living_damage_post(
+        entity,
+        kind,
+        &source,
+        steps.original,
+        steps.armor,
+        steps.magic,
+        absorbed,
+        damage,
+    );
 }
 
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it

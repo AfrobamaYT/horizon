@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "living_damage_pre",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_damage_pre",
+      "neoforge": "LivingDamageEvent.Pre",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "damage left after armor and magic, before the absorption hearts, that a mod can change (`native_living_damage_pre`).",
+  "doc_summary": "the damage of a hit after armor and magic, as NeoForge's `LivingDamageEvent.Pre`: `native_living_damage_pre(entity, kind, source, original, armor, magic, new_damage)` runs on the server in `LivingEntity.actuallyHurt` for a player or a mob once the damage is above 0 and before the absorption hearts take their share. `armor` and `magic` (enchantment protection and Resistance) are what was taken off `original`. Change `new_damage` (0 takes no health); a value that is not a number is put back. A wolf whose armor takes the hit, the ender dragon and armor stands do not fire it."
+}

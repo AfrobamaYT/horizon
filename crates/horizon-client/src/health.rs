@@ -56,6 +56,34 @@ pub static HURT_SERVER: OnceLock<fn(Hurting<'_>, &mut f32) -> bool> = OnceLock::
 pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
 }
+pub use horizon_world::living_damage::DamageSteps;
+/// The game's native damage-pre hook (`native_living_damage_pre`), set once by the game:
+/// `LivingEntity.actuallyHurt` once armor and magic took their share of a hit (above 0),
+/// before the absorption hearts (`LivingDamageEvent.Pre`). It may change the damage.
+pub static DAMAGE_PRE: OnceLock<fn(Hurting<'_>, DamageSteps, &mut f32)> = OnceLock::new();
+/// The game's native damage-post hook (`native_living_damage_post`), set once by the game:
+/// the health has just lost the damage (`LivingDamageEvent.Post`), after the absorption
+/// hearts took `absorbed`.
+pub static DAMAGE_POST: OnceLock<fn(Hurting<'_>, DamageSteps, f32, f32)> = OnceLock::new();
+/// What [`DAMAGE_PRE`] leaves of `damage`: a negative amount is none and one that is not
+/// a number stays as the hit had it.
+pub fn damage_pre(hurting: Hurting<'_>, steps: DamageSteps, damage: &mut f32) {
+    if let Some(hook) = DAMAGE_PRE.get() {
+        let before = *damage;
+        hook(hurting, steps, damage);
+        if damage.is_nan() {
+            *damage = before;
+        } else if *damage < 0.0 {
+            *damage = 0.0;
+        }
+    }
+}
+/// Tells [`DAMAGE_POST`] what the health lost (never while it is unset).
+pub fn damage_post(hurting: Hurting<'_>, steps: DamageSteps, absorbed: f32, dealt: f32) {
+    if let Some(hook) = DAMAGE_POST.get() {
+        hook(hurting, steps, absorbed, dealt);
+    }
+}
 /// A knockback's strength and direction, as `LivingEntity.knockback` has them
 /// before knockback resistance is applied. The entity is pushed away from
 /// the direction (`x`, `z`), which vanilla points at the source of the hit.
@@ -811,6 +839,24 @@ impl ServerDamageEnvironment<Attributes> for Environment<'_> {
     }
     fn damage_event(&mut self) -> io::Result<()> {
         self.phase("entity-damage")
+    }
+    fn damage_pre(&mut self, steps: DamageSteps, damage: &mut f32) -> io::Result<()> {
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: 0,
+        };
+        damage_pre(Hurting::Player(self.entity, source), steps, damage);
+        Ok(())
+    }
+    fn damage_post(&mut self, steps: DamageSteps, absorbed: f32, dealt: f32) -> io::Result<()> {
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: 0,
+        };
+        damage_post(Hurting::Player(self.entity, source), steps, absorbed, dealt);
+        Ok(())
     }
 }
 impl CombatEnvironment<Attributes> for Environment<'_> {
