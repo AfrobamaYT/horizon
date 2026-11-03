@@ -1153,14 +1153,14 @@ mod tests {
         assert_eq!(start_riding_jump(&mut m, 30), None);
         assert_eq!(m.rider.expect("the rider stays on").jump, 1.0);
         // An unsaddled nautilus cannot jump at all (`AbstractNautilus.canJump`).
-        m.extra.saddled = false;
+        m.extra.set_saddled(false);
         m.extra.anim_ticks = 0;
         assert_eq!(start_riding_jump(&mut m, 100), None);
         assert_eq!(m.rider.expect("the rider stays on").jump, 1.0);
         // The scale is spent by the mount's next travel: `executeRidersJump`
         // pushes along the rider's look, starts the 40-tick dash clock, raises
         // DASH and queues the dash sound.
-        m.extra.saddled = true;
+        m.extra.set_saddled(true);
         equine::ridden_step(&mut m);
         assert_eq!(m.rider.expect("the rider stays on").jump, 0.0);
         assert_eq!(m.extra.anim_ticks, 40, "the dash clock");
