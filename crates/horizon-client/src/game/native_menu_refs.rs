@@ -48,7 +48,7 @@ impl Game<'_> {
 
     /// A player's current supported menu. Refuses crafting tables, merchants,
     /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// clients, stale players and calls during a player swap.
+    /// clients, stale players and players whose state is swapped out.
     pub(super) fn native_menu_ref(&self, player: PlayerRef) -> Option<MenuRef> {
         let super::native_server::PlayerRead::Guest(guest) = self.player_handle_read(player)?
         else {
