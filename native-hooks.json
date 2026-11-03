@@ -4018,17 +4018,6 @@
       }
     },
     {
-      "name": "prepare_grindstone",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_grindstone",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "replace",
-        "out": "result"
-      }
-    },
-    {
       "name": "prepare_hopper_transfer",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_hopper_transfer",
