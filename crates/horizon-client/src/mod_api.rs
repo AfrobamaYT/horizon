@@ -927,6 +927,17 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// The player responsible for a game rule change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GameRuleActor<'a> {
+    /// Player UUID.
+    pub uuid: u128,
+    /// Server entity ID.
+    pub entity_id: i32,
+    /// Player name.
+    pub name: &'a str,
+}
+
 /// Read-only context for a tool modification.
 #[non_exhaustive]
 pub struct ToolUse {
@@ -1730,6 +1741,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn game_rule_change_reports_optional_actor() {
+        struct ActorRecorder(Arc<Mutex<Vec<Option<(u128, i32, String)>>>>);
+        impl Hooks for ActorRecorder {
+            fn game_rule_changed(&self, _: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+                self.0.lock().unwrap().push(
+                    event
+                        .actor
+                        .map(|actor| (actor.uuid, actor.entity_id, actor.name.to_owned())),
+                );
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let actor = GameRuleActor {
+            uuid: 123,
+            entity_id: 42,
+            name: "Alex",
+        };
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(true),
+            Some(&actor),
+        );
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(false),
+            None,
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [Some((123, 42, "Alex".into())), None]
+        );
+    }
+
     /// `GameRuleChangedEvent` as the server's setters fire it: only for a
     /// rule `GameRules.set` took, with its id and new value, to every mod.
     #[test]
@@ -1747,7 +1801,13 @@ mod tests {
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
-                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+                dispatch_game_rule_changed(
+                    &mut host,
+                    &mods,
+                    &["minecraft:", name].concat(),
+                    value,
+                    None,
+                );
             }
         };
         set("keep_inventory", GameRuleValue::Bool(true));

@@ -231,8 +231,6 @@
 //!
 //! API 248 adds Note block about to sound (`native_note_play`).
 //!
-//! API 247 adds A server game rule changes (`native_world_game_rule_change`).
-//!
 //! API 246 adds World border center change (`native_world_border_center_changed`).
 //!
 //! API 245 adds World border bounds change (`native_world_border_bounds_changed`).
@@ -882,7 +880,7 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    self, EffectTickChange, GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
     NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeServerPlayer,
     RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
@@ -6160,21 +6158,16 @@ impl Game<'_> {
     /// A server game rule `rule` (`minecraft:keep_inventory`) was set to
     /// `value` (`GameRuleChangedEvent`, from `GameRules.set` with a server:
     /// `/gamerule`, the game rules screen, the management protocol, a test
-    /// environment, `server.properties`). Before `world_game_rule_change`.
-    /// Server-side. @API:game_rule_changed@.
-    pub(super) fn native_game_rule_changed(&mut self, rule: &str, value: GameRuleValue) {
-        mod_api::dispatch_game_rule_changed(self, mod_api::mods(), rule, value);
-    }
-
-    /// A server game rule changed to its final `value`. 247.
-    pub(super) fn native_world_game_rule_change(
+    /// environment, `server.properties`). `actor` is present when a player
+    /// caused the change. The server and complete game rules are not exposed
+    /// by this event (tracked on #29). Server-side. @API:game_rule_changed@.
+    pub(super) fn native_game_rule_changed(
         &mut self,
-        player: u128,
-        name: &str,
         rule: &str,
-        value: &str,
+        value: GameRuleValue,
+        actor: Option<&GameRuleActor<'_>>,
     ) {
-        mod_api::dispatch_world_game_rule_change(self, mod_api::mods(), player, name, rule, value);
+        mod_api::dispatch_game_rule_changed(self, mod_api::mods(), rule, value, actor);
     }
 
     /// The server world's border bounds changed, either immediately or when
@@ -9892,9 +9885,14 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
 impl Game<'_> {
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
-    pub(super) fn game_rule_changed(&mut self, name: &str, value: GameRuleValue) {
+    pub(super) fn game_rule_changed(
+        &mut self,
+        name: &str,
+        value: GameRuleValue,
+        actor: Option<&GameRuleActor<'_>>,
+    ) {
         if !mod_api::mods().is_empty() {
-            self.native_game_rule_changed(&["minecraft:", name].concat(), value);
+            self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
         }
     }
     /// `AnimalTameEvent` for the mob at `index`, whose taming roll by the

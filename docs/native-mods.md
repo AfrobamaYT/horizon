@@ -1314,8 +1314,6 @@ API 245 adds `native_world_border_bounds_changed()` is told after `/worldborder 
 
 API 246 adds `native_world_border_center_changed()` is told after `/worldborder center` moves the border center. It hears successful commands only. Bundles need "hooks": 246.
 
-API 247 adds `native_world_game_rule_change(player, name, rule, value)` is told after an operator changes a world game rule through the server's game rule screen, with its final value. Bundles need "hooks": 247.
-
 API 248 adds A note block is about to sound: `native_note_play(dimension, player, pos, instrument, note, cancel)` is asked when punched, used or powered. Set `cancel` to silence it; a canceled tuning interaction leaves the note unchanged. `player` is the acting server player when available. Bundles need "hooks": 248.
 
 API 249 adds A server player completed an advancement after progress was recorded; `advancement` is its identifier, such as `minecraft:story/mine_stone`. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 249.
@@ -2238,7 +2236,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `"hooks": 308`.
 - **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": 245`.
 - **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": 246`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": 247`.
 - **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": 244`.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": 286`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
