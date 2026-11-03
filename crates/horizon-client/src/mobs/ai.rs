@@ -103,6 +103,13 @@ impl Mob {
         self.ai.swing_duration = duration.max(1);
         true
     }
+    /// Whether the current swing is the off hand's (`swing_hand`'s arm
+    /// inverted); a swing that named no hand is the main hand's.
+    pub fn swing_is_off_hand(&self) -> bool {
+        self.extra
+            .swing_right_arm
+            .is_some_and(|right| right == self.main_arm_left())
+    }
     /// LivingEntity.swing
     pub fn swing(&mut self) {
         if self.start_swing(6) {

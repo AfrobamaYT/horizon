@@ -2436,8 +2436,9 @@ a dimension.
   preserve complete stacks for all mob slots.
 - `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened
   by mining fatigue, unless one is under way and past its first half (it returns whether one started). The players around
-  see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing its main hand. Mobs and
-  players; armor stands and the dragon return false.
+  see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing the hand asked for. Mobs and
+  players work; armor stands and the dragon return false, and so does a player other than the acting one while another
+  player acts.
 - `living.arrow_count(host)` / `set_arrow_count` and `stinger_count` / `set_stinger_count` (`DATA_ARROW_COUNT_ID`,
   `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
   such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
@@ -2447,7 +2448,8 @@ a dimension.
   themselves) work on mobs; players and the other kinds read None and write false.
 - `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
-  vanilla. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
+  vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
+  which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.

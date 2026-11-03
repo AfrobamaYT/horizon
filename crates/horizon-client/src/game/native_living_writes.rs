@@ -38,8 +38,9 @@ impl Game<'_> {
     /// arm swing (shortened by haste, lengthened by mining fatigue) unless
     /// one is under way and past its first half, and tells the players
     /// around at the end of the tick, and the swinger too when
-    /// `send_to_self`. True when a swing started. Mobs (clients see their
-    /// main hand swing) and players; false for armor stands and the dragon.
+    /// `send_to_self`. True when a swing started. Mobs and players; false
+    /// for armor stands and the dragon, and for a player other than the
+    /// acting one while another player acts.
     pub(super) fn native_living_swing(
         &mut self,
         living: LivingRef,
@@ -180,7 +181,11 @@ impl Game<'_> {
     /// Sets `LivingEntity.useItemRemaining` of the item a player uses (the
     /// way a mod's tick moves the end of the use): at 1 the use completes on
     /// the next tick, at 0 or less it runs until the player lets go, as in
-    /// vanilla. False when the player uses nothing, and for the other kinds.
+    /// vanilla. It moves the deadline the use-item Tick hook moves, so only
+    /// the uses that count it (food, drink, mod items) follow it: shield, bow,
+    /// trident, spear, instrument and bundle uses ignore it, and a call from
+    /// inside the Tick hook itself is overwritten by that hook's result. False
+    /// when the player uses nothing, and for the other kinds.
     pub(super) fn native_living_set_item_use_remaining(
         &mut self,
         living: LivingRef,
@@ -203,6 +208,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
+    use super::Stuck;
     use horizon_client::first_person::Hand;
     use horizon_client::mobs::Mob;
     use horizon_client::mod_api::{EntityRef, NativeWorldEpoch};
@@ -254,6 +260,17 @@ mod tests {
             assert!(!game.native_living_set_left_handed(stale, true));
             assert_eq!(game.native_living_can_pick_up_loot(stale), None);
         });
+    }
+
+    #[test]
+    fn a_huge_stuck_count_ticks_without_overflow() {
+        let mut stuck = Stuck {
+            arrows: i32::MAX,
+            stingers: i32::MIN + 1,
+            ..Stuck::default()
+        };
+        stuck.tick();
+        assert!(stuck.arrows >= i32::MAX - 1);
     }
 
     #[test]
@@ -356,6 +373,108 @@ mod tests {
                 assert_eq!(game.guest_packets.len(), 1);
             })
             .unwrap();
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mobs_swing_reaches_clients_with_the_hand_asked_for() {
+        use super::super::lan::LanSettings;
+        use horizon_client::lan::{
+            Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig,
+        };
+        use horizon_protocol::packets::{configuration::ClientInformation, play::Clientbound};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+        with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let mut host = game.lan.take().unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 12,
+                    uuid: 12,
+                    name: "guest12".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:1".parse().unwrap(),
+                },
+                12,
+                [3.0, 64.0, 5.0],
+                10,
+            );
+            guest.placed = true;
+            host.hub.guests.push(guest);
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(40, kind, Vec3::new(3.0, 64.0, 5.0), 0.0));
+            let zombie = game.native_living(game.native_entity(40).unwrap()).unwrap();
+            // The hand in the swing packet the flush sends after each swing.
+            let mut sent = Vec::new();
+            for natural in [false, true] {
+                for hand in [Hand::Off, Hand::Main] {
+                    game.mobs[0].ai.swinging = false;
+                    game.mobs[0].ai.swing_time = 0;
+                    if natural {
+                        // A swing no hand was named for (a melee attack).
+                        game.mobs[0].swing();
+                    } else {
+                        assert!(game.native_living_swing(zombie, hand, false));
+                    }
+                    game.lan_flush_effects(&mut host);
+                    while let Ok(Out::Packet(body)) = rx.try_recv() {
+                        let mut reader = horizon_protocol::buf::Reader::new(&body);
+                        let id = reader.varint().unwrap();
+                        if let Ok(Clientbound::SwingAnimation(p)) =
+                            Clientbound::decode(id, reader.rest())
+                        {
+                            sent.push(p.hand);
+                        }
+                    }
+                    // The swing runs on, so the next one is a new start.
+                    game.mobs[0].ai.swing_time = 3;
+                    game.lan_flush_effects(&mut host);
+                    if natural {
+                        break;
+                    }
+                }
+            }
+            assert_eq!(sent, [1, 0, 0]);
         });
     }
 }

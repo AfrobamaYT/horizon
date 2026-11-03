@@ -95,9 +95,9 @@ impl Stuck {
     fn decay(count: &mut i32, remove_time: &mut i32) {
         if *count > 0 {
             if *remove_time <= 0 {
-                *remove_time = 20 * (30 - *count);
+                *remove_time = 20i32.wrapping_mul(30i32.wrapping_sub(*count));
             }
-            *remove_time -= 1;
+            *remove_time = remove_time.wrapping_sub(1);
             if *remove_time <= 0 {
                 *count -= 1;
             }
