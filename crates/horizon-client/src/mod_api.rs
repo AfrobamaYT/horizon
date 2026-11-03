@@ -25,7 +25,7 @@ pub use crate::game::{
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
     BlockSpriteArrays, RenderHookId, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn,
-    WorldDrawnEvent, wgpu,
+    WorldDrawnEvent, render_hook_ids, wgpu,
 };
 pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
@@ -1851,6 +1851,14 @@ pub(crate) fn listened(hook: generated::HookId) -> bool {
     installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
+/// Whether an installed mod subscribes to an injected hook.
+#[doc(hidden)]
+pub fn subscribed_by(index: usize, hook: generated::HookId) -> bool {
+    installed().is_some_and(|installed| {
+        index < installed.mods.len() && installed.subscribers.contains(hook as usize, index)
+    })
+}
+
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
 fn entered_registration<'a>(mods: &'a [ModEntry], hook: &'static str) -> Entered<'a> {
@@ -2233,6 +2241,23 @@ mod generated {
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+/// Derive subscriptions from the methods in a hook implementation.
+///
+/// An implementation without the attribute does not compile:
+/// ```compile_fail
+/// use horizon_client::mod_api::Hooks;
+/// struct Mod;
+/// impl Hooks for Mod {}
+/// ```
+/// A misspelled hook is rejected by the attribute:
+/// ```compile_fail,E0407
+/// use horizon_client::mod_api::{self, Hooks};
+/// struct Mod;
+/// #[mod_api::hooks]
+/// impl Hooks for Mod {
+///     fn baby_entity_spwan(&self) {}
+/// }
+/// ```
 pub use horizon_mod_api_macros::hooks;
 
 #[cfg(test)]

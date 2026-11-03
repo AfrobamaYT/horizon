@@ -3,24 +3,6 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{ImplItem, ItemImpl, parse_macro_input};
 
-include!(concat!(env!("OUT_DIR"), "/hooks.rs"));
-
-fn distance(a: &str, b: &str) -> usize {
-    let mut row: Vec<usize> = (0..=b.len()).collect();
-    for (i, a) in a.bytes().enumerate() {
-        let mut previous = row[0];
-        row[0] = i + 1;
-        for (j, b) in b.bytes().enumerate() {
-            let old = row[j + 1];
-            row[j + 1] = (row[j + 1] + 1)
-                .min(row[j] + 1)
-                .min(previous + usize::from(a != b));
-            previous = old;
-        }
-    }
-    row[b.len()]
-}
-
 /// Declare the hook methods implemented by this trait mod.
 #[proc_macro_attribute]
 pub fn hooks(_attribute: TokenStream, input: TokenStream) -> TokenStream {
@@ -43,43 +25,34 @@ pub fn hooks(_attribute: TokenStream, input: TokenStream) -> TokenStream {
             .into_compile_error()
             .into();
     };
-    let mut variants = Vec::new();
-    for item in &implementation.items {
-        let ImplItem::Fn(method) = item else { continue };
-        let method_name = method.sig.ident.to_string();
-        if !render && matches!(method_name.as_str(), "render" | "register") {
-            continue;
-        }
-        match HOOKS
-            .iter()
-            .find(|(name, _, side)| *side == render && *name == method_name)
-        {
-            Some((_, variant, _)) => variants.push(format_ident!("{variant}")),
-            None => {
-                let closest = HOOKS
-                    .iter()
-                    .filter(|(_, _, side)| *side == render)
-                    .min_by_key(|(name, _, _)| distance(&method_name, name))
-                    .unwrap()
-                    .0;
-                return syn::Error::new_spanned(
-                    &method.sig.ident,
-                    format!("unknown hook `{method_name}`; closest hook is `{closest}`"),
-                )
-                .into_compile_error()
-                .into();
+    let methods: Vec<_> = implementation
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ImplItem::Fn(method)
+                if render
+                    || !matches!(method.sig.ident.to_string().as_str(), "render" | "register") =>
+            {
+                Some(&method.sig.ident)
             }
-        }
-    }
+            _ => None,
+        })
+        .collect();
     let id = if render {
         format_ident!("RenderHookId")
     } else {
         format_ident!("HookId")
     };
-    implementation.items.push(syn::parse_quote! {
+    let ids = if render {
+        format_ident!("render_hook_ids")
+    } else {
+        format_ident!("hook_ids")
+    };
+    let subscribed = syn::parse_quote! {
         fn subscribed(&self) -> &'static [mod_api::#id] {
-            &[#(mod_api::#id::#variants),*]
+            &[#(mod_api::#ids::#methods),*]
         }
-    });
+    };
+    implementation.items.push(subscribed);
     quote!(#implementation).into()
 }

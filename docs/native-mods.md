@@ -3014,6 +3014,9 @@ A catalog hook's trait method, event and return make up its `hook_version` contr
 versions. Catalog hooks, `Host` calls and raw `target` injections all build against the
 [game's exact source revision](#native-mod-source-revisions). Rebuild the mod when that contract changes.
 
+Every `impl Hooks` and `impl RenderHooks` must have `#[mod_api::hooks]`. The attribute derives
+subscriptions from the methods implemented in that block, so dispatch knows them at installation.
+
 ### Parts
 
 A part is code a trait mod attaches to one block, block entity, item or mod menu type, its own or vanilla's
@@ -3031,6 +3034,7 @@ impl BlockPart for Gauge {
     }
 }
 
+#[mod_api::hooks]
 impl Hooks for MyMod {
     fn register(&self, r: &mut Registrar) {
         r.block_part("minecraft:stone", Gauge);
@@ -3289,12 +3293,13 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{self, Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
 impl Host for HostDouble {}
 struct Counter(Arc<AtomicUsize>);
+#[mod_api::hooks]
 impl Hooks for Counter {
     fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);

@@ -34,6 +34,11 @@ impl Subscribers {
         self.active[hook]
     }
 
+    /// Whether a particular mod subscribes to a hook.
+    pub fn contains(&self, hook: usize, index: usize) -> bool {
+        self.words[hook * self.words_per_hook + index / 64] & (1 << (index % 64)) != 0
+    }
+
     /// Visit subscribers in installation order, without allocating.
     pub fn indices(&self, hook: usize) -> Indices<'_> {
         let start = hook * self.words_per_hook;

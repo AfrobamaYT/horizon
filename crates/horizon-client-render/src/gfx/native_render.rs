@@ -14,7 +14,9 @@ use std::sync::{
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/native_render_generated.rs"));
 }
-pub use generated::{HandDrawnEvent, RenderHookId, RenderHooks, RenderNeedsEvent, WorldDrawnEvent};
+pub use generated::{
+    HandDrawnEvent, RenderHookId, RenderHooks, RenderNeedsEvent, WorldDrawnEvent, render_hook_ids,
+};
 pub use horizon_mod_api_macros::hooks;
 pub use wgpu;
 

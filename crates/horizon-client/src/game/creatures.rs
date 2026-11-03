@@ -8155,7 +8155,7 @@ mod breeding_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
-    fn empty_mod_stops_deferring_breeding_xp_after_first_event() {
+    fn empty_mod_never_defers_breeding_xp() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
         #[mod_api::hooks]
@@ -8163,7 +8163,7 @@ mod breeding_tests {
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                assert!(game.mob_world_base(&[]).asks_baby_spawn);
+                assert!(!game.mob_world_base(&[]).asks_baby_spawn);
                 let mut cancel = false;
                 game.native_baby_entity_spawn(1, 2, None, None, "minecraft:chicken", &mut cancel);
                 assert!(!cancel);

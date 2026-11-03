@@ -68,7 +68,7 @@ fn subscriber_tick_benchmark() {
 }
 
 #[test]
-fn subscriber_guards_are_thread_local_for_one_installation() {
+fn eager_subscribers_are_shared_across_dispatch_threads() {
     use std::sync::Barrier;
     struct Quiet;
     #[mod_api::hooks]
@@ -84,6 +84,18 @@ fn subscriber_guards_are_thread_local_for_one_installation() {
             ModEntry::new("listener", Box::new(Listener)),
         ]
         .into(),
+    );
+    assert!(
+        !installed
+            .subscribers
+            .contains_any(HookId::BabyEntitySpawn as usize)
+    );
+    assert_eq!(
+        installed
+            .subscribers
+            .indices(HookId::LootTableLoad as usize)
+            .collect::<Vec<_>>(),
+        [1]
     );
     let barrier = Barrier::new(2);
     std::thread::scope(|scope| {

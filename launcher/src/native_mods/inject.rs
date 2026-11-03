@@ -233,7 +233,7 @@ mod tests {
         stage(&stage_dir, &injections).unwrap();
         assert!(!stage_dir.join("crates").exists());
         let output = horizon_mod_api_gen::inject(
-            "pub trait Hooks: Send + Sync {\n}\n",
+            "#[derive(Clone, Copy)] pub enum HookId {} pub(crate) const HOOK_COUNT: usize = 0; pub mod hook_ids {} pub trait Hooks: Send + Sync {\n}\n",
             &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
         )
         .unwrap();
@@ -244,6 +244,7 @@ mod tests {
                 use std::sync::OnceLock;
                 #[derive(PartialEq)] pub enum Flow {{ Continue, Cancel }}
                 {output}
+                pub fn subscribed_by(_: usize, _: HookId) -> bool {{ true }}
                 struct Owner;
                 impl Hooks for Owner {{
                     fn inject_example_tick(&self, event: &mut InjectExampleTickEvent) -> Flow {{
@@ -282,7 +283,7 @@ mod tests {
         fs::create_dir_all(&stage_dir).unwrap();
         stage(&stage_dir, &injections).unwrap();
         let output = horizon_mod_api_gen::inject(
-            "pub trait Hooks: Send + Sync {\n}\n",
+            "#[derive(Clone, Copy)] pub enum HookId {} pub(crate) const HOOK_COUNT: usize = 0; pub mod hook_ids {} pub trait Hooks: Send + Sync {\n}\n",
             &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
         )
         .unwrap();
@@ -292,6 +293,7 @@ mod tests {
                 use std::sync::atomic::{{AtomicBool, Ordering}};
                 use std::sync::OnceLock;
                 {output}
+                pub fn subscribed_by(_: usize, _: HookId) -> bool {{ true }}
                 struct Owner;
                 impl Hooks for Owner {{
                     fn inject_example_total(&self, event: &mut InjectExampleTotalEvent) {{

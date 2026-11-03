@@ -8,8 +8,10 @@ pub(super) struct HookSources {
     pub part_traits: BTreeMap<&'static str, String>,
     pub fills: Vec<Fill>,
     pub hook_ids: String,
+    pub hook_constants: String,
     pub hook_count: usize,
     pub render_hook_ids: String,
+    pub render_hook_constants: String,
     pub render_hook_count: usize,
 }
 
@@ -19,8 +21,10 @@ pub(super) fn emit(
     methods: &[syn::ItemFn],
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
+    let mut hook_constants = String::new();
     let mut hook_count = 0;
     let mut render_hook_ids = String::new();
+    let mut render_hook_constants = String::new();
     let mut render_hook_count = 0;
     let mut traits = String::new();
     let mut dispatch = String::new();
@@ -200,9 +204,15 @@ pub(super) fn emit(
         let hook_id = event_type.strip_suffix("Event").unwrap();
         if is_render {
             render_hook_ids.push_str(&format!("{hook_id},\n"));
+            render_hook_constants.push_str(&format!(
+                "pub const {name}: super::RenderHookId = super::RenderHookId::{hook_id};\n"
+            ));
             render_hook_count += 1;
         } else {
             hook_ids.push_str(&format!("{hook_id},\n"));
+            hook_constants.push_str(&format!(
+                "pub const {name}: super::HookId = super::HookId::{hook_id};\n"
+            ));
             hook_count += 1;
         }
         let mut trait_params = vec!["&self".to_owned()];
@@ -395,8 +405,10 @@ pub(super) fn emit(
         part_traits,
         fills,
         hook_ids,
+        hook_constants,
         hook_count,
         render_hook_ids,
+        render_hook_constants,
         render_hook_count,
     })
 }
