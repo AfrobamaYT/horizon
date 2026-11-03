@@ -873,13 +873,12 @@ impl Settings {
         (displays, added)
     }
     /// `KnowledgeBookItem.use` for the stack in the acting hand: `Ok` is its
-    /// `InteractionResult.SUCCESS`, with the recipes now known; `Err` is
+    /// `InteractionResult.SUCCESS`, with the recipe ids for `ServerPlayer.awardRecipes`; `Err` is
     /// `FAIL`, with the recipe id vanilla logs (`Invalid recipe: {}`) or
     /// `None` for a book that names none. The book is used up first, as
     /// vanilla consumes it before either check (`ItemStack.consume(1, player)`;
     /// a player with infinite materials keeps it).
-    pub fn use_knowledge_book(
-        &mut self,
+    pub fn knowledge_book_recipes(
         index: &RecipeIndex,
         hand: &mut Option<ItemStack>,
         infinite: bool,
@@ -1362,14 +1361,9 @@ mod tests {
         };
 
         // A player who knows no recipe, with a stack of two books naming two.
-        let mut settings = Settings::default();
         let mut hand = Some(book(&["minecraft:stick", "minecraft:crafting_table"], 2));
-        let unlocked = settings
-            .use_knowledge_book(&index, &mut hand, false)
-            .unwrap();
+        let unlocked = Settings::knowledge_book_recipes(&index, &mut hand, false).unwrap();
         assert_eq!(unlocked, ["minecraft:stick", "minecraft:crafting_table"]);
-        assert!(!settings.knows("minecraft:stick"));
-        assert!(!settings.knows("minecraft:crafting_table"));
         // One book used up, the second still in the hand.
         assert_eq!(hand.as_ref().map(|s| s.count), Some(1));
 
@@ -1377,7 +1371,7 @@ mod tests {
         // recipe already known is still the success `awardRecipes` reports.
         let mut hand = Some(book(&["minecraft:stick"], 1));
         assert_eq!(
-            settings.use_knowledge_book(&index, &mut hand, true),
+            Settings::knowledge_book_recipes(&index, &mut hand, true),
             Ok(vec!["minecraft:stick".to_owned()])
         );
         assert_eq!(hand.as_ref().map(|s| s.count), Some(1));
@@ -1387,17 +1381,16 @@ mod tests {
         // the same — vanilla consumes it before it looks the ids up.
         let mut hand = Some(book(&["minecraft:torch", "minecraft:no_such_recipe"], 1));
         assert_eq!(
-            settings.use_knowledge_book(&index, &mut hand, false),
+            Settings::knowledge_book_recipes(&index, &mut hand, false),
             Err(Some("minecraft:no_such_recipe".to_owned()))
         );
-        assert!(!settings.knows("minecraft:torch"));
         assert_eq!(hand, None);
 
         // A book that names no recipe at all (a bare `/give`): nothing to
         // learn, and vanilla fails after using it up like any other.
         let mut hand = Some(ItemStack::new("minecraft:knowledge_book", 1));
         assert_eq!(
-            settings.use_knowledge_book(&index, &mut hand, false),
+            Settings::knowledge_book_recipes(&index, &mut hand, false),
             Err(None)
         );
         assert_eq!(hand, None);
