@@ -1,23 +1,13 @@
 //! Removing an entity for native server mods, through an `EntityRef`
 //! (docs/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.
-//! A mob goes at once (its handle reads as stale from then on). The other
-//! kinds go at the level's next sweep of departed entities, a few times per
-//! tick, so a hook that removes one never shifts the lists the game is
-//! walking. A vehicle with a chest spills it, as vanilla's `remove` does.
+//! The handle reads as gone from the call on, as `isRemoved` does. A mob
+//! leaves at once; the other kinds leave at the level's next sweep of
+//! departed entities, a few times per tick, so a hook that removes one never
+//! shifts the lists the game is walking. A vehicle with a chest spills it, as vanilla's `remove` does.
 use super::{Game, commands::Target};
-use horizon_client::mod_api::EntityRef;
+use horizon_client::mod_api::{EntityRef, NativeRemovalReason};
 use horizon_core::position::BlockPos;
-
-/// `Entity.RemovalReason`s a mod may give: `killed` or `discarded`. The
-/// unloading and dimension-change reasons belong to the game.
-fn killed(reason: &str) -> Option<bool> {
-    match reason {
-        "killed" => Some(true),
-        "discarded" => Some(false),
-        _ => None,
-    }
-}
 
 impl Game<'_> {
     /// Removes the entity with no death and no loot (`Entity.discard`): a
@@ -25,17 +15,19 @@ impl Game<'_> {
     /// a boat its lead, as vanilla's `remove` does. False for a player, or a
     /// stale handle. API @API:entity_remove@.
     pub(super) fn native_entity_discard(&mut self, entity: EntityRef) -> bool {
-        self.native_entity_remove(entity, "discarded")
+        self.native_entity_remove(entity, NativeRemovalReason::Discarded)
     }
-    /// Removes the entity for `reason` (`Entity.remove`): `discarded`, as
-    /// `discard`, or `killed`, which also runs a mob's effects that act on
+    /// Removes the entity for `reason` (`Entity.remove`): `Discarded`, as
+    /// `discard`, or `Killed`, which also runs a mob's effects that act on
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
-    /// still with no death and no loot. False for any other reason, a player,
-    /// or a stale handle. API @API:entity_remove@.
-    pub(super) fn native_entity_remove(&mut self, entity: EntityRef, reason: &str) -> bool {
-        let Some(killed) = killed(reason) else {
-            return false;
-        };
+    /// still with no death and no loot. False for a player, or a stale
+    /// handle. API @API:entity_remove@.
+    pub(super) fn native_entity_remove(
+        &mut self,
+        entity: EntityRef,
+        reason: NativeRemovalReason,
+    ) -> bool {
+        let killed = reason == NativeRemovalReason::Killed;
         match self.native_entity_target(entity) {
             None | Some(Target::Player | Target::Guest(_)) => false,
             Some(Target::Mob(id)) => {
@@ -131,16 +123,5 @@ impl Game<'_> {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn mods_give_the_two_destroying_reasons() {
-        assert_eq!(super::killed("killed"), Some(true));
-        assert_eq!(super::killed("discarded"), Some(false));
-        assert_eq!(super::killed("unloaded_to_chunk"), None);
-        assert_eq!(super::killed("changed_dimension"), None);
     }
 }

@@ -618,6 +618,17 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
+/// that destroy it. The unloading and dimension-change reasons belong to the
+/// game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeRemovalReason {
+    /// `KILLED`: a mob's effects that act on removal run.
+    Killed,
+    /// `DISCARDED`, as `Entity.discard`.
+    Discarded,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
