@@ -857,6 +857,55 @@ pub(crate) mod tests {
             event.entity.data.push(1);
         }
     }
+    /// The gold a `test:hoard` block entity holds, kept beside it.
+    pub(crate) const HOARD: AttachmentType<u32> = AttachmentType {
+        namespace: "test",
+        name: "hoard",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+    /// How many times a `test:hoard` was asked about its removal.
+    pub(crate) static HOARD_ASKED: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
+    /// The block entity of type `test:hoard`, held by block `test:press` as `test:press_entity`
+    /// is: when it is removed it gives back the gold its `HOARD` counts.
+    struct Hoard;
+    impl BlockPart for Hoard {}
+    impl BlockEntityPart for Hoard {
+        /// With data `[1]`, it replaces its own block with granite.
+        fn block_entity_tick(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut BlockEntityTickEvent<'_>,
+        ) {
+            if event.entity.data == [1] {
+                let level = host.level("minecraft:overworld").unwrap();
+                let state = host.block_state_default("minecraft:granite").unwrap();
+                assert!(level.set_block(
+                    host,
+                    event.pos,
+                    state,
+                    NativeBlockUpdateFlags::KNOWN_SHAPE
+                ));
+            }
+        }
+        fn pre_remove_side_effects(
+            &self,
+            level: &mut dyn LevelRandomHost,
+            event: &mut PreRemoveSideEffectsEvent<'_>,
+        ) {
+            HOARD_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let BlockPos { x, y, z } = event.pos;
+            if let Ok(Some(count @ 1..)) = HOARD.get_existing(level, Holder::BlockEntity([x, y, z]))
+            {
+                event
+                    .drops
+                    .push(ItemStack::new("minecraft:gold_ingot", count));
+            }
+        }
+    }
     struct NoHost;
     impl Host for NoHost {}
     impl ServerHost for NoHost {}
@@ -889,6 +938,7 @@ pub(crate) mod tests {
             r.block_part("test:gauge", Gauge);
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
+            r.block_entity_part("test:hoard", &["test:press"], Hoard);
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
             // block entity's are reached does: ahead of the game's.
             r.block_entity_capability_before_game(&ITEMS, "test:pipe", |_, at| {

@@ -79,12 +79,9 @@ impl Game<'_> {
             return;
         };
         for (player, data) in std::mem::take(&mut self.native_net.to_players) {
-            if let Some(g) = host
-                .hub
-                .guests
-                .iter()
-                .find(|g| g.placed && g.uuid == player && g.brand == "horizon")
-            {
+            if let Some(g) = host.hub.guests.iter().find(|g| {
+                g.placed && g.participates_online() && g.uuid == player && g.brand == "horizon"
+            }) {
                 host.hub.send_to(
                     g.conn,
                     &C::CustomPayload(CustomPayload {

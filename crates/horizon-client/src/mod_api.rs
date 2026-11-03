@@ -5,6 +5,17 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
+mod file_to_id_converter;
+pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
+mod reload_order;
+pub(crate) mod server_reload;
+pub use horizon_world::identifier::Identifier;
+pub use reload_order::ReloadOrderError;
+pub use server_reload::{
+    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
+    ServerReloadListeners, VanillaServerListeners,
+};
+
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
@@ -35,6 +46,7 @@ pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
+pub use crate::mod_chunk_tickets::TicketValidation;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
