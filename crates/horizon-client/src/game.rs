@@ -22116,11 +22116,10 @@ mod tests {
         let allowed = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
         let calls = Arc::new(AtomicUsize::new(0));
-        let mods: mod_api::Mods =
-            Arc::from(vec![
-                Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
-                    as Box<dyn Hooks>,
-            ]);
+        let mods: mod_api::Mods = Arc::from([mod_api::ModEntry::new(
+            "right-click-observer",
+            Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone())),
+        )]);
         assert!(mod_api::MODS.set(mods).is_ok());
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());

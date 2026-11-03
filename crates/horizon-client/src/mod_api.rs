@@ -1647,7 +1647,7 @@ mod tests {
             lines: Vec::new(),
         };
         for cancelled in [false, true] {
-            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let mods = [ModEntry::new("xp-hook", Box::new(XpHook(cancelled)))];
             let (mut amount, mut cancel) = (10, false);
             dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
             assert_eq!((amount, cancel), (-5, cancelled));
