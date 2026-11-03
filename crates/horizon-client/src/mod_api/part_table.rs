@@ -883,7 +883,7 @@ pub(crate) mod tests {
     impl Hooks for Doubler {
         fn register(&self, r: &mut Registrar) {
             r.block_part("test:gauge", Gauge);
-            r.block_part("test:gauge", Connector);
+            r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
@@ -2003,10 +2003,11 @@ pub(crate) mod tests {
             KnownIds {
                 block: &|_| true,
                 item: &|_| true,
-                state_count: 3,
+                state_count: 4,
                 state_block: &|state| match state {
                     1 => "test:gauge",
                     2 => "test:other",
+                    3 => "test:connector",
                     _ => "minecraft:air",
                 },
             },
@@ -2028,7 +2029,7 @@ pub(crate) mod tests {
     fn redstone_connection_is_scoped_to_the_attached_block() {
         game_thread();
         resolve(&[]).unwrap();
-        for (state, expected) in [(1, true), (2, false)] {
+        for (state, expected) in [(3, true), (2, false)] {
             let mut connected = false;
             dispatch_should_redstone_wire_connect_to(
                 &Level,
