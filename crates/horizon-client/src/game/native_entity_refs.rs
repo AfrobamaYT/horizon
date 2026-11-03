@@ -378,12 +378,19 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 #[cfg(test)]
 pub(super) mod tests {
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        with_game_at(root, test);
+    }
+
+    pub(in crate::game) fn with_game_at(
+        root: std::path::PathBuf,
+        test: impl FnOnce(&mut super::Game<'_>),
+    ) {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
         use horizon_client::mod_api::NativeAuthority;
 
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
             root.clone(),

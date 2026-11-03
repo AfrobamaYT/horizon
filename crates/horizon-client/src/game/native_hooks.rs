@@ -9278,6 +9278,171 @@ fn mod_screen_opens(
 mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn declared_types_create_tick_and_reload_through_game() {
+        use super::super::native_entity_refs::tests::with_game_at;
+        use horizon_client::{chunk::Chunk, containers::BlockEntity, mod_api::*, save};
+        use std::{process::Command, sync::Arc};
+
+        const CHILD: &str = "HORIZON_DECLARED_BE_GAME_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let scratch = std::env::temp_dir().join(format!(
+                "horizon-declared-be-game-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&scratch).unwrap();
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "game::native_hooks::tests::declared_types_create_tick_and_reload_through_game",
+                    "--nocapture",
+                    "--test-threads=4",
+                ])
+                .current_dir(&scratch)
+                .env(CHILD, "1")
+                .env("HORIZON_NO_AUDIO", "1")
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1");
+            for key in [
+                "HORIZON_HOME",
+                "HORIZON_LAUNCHER_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CONFIG_HOME",
+            ] {
+                command.env(key, scratch.join(key));
+            }
+            let status = command.status().unwrap();
+            std::fs::remove_dir_all(scratch).unwrap();
+            assert!(status.success());
+            return;
+        }
+
+        const FIRST: &str = "be_test:press";
+        const SECOND: &str = "be_test:ornate_banner";
+        const EMPTY: &str = "be_test:blank";
+        const PLAIN: &str = "be_test:plain_banner";
+        struct Press;
+        impl BlockPart for Press {}
+        impl BlockEntityPart for Press {
+            fn block_entity(
+                &self,
+                _: HostSide<'_>,
+                _: &mut BlockEntityEvent<'_>,
+            ) -> Option<Compound> {
+                Some(Compound::from([("energy".into(), Tag::Long(6300))]))
+            }
+            fn block_entity_tick(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut BlockEntityTickEvent<'_>,
+            ) {
+                let Some(Tag::Long(energy)) = event.entity.nbt.get_mut(&"energy".into()) else {
+                    panic!("factory payload missing");
+                };
+                *energy += 1;
+            }
+        }
+        struct TestMod;
+        impl Hooks for TestMod {
+            fn register(&self, registrar: &mut Registrar) {
+                let kind = registrar
+                    .block_entity_type("shared")
+                    .blocks(&[FIRST, SECOND])
+                    .build();
+                registrar.block_entity_part(&kind, Press);
+                registrar
+                    .block_entity_type("empty")
+                    .blocks(&[EMPTY])
+                    .build();
+            }
+            fn blocks(&self, event: &mut BlocksEvent<'_>) {
+                event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
+                    horizon_mods::content::Block {
+                        id: id.into(),
+                        template: "minecraft:white_banner".into(),
+                        ..Default::default()
+                    }
+                }));
+            }
+        }
+        let mods: Mods = Arc::from([ModEntry::new("be_test", Box::new(TestMod))]);
+        horizon_client::mod_api::install(mods.clone());
+        horizon_client::mod_api::install_parts(&mods).unwrap();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default(), &[]).unwrap();
+        with_game_at(root, |game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            for (x, block) in [(1, FIRST), (2, SECOND), (3, EMPTY), (4, PLAIN)] {
+                let state = game.pack.assets.registry.default_state(block).unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 63, 0],
+                    stone,
+                    NativeBlockUpdateFlags::NONE
+                ));
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NONE
+                ));
+                let pos = (x, 64, 0);
+                if block == PLAIN {
+                    assert!(matches!(
+                        game.world.block_entities.get(&pos),
+                        Some(BlockEntity::Banner(_))
+                    ));
+                    continue;
+                }
+                let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos) else {
+                    panic!("declared type did not override its banner template");
+                };
+                if block == EMPTY {
+                    assert_eq!(entity.id(), "be_test:empty");
+                    assert!(entity.nbt.is_empty());
+                    continue;
+                }
+                assert_eq!(entity.id(), "be_test:shared");
+                assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                game.tick_mod_block_entity(pos);
+                let saved = save::encode_block_entity(
+                    pos,
+                    game.world.block_entities.get(&pos).unwrap(),
+                    block,
+                );
+                assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
+                let (saved_pos, restored) =
+                    save::decode_block_entity_for_block(&saved, block).unwrap();
+                assert_eq!(saved_pos, pos);
+                assert_eq!(restored.id(), "be_test:shared");
+                assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
+                game.world.block_entities.insert(pos, restored);
+                game.tick_mod_block_entity(pos);
+                let saved = save::encode_block_entity(
+                    pos,
+                    game.world.block_entities.get(&pos).unwrap(),
+                    block,
+                );
+                assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {
         use super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
