@@ -583,9 +583,9 @@ impl Game<'_> {
             }
         }
         for id in needed {
-            if !session.sequences.contains_key(&id) {
-                let random = self.rand_sequences.lend(&id, self.level.seed);
-                session.sequences.insert(id, random);
+            if let std::collections::btree_map::Entry::Vacant(slot) = session.sequences.entry(id) {
+                let random = self.rand_sequences.lend(slot.key(), self.level.seed);
+                slot.insert(random);
             }
         }
     }
