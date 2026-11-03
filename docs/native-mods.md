@@ -987,6 +987,7 @@ use horizon_client::mod_api::{
     ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
 };
 
+#[derive(Default)]
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
     fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
