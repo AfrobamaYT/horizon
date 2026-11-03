@@ -16,6 +16,7 @@ pub struct NativeClientHooks {
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
+    pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
     pub ingredient_test: fn(&str, &Map<String, Value>, &ItemStack, &mut bool),
 }
@@ -136,6 +137,18 @@ pub(crate) fn living_fall(
 pub(crate) fn living_jump(entity: u32, kind: &str) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_jump)(entity, kind);
+    }
+}
+
+pub(crate) fn ender_entity_teleport(
+    entity: u32,
+    kind: &str,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    cancel: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.ender_entity_teleport)(entity, kind, from, target, cancel);
     }
 }
 

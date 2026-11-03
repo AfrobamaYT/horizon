@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 #[global_allocator]
 static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
-static MOD_API_LEVEL: [u8; horizon_mods::api_level::MARK.len()] = horizon_mods::api_level::MARK;
+static GAME_IDENTITY: [u8; horizon_mods::game_identity::MARK.len()] = horizon_mods::game_identity::MARK;
 macro_rules! native_mods {
     ($($id:literal => $hooks:path,)*) => {{
         let mods: horizon_client::mod_api::Mods = vec![$($hooks(),)*].into();
@@ -11,7 +11,7 @@ macro_rules! native_mods {
     }};
 }
 fn main() {
-    std::hint::black_box(&MOD_API_LEVEL);
+    std::hint::black_box(&GAME_IDENTITY);
     let mods = native_mods! {
 /* MOD_ENTRIES */
     };

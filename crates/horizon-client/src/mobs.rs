@@ -118,7 +118,8 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 pub struct Polygon {
     pub normal: [f32; 3],
     pub vertices: [[f32; 5]; 4],
-    /// The model's render type culls back faces (`entityCutoutCull`: the bat).
+    /// The model's render type culls back faces (`entityCutoutCull`: the bat,
+    /// the baby turtle).
     pub cull_back: bool,
 }
 impl Polygon {
@@ -253,7 +254,7 @@ impl Part {
         for (i, x) in pose.iter().enumerate().take(9) {
             p[i] = *x;
         }
-        let polygons = v["polygons"]
+        let polygons: Vec<Polygon> = v["polygons"]
             .as_array()
             .into_iter()
             .flatten()
@@ -430,6 +431,12 @@ pub(crate) fn exact_attributes(bytes: &[u8]) -> HashMap<String, HashMap<String, 
         })
         .collect()
 }
+
+/// The models that draw with `RenderTypes::entityCutoutCull`.
+fn culls_back_faces(key: &str) -> bool {
+    matches!(key, "minecraft:bat#main" | "minecraft:turtle_baby#main")
+}
+
 pub struct MobTypes {
     pub types: HashMap<String, MobType>,
 }
@@ -490,9 +497,13 @@ impl MobTypes {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
+                        let mut part = Part::parse("root", v);
+                        if culls_back_faces(k) {
+                            part.set_cull_back();
+                        }
                         layers.insert(
                             k.trim_start_matches("minecraft:").to_owned(),
-                            Arc::new(Part::parse("root", v)),
+                            Arc::new(part),
                         );
                     }
                 }
@@ -536,8 +547,7 @@ impl MobTypes {
                         |model| {
                             Arc::new({
                                 let mut part = Part::parse("root", model);
-                                // BatModel: `RenderTypes::entityCutoutCull`.
-                                if def.name == "bat" {
+                                if culls_back_faces(&model_key) {
                                     part.set_cull_back();
                                 }
                                 part
@@ -855,6 +865,8 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
+    /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
+    pub from_bucket: bool,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
@@ -966,6 +978,7 @@ pub struct Extra {
     /// Components of the current held stack; setters clear these on replacement.
     main_hand_stack: Option<crate::items::ItemStack>,
     pub off_hand: Option<Arc<str>>,
+    /// The head item (`getItemBySlot(HEAD)`), on every mob.
     pub head: Option<Arc<str>>,
     /// Equipment in the separate body slot (horse armour, wolf armour, harnesses).
     pub body: Option<Arc<str>>,
@@ -1174,6 +1187,8 @@ impl Extra {
 
 #[derive(Clone, Debug)]
 pub struct Mob {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub kind: Arc<MobType>,
     pub position: Vec3,
@@ -1328,6 +1343,13 @@ impl MannequinDescription {
         }
     }
 }
+/// Whether breeding experience was drawn in the parent's tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreedExperience {
+    Deferred,
+    Drawn(Option<u32>),
+}
+
 /// Events a mob tick asks the game to act on.
 #[derive(Clone, Debug)]
 pub enum MobEvent {
@@ -1870,6 +1892,8 @@ pub enum MobEvent {
         /// A llama's baby, drawn from the parent's random as
         /// `Llama.getBreedOffspring` does.
         llama: Option<Box<super::mobs::llama::Offspring>>,
+        /// The parent-RNG experience decision, if already made.
+        experience: BreedExperience,
     },
     /// Replace a block by name (sheep turning grass to dirt), optionally with
     /// the destroy effect.
@@ -2651,6 +2675,11 @@ impl PlayerView {
         self.effects.contains(&effect)
     }
 }
+/// `Animal.finalizeSpawnChildFromBreeding`: draw only when mob drops are enabled.
+pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
+    mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
+}
+
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     pub world: &'a World,
@@ -2713,9 +2742,11 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
-    /// The game asks `AnimalTameEvent` before a horse is tamed (a server
-    /// with mods): `RunAroundLikeCrazyGoal` then leaves `tame` to the game.
-    pub ask_taming: bool,
+    /// A server with native mods, which the game asks before a tame or a
+    /// baby (`AnimalTameEvent`, `BabyEntitySpawnEvent`): the goals then
+    /// leave what a cancel would undo to the game (a horse's `tame`, a
+    /// llama's breeding experience).
+    pub ask_mods: bool,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
@@ -2750,6 +2781,7 @@ impl Mob {
         );
         let _ = random.next_int();
         let mut mob = Self {
+            join: Default::default(),
             id,
             health: kind.max_health,
             position,
@@ -2848,6 +2880,11 @@ impl Mob {
                 | Species::Fox
                 | Species::Panda
         );
+        // Salmon.defineSynchedData: DATA_TYPE starts at Variant.DEFAULT (MEDIUM,
+        // id 1), so a salmon finalizeSpawn never sized keeps the type's box.
+        if mob.species() == Species::Salmon {
+            mob.extra.variant = 1;
+        }
         // The PathNavigation constructor: the base follow range.
         mob.ai.nav.max_visited_nodes = (mob.kind.follow_range * 16.0).floor() as i32;
         ai::register(&mut mob);
@@ -3516,6 +3553,13 @@ impl Mob {
         let main = self.extra.main_hand.as_deref() == Some(TOTEM);
         let off = !main && self.extra.off_hand.as_deref() == Some(TOTEM);
         if !main && !off {
+            return false;
+        }
+        // `LivingUseTotemEvent`: a native mod may cancel, and the mob dies.
+        if crate::health::USE_TOTEM
+            .get()
+            .is_some_and(|hook| hook(crate::health::Hurting::Mob(self, source), off))
+        {
             return false;
         }
         if main {
@@ -4818,6 +4862,43 @@ mod armor_hurt_tests {
         );
     }
 
+    /// Vanilla holds a head item and a body item at once on the mobs with a
+    /// body slot (`LivingEntity.setItemSlot` over `EntityEquipment`): the
+    /// packet keeps the helmet on 5 and the armour on 6, `/item` reads each
+    /// back, and the armour value is the body piece's.
+    #[test]
+    fn a_horse_holds_a_helmet_and_its_body_armour_at_once() {
+        use horizon_world::player_inventory::EquipmentSlot;
+        let mut m = horse();
+        m.extra.head = Some("minecraft:iron_helmet".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
+        let gear = m.equipment_stacks();
+        assert_eq!(
+            gear[5].as_ref().map(|s| s.item.as_ref().to_owned()),
+            Some("minecraft:iron_helmet".to_owned())
+        );
+        assert_eq!(
+            gear[6].as_ref().map(|s| s.item.as_ref().to_owned()),
+            Some("minecraft:diamond_horse_armor".to_owned())
+        );
+        let slot = |s| m.item_by_slot(s).map(|i| i.item.as_ref().to_owned());
+        assert_eq!(
+            slot(EquipmentSlot::Head),
+            Some("minecraft:iron_helmet".to_owned())
+        );
+        assert_eq!(
+            slot(EquipmentSlot::Body),
+            Some("minecraft:diamond_horse_armor".to_owned())
+        );
+        let (armor, _) = m.worn_armor();
+        assert!(armor > 0.0, "the body piece armors the horse");
+        // Death keeps both (`Mob.dropCustomDeathLoot` by slot).
+        let body = crate::mobs::drops::slot_item(&m, "body").unwrap();
+        let head = crate::mobs::drops::slot_item(&m, "head").unwrap();
+        assert_eq!(body.item, "minecraft:diamond_horse_armor");
+        assert_eq!(head.item, "minecraft:iron_helmet");
+    }
+
     /// `getDamageAfterArmorAbsorb` asks `hurtArmor` only when the damage type
     /// is not in `#bypasses_armor` (`LivingEntity.java:1907-1909`), so a horse
     /// that falls keeps its body piece whole.
@@ -4938,3 +5019,4 @@ mod totem_tests {
         );
     }
 }
+crate::impl_joined!(Mob);

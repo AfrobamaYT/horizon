@@ -139,7 +139,8 @@ impl Game<'_> {
             };
             let before = result_slot.map(|r| {
                 let slots: Vec<_> = (0..=r).map(|s| gs.menu.slot(s).cloned()).collect();
-                (slots, gs.menu.data[0])
+                // Only the anvil has a data slot (its cost); grindstone and smithing menus have none.
+                (slots, gs.menu.data.first().copied())
             });
             let mut undo = None;
             let hook = gs.menu.anvil_hook;
@@ -182,16 +183,14 @@ impl Game<'_> {
             // A cancelled take runs no createResult: the inputs are untouched.
             let recomputed = !cancelled
                 && before.is_some_and(|(slots, cost)| {
-                    cost != gs.menu.data[0]
+                    cost != gs.menu.data.first().copied()
                         || slots
                             .iter()
                             .enumerate()
                             .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
                 });
-            // AnvilUpdateEvent, after createResult made vanilla's result
-            // (a rename that changes nothing else too): before PrepareAnvil,
-            // which follows createResult too. A cancelled take's undo is no
-            // createResult.
+            // AnvilUpdateEvent after createResult; a cancelled take's undo
+            // is no createResult.
             let anvil_created =
                 gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
             if anvil_created
@@ -209,28 +208,18 @@ impl Game<'_> {
                 );
                 gs.menu.anvil_updated(update, cancel);
             }
-            if anvil_created {
+            if recomputed && gs.kind == StationKind::Grindstone && gs.menu.grind_hook {
                 let guest = &host.hub.guests[gi];
-                let (uuid, name) = (guest.uuid, guest.name.clone());
-                let mut result = gs.menu.slot(2).cloned();
-                self.native_prepare_anvil(uuid, &name, gs.pos, &mut result, &mut gs.menu.data[0]);
-                let env = self.menu_env();
-                gs.menu.set_slot(&env, 2, result);
-            }
-            if recomputed && gs.kind == StationKind::Grindstone {
-                let guest = &host.hub.guests[gi];
-                let (uuid, name, entity_id) = (guest.uuid, guest.name.clone(), guest.entity_id);
-                // GrindstoneEvent.OnPlaceItem, inside createResult: before PrepareGrindstone.
-                if gs.menu.grind_hook {
-                    let mut place = gs.menu.grindstone_place();
-                    let mut cancel = false;
-                    self.native_grindstone_place(uuid, entity_id, gs.pos, &mut place, &mut cancel);
-                    gs.menu.grindstone_placed(place, cancel);
-                }
-                let mut result = gs.menu.slot(2).cloned();
-                self.native_prepare_grindstone(uuid, &name, gs.pos, &mut result);
-                let env = self.menu_env();
-                gs.menu.set_slot(&env, 2, result);
+                let mut place = gs.menu.grindstone_place();
+                let mut cancel = false;
+                self.native_grindstone_place(
+                    guest.uuid,
+                    guest.entity_id,
+                    gs.pos,
+                    &mut place,
+                    &mut cancel,
+                );
+                gs.menu.grindstone_placed(place, cancel);
             }
             if recomputed && gs.kind == StationKind::Smithing {
                 let guest = &host.hub.guests[gi];
@@ -634,10 +623,16 @@ impl Game<'_> {
                 // its own host too (`lan.rs:165`), so this one path covers
                 // both single player and a LAN guest.
                 let mut carried = g.carried.clone();
+                let context = horizon_client::menu::MenuButtonContext {
+                    player: g.uuid,
+                    player_entity_id: g.entity_id,
+                    pos: [pos.0, pos.1, pos.2],
+                    id,
+                };
                 // As that player: `native_acting_player`, `native_acting_id`
                 // and `native_give_stack` answer for the one who pressed.
                 self.as_guest(host, conn, |game| {
-                    game.mod_menu_button(pos, id, &mut carried)
+                    game.mod_menu_button(context, &mut carried)
                 });
                 if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
                     let net = host.hub.stack(&carried);

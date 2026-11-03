@@ -2,42 +2,42 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "entity_velocity",
+      "name": "entity_velocity", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_velocity",
       "receiver": "entity"
     },
     {
-      "name": "entity_set_velocity",
+      "name": "entity_set_velocity", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_set_velocity",
       "receiver": "entity"
     },
     {
-      "name": "entity_on_ground",
+      "name": "entity_on_ground", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_on_ground",
       "receiver": "entity"
     },
     {
-      "name": "entity_bounding_box",
+      "name": "entity_bounding_box", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_bounding_box",
       "receiver": "entity"
     },
     {
-      "name": "entity_eye_height",
+      "name": "entity_eye_height", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_eye_height",
       "receiver": "entity"
     },
     {
-      "name": "entity_eye_position",
+      "name": "entity_eye_position", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_eye_position",
       "receiver": "entity"
     },
     {
-      "name": "entity_view_vector",
+      "name": "entity_view_vector", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_view_vector",
       "receiver": "entity"
     },
     {
-      "name": "entity_distance_to_sqr",
+      "name": "entity_distance_to_sqr", "side": "server",
       "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_distance_to_sqr",
       "receiver": "entity"
     }
