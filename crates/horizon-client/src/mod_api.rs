@@ -2541,7 +2541,8 @@ pub use resource::{
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod block_entity_type;
-pub use block_entity_type::{BlockEntityTypeBuilder, BlockEntityTypeKey};
+pub(crate) use block_entity_type::validate_block_entity_type_keys;
+pub use block_entity_type::{BlockEntityPartError, BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;

@@ -45,13 +45,7 @@ fn native_declared() -> &'static NativeDeclared {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         Game::native_blocks(&mut blocks);
         Game::native_items(&mut items);
-        let types = crate::mod_api::block_entity_types()
-            .iter()
-            .map(|kind| horizon_mods::content::BlockEntityType {
-                id: kind.id().to_owned(),
-                blocks: kind.blocks().to_vec(),
-            })
-            .collect();
+        let types = crate::mod_api::block_entity_types().to_vec();
         NativeDeclared {
             blocks,
             items,
@@ -187,7 +181,9 @@ fn register_block_entity_types(
                 .map(|block| (block.clone(), kind.id.clone()))
         })
         .collect();
-    block_entity_types::install(BlockEntityTypes::new(membership, names.clone()))?;
+    let types = BlockEntityTypes::new(membership, names.clone());
+    crate::mod_api::validate_block_entity_type_keys(&types)?;
+    block_entity_types::install(types)?;
     Ok(())
 }
 
