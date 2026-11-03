@@ -158,6 +158,7 @@ mod tests {
 
     /// A stone part whose random tick plays level events through the write host.
     struct Events;
+    #[mod_api::horizon_part]
     impl BlockPart for Events {
         fn random_tick(
             &self,

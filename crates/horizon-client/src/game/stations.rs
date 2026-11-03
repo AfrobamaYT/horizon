@@ -3140,6 +3140,7 @@ mod tests {
 
         #[derive(Clone)]
         struct Lore;
+        #[mod_api::horizon_part]
         impl ItemPart for Lore {
             fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
                 assert!(event.lines.is_empty());

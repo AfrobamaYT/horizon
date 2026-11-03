@@ -6179,6 +6179,7 @@ mod tests {
         };
 
         struct Picker(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::horizon_part]
         impl BlockPart for Picker {
             fn clone_item_stack(
                 &self,
@@ -6201,6 +6202,7 @@ mod tests {
             clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
+        #[mod_api::horizon_part]
         impl BlockPart for User {
             fn use_item_on(
                 &self,
@@ -6241,6 +6243,7 @@ mod tests {
             }
         }
         // The held items' own `Item.useOn`, counted, taking the click.
+        #[mod_api::horizon_part]
         impl ItemPart for User {
             fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
                 self.item_uses
@@ -6808,6 +6811,7 @@ mod tests {
 
         #[derive(Clone)]
         struct BlockUse(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
         impl BlockPart for BlockUse {
             fn use_item_on(
                 &self,
@@ -6876,6 +6880,7 @@ mod tests {
 
         #[derive(Clone)]
         struct Replacement(Arc<AtomicBool>);
+        #[mod_api::horizon_part]
         impl BlockPart for Replacement {
             fn use_without_item(
                 &self,

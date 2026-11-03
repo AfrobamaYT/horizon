@@ -7,8 +7,8 @@
 use super::ticket_controller::{self, ControllerInfo};
 use super::{
     BlockEntityPart, BlockPart, BlockSide, BlockStateId, Capability, CapabilityKey,
-    EntityCapabilityKey, EntityRef, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart,
-    ModEntry, PlaceProvider, ServerHost, TicketController,
+    EntityCapabilityKey, EntityRef, HOOK_COUNT, HookId, Host, ItemCapabilityKey, ItemPart,
+    ItemPlace, MenuPart, ModEntry, PlaceProvider, ServerHost, TicketController,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -56,12 +56,6 @@ impl<P: ?Sized> Clone for Attached<P> {
 pub struct Parts {
     /// Block parts, and block entity parts as the block parts they also are.
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
-    /// The same block parts by state for this game's registry: an index into
-    /// `block_slices` (one-based, so `None` names no parts), four bytes a
-    /// state.
-    block_states: Vec<Option<NonZeroU32>>,
-    /// The parts `block_states` indexes, one entry per block that has any.
-    block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
     /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
     block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     /// Block entity parts by block entity type, for the hooks asked by the entity
@@ -79,6 +73,19 @@ pub struct Parts {
     entity_capabilities: Capabilities,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
     place_providers: HashMap<&'static str, (&'static str, Arc<dyn PlaceProvider>)>,
+    /// Only the parts that override each scoped hook, resolved at load or reload.
+    hooks: Vec<Option<HookParts>>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct HookParts {
+    blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
+    block_states: Vec<Option<NonZeroU32>>,
+    block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
+    block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
+    menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
 }
 
 type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
@@ -130,6 +137,7 @@ struct Installed {
     block_entity_types: Vec<super::BlockEntityTypeKey>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
+    hook_bits: Vec<bool>,
 }
 
 pub(crate) fn block_entity_types() -> &'static [super::BlockEntityTypeKey] {
@@ -148,6 +156,7 @@ static INSTALLED: OnceLock<Installed> = OnceLock::new();
 thread_local! {
     /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
     static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
+    static TEST_PART_LOOKUPS: Cell<usize> = const { Cell::new(0) };
 }
 static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
 static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
@@ -165,6 +174,16 @@ fn installed() -> Option<&'static Installed> {
         return Some(installed);
     }
     INSTALLED.get()
+}
+
+/// Whether any installed part subscribes to a scoped hook.
+pub(crate) fn has_part_hook(hook: HookId) -> bool {
+    installed().is_some_and(|installed| installed.hook_bits[hook as usize])
+}
+
+/// Preserve the no-mod fast path for level hooks.
+pub(crate) fn has_scoped_hook(hook: HookId) -> bool {
+    !super::mods().is_empty() && has_part_hook(hook)
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
@@ -186,6 +205,8 @@ impl std::ops::Deref for PartsRef {
 /// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
 /// when there are no tag parts, then the off-thread path.
 pub(crate) fn parts(hook: &'static str) -> PartsRef {
+    #[cfg(test)]
+    TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
     };
@@ -248,22 +269,23 @@ pub(crate) fn resolve_parts(
         "block",
     );
     add_tagged(&mut parts.items, &installed.tags.items, item_tags, "item");
-    let mut names: HashMap<&str, NonZeroU32> = HashMap::with_capacity(parts.blocks.len());
-    let mut block_slices: Vec<Arc<[Attached<dyn BlockPart>]>> =
-        Vec::with_capacity(parts.blocks.len());
-    for (name, attached) in &parts.blocks {
-        names.insert(
-            name,
-            NonZeroU32::new(block_slices.len() as u32 + 1).unwrap(),
-        );
-        block_slices.push(Arc::from(attached.clone()));
+    parts.index_hooks();
+    for table in parts.hooks.iter_mut().flatten() {
+        if table.blocks.is_empty() {
+            continue;
+        }
+        let mut names = HashMap::with_capacity(table.blocks.len());
+        for (name, attached) in &table.blocks {
+            names.insert(
+                name.as_ref(),
+                NonZeroU32::new(table.block_slices.len() as u32 + 1).unwrap(),
+            );
+            table.block_slices.push(Arc::from(attached.clone()));
+        }
+        table.block_states = (0..known.state_count)
+            .map(|state| names.get((known.state_block)(state)).copied())
+            .collect();
     }
-    let mut block_states = Vec::with_capacity(known.state_count);
-    for state in 0..known.state_count {
-        block_states.push(names.get((known.state_block)(state)).copied());
-    }
-    parts.block_slices = block_slices;
-    parts.block_states = block_states;
     GAME_PARTS.set(Some(Rc::new(parts)));
     Ok(())
 }
@@ -330,7 +352,7 @@ fn add_tagged<P: ?Sized>(
     }
 }
 
-impl Parts {
+impl HookParts {
     pub(crate) fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
         self.block_states
             .get(state.0 as usize)
@@ -340,9 +362,6 @@ impl Parts {
                 |index| &self.block_slices[index.get() as usize - 1][..],
             )
     }
-
-    // Each takes the thing's id as a closure: with nothing attached in that scope the id is never
-    // worked out, so a game with no parts pays no registry read on the hot hooks.
     pub(crate) fn block_entity<'k>(
         &self,
         id: impl FnOnce() -> Option<&'k str>,
@@ -366,6 +385,44 @@ impl Parts {
         id: impl FnOnce() -> Option<&'k str>,
     ) -> &[Attached<dyn MenuPart>] {
         attached(&self.menus, id)
+    }
+}
+
+impl Parts {
+    pub(crate) fn for_hook(&self, hook: HookId) -> Option<&HookParts> {
+        self.hooks.get(hook as usize).and_then(Option::as_ref)
+    }
+    fn index_hooks(&mut self) {
+        self.hooks = vec![None; HOOK_COUNT];
+        macro_rules! index {
+            ($field:ident, $method:ident) => {
+                for (key, parts) in &self.$field {
+                    for part in parts {
+                        for hook in part.part.$method().iter().flatten() {
+                            let table =
+                                self.hooks[*hook as usize].get_or_insert_with(HookParts::default);
+                            table
+                                .$field
+                                .entry(key.clone())
+                                .or_default()
+                                .push(part.clone());
+                        }
+                    }
+                }
+            };
+        }
+        index!(blocks, block_subscribed);
+        index!(block_entities, block_entity_subscribed);
+        index!(block_entity_kinds, block_entity_subscribed);
+        index!(items, item_subscribed);
+        index!(menus, menu_subscribed);
+    }
+    #[cfg(test)]
+    pub(crate) fn block_entity<'k>(
+        &self,
+        id: impl FnOnce() -> Option<&'k str>,
+    ) -> &[Attached<dyn BlockEntityPart>] {
+        attached(&self.block_entities, id)
     }
 }
 
@@ -878,7 +935,7 @@ pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
 /// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
 pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
-    let installed = if mods.is_empty() {
+    let mut installed = if mods.is_empty() {
         Installed::default()
     } else {
         let registrar = register_all(mods);
@@ -890,8 +947,21 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             tags: registrar.tags,
             block_entity_types: registrar.block_entity_types,
             controllers: registrar.controllers,
+            hook_bits: Vec::new(),
         }
     };
+    installed.keys.index_hooks();
+    installed.hook_bits = installed.keys.hooks.iter().map(Option::is_some).collect();
+    for (_, part) in &installed.tags.blocks {
+        for hook in part.part.block_subscribed().iter().flatten() {
+            installed.hook_bits[*hook as usize] = true;
+        }
+    }
+    for (_, part) in &installed.tags.items {
+        for hook in part.part.item_subscribed().iter().flatten() {
+            installed.hook_bits[*hook as usize] = true;
+        }
+    }
     #[cfg(test)]
     TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
     #[cfg(not(test))]
@@ -926,10 +996,14 @@ pub(crate) mod tests {
 
     /// A comparator reading of 5 more than it was.
     struct Gauge;
+    #[mod_api::horizon_part]
     impl BlockPart for Gauge {
+        #[cfg_attr(test, inline)]
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output += 5;
         }
+        #[cfg_attr(test, cfg(any()))]
+        fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
     }
 
     #[test]
@@ -954,6 +1028,7 @@ pub(crate) mod tests {
 
     /// Connects redstone wire to its block from any side.
     struct Connector;
+    #[mod_api::horizon_part]
     impl BlockPart for Connector {
         fn should_redstone_wire_connect_to(
             &self,
@@ -967,7 +1042,13 @@ pub(crate) mod tests {
     /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
-    impl BlockPart for Press {}
+    #[mod_api::horizon_part]
+    impl BlockPart for Press {
+        fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+            event.output += 40;
+        }
+    }
+    #[mod_api::horizon_part]
     impl BlockEntityPart for Press {
         fn block_entity_ticks(&self, _: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
             event.ticks = true;
@@ -991,7 +1072,9 @@ pub(crate) mod tests {
     /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is
     /// removed it gives back the gold its `HOARD` counts.
     struct Hoard;
+    #[mod_api::horizon_part]
     impl BlockPart for Hoard {}
+    #[mod_api::horizon_part]
     impl BlockEntityPart for Hoard {
         /// With data `[1]`, it replaces its own block with granite.
         fn block_entity_tick(
@@ -1043,6 +1126,7 @@ pub(crate) mod tests {
 
     /// A comparator reading of 100 more, for the blocks in tag `test:gauged`.
     struct TagGauge;
+    #[mod_api::horizon_part]
     impl BlockPart for TagGauge {
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output += 100;
@@ -2290,6 +2374,7 @@ pub(crate) mod tests {
     /// Install a weak-power part on glass for a real-game query.
     pub(crate) fn weak_power_game_thread() {
         struct WeakPower;
+        #[mod_api::horizon_part]
         impl BlockPart for WeakPower {
             fn should_check_weak_power(
                 &self,
@@ -2355,11 +2440,12 @@ pub(crate) mod tests {
             KnownIds {
                 block: &|_| true,
                 item: &|_| true,
-                state_count: 4,
+                state_count: 5,
                 state_block: &|state| match state {
                     1 => "test:gauge",
                     2 => "test:other",
                     3 => "test:connector",
+                    4 => "test:press",
                     _ => "minecraft:air",
                 },
             },
@@ -2375,6 +2461,34 @@ pub(crate) mod tests {
         // 5 more from the part: 1 + 5.
         assert_eq!(read(1), 6);
         assert_eq!(read(2), 1);
+    }
+
+    #[test]
+    fn scoped_dispatch_looks_up_only_subscribed_hooks_and_parts() {
+        game_thread();
+        resolve(&[]).unwrap();
+        let parts = super::parts("test");
+        let analog = parts.for_hook(HookId::AnalogOutput).unwrap();
+        let connect = parts.for_hook(HookId::ShouldRedstoneWireConnectTo).unwrap();
+        assert_eq!(analog.block_state(BlockStateId(1)).len(), 1);
+        assert!(connect.block_state(BlockStateId(1)).is_empty());
+        assert_eq!(connect.block_state(BlockStateId(3)).len(), 1);
+        assert!(analog.block_state(BlockStateId(3)).is_empty());
+        // The block entity part's BlockPart override is indexed independently.
+        assert_eq!(read(4), 41);
+        assert!(!super::has_part_hook(HookId::ShouldCheckWeakPower));
+        super::TEST_PART_LOOKUPS.set(0);
+        let mut check = false;
+        dispatch_should_check_weak_power(
+            &Level,
+            LevelDimension::Overworld,
+            BlockPos::new(0, 64, 0),
+            BlockStateId(1),
+            Direction::East,
+            &mut check,
+        );
+        assert_eq!(super::TEST_PART_LOOKUPS.get(), 0);
+        assert!(!check);
     }
 
     #[test]
@@ -2402,11 +2516,15 @@ pub(crate) mod tests {
         // Out of range, and in range but a block no part is attached to.
         assert!(
             super::parts("analog_output")
+                .for_hook(HookId::AnalogOutput)
+                .unwrap()
                 .block_state(BlockStateId(99))
                 .is_empty()
         );
         assert!(
             super::parts("analog_output")
+                .for_hook(HookId::AnalogOutput)
+                .unwrap()
                 .block_state(BlockStateId(0))
                 .is_empty()
         );
@@ -4314,6 +4432,7 @@ pub(crate) mod tests {
     #[test]
     fn the_same_part_twice_on_one_block_is_refused() {
         struct Other;
+        #[mod_api::horizon_part]
         impl BlockPart for Other {}
         let mut r = Registrar::new("first");
         r.block_part("test:gauge", Gauge);
