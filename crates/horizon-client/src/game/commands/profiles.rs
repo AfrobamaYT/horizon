@@ -274,8 +274,7 @@ impl Game<'_> {
         // PlayerList.getPlayerByName, then ServerPlayer.getIpAddress.
         let address = |name: &str| {
             let hub = &self.lan.as_ref()?.hub;
-            hub.guests
-                .iter()
+            hub.online_players()
                 .find(|g| g.name.eq_ignore_ascii_case(name))
                 .map(|g| g.address.ip().to_string())
         };
@@ -295,8 +294,7 @@ impl Game<'_> {
             .as_ref()
             .map(|h| {
                 h.hub
-                    .guests
-                    .iter()
+                    .online_players()
                     .filter(|g| g.address.ip().to_string() == ip)
                     .map(|g| (g.uuid, g.name.clone()))
                     .collect()
