@@ -112,7 +112,7 @@ impl Game<'_> {
                     "Game rule '{}' updated from '{current}' to '{value}'",
                     rule.name
                 ));
-                self.set_game_rule(rule, value);
+                self.set_game_rule(rule, value, None);
                 return json!({ "value": typed_rule(rule, value) });
             }
             "serversettings/autosave" => {

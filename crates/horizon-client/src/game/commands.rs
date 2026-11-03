@@ -195,7 +195,10 @@ impl Game<'_> {
             return Some(amount);
         };
         let (mut amount, mut cancel) = (amount, false);
-        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        let player_entity_id = self
+            .lan_acting_entity
+            .map_or_else(|| self.own_entity_id(), |id| id as i32);
+        self.native_player_xp_change(player, player_entity_id, &name, &mut amount, &mut cancel);
         (!cancel).then_some(amount)
     }
 
@@ -3044,7 +3047,7 @@ impl Game<'_> {
                 self.give_levels(amount);
                 return true;
             } else {
-                self.give_experience_points(amount, true);
+                self.give_experience_points(amount);
             }
             return true;
         }
@@ -3064,9 +3067,14 @@ impl Game<'_> {
     /// `GameRules.set` as the `/gamerule` command and the management protocol call it: the rule changes, the
     /// world follows it, and a dedicated server tells the event stream (`MinecraftServer.onGameRuleChanged`
     /// tells the management protocol's clients).
-    pub(super) fn set_game_rule(&mut self, rule: &gamerules::Rule, value: Value) {
+    pub(super) fn set_game_rule(
+        &mut self,
+        rule: &gamerules::Rule,
+        value: Value,
+        actor: Option<&crate::mod_api::GameRuleActor<'_>>,
+    ) {
         if self.ui.rules.set(rule.name, value) {
-            self.game_rule_changed(rule.name, value);
+            self.game_rule_changed(rule.name, value, actor);
         }
         self.sync_rules();
         if self.options.dedicated.is_some() {
@@ -3106,7 +3114,20 @@ impl Game<'_> {
         if current == value {
             return Err(err("commands.gamerule.not_set", &[&rule.name, &value]));
         }
-        self.set_game_rule(rule, value);
+        let name = self.lan_acting_name.clone();
+        let actor = match (
+            self.lan_acting_uuid,
+            self.lan_acting_entity,
+            name.as_deref(),
+        ) {
+            (Some(uuid), Some(entity_id), Some(name)) => Some(crate::mod_api::GameRuleActor {
+                uuid,
+                entity_id: entity_id as i32,
+                name,
+            }),
+            _ => None,
+        };
+        self.set_game_rule(rule, value, actor.as_ref());
         self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),

@@ -180,7 +180,7 @@ impl Game<'_> {
         self.remote.is_none()
             && self.native_lifecycle.epoch() == Some(level.epoch())
             && self.world.loaded(pos[0], pos[2])
-            && (self.world.layout().min_y()..self.world.layout().max_y()).contains(&pos[1])
+            && self.world.shape.contains_y(pos[1])
     }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
@@ -445,6 +445,50 @@ pub(super) mod tests {
             assert!(game.chunk(level, [-2, 3]).is_none());
             assert!(!chunk.loaded(game));
             assert_eq!(chunk.status(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_reads_and_writes_use_dimension_build_height() {
+        use horizon_client::{
+            chunk::{Chunk, LevelShape},
+            mod_api::NativeBlockUpdateFlags,
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world.shape = LevelShape::new(0, 128, 128, true, false).unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(0, 127, 0, stone).unwrap();
+            game.world.set(0, 128, 0, stone).unwrap();
+            assert!(game.native_level_is_loaded(level, [0, 127, 0]));
+            assert_eq!(game.native_level_state(level, [0, 127, 0]), Some(stone));
+            assert_eq!(
+                game.native_level_block(level, [0, 127, 0]).as_deref(),
+                Some("minecraft:stone")
+            );
+            assert!(game.native_level_write_allowed(level, [0, 127, 0]));
+            assert!(!game.native_level_is_loaded(level, [0, 128, 0]));
+            assert_eq!(game.native_level_state(level, [0, 128, 0]), None);
+            assert_eq!(game.native_level_block(level, [0, 128, 0]), None);
+            assert!(!game.native_level_is_loaded(level, [0, -1, 0]));
+            assert_eq!(game.native_level_state(level, [0, -1, 0]), None);
+            assert!(!game.native_level_set_block(
+                level,
+                [0, 128, 0],
+                stone,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            assert!(!game.native_level_destroy_block(level, [0, 128, 0], false));
         });
     }
 
