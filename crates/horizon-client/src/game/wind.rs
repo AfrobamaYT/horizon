@@ -48,14 +48,18 @@ pub(super) struct BurstCause {
 fn push_waits_for_tick(ticks_after_projectiles: bool, id: u32, charge: Option<u32>) -> bool {
     ticks_after_projectiles && charge.is_some_and(|c| id < c)
 }
-/// `Projectile.deflect` with `ProjectileDeflection.REVERSE`.
+/// `Projectile.deflect(REVERSE, entity, owner, false, 1.0)` of a breeze's
+/// deflection, through the one engine path (`Projectile::deflect`). The turn's
+/// float is `jitter`, drawn by the caller. The owner stays; a hurting
+/// projectile's acceleration power halves (`onDeflection`).
 pub(super) fn reverse(p: &mut Projectile, jitter: f32) {
-    p.velocity = Vec3::new(
-        p.velocity.x * -0.5,
-        p.velocity.y * -0.5,
-        p.velocity.z * -0.5,
+    let owner = (p.owner, p.owner_uuid, p.guest);
+    p.deflect(
+        horizon_client::projectiles::Turn::Reverse { draw: Some(jitter) },
+        [1.0; 3],
+        owner,
+        false,
     );
-    p.yaw += 170.0 + jitter * 20.0;
 }
 /// Whether a block reacts to a wind charge's burst by being used.
 fn triggers(name: &str) -> bool {

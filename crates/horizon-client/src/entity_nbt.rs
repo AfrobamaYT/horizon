@@ -1491,6 +1491,18 @@ pub fn mob_from_nbt(
                 }
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
                 "minecraft:attack_knockback" => m.attrs.attack_knockback = v,
+                "minecraft:flying_speed"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::FlyingSpeed,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::FlyingSpeed,
+                        v,
+                    )
+                }
                 _ => {}
             }
         }
@@ -3002,6 +3014,7 @@ pub fn cushion_from_nbt(tag: &Tag, id: u32) -> Option<Cushion> {
     let color =
         crate::entities::dye_index(&text(tag.get("color")).unwrap_or_else(|| "white".into()));
     Some(Cushion {
+        join: Default::default(),
         id,
         position,
         pos,
@@ -3018,6 +3031,7 @@ mod cushion_tests {
     #[test]
     fn cushion_save_preserves_color_anchor_rotation_and_unknown_data() {
         let cushion = Cushion {
+            join: Default::default(),
             id: 7,
             position: Vec3::new(-1.5, 64.5, 3.5),
             pos: [-2, 64, 3],
@@ -3076,6 +3090,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
     let pos = attached_block_pos(tag)?;
     Some(ItemFrame {
+        join: Default::default(),
         id,
         pos,
         facing: number(tag.get("Facing")).unwrap_or(2).clamp(0, 5) as u8,
@@ -3411,7 +3426,9 @@ fn read_villager(m: &mut Mob, tag: &Tag) {
         m.extra.variant2 = name("profession")
             .and_then(|p| PROFESSIONS.iter().position(|v| *v == p))
             .unwrap_or(0) as u8;
-        m.extra.variant3 = number(data.get("level")).unwrap_or(1).clamp(1, 5) as u8;
+        m.extra.variant3 = number(data.get("level"))
+            .unwrap_or(1)
+            .clamp(1, i64::from(u8::MAX)) as u8;
     }
     let memory = |key: &str| {
         tag.get("Brain")

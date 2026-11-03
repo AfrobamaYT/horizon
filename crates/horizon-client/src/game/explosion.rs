@@ -825,6 +825,13 @@ impl Game<'_> {
         if spares_stands {
             return;
         }
+        // `DamageSources.explosion`: a caused blast is `player_explosion`.
+        let cause = self.blast_attacker().map(|(id, _)| id);
+        let damage_type = super::creatures::damage_type(
+            horizon_client::mobs::DamageKind::Explosion,
+            cause.is_some(),
+        );
+        let causing = cause.unwrap_or(0);
         let mut i = 0;
         while i < self.armor_stands.len() {
             let a = &self.armor_stands[i];
@@ -832,7 +839,7 @@ impl Game<'_> {
             if !super::armor_stands::spared_by_blast(a)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
-                self.break_armor_stand_by_anything(i);
+                self.break_armor_stand_by_anything(i, damage_type, causing);
             } else {
                 i += 1;
             }

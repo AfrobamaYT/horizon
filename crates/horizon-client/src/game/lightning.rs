@@ -599,6 +599,7 @@ impl Game<'_> {
                         m.extra.vector[0] = -1.0;
                         m.extra.variant =
                             horizon_client::mobs::copper_golem::weather_previous(m.extra.variant);
+                        self.persist.force_meta(m.id, 16);
                     }
                 }
                 _ => {}
@@ -813,11 +814,15 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let pre = Arc::new(AtomicUsize::new(0));
         let cancel_cow = Arc::new(AtomicBool::new(false));
-        let mods: horizon_client::mod_api::Mods = Arc::from(vec![Box::new(Observer {
-            seen: seen.clone(),
-            pre: pre.clone(),
-            cancel_cow: cancel_cow.clone(),
-        }) as Box<dyn Hooks>]);
+        let mods: horizon_client::mod_api::Mods =
+            Arc::from([horizon_client::mod_api::ModEntry::new(
+                "lightning-observer",
+                Box::new(Observer {
+                    seen: seen.clone(),
+                    pre: pre.clone(),
+                    cancel_cow: cancel_cow.clone(),
+                }),
+            )]);
         install(mods);
         super::super::native_entity_refs::tests::with_game(|game| {
             let piglin_type = game

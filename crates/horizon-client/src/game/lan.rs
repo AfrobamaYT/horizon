@@ -1401,7 +1401,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| g.placed)
+            .filter(|g| g.placed && g.participates_in_player_simulation())
             .map(|g| (g.conn, super::Dim::from_id(&g.dimension)))
             .collect();
         for (conn, dim) in open {
@@ -1420,6 +1420,9 @@ impl Game<'_> {
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
+            if !host.hub.guests[i].participates_in_player_simulation() {
+                continue;
+            }
             let mut g = host.hub.guests.remove(i);
             self.take_parent_vehicle(&mut g);
             self.save_guest(&mut g);
@@ -1434,6 +1437,9 @@ impl Game<'_> {
     /// into the level (`/data`) and both its files (`playerdata::save_owner`),
     /// anyone else into their own file.
     pub(super) fn save_guest(&mut self, guest: &mut horizon_client::lan::guest::Guest) {
+        if !guest.participates_in_player_simulation() {
+            return;
+        }
         Self::guest_attachments_into(&self.guest_attachments, guest);
         if guest.placed {
             let _ = self.finish_player_autosaves(true);
@@ -1599,7 +1605,10 @@ impl Game<'_> {
         host: &LanHost,
         guest: &horizon_client::lan::guest::Guest,
     ) {
-        if !guest.placed || self.adv.tree.list.is_empty() {
+        if !guest.participates_in_player_simulation()
+            || !guest.placed
+            || self.adv.tree.list.is_empty()
+        {
             return;
         }
         let Some(uuid) = self.records_uuid(host, guest.uuid) else {
@@ -1701,6 +1710,13 @@ impl Game<'_> {
             host.settings.force_game_mode = force;
             host.hub.config.force_game_mode = force;
             enforce_guest_game_mode(host, &self.world, self.collision);
+        }
+    }
+
+    /// Update the live movement check's flight policy.
+    pub(super) fn set_allow_flight(&mut self, allow: bool) {
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.config.allow_flight = allow;
         }
     }
 
@@ -2287,6 +2303,11 @@ impl Game<'_> {
         }
     }
 
+    /// Spend the current level's forced marks after its tracker snapshot.
+    pub(super) fn spend_forced_meta(&mut self) {
+        self.persist.forced_meta.clear();
+    }
+
     /// Run the hub for this tick and apply what the guests did. While the
     /// single player game is `paused` only the connections run
     /// (`IntegratedServer.tickPaused`): `ServerGamePacketListenerImpl.tick`
@@ -2383,6 +2404,8 @@ impl Game<'_> {
                     cart.lerp_steps.clear();
                 }
             }
+            // Persist is swapped per level, so parked dimensions retain their marks.
+            self.spend_forced_meta();
             // ServerEntity.sendChanges clears needsSync once it has looked.
             for m in &mut self.mobs {
                 m.needs_sync = false;
@@ -2550,7 +2573,12 @@ impl Game<'_> {
         }
     }
 
-    fn lan_guest_joined(&mut self, conn: u32, entities: &[EntityState], spawn: [f64; 3]) {
+    pub(super) fn lan_guest_joined(
+        &mut self,
+        conn: u32,
+        entities: &[EntityState],
+        spawn: [f64; 3],
+    ) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -2585,6 +2613,8 @@ impl Game<'_> {
         playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
+            // ServerPlayerGameMode.setGameModeForPlayer: the abilities of the mode chosen.
+            g.abilities.update_for_mode(default_mode);
         }
         if !known {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
@@ -2831,7 +2861,7 @@ impl Game<'_> {
         }
     }
     /// Send the tick's level events, sounds and mob animations.
-    fn lan_flush_effects(&mut self) {
+    pub(super) fn lan_flush_effects(&mut self) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -2948,7 +2978,8 @@ impl Game<'_> {
                 && !dead
                 && old.and_then(|o| o.2).is_none_or(|before| time < before)
             {
-                host.hub.swing(m.id as i32, 0, at, None);
+                host.hub
+                    .swing(m.id as i32, i32::from(m.swing_is_off_hand()), at, None);
             }
             seen.insert(m.id, (m.hurt_time, dead, swing));
         }

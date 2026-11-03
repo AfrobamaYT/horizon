@@ -110,7 +110,10 @@ impl Game<'_> {
             }
         });
         for guest in self.lan.iter().flat_map(|h| &h.hub.guests) {
-            if !guest.placed || guest.dimension != level.dimension() {
+            if !guest.participates_in_player_simulation()
+                || !guest.placed
+                || guest.dimension != level.dimension()
+            {
                 continue;
             }
             let body = if self.lan_acting == Some(guest.conn)
@@ -695,6 +698,15 @@ pub(super) mod tests {
                     10,
                 );
                 guest.placed = true;
+                if id == 12 {
+                    // A player loaded from a file saved with a walking speed.
+                    guest.abilities.walking_speed = 0.25;
+                    guest.loaded_body = Some(horizon_client::lan::guest::SavedBody {
+                        fire_ticks: 0,
+                        air: 300,
+                        fall_distance: 0.0,
+                    });
+                }
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
@@ -714,6 +726,24 @@ pub(super) mod tests {
             );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
+            // A write sticks, is refused for a speed that is not a number, and a
+            // mode change sets the flags again (the speeds stay).
+            let mut written = abilities;
+            written.may_build = false;
+            written.walk_speed = 0.2;
+            written.fly_speed = 0.1;
+            assert!(game.native_player_set_abilities(player, written));
+            assert_eq!(game.native_player_abilities(player), Some(written));
+            assert_eq!(game.native_player_may_build(player), Some(false));
+            let mut bad = written;
+            bad.walk_speed = f32::NAN;
+            assert!(!game.native_player_set_abilities(player, bad));
+            assert_eq!(game.native_player_abilities(player), Some(written));
+            assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+            let abilities = game.native_player_abilities(player).unwrap();
+            assert!(abilities.may_build && abilities.instabuild && abilities.may_fly);
+            assert_eq!((abilities.walk_speed, abilities.fly_speed), (0.2, 0.1));
+            assert!(game.native_player_set_game_mode(player, GameMode::Survival));
             let mut stale = player;
             stale.entity = horizon_client::mod_api::EntityRef::new(
                 horizon_client::mod_api::NativeWorldEpoch::new(0),
@@ -741,10 +771,45 @@ pub(super) mod tests {
                     "minecraft:stone"
                 );
                 assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+                // The loaded walking speed is the movement speed's base.
+                assert_eq!(
+                    game.player
+                        .as_mut()
+                        .unwrap()
+                        .attribute("minecraft:movement_speed")
+                        .unwrap(),
+                    f64::from(0.25f32)
+                );
+                // In the player's own turn the write reaches the body as well.
+                let mut a = game.native_player_abilities(player).unwrap();
+                a.may_fly = true;
+                a.walk_speed = 0.3;
+                assert!(game.native_player_set_abilities(player, a));
+                assert_eq!(game.native_player_abilities(player), Some(a));
+                assert!(game.player.as_ref().unwrap().may_fly);
                 assert_eq!(other.position(game), Some([3.0, 64.0, 5.0]));
                 assert!(game.native_living(other).is_some());
             })
             .unwrap();
+            // A mode change in a turn, then a write in the same turn: the write wins.
+            game.as_guest(12, |game| {
+                let player = game.native_player_ref(12).unwrap();
+                assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+                let mut a = game.native_player_abilities(player).unwrap();
+                assert!(a.instabuild && a.may_fly);
+                a.fly_speed = 0.4;
+                a.walk_speed = 0.3;
+                assert!(game.native_player_set_abilities(player, a));
+            })
+            .unwrap();
+            let kept = game.lan.as_ref().unwrap().hub.guest(12).unwrap();
+            assert_eq!(kept.game_mode, 1);
+            assert!(kept.abilities.instabuild);
+            assert_eq!(kept.abilities.flying_speed, 0.4);
+            assert_eq!(kept.abilities.walking_speed, 0.3);
+            // The turn's write is stored in the guest's record.
+            let stored = game.lan.as_ref().unwrap().hub.guest(12).unwrap().abilities;
+            assert!(stored.may_fly && stored.walking_speed == 0.3);
             let swap = game.enter_guest(12).unwrap();
             assert!(game.native_entity(12).is_some());
             let other = game.native_entity(13).unwrap();
@@ -786,6 +851,35 @@ pub(super) mod tests {
             assert_eq!(game.lan_acting, Some(12));
             game.leave_guest(swap);
             assert!(game.lan_guest_swaps.is_empty());
+            // A player saved in creative (game mode 1, mayfly and instabuild)
+            // joins again: without force they stay creative; forced into the
+            // default mode (survival) they get its abilities.
+            let root = std::env::temp_dir().join(format!("abilities-force-{}", std::process::id()));
+            game.world_root = root.clone();
+            let g = game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap();
+            g.game_mode = 1;
+            g.abilities.update_for_mode(1);
+            assert!(g.abilities.may_fly && g.abilities.instabuild);
+            horizon_client::lan::playerdata::save(g, &root);
+            let joined = |game: &mut super::super::Game<'_>, force| {
+                let host = game.lan.as_mut().unwrap();
+                host.hub.config.default_game_mode = 0;
+                host.hub.config.force_game_mode = force;
+                let g = host.hub.guest_mut(13).unwrap();
+                g.game_mode = 0;
+                g.abilities = Default::default();
+                game.lan_guest_joined(13, &[], [0.0, 64.0, 0.0]);
+                let g = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
+                (
+                    g.game_mode,
+                    g.abilities.may_fly,
+                    g.abilities.instabuild,
+                    g.abilities.may_build,
+                )
+            };
+            assert_eq!(joined(game, false), (1, true, true, true));
+            assert_eq!(joined(game, true), (0, false, false, true));
+            let _ = std::fs::remove_dir_all(root);
         });
     }
 
@@ -881,6 +975,7 @@ pub(super) mod tests {
             let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
             assert!(fake.placed && fake.motion.is_some());
+            assert!(fake.loaded && fake.client_loaded());
             assert!(!fake.participates_online() && !fake.participates_in_player_simulation());
             assert_eq!((fake.game_mode, fake.permission, fake.input), (0, 0, 0));
             assert!(fake.vehicle.is_none() && fake.bed.is_none() && fake.menu.is_none());
@@ -948,6 +1043,13 @@ pub(super) mod tests {
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
+            // A fake record in the Nether does not keep that level ticking.
+            game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
+            let ticking = game.levels_to_tick();
+            assert!(!ticking.contains(&super::super::Dim::Nether));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            assert!(game.levels_to_tick().contains(&super::super::Dim::Nether));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:overworld".into();
             game.lan_acting = Some(real_id);
             let selector = horizon_client::command::args::Selector {
                 kind: 'a',
@@ -963,10 +1065,38 @@ pub(super) mod tests {
             assert!(game.run_command_quietly("list"));
             assert!(!game.run_command_quietly("tp fake 0 64 0"));
             game.lan_acting = None;
+            for (conn, learns) in [(fake_id, false), (real_id, true)] {
+                game.as_guest(conn, |game| {
+                    let mut book =
+                        horizon_client::items::ItemStack::new("minecraft:knowledge_book", 1);
+                    book.data_mut().set_other(
+                        "minecraft:recipes",
+                        Some(horizon_world::nbt::Tag::List(vec![
+                            horizon_world::nbt::Tag::String("minecraft:stick".into()),
+                        ])),
+                    );
+                    let slot = game.held_slot();
+                    *game.stack_in_mut(slot) = Some(book.clone());
+                    assert!(game.use_knowledge_book(&book));
+                    assert!(game.stack_in(slot).is_none());
+                    assert_eq!(game.level.recipe_book.knows("minecraft:stick"), learns);
+                })
+                .unwrap();
+            }
             game.guest_packets
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(fake_id, |game| {
                 assert!(game.lan_acting_fake);
+                assert!(game.player.as_ref().is_some_and(|p| p.client_loaded));
+                assert!(game.player_view().is_none());
+                let mut visited = 0;
+                game.for_each_player(|_| visited += 1);
+                assert_eq!(visited, 0);
+                let before = game.stats.get("custom", "minecraft:jump");
+                game.award_stat("custom", "minecraft:jump", 1);
+                assert_eq!(game.stats.get("custom", "minecraft:jump"), before);
+                game.trigger("minecraft:tick", |_, _| panic!("fake criterion evaluated"));
+                assert_eq!(game.award_recipes(&["minecraft:test".into()]), 0);
                 let source = horizon_client::command::args::Selector {
                     kind: 's',
                     limit: 1,
@@ -1043,6 +1173,9 @@ pub(super) mod tests {
                 .push(("fake_outer".into(), [0.0; 3], 1.0, 1.0));
             game.as_guest(real_id, |game| {
                 assert!(!game.lan_acting_fake);
+                let before = game.stats.get("custom", "minecraft:jump");
+                game.award_stat("custom", "minecraft:jump", 1);
+                assert_eq!(game.stats.get("custom", "minecraft:jump"), before + 1);
                 game.guest_cooldowns
                     .push(("minecraft:real_inner".into(), 9));
             })
