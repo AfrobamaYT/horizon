@@ -268,7 +268,7 @@ jobs:
       - name: Use system Python for parity harnesses
         run: |
           mkdir -p "$DYNA_CI_BUILD/bin"
-          ln -sf "$(command -v python3)" "$DYNA_CI_BUILD/bin/python"
+          ln -sf "$GITHUB_WORKSPACE/tools/ci/dyna_parity_python.sh" "$DYNA_CI_BUILD/bin/python"
           echo "$DYNA_CI_BUILD/bin" >> "$GITHUB_PATH"
       - name: Install Rust toolchain
         run: |
@@ -276,9 +276,12 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
           fi
           rustup toolchain install stable --profile minimal
-      - name: Link prepared vanilla data
+      - name: Set up disk-backed parity scratch and link prepared vanilla data
         run: |
-          mkdir -p .local
+          rm -rf "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          mkdir -p "$DYNA_CI_BUILD/parity-out" "$DYNA_CI_BUILD/parity-tmp"
+          ln -s "$DYNA_CI_BUILD/parity-out" .local
+          echo "TMPDIR=$DYNA_CI_BUILD/parity-tmp" >> "$GITHUB_ENV"
           for dir in minecraft datagen horizon-client tools; do
             test -d "/cache/horizon-local/$dir"
             ln -s "/cache/horizon-local/$dir" ".local/$dir"

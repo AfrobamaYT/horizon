@@ -1861,6 +1861,26 @@ impl OpenNativeScreen {
     }
 }
 
+/// `PlayerSpawnPhantomsEvent.Result`: whether the phantom spawner tries a spawn near a player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhantomSpawnResult {
+    /// Always try, skipping the skylight and sea level check.
+    Allow,
+    /// Try only above sea level with the sky in view.
+    Default,
+    /// Never try.
+    Deny,
+}
+
+/// `Player.BedSleepingProblem` as `CanContinueSleepingEvent.getProblem` reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SleepProblem {
+    /// The sleeper's bed is gone.
+    NotPossibleHere,
+    /// The bed rule no longer lets a player sleep: it is daytime.
+    NotPossibleNow,
+}
+
 /// The player as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
@@ -4239,6 +4259,59 @@ impl Game<'_> {
     pub(super) fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         mod_api::dispatch_player_bed_leave(self, mod_api::mods(), player, name, pos);
     }
+    /// `CanContinueSleepingEvent`: a sleeping living entity's check that it may go on
+    /// sleeping, run each tick for a server player the dead and health checks would not
+    /// already wake, and for a sleeping villager or wandering trader. `entity` is its UUID,
+    /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
+    /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
+    /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
+    /// none when nothing is wrong. `may_continue` starts empty, meaning `problem.is_none()` (`mayContinueSleeping`);
+    /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
+    /// on a guest tick. @API:can_continue_sleeping@.
+    pub(super) fn native_can_continue_sleeping(
+        &mut self,
+        entity: u128,
+        name: &str,
+        kind: &str,
+        pos: [i32; 3],
+        problem: Option<SleepProblem>,
+        may_continue: &mut Option<bool>,
+    ) {
+        mod_api::dispatch_can_continue_sleeping(
+            self,
+            mod_api::mods(),
+            entity,
+            name,
+            kind,
+            pos,
+            problem,
+            may_continue,
+        );
+    }
+    /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
+    /// spawn near a non-spectator server player, before its difficulty and rest rolls.
+    /// `result` starts empty, meaning `Default` (skylight and sea level check); `Allow` skips
+    /// that check and `Deny` stops the attempt. `phantoms` starts with a randomly drawn
+    /// group size; set it to override the count. Without mods the original draw order is kept.
+    /// @API:player_spawn_phantoms@.
+    pub(super) fn native_player_spawn_phantoms(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        result: &mut Option<PhantomSpawnResult>,
+        phantoms: &mut Option<i32>,
+    ) {
+        mod_api::dispatch_player_spawn_phantoms(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            pos,
+            phantoms,
+            result,
+        );
+    }
     /// A server player's book edit or signing packet is about to be applied.
     /// `pages` is its page count; `signing` means the packet has a title. Set
     /// `cancel` to drop the edit. Helpers looking up the guest through
@@ -6411,6 +6484,16 @@ impl Game<'_> {
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    pub(super) fn native_create_spawn_position(
+        &mut self,
+        position: &mut [i32; 3],
+        rotation: &mut [f32; 2],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_create_spawn_position(self, mod_api::mods(), position, rotation, cancel);
+    }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
     /// food and experience reset, with their state swapped in. Once for each
@@ -8452,7 +8535,14 @@ impl Game<'_> {
     }
     /// Collision boxes in block-local coordinates with an empty collision context.
     pub(super) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
-        self.block_collision_shape(pos)
+        self.native_block_collision_in(&self.world, pos)
+    }
+    pub(super) fn native_block_collision_in(
+        &self,
+        world: &horizon_client::world::World,
+        pos: [i32; 3],
+    ) -> Vec<[f64; 6]> {
+        self.block_collision_shape_in(world, pos)
             .boxes()
             .iter()
             .map(|bounds| {
