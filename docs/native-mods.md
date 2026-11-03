@@ -2375,6 +2375,11 @@ client, so a call a tick looks smooth.
 several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
 a dimension.
 
+An entity held out of storage while it is changed refuses handle reads and writes: reads return `None` and writes return
+`false`. This includes cart and ridden-cart ticks, boat ticks (including ridden-boat leash ticks), and a copper golem turning into a
+statue. A block entity also refuses its handle while it is being ticked. Tick hooks before and after that work can use
+the handle normally.
+
 The client also owns a world epoch, separate from the server's. It begins when a play login creates the
 client level, changes when a dimension change or later login replaces that level, and retires after the
 client logout hook or when reconfiguration clears the level. A same-level respawn keeps the epoch.

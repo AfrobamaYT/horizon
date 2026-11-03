@@ -78,12 +78,22 @@ pub fn read(path: &Path) -> Result<JarInfo, String> {
 
 /// A main-section attribute of `META-INF/MANIFEST.MF`.
 fn manifest_value(manifest: &str, key: &str) -> Option<String> {
-    manifest
-        .lines()
-        .take_while(|l| !l.trim().is_empty())
-        .find_map(|l| l.strip_prefix(key)?.strip_prefix(':'))
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
+    let manifest = manifest.replace("\r\n", "\n").replace('\r', "\n");
+    let mut value: Option<String> = None;
+    for line in manifest.lines().take_while(|line| !line.is_empty()) {
+        if let Some(continuation) = line.strip_prefix(' ') {
+            if let Some(value) = &mut value {
+                value.push_str(continuation);
+            }
+        } else if value.is_some() {
+            break;
+        } else if let Some((name, contents)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case(key) {
+                value = Some(contents.strip_prefix(' ').unwrap_or(contents).to_owned());
+            }
+        }
+    }
+    value.filter(|value| !value.is_empty())
 }
 
 /// The jar's mod from its metadata files (`neoforge.mods.toml` first, then
@@ -325,6 +335,44 @@ mod tests {
         }
         archive.finish().unwrap();
         SyntheticJar(path, dir)
+    }
+
+    #[test]
+    fn manifest_version_continuations_are_read_in_the_main_section_only() {
+        let metadata = "[[mods]]\nmodId = 'ruby'\nversion = '${file.jarVersion}'\n";
+        let folded = synthetic_jar(
+            "folded-version",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\r\nimplementation-version: 1.2-\r\n snapshot\r\nNext-Attribute: ignored\r\n\r\nName: file\r\nImplementation-Version: wrong\r\n",
+                ),
+            ],
+        );
+        assert_eq!(read(&folded.0).unwrap().version, "1.2-snapshot");
+        let lone_cr = synthetic_jar(
+            "cr-version",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\rImplementation-Version:  2.3-\r build\r\rName: file\rImplementation-Version: wrong\r",
+                ),
+            ],
+        );
+        assert_eq!(read(&lone_cr.0).unwrap().version, " 2.3-build");
+        let named = synthetic_jar(
+            "named-section-only",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\r\n\r\nName: file\r\nImplementation-Version: wrong\r\n",
+                ),
+            ],
+        );
+        assert_eq!(read(&named.0).unwrap().version, "");
     }
 
     #[test]
