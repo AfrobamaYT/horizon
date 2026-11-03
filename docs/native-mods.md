@@ -2390,6 +2390,18 @@ a dimension.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
+- `level.chunk_ref(host, [x, z])` makes a `ChunkRef` for any chunk of an open level, loaded or not (None past 30 million
+  blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
+  `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
+  is the world's own state: it is saved with the level and stays until `/forceload remove`.
+- `chunk.set_mod_forced(host, owner, forced)` (NeoForge's `TicketController.forceChunk`, one implicit controller per mod)
+  holds or releases a chunk for the calling mod and returns whether its tickets changed. `owner` is a `NativeTicketOwner`,
+  `Block([x, y, z])` or `Entity(uuid)`. A ticket is scoped by mod, owner and chunk, so two owners in one chunk release
+  separately; the chunk stays loaded, entity ticking and saved, and its level keeps ticking, while any ticket or
+  `/forceload` holds it. `level.mod_forced_chunks(host)` lists the calling mod's tickets as `(owner, [x, z])`.
+  Tickets are saved in `data/horizon/mod_chunk_tickets.dat`, never in vanilla's `chunk_tickets.dat`; when a world loads,
+  the tickets of a mod that isn't installed are discarded. There is no non-ticking ticket. Outside a mod's hook, and for a
+  stale handle or a chunk past the world's bounds, the calls return `false` or `None`.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
