@@ -14,7 +14,8 @@ use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 /// with, and the game's own provider, if the game has one.
 pub struct CapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    pub(super) default: Option<fn(&mut dyn super::ServerHost, BlockSide) -> Option<Box<T>>>,
+    pub(super) default:
+        Option<fn(&mut dyn crate::mod_api::ServerHost, BlockSide) -> Option<Box<T>>>,
     pub(super) handler: PhantomData<fn() -> Box<T>>,
 }
 
@@ -86,23 +87,27 @@ pub const ITEMS: CapabilityKey<dyn ResourceHandler<ItemResource>> = CapabilityKe
 /// follow.
 struct GameItems(BlockSide);
 impl ResourceHandler<ItemResource> for GameItems {
-    fn size(&self, host: &mut dyn super::ServerHost) -> usize {
+    fn size(&self, host: &mut dyn crate::mod_api::ServerHost) -> usize {
         backend_of(&*host)
             .and_then(|backend| backend.container_size(self.0))
             .unwrap_or(0)
     }
-    fn resource(&self, host: &mut dyn super::ServerHost, index: usize) -> Option<ItemResource> {
+    fn resource(
+        &self,
+        host: &mut dyn crate::mod_api::ServerHost,
+        index: usize,
+    ) -> Option<ItemResource> {
         let stack = backend_of(&*host)?.container_stack(self.0, index)?;
         Some(ItemResource::of(&stack))
     }
-    fn amount(&self, host: &mut dyn super::ServerHost, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn crate::mod_api::ServerHost, index: usize) -> u32 {
         backend_of(&*host)
             .and_then(|backend| backend.container_stack(self.0, index))
             .map_or(0, |stack| stack.count)
     }
     fn capacity(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         index: usize,
         resource: &ItemResource,
     ) -> u32 {
@@ -112,7 +117,7 @@ impl ResourceHandler<ItemResource> for GameItems {
     }
     fn insert(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -127,7 +132,7 @@ impl ResourceHandler<ItemResource> for GameItems {
     }
     fn extract(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -154,7 +159,7 @@ impl LevelRef {
     /// entities the game doesn't write: no provider is asked for one.
     pub fn capability<T: ?Sized + 'static>(
         self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         key: &CapabilityKey<T>,
         pos: [i32; 3],
         side: Option<Direction>,

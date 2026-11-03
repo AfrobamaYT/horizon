@@ -1,7 +1,7 @@
 //! NeoForge 26.3's transfer API (#41 §7): a resource is what a handler holds, without an amount
 //! ([`ItemResource`]), and a [`ResourceHandler`] is the indexed contents of one holder, written
 //! only inside a transaction.
-use super::{Capability, Compound, Host, ItemStack, Tag, Transaction};
+use super::{Capability, Compound, Host, HostTransaction, ItemStack, Tag, Transaction};
 use horizon_world::nbt::JavaString;
 use std::fmt;
 
@@ -218,22 +218,32 @@ impl fmt::Debug for ItemResource {
 /// asked; a handler answering more is a mod bug, and the move it was part of is aborted.
 pub trait ResourceHandler<R> {
     /// How many indices it has.
-    fn size(&self, host: &mut dyn super::ServerHost) -> usize;
+    fn size(&self, host: &mut dyn crate::mod_api::ServerHost) -> usize;
     /// What index `index` holds, if anything.
-    fn resource(&self, host: &mut dyn super::ServerHost, index: usize) -> Option<R>;
+    fn resource(&self, host: &mut dyn crate::mod_api::ServerHost, index: usize) -> Option<R>;
     /// How much of it.
-    fn amount(&self, host: &mut dyn super::ServerHost, index: usize) -> u32;
+    fn amount(&self, host: &mut dyn crate::mod_api::ServerHost, index: usize) -> u32;
     /// How much of `resource` index `index` holds when it holds that, whatever it holds now: none
     /// where `resource` may not go (`getCapacityAsLong`).
-    fn capacity(&self, host: &mut dyn super::ServerHost, index: usize, resource: &R) -> u32;
+    fn capacity(
+        &self,
+        host: &mut dyn crate::mod_api::ServerHost,
+        index: usize,
+        resource: &R,
+    ) -> u32;
     /// Whether `resource` may go in index `index` at all (`isValid`).
-    fn is_valid(&self, host: &mut dyn super::ServerHost, index: usize, resource: &R) -> bool {
+    fn is_valid(
+        &self,
+        host: &mut dyn crate::mod_api::ServerHost,
+        index: usize,
+        resource: &R,
+    ) -> bool {
         self.capacity(host, index, resource) > 0
     }
     /// Puts up to `amount` of `resource` into index `index`: how much went in.
     fn insert(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &R,
@@ -243,7 +253,7 @@ pub trait ResourceHandler<R> {
     /// another resource.
     fn extract(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &R,
@@ -253,7 +263,7 @@ pub trait ResourceHandler<R> {
     /// index): by default index by index from 0. How much went in.
     fn insert_any(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         resource: &R,
         amount: u32,
@@ -271,7 +281,7 @@ pub trait ResourceHandler<R> {
     /// by default index by index from 0. How much came out.
     fn extract_any(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         resource: &R,
         amount: u32,
@@ -303,7 +313,7 @@ pub struct Overanswered {
 /// whole thirds). A handler answering more than it was asked has its move undone and ends the
 /// moving with [`Overanswered`].
 pub fn move_resources<R>(
-    host: &mut dyn super::ServerHost,
+    host: &mut dyn crate::mod_api::ServerHost,
     from: &Capability<dyn ResourceHandler<R>>,
     to: &Capability<dyn ResourceHandler<R>>,
     filter: impl Fn(&R) -> bool,
@@ -351,16 +361,16 @@ pub(super) struct Ends<'a, A: ?Sized, B: ?Sized> {
 /// asked has its move undone and gives [`Overanswered`]. The one step of `move_resources` and
 /// `move_energy`.
 pub(super) fn move_once<A: ?Sized, B: ?Sized>(
-    host: &mut dyn super::ServerHost,
+    host: &mut dyn crate::mod_api::ServerHost,
     ends: Ends<'_, A, B>,
     want: u32,
-    extract: impl Fn(&mut dyn super::ServerHost, &Transaction, u32) -> u32,
-    insert: impl Fn(&mut dyn super::ServerHost, &Transaction, u32) -> u32,
+    extract: impl Fn(&mut dyn crate::mod_api::ServerHost, &Transaction, u32) -> u32,
+    insert: impl Fn(&mut dyn crate::mod_api::ServerHost, &Transaction, u32) -> u32,
 ) -> Result<u32, Overanswered> {
     let Ends { from, to, at } = ends;
     // `Err(Ok(took))`: `to` took only that much; `Err(Err(_))`: a handler answered more than it
     // was asked.
-    let step = |host: &mut dyn super::ServerHost, want: u32| {
+    let step = |host: &mut dyn crate::mod_api::ServerHost, want: u32| {
         host.transaction(|host, tx| {
             let Some(out) = from.checked(extract(host, tx, want), want, at) else {
                 return Err(Err(Overanswered {

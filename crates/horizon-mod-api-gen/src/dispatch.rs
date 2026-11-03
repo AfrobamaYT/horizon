@@ -216,7 +216,11 @@ pub(super) fn emit(
         if let Some((name, param)) = &host {
             trait_params.push(format!("{name}: {}", param.ty));
             let by_side = param.ty == "HostSide";
-            dispatch_params.push(format!("{}{name}: {}", if by_side { "mut " } else { "" }, param.ty));
+            dispatch_params.push(format!(
+                "{}{name}: {}",
+                if by_side { "mut " } else { "" },
+                param.ty
+            ));
             call_args.push(if by_side {
                 format!("{name}.reborrow()")
             } else if param.ty.starts_with("&mut ") {

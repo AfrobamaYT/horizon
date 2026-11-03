@@ -1946,9 +1946,9 @@ impl NativeTriState {
 mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
-pub use generated_host::{ClientHost, Host, ServerHost};
 #[doc(hidden)]
 pub use generated_host::{Backend, BackendMut};
+pub use generated_host::{ClientHost, Host, ServerHost};
 
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;

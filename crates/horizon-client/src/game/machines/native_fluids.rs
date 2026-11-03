@@ -398,6 +398,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {
@@ -501,7 +502,7 @@ mod tests {
             assert!(game.native_level_set_block(level, to, one, flags));
             // The target has room for two levels: the bucket the source first gives doesn't
             // fit, so the move is undone and tried again with what fit, two levels' worth.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn crate::mod_api::ServerHost = game;
             let source = level.capability(host, &FLUIDS, from, None).unwrap();
             let target = level.capability(host, &FLUIDS, to, None).unwrap();
             let moved = host

@@ -11,7 +11,7 @@ use std::marker::PhantomData;
 /// provider, if the game has one.
 pub struct EntityCapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    default: Option<fn(&mut dyn super::ServerHost, EntityRef) -> Option<Box<T>>>,
+    default: Option<fn(&mut dyn crate::mod_api::ServerHost, EntityRef) -> Option<Box<T>>>,
     handler: PhantomData<fn() -> Box<T>>,
 }
 
@@ -52,7 +52,7 @@ impl EntityRef {
     /// in place: no provider is asked for one.
     pub fn capability<T: ?Sized + 'static>(
         self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         key: &EntityCapabilityKey<T>,
     ) -> Option<Capability<T>> {
         if !self.level(host)?.in_place(host) {
@@ -99,19 +99,23 @@ impl ContainerItems {
 }
 
 impl ResourceHandler<ItemResource> for ContainerItems {
-    fn size(&self, _: &mut dyn super::ServerHost) -> usize {
+    fn size(&self, _: &mut dyn crate::mod_api::ServerHost) -> usize {
         self.size
     }
-    fn resource(&self, host: &mut dyn super::ServerHost, index: usize) -> Option<ItemResource> {
+    fn resource(
+        &self,
+        host: &mut dyn crate::mod_api::ServerHost,
+        index: usize,
+    ) -> Option<ItemResource> {
         self.place(host, index)?.resource(host)
     }
-    fn amount(&self, host: &mut dyn super::ServerHost, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn crate::mod_api::ServerHost, index: usize) -> u32 {
         self.place(host, index)
             .map_or(0, |place| place.amount(host))
     }
     fn capacity(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         index: usize,
         resource: &ItemResource,
     ) -> u32 {
@@ -122,7 +126,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
     }
     fn insert(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -136,7 +140,7 @@ impl ResourceHandler<ItemResource> for ContainerItems {
     }
     fn extract(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -183,7 +187,7 @@ impl PlayerItems {
 /// Puts up to `amount` of `resource` at `place`, into what fits there and no further: an
 /// empty place or one with the same item, up to `limit`.
 fn fill(
-    host: &mut dyn super::ServerHost,
+    host: &mut dyn crate::mod_api::ServerHost,
     tx: &Transaction,
     place: &ItemPlace,
     resource: &ItemResource,
@@ -234,19 +238,23 @@ fn equips(host: &dyn Host, resource: &ItemResource, slot: &str) -> bool {
 }
 
 impl ResourceHandler<ItemResource> for PlayerItems {
-    fn size(&self, _: &mut dyn super::ServerHost) -> usize {
+    fn size(&self, _: &mut dyn crate::mod_api::ServerHost) -> usize {
         OFF_HAND + 1
     }
-    fn resource(&self, host: &mut dyn super::ServerHost, index: usize) -> Option<ItemResource> {
+    fn resource(
+        &self,
+        host: &mut dyn crate::mod_api::ServerHost,
+        index: usize,
+    ) -> Option<ItemResource> {
         self.place(host, index)?.resource(host)
     }
-    fn amount(&self, host: &mut dyn super::ServerHost, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn crate::mod_api::ServerHost, index: usize) -> u32 {
         self.place(host, index)
             .map_or(0, |place| place.amount(host))
     }
     fn capacity(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         index: usize,
         resource: &ItemResource,
     ) -> u32 {
@@ -263,7 +271,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     }
     fn insert(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -277,7 +285,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     }
     fn extract(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &ItemResource,
@@ -304,7 +312,7 @@ impl ResourceHandler<ItemResource> for PlayerItems {
     /// the armour.
     fn insert_any(
         &self,
-        host: &mut dyn super::ServerHost,
+        host: &mut dyn crate::mod_api::ServerHost,
         tx: &Transaction,
         resource: &ItemResource,
         amount: u32,

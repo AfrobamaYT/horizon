@@ -2005,7 +2005,7 @@ impl Game<'_> {
         &mut self,
         categories: &mut Vec<RecipeBookCategory>,
     ) {
-        mod_api::dispatch_recipe_book_categories(self, categories);
+        mod_api::dispatch_recipe_book_categories(mod_api::HostSide::of(self), categories);
     }
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
@@ -2162,7 +2162,7 @@ impl Game<'_> {
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
     pub(super) fn native_tick(&mut self) {
-        mod_api::dispatch_tick(self);
+        mod_api::dispatch_tick(mod_api::HostSide::of(self));
     }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
@@ -2256,7 +2256,7 @@ impl Game<'_> {
     /// Contributed files sit below the world's own data packs: a pack's file
     /// for the same path still overrides a mod's. Server-side (the single
     /// player's integrated server included). API 106.
-    pub(super) fn native_data_pack_files(&self, files: &mut Vec<(String, Vec<u8>)>) {
+    pub(super) fn native_data_pack_files(&mut self, files: &mut Vec<(String, Vec<u8>)>) {
         mod_api::dispatch_data_pack_files(self, files);
     }
     /// The server is assembling its data tables, as for
@@ -2272,7 +2272,7 @@ impl Game<'_> {
     /// overriding an older. Read them with `native_data_map` and
     /// `native_data_map_entries`, in `native_data_maps.rs`. Server-side, not
     /// synced to clients. API 143.
-    pub(super) fn native_data_map_types(&self, types: &mut Vec<NativeDataMapType>) {
+    pub(super) fn native_data_map_types(&mut self, types: &mut Vec<NativeDataMapType>) {
         mod_api::dispatch_data_map_types(self, types);
     }
     /// The server is about to open its worlds: nothing of the world is
@@ -2488,7 +2488,7 @@ impl Game<'_> {
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
     pub(super) fn native_command(&mut self, command: &str, ran: &mut bool) {
-        mod_api::dispatch_command(self, command, ran);
+        mod_api::dispatch_command(mod_api::HostSide::of(self), command, ran);
     }
     /// The commands `native_command` runs, by name and without their slash:
     /// push the ones that are yours. Asked when a connection starts and
@@ -2724,13 +2724,13 @@ impl Game<'_> {
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
-        mod_api::dispatch_mods(self, mods);
+        mod_api::dispatch_mods(mod_api::HostSide::of(self), mods);
     }
     /// The buttons of mod `mod_id`'s settings page, under its keys: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     pub(super) fn native_settings(&mut self, mod_id: &str, buttons: &mut Vec<String>) {
-        mod_api::dispatch_settings(self, mod_id, buttons);
+        mod_api::dispatch_settings(mod_api::HostSide::of(self), mod_id, buttons);
     }
     /// Button `button` of mod `mod_id`'s settings page was clicked.
     pub(super) fn native_settings_click(&mut self, mod_id: &str, button: usize) {
@@ -2754,7 +2754,7 @@ impl Game<'_> {
         block: &str,
         entity: &mut Option<(String, Compound)>,
     ) {
-        mod_api::dispatch_block_entity(self, block, entity);
+        mod_api::dispatch_block_entity(mod_api::HostSide::of(self), block, entity);
     }
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
     /// set `ticks` when it is yours. Asked for each of the block's states
@@ -2796,7 +2796,7 @@ impl Game<'_> {
         block: &str,
         container: &mut Option<ModContainer>,
     ) {
-        mod_api::dispatch_block_entity_container(self, block, container);
+        mod_api::dispatch_block_entity_container(mod_api::HostSide::of(self), block, container);
     }
     /// Block `block`'s block entity has fluid tanks: set `fluids` when the
     /// block is yours, in the container's shape — each tank's capacity in
@@ -2839,7 +2839,7 @@ impl Game<'_> {
     /// `minecraft:container`, as a shulker box item keeps them.
     /// API @API:item_container@.
     pub(super) fn native_item_container(&self, item: &str, slots: &mut Option<u32>) {
-        mod_api::dispatch_item_container(self, item, slots);
+        mod_api::dispatch_item_container(mod_api::HostSide::of(self), item, slots);
     }
     /// A server tick of the block entity at `pos`, in vanilla's order among
     /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
@@ -3004,8 +3004,8 @@ impl Game<'_> {
     /// when the block is yours, to lay its screen out (`native_screen_draw`
     /// draws it). The server asks it too: a slot it hides is not in the menu
     /// there either, so shift-clicks never fill it. API 19.
-    pub(super) fn native_screen(&self, block: &str, screen: &mut Option<NativeScreen>) {
-        mod_api::dispatch_screen(self, block, screen);
+    pub(super) fn native_screen(&mut self, block: &str, screen: &mut Option<NativeScreen>) {
+        mod_api::dispatch_screen(mod_api::HostSide::of(self), block, screen);
     }
     /// Draw block `block`'s screen at `origin` (its top left, GUI pixels),
     /// over a plain panel with its slots' frames and under the items and
@@ -4795,7 +4795,13 @@ impl Game<'_> {
         state: u32,
         can_harvest: &mut bool,
     ) {
-        mod_api::dispatch_player_harvest_check(self, player, pos, state, can_harvest);
+        mod_api::dispatch_player_harvest_check(
+            mod_api::HostSide::of(self),
+            player,
+            pos,
+            state,
+            can_harvest,
+        );
     }
 
     /// A player's destroy speed for the block at `pos` may be changed or canceled.
@@ -5435,7 +5441,14 @@ impl Game<'_> {
         update: &mut horizon_client::menu::AnvilUpdate,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_anvil_update(self, player, player_entity_id, pos, update, cancel);
+        mod_api::dispatch_anvil_update(
+            mod_api::HostSide::of(self),
+            player,
+            player_entity_id,
+            pos,
+            update,
+            cancel,
+        );
     }
     /// A grindstone at `pos` made its result after its inputs changed, for
     /// the server player `player` (UUID) and `player_entity_id`
@@ -6275,7 +6288,7 @@ impl Game<'_> {
     /// frame the hand draws one in use, on both sides. It has no user, as
     /// it is asked so often: answer from the stack alone. API 90.
     pub(super) fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32) {
-        mod_api::dispatch_use_duration(self, stack, duration);
+        mod_api::dispatch_use_duration(mod_api::HostSide::of(self), stack, duration);
     }
     /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
     /// `animation` arrives with its consumable's (`eat`, `drink`), else
@@ -6293,7 +6306,7 @@ impl Game<'_> {
     /// let a full player eat. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone. API 90.
     pub(super) fn native_can_eat(&self, stack: &ItemStack, can_eat: &mut bool) {
-        mod_api::dispatch_can_eat(self, stack, can_eat);
+        mod_api::dispatch_can_eat(mod_api::HostSide::of(self), stack, can_eat);
     }
     /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
     /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
@@ -6388,7 +6401,7 @@ impl Game<'_> {
         entity: Option<i32>,
         remaining: i32,
     ) {
-        mod_api::dispatch_on_use_tick(self, stack, entity, remaining);
+        mod_api::dispatch_on_use_tick(mod_api::HostSide::of(self), stack, entity, remaining);
     }
     /// NeoForge's `LivingEntityUseItemEvent.Stop`: `entity` lets go of
     /// `stack` in `hand` before its use ran its time
@@ -6468,7 +6481,13 @@ impl Game<'_> {
         sweeping: &mut bool,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_sweep_attack(self, target, vanilla_sweep, sweeping, canceled);
+        mod_api::dispatch_sweep_attack(
+            mod_api::HostSide::of(self),
+            target,
+            vanilla_sweep,
+            sweeping,
+            canceled,
+        );
     }
     /// `Item.releaseUsing` of `stack`: `entity` let it go with `time_left`
     /// ticks of its `native_use_duration` left, so it was held for
@@ -6485,7 +6504,13 @@ impl Game<'_> {
         time_left: i32,
         used: &mut bool,
     ) {
-        mod_api::dispatch_release_using(self, stack, entity, time_left, used);
+        mod_api::dispatch_release_using(
+            mod_api::HostSide::of(self),
+            stack,
+            entity,
+            time_left,
+            used,
+        );
     }
     /// A player breaks the block `state` at `pos`, once the game allowed it
     /// (the held item can break blocks, the debug stick didn't take the
@@ -6569,7 +6594,13 @@ impl Game<'_> {
         final_state: &mut Option<BlockStateId>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_block_tool_modification(self, stack, tool, final_state, cancel);
+        mod_api::dispatch_block_tool_modification(
+            mod_api::HostSide::of(self),
+            stack,
+            tool,
+            final_state,
+            cancel,
+        );
     }
 
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
@@ -9627,7 +9658,7 @@ impl Game<'_> {
     /// The container slots (of `size`) that the mod's screen for the block at
     /// `pos` does not show: the server's menu does not have them either, so a
     /// shift-click never moves an item where the player cannot see it.
-    pub(super) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
+    pub(super) fn native_hidden_slots(&mut self, pos: Pos, size: usize) -> Vec<usize> {
         if self.mod_menu_at(pos).is_none() {
             return Vec::new();
         }

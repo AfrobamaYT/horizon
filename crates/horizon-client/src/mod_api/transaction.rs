@@ -13,6 +13,26 @@ pub struct TransactionSeal(());
 /// its closure alone.
 pub struct Transaction(());
 
+/// Transaction support preserves the receiver's side inside its closure.
+///
+/// ```
+/// use horizon_client::mod_api::{BlockEntityRef, HostTransaction, ServerHost};
+/// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
+///     let _: Result<(), ()> = host.transaction(|host, _tx| {
+///         block.set_changed(host);
+///         Ok(())
+///     });
+/// }
+/// ```
+/// ```compile_fail
+/// use horizon_client::mod_api::{BlockEntityRef, Host, HostTransaction};
+/// fn write(host: &mut dyn Host, block: BlockEntityRef) {
+///     let _: Result<(), ()> = host.transaction(|host, _tx| {
+///         block.set_changed(host);
+///         Ok(())
+///     });
+/// }
+/// ```
 pub trait HostTransaction: Host {
     /// Runs `f` in a transaction, nested in the open one if any (`Transaction.openRoot` and
     /// `open`): `Ok` commits it (`commit`), into the transaction around it or, at the
