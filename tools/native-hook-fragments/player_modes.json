@@ -2,17 +2,17 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "player_permission_level",
+      "name": "player_permission_level", "side": "server",
       "target": "horizon_client::game::native_player_modes::Game<'_>::native_player_permission_level",
       "receiver": "player"
     },
     {
-      "name": "player_has_infinite_materials",
+      "name": "player_has_infinite_materials", "side": "server",
       "target": "horizon_client::game::native_player_modes::Game<'_>::native_player_has_infinite_materials",
       "receiver": "player"
     },
     {
-      "name": "player_can_use_game_master_blocks",
+      "name": "player_can_use_game_master_blocks", "side": "server",
       "target": "horizon_client::game::native_player_modes::Game<'_>::native_player_can_use_game_master_blocks",
       "receiver": "player"
     }

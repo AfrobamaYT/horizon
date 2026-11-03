@@ -2,32 +2,32 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "level_seed",
+      "name": "level_seed", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_seed",
       "receiver": "level"
     },
     {
-      "name": "level_difficulty",
+      "name": "level_difficulty", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_difficulty",
       "receiver": "level"
     },
     {
-      "name": "level_game_rule",
+      "name": "level_game_rule", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_game_rule",
       "receiver": "level"
     },
     {
-      "name": "level_weather",
+      "name": "level_weather", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_weather",
       "receiver": "level"
     },
     {
-      "name": "level_is_raining",
+      "name": "level_is_raining", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_is_raining",
       "receiver": "level"
     },
     {
-      "name": "level_is_thundering",
+      "name": "level_is_thundering", "side": "server",
       "target": "horizon_client::game::native_level_world::Game<'_>::native_level_is_thundering",
       "receiver": "level"
     }
