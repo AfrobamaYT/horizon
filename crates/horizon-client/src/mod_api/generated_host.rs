@@ -1327,6 +1327,22 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::level_entities_in")
     }
+    /// Block-local outline or collision boxes with an empty context. Interaction,
+    /// visual, occlusion and support shapes are not exposed. Returns None on a
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
+    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// API @API:level_shapes@.
+    fn level_block_shape(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        let _ = level;
+        let _ = pos;
+        let _ = kind;
+        unimplemented!("Host::level_block_shape")
+    }
     /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
     /// player, an armor stand or the dragon), or None for another kind or a
     /// stale handle. API @API:living_refs@.
@@ -1467,6 +1483,19 @@ impl LevelRef {
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>> {
         host.level_entities_in(self, min, max)
+    }
+    /// Block-local outline or collision boxes with an empty context. Interaction,
+    /// visual, occlusion and support shapes are not exposed. Returns None on a
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
+    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// API @API:level_shapes@.
+    pub fn block_shape(
+        self,
+        host: &dyn Host,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        host.level_block_shape(self, pos, kind)
     }
 }
 impl LivingRef {

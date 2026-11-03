@@ -8462,7 +8462,14 @@ impl Game<'_> {
     }
     /// Collision boxes in block-local coordinates with an empty collision context.
     pub(super) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
-        self.block_collision_shape(pos)
+        self.native_block_collision_in(&self.world, pos)
+    }
+    pub(super) fn native_block_collision_in(
+        &self,
+        world: &horizon_client::world::World,
+        pos: [i32; 3],
+    ) -> Vec<[f64; 6]> {
+        self.block_collision_shape_in(world, pos)
             .boxes()
             .iter()
             .map(|bounds| {

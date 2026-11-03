@@ -3300,18 +3300,22 @@ impl Game<'_> {
     /// block while the main hand holds the block's own item
     /// (`CollisionContext.isHoldingItem`), and `ShulkerBoxBlock.getShape`
     /// grows with the lid (`ShulkerBoxBlockEntity.getBoundingBox`).
-    fn context_outline(&self, pos: [i32; 3], state: BlockStateId) -> Option<[f64; 6]> {
+    fn context_outline(
+        &self,
+        pos: [i32; 3],
+        state: BlockStateId,
+        player_context: bool,
+        anims: &horizon_client::block_entity_anim::BlockEntityAnims,
+    ) -> Option<[f64; 6]> {
         let name = &self.res.facts().get(state).name;
         if matches!(&**name, "minecraft:light" | "minecraft:scaffolding") {
-            return self
-                .held()
-                .is_some_and(|s| *s.item == **name)
+            return (player_context && self.held().is_some_and(|s| *s.item == **name))
                 .then_some([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
         }
         if !name.ends_with("shulker_box") {
             return None;
         }
-        let progress = self.be_anims.shulkers.get(&pos).map_or(0.0, |s| s.progress);
+        let progress = anims.shulkers.get(&pos).map_or(0.0, |s| s.progress);
         let facing = self
             .pack
             .assets
@@ -3331,8 +3335,17 @@ impl Game<'_> {
     }
     /// A block's outline boxes in world space (`getShape` plus the random offset).
     fn outline_boxes(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
-        let state = self.world.block(pos[0], pos[1], pos[2]);
-        if let Some(b) = self.context_outline(pos, state) {
+        self.outline_boxes_in_context(&self.world, &self.be_anims, pos, true)
+    }
+    fn outline_boxes_in_context(
+        &self,
+        world: &World,
+        anims: &horizon_client::block_entity_anim::BlockEntityAnims,
+        pos: [i32; 3],
+        player_context: bool,
+    ) -> Vec<[f64; 6]> {
+        let state = world.block(pos[0], pos[1], pos[2]);
+        if let Some(b) = self.context_outline(pos, state, player_context, anims) {
             return vec![std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i])];
         }
         let f = self.res.facts().get(state);
@@ -15404,7 +15417,7 @@ impl Game<'_> {
                         [0.0; 3]
                     };
                     let p = h.pos.map(f64::from);
-                    if let Some(b) = self.context_outline(h.pos, state) {
+                    if let Some(b) = self.context_outline(h.pos, state, true, &self.be_anims) {
                         return horizon_client::blocks::cube_edges()
                             .iter()
                             .map(|e| {
