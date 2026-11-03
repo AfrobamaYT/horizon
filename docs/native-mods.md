@@ -944,7 +944,9 @@ there is no per-particle code hook.
 
 Trait mods implement `Hooks::add_server_reload_listeners` (server only), the counterpart of
 NeoForge 26.3's `AddServerReloadListenersEvent`. Registration runs on world open, `/reload`
-and `/datapack` changes, after pack selection. Register an `Arc<impl ServerReloadListener>`
+and `/datapack` changes, after pack selection. The `&dyn Host` beside the event gives registry
+access at registration, as `AddServerReloadListenersEvent.getRegistryAccess` does. Register an
+`Arc<impl ServerReloadListener>`
 with a unique `Identifier` and `FileToIdConverter::json("machines")`, or `::new("machines", ".bin")`
 for another suffix. The listener's `ServerReloadContext` lists converted IDs and reads their
 bytes from `data/*/machines/`, including a mod's packaged files and later selected datapack
@@ -995,7 +997,7 @@ impl ServerReloadListener for MachineData {
 }
 struct MyMod(Arc<MachineData>);
 impl Hooks for MyMod {
-    fn add_server_reload_listeners(&self, event: &mut AddServerReloadListenersEvent<'_>) {
+    fn add_server_reload_listeners(&self, _host: &dyn Host, event: &mut AddServerReloadListenersEvent<'_>) {
         event.listeners.add_listener(
             Identifier::parse("my_mod:machines").unwrap(),
             FileToIdConverter::json("machines").unwrap(),

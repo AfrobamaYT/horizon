@@ -7,8 +7,8 @@ use super::{Game, functions::PackStack};
 use horizon_client::{
     datapack::DataStore,
     mod_api::{
-        FileToIdConverter, Identifier, ReloadOrderError, ServerReloadApply, ServerReloadContext, ServerReloadError,
-        ServerReloadListeners, VanillaServerListeners,
+        FileToIdConverter, Identifier, ReloadOrderError, ServerReloadApply, ServerReloadContext,
+        ServerReloadError, ServerReloadListeners, VanillaServerListeners,
     },
 };
 
@@ -24,7 +24,9 @@ impl std::fmt::Display for ServerDataReloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Order(error) => error.fmt(f),
-            Self::Listener { listener, source } => write!(f, "reload listener {listener}: {source}"),
+            Self::Listener { listener, source } => {
+                write!(f, "reload listener {listener}: {source}")
+            }
         }
     }
 }
@@ -50,7 +52,10 @@ impl PackStack {
         let mut selected = std::collections::BTreeMap::new();
         for pack in self.builtin.iter().chain(self.enabled_packs()) {
             for file in pack.list_kinds(&[converter.directory()]) {
-                if let Some(id) = file.strip_prefix("data/").and_then(|path| converter.file_to_id(path)) {
+                if let Some(id) = file
+                    .strip_prefix("data/")
+                    .and_then(|path| converter.file_to_id(path))
+                {
                     selected.insert(id, (pack, file));
                 }
             }
@@ -75,7 +80,7 @@ impl Game<'_> {
         stack: &PackStack,
     ) -> Result<Vec<PreparedReload>, ServerDataReloadError> {
         let mut listeners = ServerReloadListeners::new();
-        Self::native_add_server_reload_listeners(&mut listeners);
+        self.native_add_server_reload_listeners(&mut listeners);
         let listeners = listeners.finish().map_err(ServerDataReloadError::Order)?;
         let mut prepared = Vec::new();
         for listener in listeners {

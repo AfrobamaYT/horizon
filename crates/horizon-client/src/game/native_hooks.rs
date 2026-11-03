@@ -1412,9 +1412,11 @@ impl Game<'_> {
         mod_api::dispatch_data_pack_files(self, files);
     }
 
-    /// Register server data reload listeners after packs are selected.
-    pub(super) fn native_add_server_reload_listeners(listeners: &mut ServerReloadListeners) {
-        mod_api::dispatch_add_server_reload_listeners(listeners);
+    /// Register server data reload listeners after packs are selected. The
+    /// host gives registry access at registration, as
+    /// `AddServerReloadListenersEvent.getRegistryAccess` does.
+    pub(super) fn native_add_server_reload_listeners(&self, listeners: &mut ServerReloadListeners) {
+        mod_api::dispatch_add_server_reload_listeners(self, listeners);
     }
     /// The server is assembling its data tables, as for
     /// `native_data_pack_files` (a world's first open and every `/reload`):
