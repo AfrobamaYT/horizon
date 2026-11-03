@@ -855,8 +855,6 @@ pub fn publish(
     };
     let existing = gh.entry(&form.id).map_err(github_down)?;
     let is_new = existing.is_none();
-    let turns_native =
-        kind == Kind::NativeMod && existing.as_ref().is_some_and(|(e, _)| e.kind == Kind::Mod);
     // An owner update: an owner's new version and nothing else of the entry
     // changes (key and owners included).
     let mut owner_update = false;
@@ -899,18 +897,13 @@ pub fn publish(
                     ),
                 ));
             }
-            // A mod may turn native once, never back (`registry::review`,
-            // docs/native-mods.md): its `.hmod` versions stay published.
             if entry.kind != kind {
-                if (&entry.kind, &kind) != (&Kind::Mod, &Kind::NativeMod) {
-                    return Err(bad(format!(
-                        "{} is a {}, not a {}: a project's kind never changes (only a mod may turn native-mod, once)",
-                        form.id,
-                        entry.kind.name(),
-                        kind.name()
-                    )));
-                }
-                entry.kind = kind.clone();
+                return Err(bad(format!(
+                    "{} is a {}, not a {}: a project's kind never changes",
+                    form.id,
+                    entry.kind.name(),
+                    kind.name()
+                )));
             }
             if entry.versions.iter().any(|v| v.version == version.version) {
                 return Err(Refusal::new(
@@ -941,9 +934,7 @@ pub fn publish(
             let (mut a, mut b) = (entry.clone(), before);
             a.versions.clear();
             b.versions.clear();
-            // A mod turning native is reviewed by hand, never an owner update.
             owner_update = a == b
-                && !turns_native
                 && (entry.key.is_none() || version.signature.is_some())
                 && version
                     .version
@@ -1054,13 +1045,7 @@ pub fn publish(
             .map_or(config.public_url.as_str(), |(_, host)| host),
         id = form.id,
         kind = kind.name(),
-        new = if is_new {
-            "new"
-        } else if turns_native {
-            "update: turns native, its `.hmod` versions stay published"
-        } else {
-            "update"
-        },
+        new = if is_new { "new" } else { "update" },
         version = v.version,
         game = v.game,
         file = v.file.name,

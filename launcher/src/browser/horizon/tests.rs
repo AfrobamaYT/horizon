@@ -138,6 +138,22 @@ fn searches_by_kind_and_words() {
 }
 
 #[test]
+fn removing_native_mod_does_not_remove_a_separate_content_file() {
+    let index = sample();
+    let home = scratch("native-remove");
+    put(&index, true, &home).unwrap();
+    let mut list = installed::Installed::load(&home);
+    list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
+    list.save(&home).unwrap();
+    fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
+    fs::write(home.join("horizon-native-mods/coords_hud.hnmod"), "").unwrap();
+    installed::remove(&home, "coords_hud").unwrap();
+    assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
+    assert!(!home.join("horizon-native-mods/coords_hud.hnmod").exists());
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
 fn installs_checked_turns_on_and_removes() {
     let index = sample();
     let home = scratch("install");
@@ -179,26 +195,6 @@ fn installs_checked_turns_on_and_removes() {
     installed::remove(&home, "coords_hud").unwrap();
     assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
     assert!(installed::Installed::load(&home).entries.is_empty());
-    fs::remove_dir_all(&home).unwrap();
-}
-
-#[test]
-fn a_mod_that_turned_native_keeps_its_hmod_until_removed() {
-    assert!(stays(true, "horizon-mods/coords_hud.hmod"));
-    assert!(!stays(false, "horizon-mods/coords_hud.hmod"));
-    assert!(!stays(true, "horizon-native-mods/coords_hud.hnmod"));
-    let index = sample();
-    let home = scratch("turned-native");
-    put(&index, true, &home).unwrap();
-    // As install_version leaves it after the native update.
-    let mut list = installed::Installed::load(&home);
-    list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
-    list.save(&home).unwrap();
-    fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
-    fs::write(home.join("horizon-native-mods/coords_hud.hnmod"), "").unwrap();
-    installed::remove(&home, "coords_hud").unwrap();
-    assert!(!home.join("horizon-native-mods/coords_hud.hnmod").exists());
-    assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
     fs::remove_dir_all(&home).unwrap();
 }
 
