@@ -4629,6 +4629,10 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// Not `native_loot_drops`: that is the loot-modifier step, which edits
+    /// the stacks a table rolled (blocks, shearing, a mob's table). This hook
+    /// fires once after it, on the entity's whole collected drop list, and
+    /// nothing is spawned until it returns.
     /// A dying mob or server player `entity` of `kind` (`player` is the
     /// player's UUID) is about to drop `drops`, the items
     /// `LivingEntity.dropAllDeathLoot` collected (NeoForge's
