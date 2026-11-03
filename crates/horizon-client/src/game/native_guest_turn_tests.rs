@@ -12,12 +12,7 @@ use std::sync::{
     atomic::{AtomicI32, AtomicUsize},
 };
 
-/// Before #228, the host was absent during A's turn, so handles could not
-/// read B or the online list, and a vehicle write could not reach B's seat.
-/// Now the host remains visible throughout the turn and B follows at once.
-#[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
+fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
     with_game(|game| {
         let settings = LanSettings {
             port: 0,
@@ -64,11 +59,41 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
                 10,
             );
             guest.placed = true;
-            if id == 13 {
-                guest.vehicle = Some(42);
-            }
             game.lan.as_mut().unwrap().hub.guests.push(guest);
         }
+        test(game);
+    });
+}
+
+/// Before #228, the host was absent during a guest turn and B and the
+/// online list were invisible to native handles.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn another_guest_and_online_players_are_visible_during_a_turn() {
+    with_guests(|game| {
+        let rider = game.native_entity(13).unwrap();
+        game.as_guest(12, |game| {
+            assert_eq!(rider.position(game), Some([3.0, 64.0, 5.0]));
+            let online = game.native_server_players();
+            assert_eq!(online.iter().map(|p| p.uuid).collect::<Vec<_>>(), [12, 13]);
+            assert_eq!(online[1].position, [3.0, 64.0, 5.0]);
+        })
+        .unwrap();
+    });
+}
+
+/// Requires #235's passenger walk as well as #228's host visibility.
+#[test]
+#[ignore = "needs #235's passenger walk"]
+fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
+    with_guests(|game| {
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guest_mut(13)
+            .unwrap()
+            .vehicle = Some(42);
         let horse = game.res.mob_types().get("minecraft:horse").unwrap().clone();
         game.mobs
             .push(Mob::new(42, horse, Vec3::new(3.0, 64.0, 5.0), 0.0));
@@ -80,9 +105,6 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
         let after = [10.0, 70.0 + (1.44375 - 0.6), -4.0];
         game.as_guest(12, |game| {
             assert_eq!(rider.position(game), Some(before));
-            let online = game.native_server_players();
-            assert_eq!(online.iter().map(|p| p.uuid).collect::<Vec<_>>(), [12, 13]);
-            assert_eq!(online[1].position, before);
             assert!(vehicle.teleport_to(game, [10.0, 70.0, -4.0], None));
             assert_eq!(vehicle.position(game), Some([10.0, 70.0, -4.0]));
             assert_eq!(rider.position(game), Some(after));
