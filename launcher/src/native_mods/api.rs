@@ -1,16 +1,7 @@
 //! The launcher's generated executable for trait mods.
-use super::{Bundle, MANIFEST};
+use super::Bundle;
 use std::fs;
 use std::path::Path;
-
-/// Match horizon-mixins crate IDs before using them as folder names.
-pub(super) fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 100
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
 
 pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -20,39 +11,6 @@ pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
 fn write(path: &Path, value: &toml::Table) -> Result<(), String> {
     let text = toml::to_string(value).map_err(|e| format!("{}: {e}", path.display()))?;
     fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Remove launcher-only tables from the incoming copy before horizon-mixins reads it.
-pub(super) fn strip(bundle: &Bundle) -> Result<(), String> {
-    let path = bundle.dir.join(MANIFEST);
-    let mut manifest = read(&path)?;
-    let api = manifest.remove("api");
-    let dependencies = manifest.remove("dependencies");
-    if api.is_some() || dependencies.is_some() {
-        write(&path, &manifest)?;
-    }
-    Ok(())
-}
-
-/// Read and validate the trait package folder at the manifest boundary.
-pub(super) fn folder(dir: &Path) -> Result<String, String> {
-    let manifest = dir.join(MANIFEST);
-    let folder = horizon_mods::index::native::RUST;
-    let relative = Path::new(folder);
-    let source = dir.join(relative);
-    let root = dir
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", dir.display()))?;
-    let resolved = source
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", source.display()))?;
-    if !resolved.starts_with(&root) || !resolved.join("Cargo.toml").is_file() {
-        return Err(format!(
-            "{}: [api] path must be a folder in the bundle with Cargo.toml",
-            manifest.display()
-        ));
-    }
-    Ok(folder.to_owned())
 }
 
 pub(super) const PACKAGE: &str = "horizon-native-game";
@@ -76,7 +34,7 @@ fn main_rs(template: &str, ids: &[&str]) -> String {
 
 /// API objects in the same order as the generated executable's mod list.
 pub(super) fn with_api(mods: &[Bundle]) -> impl Iterator<Item = &Bundle> {
-    mods.iter().filter(|m| m.api.is_some())
+    mods.iter()
 }
 
 /// Add API packages and the generated executable to the fresh staged workspace.
@@ -86,12 +44,7 @@ pub(super) fn stage(
     declared: &[Vec<super::dependencies::Dependency>],
     resolution: &super::dependencies::Resolution,
 ) -> Result<bool, String> {
-    let mods: Vec<_> = resolution
-        .order
-        .iter()
-        .map(|&i| (i, &bundles[i]))
-        .filter(|(_, b)| b.api.is_some())
-        .collect();
+    let mods: Vec<_> = resolution.order.iter().map(|&i| (i, &bundles[i])).collect();
     if mods.is_empty() {
         return Ok(false);
     }
@@ -100,10 +53,7 @@ pub(super) fn stage(
     })?;
     let mut packages = std::collections::HashMap::new();
     for (_, bundle) in &mods {
-        let path = bundle
-            .dir
-            .join(bundle.api.as_ref().expect("filtered"))
-            .join("Cargo.toml");
+        let path = bundle.dir.join("Cargo.toml");
         let manifest = read(&path)?;
         let name = manifest
             .get("package")
@@ -112,6 +62,23 @@ pub(super) fn stage(
             .ok_or_else(|| format!("{}: missing package name", path.display()))?;
         packages.insert(bundle.id.as_str(), name.to_owned());
     }
+    let post_builds: Vec<_> = mods
+        .iter()
+        .flat_map(|(_, bundle)| {
+            let package = &packages[bundle.id.as_str()];
+            bundle
+                .native()
+                .post_build
+                .iter()
+                .map(move |step| super::crates::PostBuild {
+                    mod_id: bundle.id.clone(),
+                    package: package.clone(),
+                    bin: step.bin.clone(),
+                    args: step.args.clone(),
+                })
+        })
+        .collect();
+    super::crates::write_post_builds(stage, &post_builds)?;
     let mut deps = toml::Table::new();
     for name in ["horizon-client", "horizon-threads", "horizon-mods"] {
         deps.insert(name.into(), path_dep(&format!("../{name}")));
@@ -128,8 +95,7 @@ pub(super) fn stage(
     for (i, (index, bundle)) in mods.iter().enumerate() {
         let relative = format!("native-api/{}", bundle.id);
         let dest = stage.join(&relative);
-        let source = bundle.dir.join(bundle.api.as_ref().expect("filtered"));
-        super::sync(&source, &dest)?;
+        super::copy_bundle(bundle, &dest)?;
         let path = dest.join("Cargo.toml");
         let mut manifest = read(&path)?;
         let package = manifest
@@ -288,9 +254,11 @@ mod tests {
         let dir = fixture(
             "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\nentry = 'other'\n",
         );
-        assert!(super::super::bundle(&dir, None)
-            .unwrap_err()
-            .contains("accepts only path"));
+        assert!(
+            super::super::bundle(&dir, None)
+                .unwrap_err()
+                .contains("accepts only path")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -359,9 +327,11 @@ mod tests {
         assert!(stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap());
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         let members = root["workspace"]["members"].as_array().unwrap();
-        assert!(members
-            .iter()
-            .any(|v| v.as_str() == Some("native-api/example")));
+        assert!(
+            members
+                .iter()
+                .any(|v| v.as_str() == Some("native-api/example"))
+        );
         assert!(members.iter().any(|v| v.as_str() == Some(GAME)));
         let engine = read(&stage_dir.join("native-api/example/Cargo.toml")).unwrap();
         assert_eq!(
@@ -381,14 +351,16 @@ mod tests {
             game["package"]["build"].as_str(),
             Some("../horizon-client/build.rs")
         );
-        assert!(stage_dir
-            .join(GAME)
-            .join(
-                game["dependencies"]["horizon-client"]["path"]
-                    .as_str()
-                    .unwrap()
-            )
-            .ends_with("crates/native-game/../horizon-client"));
+        assert!(
+            stage_dir
+                .join(GAME)
+                .join(
+                    game["dependencies"]["horizon-client"]["path"]
+                        .as_str()
+                        .unwrap()
+                )
+                .ends_with("crates/native-game/../horizon-client")
+        );
         // The game's default features are the generated package's alone, so a server build's
         // `--no-default-features` reaches horizon-client.
         assert_eq!(
@@ -432,13 +404,15 @@ mod tests {
             assert!(!stage_dir.join(GAME).exists());
             assert!(!stage_dir.join("native-api").exists());
         }
-        assert!(!stage(
-            &stage_dir,
-            &[],
-            &[],
-            &super::super::dependencies::Resolution { order: vec![] },
-        )
-        .unwrap());
+        assert!(
+            !stage(
+                &stage_dir,
+                &[],
+                &[],
+                &super::super::dependencies::Resolution { order: vec![] },
+            )
+            .unwrap()
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

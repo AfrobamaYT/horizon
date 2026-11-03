@@ -12,7 +12,6 @@
 use crate::backend;
 use crate::browser::java;
 use crate::native_mods::{self, Bundle, INSTALLED};
-use horizon_mods::index::native as format;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -433,33 +432,9 @@ pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     Ok(found)
 }
 
-/// The `.hmod` of a mod folder, as bytes: its source (Rust, TOML and `data/`) with a manifest made
-/// from its `horizon-mixin.toml`, which must pin the Horizon commit it was made for
-/// (`[compatibility] horizon_revision`). An unpacked `.hmod` (`horizon-native.json`) keeps the
-/// pins and hook points its manifest names. The zip is the same for the same files.
+/// Deterministically package a validated flat mod project.
 pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
-    let horizon = bundle.horizon.clone().filter(|h| horizon_mods::manifest::revision(h)).ok_or_else(|| {
-        format!(
-            "{} has no [compatibility] horizon_revision (40 hex digits): add the Horizon commit it was made for.",
-            bundle.id
-        )
-    })?;
-    let manifest = format::Manifest {
-        schema: 1,
-        id: bundle.id.clone(),
-        version: bundle.version.clone(),
-        game: crate::browser::GAME.into(),
-        horizon,
-        mixins: bundle
-            .mixins
-            .clone()
-            .unwrap_or_else(|| native_mods::MIXINS_REV.into()),
-    };
-    let root = bundle
-        .dir
-        .parent()
-        .ok_or("native source has no project root")?;
-    format::Bundle::pack_directory(root, &manifest)
+    horizon_mods::Package::pack_directory(&bundle.dir)
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {

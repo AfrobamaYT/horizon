@@ -268,7 +268,9 @@ pub(super) fn refused(
     api_ids: &[&str],
 ) -> Option<String> {
     let why = |mod_id: &str, name: &str, version: &str| {
-        format!("{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.")
+        format!(
+            "{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has."
+        )
     };
     if let Some(w) = wanted
         .iter()
@@ -301,11 +303,13 @@ pub(super) fn locked(error: String) -> String {
     if !error.contains("--locked was passed") {
         return error;
     }
-    format!("A native mod's crate needs a crate that isn't in Horizon's Cargo.lock, through one of its dependencies' features. A native mod's crate can use only the crates Horizon itself uses, with the features that need no others.\n\n{error}")
+    format!(
+        "A native mod's crate needs a crate that isn't in Horizon's Cargo.lock, through one of its dependencies' features. A native mod's crate can use only the crates Horizon itself uses, with the features that need no others.\n\n{error}"
+    )
 }
 
 /// A mod's post-build step: a program of one of its crates, run after the game compiles.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub(super) struct PostBuild {
     #[serde(rename = "mod")]
     pub mod_id: String,
@@ -315,7 +319,13 @@ pub(super) struct PostBuild {
     pub args: Vec<String>,
 }
 
-/// The post-build steps horizon-mixins listed in `stage` (none when no mod has one).
+/// Persist the launcher's typed post-build plan beside the staged workspace.
+pub(super) fn write_post_builds(stage: &Path, steps: &[PostBuild]) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(steps).map_err(|e| e.to_string())?;
+    fs::write(stage.join(POST_BUILD), bytes).map_err(|e| e.to_string())
+}
+
+/// The post-build steps listed in `stage` (none when no mod has one).
 pub(super) fn post_builds(stage: &Path) -> Result<Vec<PostBuild>, String> {
     let path = stage.join(POST_BUILD);
     match fs::read_to_string(&path) {
