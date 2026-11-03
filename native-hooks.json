@@ -2473,7 +2473,7 @@
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_critical_hit",
       "neoforge": "CriticalHitEvent",
-      "side": "both",
+      "side": "server",
       "cancellable": false,
       "mod_api": {
         "contract": "listen"
