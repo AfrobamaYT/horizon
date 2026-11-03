@@ -153,10 +153,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_carried_stack", "side": "server"
     },
     {
-      "name": "set_block",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block", "side": "server"
-    },
-    {
       "name": "edit_blocks",
       "target": "horizon_client::game::native_world_edit::Game<'_>::native_edit_blocks", "side": "server"
     },

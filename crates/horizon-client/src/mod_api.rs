@@ -1443,15 +1443,19 @@ mod tests {
         }
     }
 
-    /// A double with the three `Host` methods the probe calls.
+    /// A double with the `Host` methods the probe calls.
     struct Reader {
         block: &'static str,
         lines: Vec<Text>,
     }
 
     impl Host for Reader {
-        fn block(&self, _pos: [i32; 3]) -> String {
-            self.block.to_string()
+        fn level(&self, dimension: &str) -> Option<LevelRef> {
+            (dimension == "minecraft:overworld")
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+        }
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {
@@ -1532,8 +1536,9 @@ mod tests {
 
     impl Hooks for Probe {
         fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-            let block = host.block(event.pos);
             let player = host.acting_player().expect("a player acts");
+            let level = host.level(&player.dimension).expect("a loaded level");
+            let block = level.block(host, event.pos).expect("a loaded block");
             host.action_bar(player.uuid, Text::literal(block.clone()));
             if block == "minecraft:stone" {
                 Flow::Cancel

@@ -2954,7 +2954,7 @@ a mod's own tests drive a hook through its dispatch function ([Testing a trait m
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
-the same mod: for example, `set_block` fires `block_changed`. Mods keep mutable
+the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods keep mutable
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
