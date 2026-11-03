@@ -560,7 +560,7 @@ and the recipe fails, as an unknown kind does.
 
 A mod has one top-level `data/` tree and one `assets/` tree, with the same namespace and
 content checks as a content mod. They are normal pack resources, not a second native-only data folder.
-Code-only bytes can stay inside `src/` and be compiled in with `include_bytes!`.
+Code-only tables can stay in a packaged `src/*.toml` file and be compiled in with `include_bytes!`.
 
 The build currently also stages the full `data/` tree as `native-data/<mod>/` at the workspace root.
 A helper compiles a file in with `horizon_client::native_data!("my_mod", "my_mod/greeting.txt")`
