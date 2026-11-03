@@ -2958,11 +2958,14 @@ impl Hub {
         // in the player go to the player too, whose own model draws them.
         let g = &mut self.guests[i];
         if g.stuck != g.sent_stuck {
-            let values = [(12, g.stuck.0, g.sent_stuck.0), (13, g.stuck.1, g.sent_stuck.1)]
-                .into_iter()
-                .filter(|(_, now, sent)| now != sent)
-                .map(|(index, now, _)| (index, serializer::INT, Value::Int(now)))
-                .collect();
+            let values = [
+                (12, g.stuck.0, g.sent_stuck.0),
+                (13, g.stuck.1, g.sent_stuck.1),
+            ]
+            .into_iter()
+            .filter(|(_, now, sent)| now != sent)
+            .map(|(index, now, _)| (index, serializer::INT, Value::Int(now)))
+            .collect();
             g.sent_stuck = g.stuck;
             g.send(&C::SetEntityData(play::SetEntityData {
                 id: g.entity_id,
