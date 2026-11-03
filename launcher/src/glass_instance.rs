@@ -782,7 +782,8 @@ impl Launcher {
             .map(|tag| {
                 let latest = follows.as_ref() == Some(&tag);
                 let on = chosen.as_ref() == Some(&tag);
-                let date = horizon_launcher::nightly::date_of(&tag).map(str::to_string);
+                let date = horizon_launcher::nightly::date_of(&tag)
+                    .map(|d| glass_versions::published(d, ""));
                 let pick = tag.clone();
                 list_choice(format!("horizon-version-{tag}"), on, &t)
                     .py(px(12.))

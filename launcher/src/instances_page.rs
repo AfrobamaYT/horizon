@@ -284,6 +284,16 @@ impl Launcher {
             java: Default::default(),
         });
         self.servers.text(Field::InstanceVersion).set(String::new());
+        // A new instance starts with the name the dialog gives it, as the mockup's.
+        if self
+            .instances
+            .dialog
+            .as_ref()
+            .is_some_and(|d| d.editing.is_none())
+        {
+            let name = self.default_name().unwrap_or_default();
+            self.servers.text(Field::InstanceName).set(name);
+        }
     }
 
     /// Opens the dialog for a copy of the selected instance, named after it.

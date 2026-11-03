@@ -75,17 +75,18 @@ impl Launcher {
         self.instances.dialog.as_mut().map(|d| &mut d.java)
     }
 
-    /// The name a new Java instance gets for what it plays now.
-    fn default_name(&self) -> Option<String> {
+    /// The name a new instance gets for what it plays now (the mockup's `defaultName`): "My
+    /// Horizon", or the game and its version for a Java one.
+    pub(super) fn default_name(&self) -> Option<String> {
         let j = &self.instances.dialog.as_ref()?.java;
+        if j.kind == NewKind::Horizon {
+            return Some(tr("My Horizon").to_string());
+        }
         let versions = match &self.instances.versions {
             VersionList::Ready(v) => Some(v),
             _ => None,
         };
-        (j.kind != NewKind::Horizon)
-            .then(|| j.minecraft(versions))
-            .flatten()
-            .map(|mc| j.default_name(&mc))
+        j.minecraft(versions).map(|mc| j.default_name(&mc))
     }
 
     /// Changes what the new instance plays. Its name follows while it is the one the dialog gave
