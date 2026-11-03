@@ -3499,7 +3499,7 @@ impl Game<'_> {
         } else {
             self.ui.registries.players.clone()
         };
-        players.extend(host.hub.guests.iter().map(|g| g.name.clone()));
+        players.extend(host.hub.online_players().map(|g| g.name.clone()));
         let (ops, banned_players, banned_ips, whitelisted) = match &self.server_lists {
             Some(lists) => {
                 let l = lists.lock().unwrap();
