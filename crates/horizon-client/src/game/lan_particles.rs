@@ -536,7 +536,7 @@ impl Game<'_> {
                 sound.volume,
                 sound.pitch,
                 sound.source,
-                host.hub.next_sound_seed(),
+                sound.seed,
             );
             // `Level.playSound(except, entity, ...)`: the same sound and
             // seed, bound to the entity.
@@ -561,7 +561,7 @@ impl Game<'_> {
                 sound.except,
                 |position| {
                     let distance: f64 = (0..3).map(|k| (position[k] - sound.at[k]).powi(2)).sum();
-                    distance <= range * range
+                    distance < range * range
                 },
             );
         }
