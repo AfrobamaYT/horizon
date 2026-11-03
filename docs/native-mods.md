@@ -382,17 +382,16 @@ binding names a parameter, and a trait mod's event gains fields; a test that cal
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
-### Damage with the attacker, weapon and geometry
+### Host-aware weapon damage (API next)
 
-`living_incoming_damage` (API 50) is one hook for every hit: it gets the attacker's network id,
-the weapon (a player's selected stack, a mob's main hand; `weapon.enchantments()` exposes the
-enchantment ids and levels), the hit's source position, and a mob victim's position and look
-vector, so an enchantment can tell a blow from behind and change `amount`. The weapon and the
-attacker come from the attack scope the game opens around an attack and are recorded only while
-a native mod is loaded; the positions are none for a player or the dragon as victim. It has no
-`Host`: the game is in the middle of the hit, so read the world from a tick hook. These arguments
-were added after the hook first shipped, so a mixin injection that names
-`native_living_incoming_damage` as a raw target must take them too.
+`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; v1 keeps its signature and firing point.
+It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
+and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
+levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
+It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before
+v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
+projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
+without loaded mods. The fragment `living_incoming_damage_v2.json` receives its API number at merge.
 
 ### The build's warnings
 
@@ -1046,7 +1045,7 @@ ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's are
 Horizon makes another way: a mob's melee push from its attack knockback or a Knockback weapon, an armor stand's and the
 ender dragon's. It has no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the
 server thread), so state a mod shares with its render thread hooks needs
-synchronising. `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by mob, or 0 when unknown) and `attacker_main` and `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only while a native mod is loaded); an armor stand's sweep fires the hook too. These arguments were added to the hook after it first shipped, so a mixin injection that names `native_living_knockback` as a raw target must take them as well.
+synchronising.
 
 Bundles that use it need `"hooks": 125`.
 
@@ -1889,6 +1888,21 @@ The catalog does not cover helper methods or arbitrary private game code.
 Injections name them with `hook` and `hook_version` ("Named hook points" above); raw
 targets and the `hooks` metadata continue to work as before.
 
+### Knockback hook versions
+
+`living_knockback_v2` keeps `living_knockback` version 1 unchanged, as `menu_button_v2` does for
+its older hook: v1's function signature is a target mixin mods attach to, so it cannot gain
+arguments. Both already receive the raw strength before knockback resistance (v1 did before
+v2 existed). V2 adds three things: the attacker's network entity id (falling back to a known
+last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
+`attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
+recorded only while a native mod is loaded), and armor-stand sweeps. V2 runs after v1 on
+their shared paths; cancellation from either prevents motion, so a trait mod that listens to
+both sees each hit twice and should pick one. Mob melee, player hits, sweeps and spears use the
+shared knockback path; direct velocity pushes (explosions, Punch arrows, hoglin throws) are not
+`LivingEntity.knockback` and do not fire it. The fragment assigns the new API number when
+stamped; the existing hook stays version 1.
+
 ### Reading server blocks (draft)
 
 A native server tick hook can call `native_server_block` with its context, a dimension id and a block position. It returns the block name and state properties from a loaded chunk. It does not load a chunk or open a dimension. Reads outside that hook, from a stale context, from unavailable dimensions or outside the world bounds return an error.
@@ -2486,6 +2500,9 @@ a dimension.
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.
+- `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
+  do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
+  `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
