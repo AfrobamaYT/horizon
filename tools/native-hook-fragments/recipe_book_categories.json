@@ -8,7 +8,7 @@
   ],
   "helpers": [
     {
-      "name": "recipe_book_category",
+      "name": "recipe_book_category", "side": "both",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_recipe_book_category",
       "mod_api": {}
     }

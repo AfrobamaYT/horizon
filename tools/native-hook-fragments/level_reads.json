@@ -2,37 +2,37 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "level_block_state",
+      "name": "level_block_state", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block_state",
       "receiver": "level"
     },
     {
-      "name": "level_block",
+      "name": "level_block", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block",
       "receiver": "level"
     },
     {
-      "name": "level_block_property",
+      "name": "level_block_property", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block_property",
       "receiver": "level"
     },
     {
-      "name": "level_is_loaded",
+      "name": "level_is_loaded", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_is_loaded",
       "receiver": "level"
     },
     {
-      "name": "level_height",
+      "name": "level_height", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_height",
       "receiver": "level"
     },
     {
-      "name": "level_game_time",
+      "name": "level_game_time", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_game_time",
       "receiver": "level"
     },
     {
-      "name": "level_day_time",
+      "name": "level_day_time", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_day_time",
       "receiver": "level"
     }

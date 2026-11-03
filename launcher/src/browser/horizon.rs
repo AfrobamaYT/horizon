@@ -657,6 +657,19 @@ fn install_version(
     let mut list = installed::Installed::load(home);
     let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == p.id;
     let old = list.entries.iter().find(|e| ours(e)).cloned();
+    if old.as_ref().is_some_and(|o| {
+        o.kind != project.kind
+            || (o
+                .file
+                .starts_with(&format!("{}/", crate::native_mods::INSTALLED))
+                != native
+                && project.kind == Kind::Mod)
+    }) {
+        return Err(format!(
+            "{} has a different installed kind: remove it before installing this version.",
+            p.name
+        ));
+    }
     if old.as_ref().is_some_and(|o| o.version == v.version) {
         return Ok(old.expect("checked"));
     }
@@ -701,10 +714,7 @@ fn install_version(
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    if let Some(old) = old
-        .as_ref()
-        .filter(|o| o.file != relative && !stays(native, &o.file))
-    {
+    if let Some(old) = old.as_ref().filter(|o| o.file != relative) {
         let _ = fs::remove_file(home.join(&old.file));
     }
     if project.kind == Kind::Mod {
@@ -733,13 +743,6 @@ fn install_version(
     list.entries.push(entry.clone());
     list.save(home)?;
     Ok(entry)
-}
-
-/// Whether an update to a native version keeps the old file `old`: a mod that turned native
-/// keeps its `.hmod` until the player builds the game with the new version. The game runs it
-/// meanwhile and skips it once the native one is built in; removing the mod removes both.
-fn stays(native: bool, old: &str) -> bool {
-    native && old.ends_with(".hmod")
 }
 
 /// The mod id of an installed mod (`horizon-mods/<id>`, `horizon-mods/<id>.hmod` or
