@@ -303,8 +303,102 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::commands::Target;
-    use horizon_client::mobs::Mob;
+    use horizon_client::{
+        mobs::Mob,
+        mod_api::{self, EntityMountEvent, Flow, Hooks, ServerHost},
+    };
     use horizon_core::geometry::Vec3;
+    use std::sync::{Arc, Mutex};
+
+    struct MountObserver(Arc<Mutex<Vec<bool>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for MountObserver {
+        fn entity_mount(&self, _: &mut dyn ServerHost, event: &mut EntityMountEvent<'_>) -> Flow {
+            self.0.lock().unwrap().push(event.mounting);
+            if event.mounting {
+                Flow::Continue
+            } else {
+                Flow::Cancel
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn canceled_dismount_keeps_old_mount_and_mount_hook_fires_once() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mount_observer",
+            Box::new(MountObserver(events.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                for id in [40, 41, 42] {
+                    let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+                }
+                assert!(game.start_riding_target(Target::Mob(40), Target::Mob(41), true));
+                assert!(!game.start_riding_target(Target::Mob(40), Target::Mob(42), true));
+                assert_eq!(game.mobs[0].extra.mount, Some(41));
+                assert_eq!(*events.lock().unwrap(), [true, true, false]);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn boat_and_cart_interactions_use_shared_mount_path() {
+        use super::super::{
+            InteractTarget,
+            boats::Boat,
+            minecarts::{CartKind, Minecart},
+        };
+        use horizon_client::motion::PlayerMotion;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.boats
+                .push(Boat::new(60, "oak".into(), Vec3::ZERO, 45.0));
+            assert!(game.interact_boat(Some(InteractTarget {
+                id: 60,
+                location: [0.0; 3]
+            })));
+            assert_eq!(game.riding, Some(60));
+            assert_eq!(game.yaw, 45.0);
+            game.riding = None;
+            game.carts
+                .push(Minecart::new(61, CartKind::Rideable, Vec3::ZERO));
+            assert!(game.interact_cart(Some(InteractTarget {
+                id: 61,
+                location: [0.0; 3]
+            })));
+            assert_eq!(game.riding, Some(61));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn handles_reject_held_out_and_stale_entities() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for id in [50, 51] {
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            let rider = game.native_entity(50).unwrap();
+            let vehicle = game.native_entity(51).unwrap();
+            let stale = mod_api::EntityRef::new(
+                mod_api::NativeWorldEpoch::new(rider.epoch().get().wrapping_add(1)),
+                rider.id(),
+            );
+            assert!(!game.native_entity_start_riding(stale, vehicle, true));
+            game.held_out.push(51);
+            assert!(!game.native_entity_start_riding(rider, vehicle, true));
+            game.held_out.pop();
+            assert!(game.native_entity_start_riding(rider, vehicle, true));
+            assert_eq!(game.mobs[0].extra.mount, Some(51));
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

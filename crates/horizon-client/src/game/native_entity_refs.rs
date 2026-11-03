@@ -931,6 +931,20 @@ pub(super) mod tests {
             };
             assert_eq!(joined(game, false), (1, true, true, true));
             assert_eq!(joined(game, true), (0, false, false, true));
+            // A remote guest can mount through the same handle path as the acting player.
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                21,
+                kind,
+                horizon_core::geometry::Vec3::ZERO,
+                0.0,
+            ));
+            let guest = game.native_entity(12).unwrap();
+            let vehicle = game.native_entity(21).unwrap();
+            assert!(game.native_entity_start_riding(guest, vehicle, true));
+            assert_eq!(game.command_guest(12).unwrap().vehicle, Some(21));
+            assert!(game.native_entity_stop_riding(guest));
+            assert_eq!(game.command_guest(12).unwrap().vehicle, None);
             let _ = std::fs::remove_dir_all(root);
         });
     }
