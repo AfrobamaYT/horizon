@@ -46,7 +46,8 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
                 let invisible = flags & 32 != 0;
                 if species == Species::Illusioner {
                     illusioner::set_invisible(m, invisible);
-                } else if &*m.kind.id != "minecraft:player" {
+                }
+                if &*m.kind.id != "minecraft:player" {
                     m.invisible = invisible;
                 }
             }
@@ -544,6 +545,18 @@ mod tests {
         let mut m = Mob::new(1, t, horizon_core::geometry::Vec3::ZERO, 0.0);
         client_defaults(&mut m);
         Some(m)
+    }
+
+    #[test]
+    fn review_388_illusioner_shared_flag_hides_the_body() {
+        let mut m = mob("minecraft:illusioner").expect("prepared illusioner fixture");
+        apply(&mut m, &[(0, s::BYTE, Value::Byte(32))]);
+        assert!(
+            m.is_invisible(),
+            "a received shared flag must hide the illusioner's body"
+        );
+        apply(&mut m, &[(0, s::BYTE, Value::Byte(0))]);
+        assert!(!m.is_invisible());
     }
 
     /// #2920: a server's horse is moved by its rider's client, which jumps

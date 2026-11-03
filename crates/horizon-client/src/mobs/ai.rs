@@ -2731,6 +2731,14 @@ pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>
             let ticks = &mut m.extra.effects[i].1;
             *ticks = if expired { 0 } else { *ticks - 1 };
         }
+        // LivingEntity.tickEffects refreshes a surviving effect every 600 ticks.
+        if m.extra
+            .effects
+            .get(i)
+            .is_some_and(|e| e.0 == effect && e.1 > 0 && e.1 % 600 == 0)
+        {
+            m.effects_dirty = true;
+        }
         i += 1;
     }
     // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
@@ -3109,6 +3117,26 @@ mod poison_effect_tests {
         assert!(pig.is_invisible());
         tick_effects(&mut pig, None);
         assert!(!pig.is_invisible());
+    }
+
+    #[test]
+    fn review_388_periodic_effect_refresh_resets_invisibility() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        let data = MobTypes::load(&root).expect("prepared resources");
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("speed", 602, 0);
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.invisible = true;
+        tick_effects(&mut pig, None);
+        assert_eq!(pig.extra.effects[0].1, 600);
+        assert!(
+            !pig.is_invisible(),
+            "LivingEntity's periodic effect update clears the manual flag at duration 600"
+        );
     }
 
     /// `LivingEntity.tickEffects` ticks each effect with the mob's list in
