@@ -1482,9 +1482,7 @@ impl Game<'_> {
                     .as_ref()
                     .map(|h| {
                         h.hub
-                            .guests
-                            .iter()
-                            .filter(|g| g.participates_online())
+                            .online_players()
                             .map(|g| (g.name.clone(), g.uuid))
                             .collect()
                     })

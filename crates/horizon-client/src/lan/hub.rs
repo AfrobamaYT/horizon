@@ -809,6 +809,12 @@ impl Hub {
         self.config.simulation_distance = distance;
         self.broadcast(&C::SetSimulationDistance(play::Distance { distance }));
     }
+    /// Placed network players in join order.
+    pub fn online_players(&self) -> impl Iterator<Item = &Guest> {
+        self.guests
+            .iter()
+            .filter(|g| g.placed && g.participates_online())
+    }
     /// The number of network guests, including those still joining.
     pub fn online_count(&self) -> usize {
         self.guests
@@ -903,9 +909,7 @@ impl Hub {
     /// gray commas (ComponentUtils.formatList).
     pub fn list_reply(&self, uuids: bool) -> Tag {
         let players: Vec<(u128, &str)> = self
-            .guests
-            .iter()
-            .filter(|g| g.placed)
+            .online_players()
             .map(|g| (g.uuid, g.name.as_str()))
             .collect();
         let format = |(uuid, name): (u128, &str)| {
@@ -4425,6 +4429,12 @@ mod tests {
         fake.placed = true;
         hub.guests.push(fake);
         assert_eq!(hub.online_count(), 1);
+        let reply = hub.list_reply(false);
+        let Some(Tag::List(args)) = reply.get("with") else {
+            panic!("expected list reply arguments");
+        };
+        assert_eq!(args[0], Tag::Int(1));
+        assert_eq!(args[2], display_name(1, "Bob"));
         hub.guests[0].sent_chunks.insert((2, 0));
         let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
         let mut next_entity = 100;
