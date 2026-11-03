@@ -313,10 +313,6 @@
       "target": "horizon_client::game::native_motion::Game<'_>::native_push_player", "side": "client"
     },
     {
-      "name": "set_flying_speed",
-      "target": "horizon_client::game::native_motion::Game<'_>::native_set_flying_speed", "side": "server"
-    },
-    {
       "name": "net_send_to_player",
       "target": "horizon_client::game::native_net::Game<'_>::native_net_send_to_player", "side": "server"
     },
@@ -333,24 +329,8 @@
       "target": "horizon_client::game::native_menus::Game<'_>::native_open_menu", "side": "server"
     },
     {
-      "name": "set_menu_items",
-      "target": "horizon_client::game::native_menus::Game<'_>::native_set_menu_items", "side": "server"
-    },
-    {
       "name": "close_menu",
       "target": "horizon_client::game::native_menus::Game<'_>::native_close_menu", "side": "server"
-    },
-    {
-      "name": "fluid_insert",
-      "target": "horizon_client::game::machines::native_fluids::Game<'_>::native_fluid_insert", "side": "server"
-    },
-    {
-      "name": "fluid_extract",
-      "target": "horizon_client::game::machines::native_fluids::Game<'_>::native_fluid_extract", "side": "server"
-    },
-    {
-      "name": "move_fluids",
-      "target": "horizon_client::game::machines::native_fluids::Game<'_>::native_move_fluids", "side": "server"
     },
     {
       "name": "dimension",
@@ -2473,7 +2453,7 @@
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_critical_hit",
       "neoforge": "CriticalHitEvent",
-      "side": "both",
+      "side": "server",
       "cancellable": false,
       "mod_api": {
         "contract": "listen"

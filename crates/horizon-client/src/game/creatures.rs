@@ -5257,6 +5257,7 @@ impl Game<'_> {
                         pl.velocity = Vec3::ZERO;
                         pl.fall_distance = 0.0;
                         pl.teleported = true;
+                        pl.teleported_delta = [false; 3];
                     }
                     self.previous_position = to;
                     if damage > 0.0 {
