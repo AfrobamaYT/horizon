@@ -79,7 +79,6 @@ impl Game<'_> {
         if self.remote.is_some() {
             return None;
         }
-        self.load_bossbars();
         let uuid = self.add_custom_bossbar(&id, name.component())?;
         self.bossbars_changed();
         Some(BossBarRef { epoch, uuid })
