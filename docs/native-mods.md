@@ -136,6 +136,11 @@ the catalog, not a global API number, source comments or documentation histories
   (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_data`, `native_block`,
   `native_block_property` and `native_cursor`. A mod inserts items through the block's item capability,
   `level.capability(host, &ITEMS, pos, side)`.
+- `click_menu_button(button)`, a client helper, presses button `button` of the open menu as a click on one of its buttons does
+  (`MultiPlayerGameMode.handleInventoryButtonClick`, `ServerboundContainerButtonClickPacket`); the server's menu decides what it does
+  (`clickMenuButton`, and `menu_button` for a mod's menu). It is for a client mod's own input on a menu's screen where `screen_click`
+  doesn't come, such as a key or the wheel (`screen_key_pressed_pre`, `screen_mouse_scrolled_pre`). It is refused while no menu the
+  server opened is open.
 
 - What a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
   click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it
