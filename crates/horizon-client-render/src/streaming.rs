@@ -426,6 +426,21 @@ pub struct ProtoCensus {
     /// `ChunkGenerator::cache_census`.
     pub caches: Vec<(&'static str, usize, Option<usize>)>,
 }
+/// An update paused before removing its out-of-range live chunks.
+pub struct StreamingUpdate {
+    uploads: Vec<((i32, i32, i32), SectionMesh)>,
+    sweep: bool,
+    far: Vec<(i32, i32)>,
+    paused: bool,
+}
+
+impl StreamingUpdate {
+    /// Chunks the update plans to unload, still present in the world.
+    pub fn unloading(&self) -> &[(i32, i32)] {
+        &self.far
+    }
+}
+
 pub struct Streaming {
     shared: Arc<Shared>,
     /// Columns generated and saved as they were left behind: new when they
@@ -1566,9 +1581,20 @@ impl Streaming {
         &mut self,
         world: &mut World,
     ) -> (Vec<((i32, i32, i32), SectionMesh)>, Vec<Arc<Chunk>>) {
+        let plan = self.plan_update(world);
+        self.finish_update(world, plan)
+    }
+
+    /// Collect completed work and plan removals without removing live chunks.
+    pub fn plan_update(&mut self, world: &mut World) -> StreamingUpdate {
         let mut uploads = Vec::new();
         if self.paused {
-            return (uploads, Vec::new());
+            return StreamingUpdate {
+                uploads,
+                sweep: false,
+                far: Vec::new(),
+                paused: true,
+            };
         }
         ExtraCover::refresh(&mut self.cover, &self.extra);
         // The sweeps below walk every loaded column and proto chunk. Run them
@@ -1662,15 +1688,41 @@ impl Streaming {
             }
         }
         self.free(stale);
-        let mut removed = Vec::new();
-        if sweep {
-            // Unload far columns.
-            let far: Vec<_> = world
+        let far = if sweep {
+            world
                 .chunks
                 .keys()
                 .copied()
                 .filter(|&(x, z)| !self.remote && self.ranges().unloaded(x, z, self.decorates))
-                .collect();
+                .collect()
+        } else {
+            Vec::new()
+        };
+        StreamingUpdate {
+            uploads,
+            sweep,
+            far,
+            paused: false,
+        }
+    }
+
+    /// Commit a planned update after the caller has finished with live chunks.
+    pub fn finish_update(
+        &mut self,
+        world: &mut World,
+        plan: StreamingUpdate,
+    ) -> (Vec<((i32, i32, i32), SectionMesh)>, Vec<Arc<Chunk>>) {
+        let StreamingUpdate {
+            uploads,
+            sweep,
+            far,
+            paused,
+        } = plan;
+        if paused {
+            return (uploads, Vec::new());
+        }
+        let mut removed = Vec::new();
+        if sweep {
             for key in &far {
                 self.decorated.remove(key);
             }
