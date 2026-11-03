@@ -1468,6 +1468,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
+        struct XpHook(bool);
+        impl Hooks for XpHook {
+            fn player_xp_change(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerXpChangeEvent<'_>,
+            ) -> Flow {
+                assert_eq!(
+                    (event.player, event.player_entity_id, event.name),
+                    (7, 42, "Probe")
+                );
+                event.amount = -5;
+                if self.0 { Flow::Cancel } else { Flow::Continue }
+            }
+        }
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for cancelled in [false, true] {
+            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let (mut amount, mut cancel) = (10, false);
+            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            assert_eq!((amount, cancel), (-5, cancelled));
+        }
+    }
+
     struct MorePhantoms;
 
     impl Hooks for MorePhantoms {

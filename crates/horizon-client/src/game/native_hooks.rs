@@ -200,8 +200,6 @@
 //!
 //! API 261 adds XP orb pickup cooldown changed for a server player (`native_player_exp_cooldown_change`).
 //!
-//! API 260 adds A server player's orb-pickup experience points before they are added (`native_player_exp_change`).
-//!
 //! API 259 adds A server player used a firework rocket to boost while gliding (`native_player_elytra_boost`).
 //!
 //! API 258 adds A server player threw an egg (`native_player_egg_throw`).
@@ -4632,14 +4630,6 @@ impl Game<'_> {
             cancel,
         );
     }
-    /// A server player's experience points are about to increase from an orb pickup,
-    /// after mending has taken its share. Change `amount` to change the points
-    /// added. The player's state is not swapped in, so helpers that look them up
-    /// through `self.lan` may find nothing while a guest packet is handled.
-    /// Server-side. 260.
-    pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
-        mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
-    }
     /// A server player's level is about to change through
     /// `Player.giveExperienceLevels`: once per level gained or lost by points,
     /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
@@ -4692,19 +4682,26 @@ impl Game<'_> {
     /// A server player's experience points are about to change through
     /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
     /// orb pickup after mending, an advancement reward, or `/xp add ... points`.
-    /// Change `amount` (in points) or set `cancel` to give nothing. An orb or
-    /// an advancement reward gives nothing for a negative amount. Experience
-    /// bottles and furnaces make orbs, so they come through the orb path.
-    /// `native_player_exp_change` is separate and still fires first for an orb
-    /// pickup. Server-side. API @API:player_xp_change@.
+    /// Change the signed `amount` (in points) or set `cancel` to give nothing.
+    /// Experience bottles and furnaces make orbs, so they come through the orb
+    /// path. Server-side. API @API:player_xp_change@.
     pub(super) fn native_player_xp_change(
         &mut self,
         player: u128,
+        player_entity_id: i32,
         name: &str,
         amount: &mut i32,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_player_xp_change(self, mod_api::mods(), player, name, amount, cancel);
+        mod_api::dispatch_player_xp_change(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            amount,
+            cancel,
+        );
     }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,

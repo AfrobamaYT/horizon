@@ -1336,7 +1336,6 @@ API 258 adds A server player threw an egg after its projectile was launched and 
 
 API 259 adds A server player used a firework rocket to boost while gliding, after the rocket was launched and consumed. Bundles need "hooks": 259.
 
-API 260 adds A server player's experience points from an orb pickup: `native_player_exp_change(player, name, amount)` is called after mending has taken its share and before the remaining points are added. Change `amount` to change the points added; negative values become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Command experience changes use another path and are not heard. Bundles need "hooks": 260.
 
 API 261 adds A server player's XP orb pickup cooldown changed, after its new value is stored (`native_player_exp_cooldown_change(player, name, ticks)`). Bundles need "hooks": 261.
 
@@ -1964,10 +1963,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   keep the old slot; the client is sent that slot again.
 - **`native_furnace_burn(pos, fuel)`**: a furnace consumed `fuel` and started burning at `pos`.
 - **`native_furnace_smelt(pos, item, result)`**: a furnace finished smelting `item` into `result` at `pos`.
-- **`native_player_exp_change(player, name, amount)`**: a server player's experience points from an orb pickup are
-  about to be added, after mending has taken its share. Change `amount` to change the points added; negative values
-  become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing
-  while a guest packet is being handled. Command experience changes use another path and are not heard.
 - **`native_player_item_cooldown(player, name, item, ticks, cancel)`**: an item cooldown is about to start for a
   server player, including a used item's cooldown and a shield disabled by a hit. `item` is the item id and `ticks`
   its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound.
