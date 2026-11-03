@@ -3425,7 +3425,7 @@ pub(crate) mod tests {
                 let second = move_energy(host, &source, &tank, 200, tx)?;
                 Ok(first + second)
             });
-            let owner = mod_name(0);
+            let owner = "doubler".to_owned();
             assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
             assert_eq!(
                 world.amounts(&[SOURCE, OTHER, TANK]),
