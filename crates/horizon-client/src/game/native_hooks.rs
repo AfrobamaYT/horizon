@@ -229,7 +229,6 @@
 //!
 //! API 249 adds A player completed an advancement (`native_player_advancement_done`).
 //!
-//!
 //! API 247 adds A server game rule changes (`native_world_game_rule_change`).
 //!
 //! API 246 adds World border center change (`native_world_border_center_changed`).
