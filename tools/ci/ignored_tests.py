@@ -29,7 +29,7 @@ def known_failures():
     known = {}
     for number, line in enumerate(KNOWN.read_text().splitlines(), 1):
         line = line.split(" #", 1)[0].split()
-        if not line:
+        if not line or line[0].startswith("#"):
             continue
         if len(line) < 3 or line[3:] not in ([], ["flaky"], ["harness"]):
             sys.exit(f"{KNOWN.name}:{number}: expected `PACKAGE TEST REFERENCE [flaky|harness]`")
