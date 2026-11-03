@@ -1561,19 +1561,28 @@ mod tests {
                 }
             }
         }
-        let mods: Vec<Box<dyn Hooks>> = vec![
-            Box::new(HandMod {
-                offset: 1.0,
-                cancel: false,
-            }),
-            Box::new(HandMod {
-                offset: 2.0,
-                cancel: true,
-            }),
-            Box::new(HandMod {
-                offset: 4.0,
-                cancel: false,
-            }),
+        let mods = [
+            ModEntry::new(
+                "hand-first",
+                Box::new(HandMod {
+                    offset: 1.0,
+                    cancel: false,
+                }),
+            ),
+            ModEntry::new(
+                "hand-cancel",
+                Box::new(HandMod {
+                    offset: 2.0,
+                    cancel: true,
+                }),
+            ),
+            ModEntry::new(
+                "hand-last",
+                Box::new(HandMod {
+                    offset: 4.0,
+                    cancel: false,
+                }),
+            ),
         ];
         let host = Reader {
             block: "minecraft:air",
@@ -2218,7 +2227,10 @@ mod tests {
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        let mods = [ModEntry::new(
+            "actor-recorder",
+            Box::new(ActorRecorder(seen.clone())),
+        )];
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),

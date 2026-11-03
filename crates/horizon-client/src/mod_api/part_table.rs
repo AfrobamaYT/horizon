@@ -379,7 +379,7 @@ pub fn block_entity_capability<T: ?Sized + 'static>(
 }
 
 /// The mod's provider of the item places named `provider`, with the mod's index.
-pub(crate) fn place_provider(provider: &str) -> Option<(usize, Arc<dyn PlaceProvider>)> {
+pub(crate) fn place_provider(provider: &str) -> Option<(&'static str, Arc<dyn PlaceProvider>)> {
     let (owner, provider) = INSTALLED.get()?.keys.place_providers.get(provider)?;
     Some((*owner, provider.clone()))
 }
