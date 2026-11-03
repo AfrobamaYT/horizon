@@ -4,7 +4,11 @@ use horizon_world::loot::PackOverlay;
 use serde_json::Value;
 use std::path::Path;
 
-fn qualified(id: &str) -> String {
+/// A recipe's whole id from its name in the tables: vanilla's are kept bare
+/// (`oak_planks`), everyone else's whole (`mymod:crusher/iron`). The book,
+/// the network copy, the advancements' JSON and brewing know a recipe by
+/// this id.
+pub fn qualified(id: &str) -> String {
     if id.contains(':') {
         id.to_owned()
     } else {

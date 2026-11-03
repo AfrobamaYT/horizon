@@ -384,7 +384,7 @@ impl Book {
                 Recipe::Special(special) => {
                     for shown in special.book_displays() {
                         entries.push(Entry {
-                            id: crate::crafting::recipe_id(name),
+                            id: crate::crafting::qualified(name),
                             display_id: -1,
                             category: crafting_category(&category),
                             group: group(&grp),
@@ -398,7 +398,7 @@ impl Book {
                 }
             };
             entries.push(Entry {
-                id: crate::crafting::recipe_id(name),
+                id: crate::crafting::qualified(name),
                 display_id: -1,
                 category: crafting_category(&category),
                 group: group(&grp),
@@ -419,7 +419,7 @@ impl Book {
                 _ => continue,
             };
             entries.push(Entry {
-                id: crate::crafting::recipe_id(&c.id),
+                id: crate::crafting::qualified(&c.id),
                 display_id: -1,
                 category,
                 group: group(&c.group),

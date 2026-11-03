@@ -1293,15 +1293,6 @@ pub fn recipe_result(v: &Value) -> Option<ItemStack> {
     template.item.is_some().then(|| template.create())
 }
 /// The type of a recipe the game doesn't craft itself: one outside `minecraft`.
-/// A recipe's whole id from its name in the tables: vanilla's are kept bare
-/// (`oak_planks`), everyone else's whole (`mymod:crusher/iron`).
-pub fn recipe_id(name: &str) -> String {
-    if name.contains(':') {
-        name.to_owned()
-    } else {
-        format!("minecraft:{name}")
-    }
-}
 fn custom_type(v: &Value) -> Option<&str> {
     v["type"]
         .as_str()
@@ -1390,17 +1381,7 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
         augment(i, ingredients, stacks, &mut owner, &mut seen)
     })
 }
-/// A resource id with its default namespace filled in — the whole id the
-/// book, the network copy and the advancements' JSON know a recipe by,
-/// whatever the caller passes. `sources` names a `minecraft:` recipe bare
-/// on purpose (vanilla's own ids); this puts the namespace back.
-pub fn qualified(id: &str) -> String {
-    if id.contains(':') {
-        id.to_owned()
-    } else {
-        format!("minecraft:{id}")
-    }
-}
+pub use horizon_items::recipe_sources::qualified;
 
 impl Recipes {
     pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Result<Self> {

@@ -171,9 +171,7 @@ impl Brewing {
                 .is_some_and(|name| !name.contains('/'))
         });
         for (id, _) in &mut sources {
-            if !id.contains(':') {
-                *id = format!("minecraft:{id}");
-            }
+            *id = horizon_items::recipe_sources::qualified(id);
         }
         sources.sort_by(|a, b| a.0.cmp(&b.0));
         let mut recipes = Vec::new();
