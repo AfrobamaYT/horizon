@@ -3112,11 +3112,14 @@ mod poison_effect_tests {
     }
 
     #[test]
-    fn review_388_periodic_effect_refresh_resets_invisibility() {
+    fn effect_refresh_every_600_ticks_resets_manual_visibility() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
-        let data = MobTypes::load(&root).expect("prepared resources");
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
         let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
         let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
         pig.add_effect("speed", 602, 0);

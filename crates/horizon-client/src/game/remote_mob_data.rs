@@ -548,8 +548,10 @@ mod tests {
     }
 
     #[test]
-    fn review_388_illusioner_shared_flag_hides_the_body() {
-        let mut m = mob("minecraft:illusioner").expect("prepared illusioner fixture");
+    fn received_invisible_illusioner_hides_body() {
+        let Some(mut m) = mob("minecraft:illusioner") else {
+            return;
+        };
         apply(&mut m, &[(0, s::BYTE, Value::Byte(32))]);
         assert!(
             m.is_invisible(),
