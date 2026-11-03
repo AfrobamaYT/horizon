@@ -55,7 +55,7 @@ fn push_waits_for_tick(ticks_after_projectiles: bool, id: u32, charge: Option<u3
 pub(super) fn reverse(p: &mut Projectile) {
     let owner = (p.owner, p.owner_uuid, p.guest);
     p.deflect(
-        horizon_client::projectiles::Turn::Reverse { draw: None },
+        horizon_client::projectiles::Turn::Reverse,
         [1.0; 3],
         owner,
         false,
