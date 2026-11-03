@@ -165,12 +165,7 @@ impl Game<'_> {
             };
             // LivingEntityRenderer.shouldShowName (team rules included), then
             // MobRenderer: a visible name, or the mob under the crosshair.
-            let invisible = sb::invisible_to(
-                team,
-                viewer,
-                self.spectator(),
-                m.invisible || m.has_effect("minecraft:invisibility"),
-            );
+            let invisible = sb::invisible_to(team, viewer, self.spectator(), m.is_invisible());
             // Entity.isDiscrete: a crouching player.
             let discrete = player && m.extra.crouching;
             let view = sb::NameView {

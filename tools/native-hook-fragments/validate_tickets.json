@@ -1,8 +1,8 @@
 {
   "hooks": [
     {
-      "name": "chunk_tickets_validate",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_chunk_tickets_validate",
+      "name": "validate_tickets",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_validate_tickets",
       "neoforge": "LoadingValidationCallback",
       "side": "server",
       "cancellable": false,

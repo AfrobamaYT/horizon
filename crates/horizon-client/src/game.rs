@@ -209,6 +209,7 @@ mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 mod native_components;
+mod native_configs;
 mod native_criteria;
 mod native_data_maps;
 mod native_display_refs;
@@ -256,6 +257,7 @@ mod native_net;
 mod native_panel;
 mod native_panel_recipes;
 mod native_player_cooldowns;
+mod native_player_death;
 mod native_player_food;
 mod native_player_modes;
 mod native_player_stats;
@@ -446,6 +448,7 @@ use horizon_world::{
 pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use native_configs::{NativeConfig, NativeConfigFile, NativeConfigKind};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
 pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
@@ -1452,6 +1455,20 @@ impl LevelAccess for GameLevel<'_> {
             self.native_is_signal_source(state, &mut source);
         }
         source
+    }
+    fn has_weak_power_hook(&self) -> bool {
+        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+    }
+    fn adjust_should_check_weak_power(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        let mut check = vanilla;
+        self.native_should_check_weak_power(self.dimension, pos, state, direction, &mut check);
+        check
     }
     fn has_redstone_wire_connection_hook(&self) -> bool {
         self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
@@ -3112,6 +3129,8 @@ struct Game<'a> {
     native_lifecycle: native_lifecycle::NativeLifecycle,
     /// Entities whose copies are held out of storage; their handles refuse until stored back.
     held_out: Vec<u32>,
+    /// Native mods' config files this game loaded (game/native_configs.rs).
+    native_configs: native_configs::NativeConfigs,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
@@ -4984,6 +5003,11 @@ impl Game<'_> {
                 forced: self.streaming.forced.iter().copied().collect(),
                 // Filled from the `PORTAL` tickets by `update`.
                 portal: Vec::new(),
+                // EnderDragonFight.tick: while a player watches the fight, the
+                // arena holds a `DRAGON` ticket of radius 9 at (0, 0), so its
+                // island ticks out to 7 chunks whatever the watcher's
+                // simulation distance. The fight lives in the End only.
+                dragon: (self.dim == Dim::End && self.fight.arena_watched()).then_some((0, 0)),
                 view_distance: self.settings.render_distance.clamp(2, 32),
                 simulation_distance: self.settings.simulation_distance.max(2),
             }
@@ -5158,10 +5182,47 @@ impl Game<'_> {
             for &bounds in &level.trigger_extras {
                 touch(bounds);
             }
-            touched.sort_unstable_by_key(|p| (p.x, p.y, p.z));
-            touched.dedup();
-            for pos in inside.into_iter().chain(touched) {
+            for pos in inside {
                 b.entity_inside(level, ticks, pos);
+            }
+            // The touched blocks go once each, in (x, y, z) order. Only an
+            // entity-sensing block does anything there, so the others are
+            // passed over while no block has changed since they were looked
+            // at (they are still not sensing), and only the few sensing ones
+            // are sorted. Once a block changes, every later one goes, as the
+            // whole sorted list would.
+            let key = |p: &BlockPos| (p.x, p.y, p.z);
+            let (mut sensing, rest): (Vec<_>, Vec<_>) = touched
+                .into_iter()
+                .partition(|p| b.senses_entities(level.world.block(p.x, p.y, p.z)));
+            sensing.sort_unstable_by_key(key);
+            sensing.dedup();
+            let looked = (
+                level.world.revision,
+                level.world.chunks.membership_revision(),
+            );
+            let mut i = 0;
+            while i < sensing.len() {
+                let pos = sensing[i];
+                b.entity_inside(level, ticks, pos);
+                i += 1;
+                let now = (
+                    level.world.revision,
+                    level.world.chunks.membership_revision(),
+                );
+                if now != looked {
+                    let mut later: Vec<_> = rest
+                        .into_iter()
+                        .chain(sensing.drain(i..))
+                        .filter(|p| key(p) > key(&pos))
+                        .collect();
+                    later.sort_unstable_by_key(key);
+                    later.dedup();
+                    for pos in later {
+                        b.entity_inside(level, ticks, pos);
+                    }
+                    break;
+                }
             }
             for (pos, on_ground, feet_y) in standing {
                 b.entity_on_big_dripleaf(level, ticks, pos, on_ground, feet_y);
@@ -5175,30 +5236,34 @@ impl Game<'_> {
             self.tick_scheduled()?;
         }
         self.with_level(|b, level, ticks| {
-            // Each chunk's ticking sections and their masks, read again only
-            // after a block changed.
-            let mut sections = Vec::new();
             horizon_client::spans::time("random_ticks", || {
                 for (x, z) in ticking.into_iter().filter(|_| !debug) {
-                    let mut read = None;
+                    // The last answer, asked from Y `from` at a world revision:
+                    // the next ticking section and its mask. It stands for a
+                    // later Y up to that section's until a block changes.
+                    let mut last: Option<(u64, i32, Option<(i32, Arc<_>)>)> = None;
                     let pos = horizon_core::position::ChunkPos::new(x, z);
                     b.tick_chunk_random_masked(level, ticks, pos, |level, from| {
-                        if read != Some(level.world.revision) {
-                            read = Some(level.world.revision);
-                            sections.clear();
-                            if let Some(chunk) = level.world.chunks.get(&(x, z)) {
-                                level.random_tick_sections.masked(
+                        let revision = level.world.revision;
+                        let stands = last.as_ref().is_some_and(|(r, f, next)| {
+                            *r == revision
+                                && *f <= from
+                                && next.as_ref().is_none_or(|(y, _)| from <= *y)
+                        });
+                        if !stands {
+                            let next = level.world.chunks.get(&(x, z)).and_then(|chunk| {
+                                level.random_tick_sections.next_masked(
                                     (x, z),
                                     chunk,
                                     level.facts,
                                     |id| b.random_tick_candidate(BlockStateId(id)),
-                                    &mut sections,
-                                );
-                            }
+                                    from,
+                                )
+                            });
+                            last = Some((revision, from, next));
                         }
-                        sections
-                            .iter()
-                            .find(|(y, _)| *y >= from)
+                        last.as_ref()
+                            .and_then(|(_, _, next)| next.as_ref())
                             .map(|(y, mask)| (*y, Some(mask.clone())))
                     });
                 }
@@ -18854,6 +18919,7 @@ impl Game<'_> {
                             self.tick_fov();
                         }
                         self.tick_win_screen()?;
+                        self.native_configs_tick_client();
                         // Gui.tick runs ChatListener.tick paused or not.
                         self.tick_chat_queue();
                         self.tick_music();
@@ -19606,6 +19672,7 @@ impl<'a> Game<'a> {
             native_input: Default::default(),
             native_lifecycle: Default::default(),
             held_out: Vec::with_capacity(4),
+            native_configs: Default::default(),
             native_net: Default::default(),
             native_mod_screen: None,
             sky_darken_memo: Default::default(),
