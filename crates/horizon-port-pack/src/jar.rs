@@ -89,7 +89,7 @@ fn manifest_value(manifest: &str, key: &str) -> Option<String> {
             break;
         } else if let Some((name, contents)) = line.split_once(':') {
             if name.eq_ignore_ascii_case(key) {
-                value = Some(contents.trim_start().to_owned());
+                value = Some(contents.strip_prefix(' ').unwrap_or(contents).to_owned());
             }
         }
     }
@@ -357,11 +357,11 @@ mod tests {
                 ("META-INF/neoforge.mods.toml", metadata),
                 (
                     "META-INF/MANIFEST.MF",
-                    "Manifest-Version: 1.0\rImplementation-Version: 2.3-\r build\r\rName: file\rImplementation-Version: wrong\r",
+                    "Manifest-Version: 1.0\rImplementation-Version:  2.3-\r build\r\rName: file\rImplementation-Version: wrong\r",
                 ),
             ],
         );
-        assert_eq!(read(&lone_cr.0).unwrap().version, "2.3-build");
+        assert_eq!(read(&lone_cr.0).unwrap().version, " 2.3-build");
         let named = synthetic_jar(
             "named-section-only",
             &[
