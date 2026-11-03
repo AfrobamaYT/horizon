@@ -4810,6 +4810,96 @@ impl Game<'_> {
             stack,
         );
     }
+    /// A brewing stand at `pos` is about to brew (`PotionBrewEvent.Pre`,
+    /// in `BrewingStandBlockEntity.doBrew`): `stacks` is a copy of its five
+    /// slots (three bottles, the ingredient, the fuel). Set `cancel` to skip
+    /// vanilla's brew: the stand then takes `stacks` as the mods left them,
+    /// uses no ingredient and plays no brew sound, and `potion_brew_post`
+    /// fires with those slots; `brewing_complete` doesn't, as nothing was
+    /// brewed. Uncancelled, changes to `stacks` are dropped. Server-side.
+    /// @API:potion_brew_pre@.
+    pub(super) fn native_potion_brew_pre(
+        &mut self,
+        pos: [i32; 3],
+        stacks: &mut [Option<ItemStack>; 5],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_potion_brew_pre(self, mod_api::mods(), pos, stacks, cancel);
+    }
+    /// A brewing stand at `pos` brewed (`PotionBrewEvent.Post`, at the end of
+    /// `BrewingStandBlockEntity.doBrew`), or `potion_brew_pre` was cancelled:
+    /// `stacks` holds its five slots after the brew (or as the cancelling
+    /// mods left them), and what the mods leave there is the stand's. Fires
+    /// last, as `doBrew` ends: after `brewing_complete`, the brew sound and
+    /// the ingredient's remainder dropping. Server-side. @API:potion_brew_post@.
+    pub(super) fn native_potion_brew_post(
+        &mut self,
+        pos: [i32; 3],
+        stacks: &mut [Option<ItemStack>; 5],
+    ) {
+        mod_api::dispatch_potion_brew_post(self, mod_api::mods(), pos, stacks);
+    }
+    /// `FurnaceResultSlot.checkTakeAchievements` ran for a server player at a
+    /// furnace, blast furnace or smoker's result slot: `player` is their UUID
+    /// and `player_entity_id` their network id; `stack` and `amount_removed`
+    /// are what vanilla passes there (`getSmelting`, `getAmountRemoved`). A
+    /// click or a throw passes the taken stack and its count; a shift-click
+    /// passes the slot's stack as it was with the count moved, then what
+    /// stayed in the slot (`None` once it is empty) with 0; a hotbar swap
+    /// passes the taken stack with 0. Fires before `furnace_extract`.
+    /// Server-side. @API:item_smelted@.
+    pub(super) fn native_item_smelted(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        stack: Option<&ItemStack>,
+        amount_removed: u32,
+    ) {
+        mod_api::dispatch_item_smelted(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            stack,
+            amount_removed,
+        );
+    }
+    /// A server player enchanted `item` at an enchanting table
+    /// (`EnchantmentMenu.clickMenuButton`): `enchantments` are the ones it was
+    /// given, in order, as (id, level). `item` is the enchanted stack (an
+    /// enchanted book for a book). Fires after the levels are paid, before
+    /// `enchant_item`. Server-side. @API:player_enchant_item@.
+    pub(super) fn native_player_enchant_item(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        item: &ItemStack,
+        enchantments: &[(std::sync::Arc<str>, u32)],
+    ) {
+        mod_api::dispatch_player_enchant_item(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            item,
+            enchantments,
+        );
+    }
+    /// An enchanting table at `pos` drew the level of one offer
+    /// (`EnchantmentMenu.slotsChanged`, after `getEnchantmentCost`): `offer`
+    /// holds the server player whose table it is, the row (0 to 2), the
+    /// power (bookshelves counted), the item and the level drawn. Change
+    /// `level` to change the offer; a level below `row + 1` offers nothing,
+    /// as vanilla's. Asked for each row in order, before
+    /// `prepare_item_enchant`. Server-side. @API:enchantment_level_set@.
+    pub(super) fn native_enchantment_level_set(
+        &mut self,
+        pos: [i32; 3],
+        offer: &horizon_client::stations::EnchantmentRow<'_>,
+        level: &mut i32,
+    ) {
+        mod_api::dispatch_enchantment_level_set(self, mod_api::mods(), pos, offer, level);
+    }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_campfire_start(self, mod_api::mods(), pos, item);
@@ -6812,12 +6902,16 @@ impl Game<'_> {
     }
     /// A player was saved to the world's store (NeoForge's
     /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
-    /// world closes, when the dedicated server saves everyone, and for an
-    /// integrated server's owner when the world saves them. LAN guests are
-    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// world closes, when a dedicated or integrated server saves its guests,
+    /// and for an integrated server's owner when the world saves them.
+    /// Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     pub(super) fn native_player_save_to_file(
         &mut self,
         player: u128,

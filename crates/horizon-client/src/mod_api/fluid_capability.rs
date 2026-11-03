@@ -235,7 +235,7 @@ impl End {
                 .handler
                 .insert(host, self.at, self.side, tank, left.clone(), false);
             match rest.filter(|rest| rest.amount > 0) {
-                Some(rest) if rest.amount < amount => left = rest,
+                Some(rest) if rest.amount < amount => left = left.with_amount(rest.amount),
                 Some(_) => return Some(left),
                 None => return None,
             }
@@ -243,7 +243,81 @@ impl End {
     }
 }
 
+impl End {
+    /// `rest` back into tank `tank`, else the handler's others; what neither takes.
+    fn back(&self, host: &mut dyn Host, tank: usize, rest: FluidStack) -> Option<FluidStack> {
+        let rest = self.fill_tank(host, tank, rest)?;
+        let back = self.fill(host, &rest);
+        (back < rest.amount).then(|| rest.with_amount(rest.amount - back))
+    }
+}
+
+/// `handler` at `at` gave `excess` from tank `tank` beyond what it was asked, or another fluid
+/// than its tank showed: a mod bug, warned once naming its mod. The excess goes back into that
+/// tank, else its others; what none of them takes is lost, with a warning naming that mod.
+fn give_back(
+    host: &mut dyn Host,
+    handler: Arc<dyn FluidHandler>,
+    at: [i32; 3],
+    side: Option<Direction>,
+    tank: usize,
+    excess: FluidStack,
+) {
+    broken(&handler, at, "gave");
+    let end = End { handler, at, side };
+    if let Some(lost) = end.back(host, tank, excess) {
+        log::warn!(
+            "Horizon: {} mB of {} given at {at:?} were lost: {}'s fluid handler gave other than \
+             it was asked",
+            lost.amount,
+            lost.fluid,
+            owner(&end.handler)
+        );
+    }
+}
+
 impl dyn Host + '_ {
+    /// Drains up to `max` millibuckets out of `handler`'s tanks at `at`, through `side`: one
+    /// fluid, the first there, and none with components, as the API 54 helper names a fluid by
+    /// its id alone. What came out. A tank giving more than asked, or another fluid than it
+    /// showed, gives it back (`give_back`); the other fluid ends the drain.
+    pub(crate) fn drain_one_named_fluid(
+        &mut self,
+        handler: &Arc<dyn FluidHandler>,
+        at: [i32; 3],
+        side: Option<Direction>,
+        max: u32,
+    ) -> Option<FluidStack> {
+        let mut out: Option<FluidStack> = None;
+        for tank in 0..handler.tanks(self, at, side) {
+            let taken = out.as_ref().map_or(0, |out| out.amount);
+            let want = max - taken;
+            if want == 0 {
+                break;
+            }
+            let Some(there) = handler.fluid(self, at, side, tank) else {
+                continue;
+            };
+            let first = out.as_ref().unwrap_or(&there);
+            if there.has_components() || !there.same_fluid_same_components(first) {
+                continue;
+            }
+            let Some(got) = handler.extract(self, at, side, tank, want, false) else {
+                continue;
+            };
+            if !got.same_fluid_same_components(&there) {
+                give_back(self, handler.clone(), at, side, tank, got);
+                break;
+            }
+            if got.amount > want {
+                let excess = got.with_amount(got.amount - want);
+                give_back(self, handler.clone(), at, side, tank, excess);
+            }
+            out = Some(there.with_amount(taken + got.amount.min(want)));
+        }
+        out.filter(|out| out.amount > 0)
+    }
+
     /// Moves up to `max` millibuckets of one fluid from the block at `from`, through its side
     /// `from_side`, into the one at `to`, through `to_side`, by their [`FLUIDS`] handlers, in
     /// rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, each source tank in turn
@@ -295,11 +369,17 @@ impl dyn Host + '_ {
         };
         let mut moved: Option<FluidStack> = None;
         for tank in 0..source.handler.tanks(self, from, from_side) {
-            let extract = |host: &mut dyn Host, max, simulate| {
+            // A simulation answering more than was asked is taken at the request; a real
+            // extract's excess is handled below, since it has left the source.
+            let extract = |host: &mut dyn Host, max: u32, simulate| {
                 source
                     .handler
                     .extract(host, from, from_side, tank, max, simulate)
                     .filter(|out| out.amount > 0)
+                    .map(|out| match simulate {
+                        true => out.with_amount(out.amount.min(max)),
+                        false => out,
+                    })
             };
             loop {
                 let left = max - moved.as_ref().map_or(0, |moved| moved.amount);
@@ -341,23 +421,23 @@ impl dyn Host + '_ {
                     broken(&source.handler, from, "gave");
                     liar = Some(&source.handler);
                 }
-                let went = target.pass(self, &out, false);
-                if went < out.amount && liar.is_none() {
+                // Only the fluid and amount both ends agreed on goes into the target; what came
+                // out beyond it is the source's to take back.
+                let agreed = match out.same_fluid_same_components(&give) {
+                    true => out.amount.min(give.amount),
+                    false => 0,
+                };
+                let went = target.pass(self, &out.with_amount(agreed), false);
+                if went < agreed && liar.is_none() {
                     broken(&target.handler, to, "took");
                     liar = Some(&target.handler);
                 }
                 if let Some(liar) = liar.filter(|_| went < out.amount) {
                     let rest = out.with_amount(out.amount - went);
-                    let lost = source
-                        .fill_tank(self, tank, rest)
-                        .and_then(|rest| {
-                            let back = source.fill(self, &rest);
-                            (back < rest.amount).then(|| rest.with_amount(rest.amount - back))
-                        })
-                        .and_then(|rest| {
-                            let into = target.fill(self, &rest);
-                            (into < rest.amount).then(|| rest.with_amount(rest.amount - into))
-                        });
+                    let lost = source.back(self, tank, rest).and_then(|rest| {
+                        let into = target.fill(self, &rest);
+                        (into < rest.amount).then(|| rest.with_amount(rest.amount - into))
+                    });
                     if let Some(lost) = lost {
                         log::warn!(
                             "Horizon: a fluid move from {from:?} to {to:?} lost {} mB of {}: \

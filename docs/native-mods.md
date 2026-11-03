@@ -2472,10 +2472,16 @@ a dimension.
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
   slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
   preserve complete stacks for all mob slots.
+- `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
+  whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
+  `view_vector` and `distance_to_sqr(host, pos)` read and move it.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
 - The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+- `host.block_entity(level, pos)` finds a block entity in a loaded chunk, including in parked levels;
+  `kind`, `position`, `level` and `data` read it. A removed or temporarily taken-out entity reads `None`;
+  a replacement at the same position resolves to the new entity, unlike vanilla's object identity.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
@@ -2483,7 +2489,7 @@ a dimension.
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags. Bundles need `"hooks": ["level_block_writes"]`.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
-(`entity`, `level`) also becomes a method of that handle.
+(`entity`, `level`, `block_entity`) also becomes a method of that handle.
 
 ### Mobs drawn by a mod
 
@@ -3100,6 +3106,12 @@ mod: what it leaves over in a move goes back into the source tank, else into the
 to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
 broken handler can void.
 
+The game never trusts an answer past what it asked, offered or simulated. A real extract must give the item or
+fluid, with the components, that its simulation showed: another is given back and nothing comes out, and a
+leftover of another item counts as the offered one. A leftover larger than the offer counts as the offer, and what an extract gives beyond the request goes back into its slot or tank, else is
+dropped at the block (items) or, as above, lost with a warning (fluids). Either is a mod bug, warned once naming
+the mod; a broken handler can't make a move overflow, duplicate items or panic the game.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
@@ -3185,10 +3197,14 @@ Ok::<(), AttachmentError>(())
 For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
-`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item
-entities, boats, minecarts, armor stands, cushions, item frames, paintings and the
-server's `OtherEntity` records; projectiles, orbs and other ID-less save paths are
-not covered. Player UUIDs cover online guests and the acting player. Mutable level
+`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover every entity in
+the level apart from players: mobs, items, experience orbs, projectiles, tridents,
+falling blocks, primed TNT, fireworks, boats, minecarts, armor stands, cushions, item
+frames, paintings, End crystals, the ender dragon, ominous item spawners and the
+server's `OtherEntity` records. An entity keeps its UUID through saves, so its saved
+attachments load back with it; an orb saved with a `count` above one loads as several
+orbs, and only the first keeps the attachments. Player UUIDs cover online guests and
+the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
 cannot access attachments. Unserialized values disappear on unload or restart. A saved
 value is stored under `horizon:attachments`, then the mod namespace and attachment name,

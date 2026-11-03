@@ -46,7 +46,7 @@ class DynaRoutingTests(unittest.TestCase):
 
     def test_workflow_wires_route_and_keeps_privileges_off_pool(self):
         from test_ci_runners import jobs
-        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
         blocks = dict(jobs(workflow))
         route = blocks["changes"]
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
@@ -60,6 +60,22 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertNotIn("permissions:", block)
         self.assertIn("runs-on: ubuntu-latest", blocks["pool-watch"])
         self.assertIn("permissions:\n  contents: read", workflow)
+
+    def test_schedule_only_dispatches_and_parity_only_runs_on_dispatch(self):
+        from test_ci_runners import jobs, triggers
+        workflow = (ROOT / ".github/workflows/dyna-ci.yml").read_text()
+        self.assertEqual(triggers(workflow), {"pull_request", "push", "workflow_dispatch", "schedule"})
+        blocks = dict(jobs(workflow))
+        dispatcher = blocks["nightly-dispatch"]
+        self.assertIn("github.event_name == 'schedule'", dispatcher)
+        self.assertIn("runs-on: ubuntu-latest", dispatcher)
+        self.assertIn('gh workflow run dyna-ci.yml --repo "$GITHUB_REPOSITORY" --ref main', dispatcher)
+        self.assertIn("if: github.event_name != 'schedule'", blocks["changes"])
+        parity = blocks["vanilla-parity"]
+        self.assertIn("github.event_name == 'workflow_dispatch'", parity)
+        self.assertIn("github.repository == 'arismoko/horizon'", parity)
+        self.assertIn("runs-on: dyna-large", parity)
+        self.assertIn("persist-credentials: false", parity)
 
 
 if __name__ == "__main__":
