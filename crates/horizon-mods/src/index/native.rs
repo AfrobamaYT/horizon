@@ -479,6 +479,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn archive_with_an_unknown_manifest_field_is_refused() {
         let path = std::env::temp_dir().join(format!("native-unknown-{}.hmod", std::process::id()));
         for name in ["hooks", "banana"] {
