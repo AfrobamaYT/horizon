@@ -2074,9 +2074,13 @@ impl Game<'_> {
                         }),
                         Some(conn),
                     );
-                    let guest = &host.hub.guests[gi];
-                    let (uuid, name) = (guest.uuid, guest.name.clone());
-                    self.native_block_damage_abort(uuid, &name, a.pos);
+                    if horizon_client::mod_api::listened(
+                        horizon_client::mod_api::HookId::BlockDamageAbort,
+                    ) {
+                        let guest = &host.hub.guests[gi];
+                        let (uuid, name) = (guest.uuid, guest.name.clone());
+                        self.native_block_damage_abort(uuid, &name, a.pos);
+                    }
                 }
                 4 | 5 => {
                     if !spectator {
@@ -2163,12 +2167,16 @@ impl Game<'_> {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                     });
-                    let Some(host) = self.lan.as_ref() else {
-                        return;
-                    };
-                    let guest = &host.hub.guests[gi];
-                    let (uuid, name) = (guest.uuid, guest.name.clone());
-                    self.native_player_swap_with_equipment_slot(uuid, &name, "offhand");
+                    if horizon_client::mod_api::listened(
+                        horizon_client::mod_api::HookId::PlayerSwapWithEquipmentSlot,
+                    ) {
+                        let Some(host) = self.lan.as_ref() else {
+                            return;
+                        };
+                        let guest = &host.hub.guests[gi];
+                        let (uuid, name) = (guest.uuid, guest.name.clone());
+                        self.native_player_swap_with_equipment_slot(uuid, &name, "offhand");
+                    }
                 }
                 // STAB: `PiercingWeapon.attack` of a left click with a spear.
                 8 if !spectator => self.guest_jab(conn),
@@ -2637,12 +2645,16 @@ impl Game<'_> {
                     };
                     host.hub
                         .select_bundle_item(conn, slot, p.index, &mut self.world);
-                    let Some(host) = self.lan.as_ref() else {
-                        return;
-                    };
-                    let guest = &host.hub.guests[gi];
-                    let (uuid, name) = (guest.uuid, guest.name.clone());
-                    self.native_player_bundle_item_select(uuid, &name, p.slot, p.index);
+                    if horizon_client::mod_api::listened(
+                        horizon_client::mod_api::HookId::PlayerBundleItemSelect,
+                    ) {
+                        let Some(host) = self.lan.as_ref() else {
+                            return;
+                        };
+                        let guest = &host.hub.guests[gi];
+                        let (uuid, name) = (guest.uuid, guest.name.clone());
+                        self.native_player_bundle_item_select(uuid, &name, p.slot, p.index);
+                    }
                 }
             }
             S::ContainerClick(p) => {
@@ -5538,8 +5550,13 @@ impl Game<'_> {
         if progress != play.last_progress && progress >= 0 {
             play.last_progress = progress;
             let guest = &host.hub.guests[gi];
-            let (uuid, name, id) = (guest.uuid, guest.name.clone(), guest.entity_id);
-            self.native_block_break_progress_update(uuid, &name, pos, progress);
+            let id = guest.entity_id;
+            if horizon_client::mod_api::listened(
+                horizon_client::mod_api::HookId::BlockBreakProgressUpdate,
+            ) {
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                self.native_block_break_progress_update(uuid, &name, pos, progress);
+            }
             // The host player sees it too (on the server thread its window is a guest).
             self.destroy_block_progress(id, pos, progress);
             let Some(host) = self.lan.as_ref() else {

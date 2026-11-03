@@ -238,12 +238,15 @@ impl Game<'_> {
         else {
             return;
         };
-        let (conn, name) = (g.conn, g.name.clone());
+        let conn = g.conn;
         let mut result = self
             .recipes()
             .find(&g.craft_grid, 2)
             .map(|(_, stack)| stack);
-        self.native_prepare_item_craft(uuid, &name, None, &mut result);
+        if horizon_client::mod_api::listened(horizon_client::mod_api::HookId::PrepareItemCraft) {
+            let name = g.name.clone();
+            self.native_prepare_item_craft(uuid, &name, None, &mut result);
+        }
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -434,12 +437,7 @@ impl Game<'_> {
         let Some(guest) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else {
             return true;
         };
-        let (uuid, entity_id, name, at) = (
-            guest.uuid,
-            guest.entity_id,
-            guest.name.clone(),
-            guest.position,
-        );
+        let (uuid, entity_id, at) = (guest.uuid, guest.entity_id, guest.position);
         for (stack, removed) in std::mem::take(&mut menu.item_smelted) {
             self.native_item_smelted(uuid, entity_id, stack.as_ref(), removed);
         }
@@ -447,7 +445,15 @@ impl Game<'_> {
         let count = |s: Option<&ItemStack>| s.map_or(0, |s| s.count);
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let output = items[2].as_ref();
-            if let Some(output) = output {
+            if let Some(output) = output
+                && horizon_client::mod_api::listened(
+                    horizon_client::mod_api::HookId::FurnaceExtract,
+                )
+                && let Some(name) = self
+                    .lan
+                    .as_ref()
+                    .map(|host| host.hub.guests[gi].name.clone())
+            {
                 let taken = output.count - count(menu.slot(2));
                 self.native_furnace_extract(
                     uuid,
