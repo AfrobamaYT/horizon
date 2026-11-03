@@ -2044,7 +2044,7 @@ mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
 pub use resource::{ComponentId, ItemResource, Overanswered, ResourceHandler, move_resources};
-pub use transaction::{Transaction, TransactionSeal, run_transaction};
+pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,

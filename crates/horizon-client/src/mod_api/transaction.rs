@@ -13,7 +13,7 @@ pub struct TransactionSeal(());
 /// its closure alone.
 pub struct Transaction(());
 
-impl dyn Host + '_ {
+pub trait HostTransaction: Host {
     /// Runs `f` in a transaction, nested in the open one if any (`Transaction.openRoot` and
     /// `open`): `Ok` commits it (`commit`), into the transaction around it or, at the
     /// outermost, for good, with the world told of each change once; `Err` aborts it
@@ -24,11 +24,18 @@ impl dyn Host + '_ {
     /// Covered: block entities (item slots, saved compound, custom name and attachments), cauldrons,
     /// players' inventories and cursors, entities' inventories
     /// ([`ItemPlace::EntitySlot`](super::ItemPlace::EntitySlot)) and item entities' stacks.
-    pub fn transaction<T, E>(
+    fn transaction<T, E>(
         &mut self,
-        f: impl FnOnce(&mut dyn Host, &Transaction) -> Result<T, E>,
+        f: impl FnOnce(&mut Self, &Transaction) -> Result<T, E>,
+    ) -> Result<T, E>;
+}
+
+impl<H: Host + ?Sized> HostTransaction for H {
+    fn transaction<T, E>(
+        &mut self,
+        f: impl FnOnce(&mut Self, &Transaction) -> Result<T, E>,
     ) -> Result<T, E> {
-        run_transaction(self, |host, tx| f(host, tx))
+        run_transaction(self, f)
     }
 }
 
