@@ -435,6 +435,15 @@ pub struct Menu {
     /// The anvil result taken while `anvil_hook` is set, as it was before
     /// crafting.
     pub anvil_craft: Option<AnvilCraft>,
+    /// The caller fires `GrindstoneEvent.OnTakeItem` for a taken grindstone
+    /// result: its `onTake` waits in `grind_take` for `grindstone_taken`.
+    pub grind_hook: bool,
+    /// The grindstone result taken while `grind_hook` is set, with its
+    /// inputs as they were.
+    pub grind_take: Option<GrindstoneTake>,
+    /// `GrindstoneEvent.OnPlaceItem`'s experience for the result now in the
+    /// slot, or -1 for vanilla's.
+    grind_xp: i32,
     /// The enchanting table's item changed to an enchantable one: the caller
     /// (with a level) fills the costs and clues (`slotsChanged`'s
     /// `access.execute`).
@@ -458,6 +467,44 @@ pub struct Anvil {
     pub repair_count: u32,
     /// `onlyRenaming`.
     pub only_renaming: bool,
+}
+
+/// What `AnvilUpdateEvent` asks about once both anvil inputs are in, and
+/// what the mods may set: an `output` (none until a mod sets one), its level
+/// `cost` (from the inputs' repair costs) and `material_cost`, the units of
+/// `right` used (0 or more than it holds: all of it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilUpdate {
+    pub left: ItemStack,
+    pub right: ItemStack,
+    /// The rename box's text, `None` when the client sent none.
+    pub name: Option<String>,
+    pub output: Option<ItemStack>,
+    pub cost: i64,
+    pub material_cost: i32,
+}
+
+/// What `GrindstoneEvent.OnPlaceItem` asks about once the inputs changed,
+/// and what the mods may set: an `output` (none until a mod sets one) and,
+/// with it, `xp` (-1 for vanilla's experience).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GrindstonePlace {
+    pub top: Option<ItemStack>,
+    pub bottom: Option<ItemStack>,
+    pub output: Option<ItemStack>,
+    pub xp: i32,
+}
+
+/// A grindstone result taken, as `GrindstoneEvent.OnTakeItem` reports it:
+/// the inputs, the experience (-1 for vanilla's, or what OnPlaceItem set)
+/// and what the inputs hold afterwards (empty, as vanilla's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GrindstoneTake {
+    pub top: Option<ItemStack>,
+    pub bottom: Option<ItemStack>,
+    pub xp: i32,
+    pub new_top: Option<ItemStack>,
+    pub new_bottom: Option<ItemStack>,
 }
 
 /// An anvil craft as `AnvilCraftEvent` reports it: the inputs and the result
@@ -880,6 +927,9 @@ impl Menu {
             combined: false,
             anvil_hook: false,
             anvil_craft: None,
+            grind_hook: false,
+            grind_take: None,
+            grind_xp: -1,
             enchant_changed: false,
             enchant_button: None,
             may_build: true,
@@ -1215,6 +1265,93 @@ impl Menu {
         }
         self.data[0] = out.cost;
         self.containers[RESULT][0] = out.result;
+    }
+
+    /// `AnvilUpdateEvent`'s question about the result `createResult` just
+    /// made, or `None` when vanilla alone decides: the event is asked only
+    /// with both inputs in.
+    pub fn anvil_update(&self) -> Option<AnvilUpdate> {
+        let [Some(left), Some(right)] = [0, 1].map(|i| self.containers[MAIN][i].clone()) else {
+            return None;
+        };
+        Some(AnvilUpdate {
+            cost: i64::from(left.repair_cost()) + i64::from(right.repair_cost()),
+            name: self.anvil.name.clone(),
+            left,
+            right,
+            output: None,
+            material_cost: 0,
+        })
+    }
+
+    /// The mods' answer to [`Self::anvil_update`]: a cancel leaves no result
+    /// (at cost 1, `createResult`'s start); an output replaces vanilla's,
+    /// with its cost (clamped to 0 or more) and material cost; otherwise
+    /// vanilla's result stays.
+    pub fn anvil_updated(&mut self, update: AnvilUpdate, cancel: bool) {
+        if !cancel && update.output.is_none() {
+            return;
+        }
+        self.anvil.only_renaming = false;
+        if cancel {
+            self.anvil.repair_count = 0;
+            self.data[0] = 1;
+            self.containers[RESULT][0] = None;
+            return;
+        }
+        self.anvil.repair_count = update.material_cost.max(0) as u32;
+        self.data[0] = update.cost.clamp(0, i64::from(i32::MAX)) as i32;
+        self.containers[RESULT][0] = update.output;
+    }
+
+    /// `GrindstoneEvent.OnPlaceItem`'s question about the result
+    /// `createResult` just made.
+    pub fn grindstone_place(&self) -> GrindstonePlace {
+        GrindstonePlace {
+            top: self.containers[MAIN][0].clone(),
+            bottom: self.containers[MAIN][1].clone(),
+            output: None,
+            xp: -1,
+        }
+    }
+
+    /// The mods' answer to [`Self::grindstone_place`]: a cancel leaves no
+    /// result; an output replaces vanilla's, and its `xp` (when 0 or more)
+    /// is what taking it gives; otherwise vanilla's result and experience stay.
+    pub fn grindstone_placed(&mut self, place: GrindstonePlace, cancel: bool) {
+        self.grind_xp = -1;
+        if cancel {
+            self.containers[RESULT][0] = None;
+        } else if let Some(output) = place.output {
+            self.containers[RESULT][0] = Some(output);
+            self.grind_xp = place.xp.max(-1);
+        }
+    }
+
+    /// The rest of a taken grindstone result's `onTake` once the mods
+    /// answered `grind_take`: cancelled, the inputs stay and nothing is
+    /// given. Otherwise the inputs become `new_top` and `new_bottom`, and
+    /// the experience is the mods' `xp` when 0 or more (returned, given as
+    /// is) or vanilla's (`ground`, rolled by the caller).
+    pub fn grindstone_taken(
+        &mut self,
+        env: &Env,
+        take: GrindstoneTake,
+        cancel: bool,
+    ) -> Option<i32> {
+        if cancel {
+            return None;
+        }
+        if take.xp < 0 {
+            self.ground = Some(crate::stations::grindstone_xp_base(
+                env.enchantments,
+                take.top.as_ref(),
+                take.bottom.as_ref(),
+            ));
+        }
+        self.put(env, 0, take.new_top);
+        self.put(env, 1, take.new_bottom);
+        (take.xp >= 0).then_some(take.xp)
     }
 
     /// `AnvilMenu.setItemName` (`ServerboundRenameItemPacket`): false when
@@ -1853,6 +1990,16 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::GrindResult {
+            if self.grind_hook {
+                self.grind_take = Some(GrindstoneTake {
+                    top: self.containers[MAIN][0].clone(),
+                    bottom: self.containers[MAIN][1].clone(),
+                    xp: self.grind_xp,
+                    new_top: None,
+                    new_bottom: None,
+                });
+                return;
+            }
             // GrindstoneMenu's result onTake: the experience (from the inputs
             // before they go), then both inputs cleared.
             self.ground = Some(crate::stations::grindstone_xp_base(
@@ -3507,7 +3654,41 @@ pub(crate) mod tests {
     /// the 62 left with 0 (`onTake`); nothing is kept without a listener.
     #[test]
     fn a_furnace_take_keeps_what_check_take_achievements_passes() {
-        let root = std::env::temp_dir().join(format!("horizon-smelted-{}", std::process::id()));
+        bare_env(|env| {
+            let furnace = |hook: bool| {
+                let mut menu = Menu::new(Kind::Furnace("smelting"));
+                menu.item_smelted_hook = hook;
+                menu.set_slot(env, 2, stack("iron_ingot", 64));
+                menu
+            };
+
+            let mut menu = furnace(true);
+            menu.click(env, 2, 0, Input::Pickup).unwrap();
+            assert_eq!(menu.item_smelted, [(stack("iron_ingot", 64), 64)]);
+
+            // The inventory full of dirt but for one stack with room for 2.
+            let mut menu = furnace(true);
+            for s in 3..39 {
+                menu.set_slot(env, s, stack("dirt", 64));
+            }
+            menu.set_slot(env, 3, stack("iron_ingot", 62));
+            menu.click(env, 2, 0, Input::QuickMove).unwrap();
+            assert_eq!(menu.slot(2), stack("iron_ingot", 62).as_ref());
+            assert_eq!(
+                menu.item_smelted,
+                [(stack("iron_ingot", 64), 2), (stack("iron_ingot", 62), 0),]
+            );
+
+            let mut menu = furnace(false);
+            menu.click(env, 2, 0, Input::Pickup).unwrap();
+            assert!(menu.item_smelted.is_empty());
+        });
+    }
+
+    /// A test `Env` with no vanilla data: the anvil's and grindstone's own
+    /// results don't matter where the mods answer.
+    fn bare_env(test: impl FnOnce(&Env)) {
+        let root = std::env::temp_dir().join(format!("horizon-bare-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
         let items = Items::for_tests(Default::default());
         let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
@@ -3515,7 +3696,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let (banners, station_recipes) = (Default::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
-        let env = &Env {
+        test(&Env {
             player: Some(7),
             player_entity_id: Some(41),
             side: LogicalSide::Server,
@@ -3528,34 +3709,88 @@ pub(crate) mod tests {
             names: &names,
             trade: None,
             maps: None,
-        };
-        let furnace = |hook: bool| {
-            let mut menu = Menu::new(Kind::Furnace("smelting"));
-            menu.item_smelted_hook = hook;
-            menu.set_slot(env, 2, stack("iron_ingot", 64));
-            menu
-        };
+        });
+    }
 
-        let mut menu = furnace(true);
-        menu.click(env, 2, 0, Input::Pickup).unwrap();
-        assert_eq!(menu.item_smelted, [(stack("iron_ingot", 64), 64)]);
+    /// `AnvilUpdateEvent`: asked only with both inputs in; a mod's output
+    /// takes its cost and uses its material cost of the right input when
+    /// taken; a cancel leaves no result at cost 1.
+    #[test]
+    fn an_anvil_update_sets_the_result_cost_and_material_or_cancels() {
+        bare_env(|env| {
+            let mut menu = Menu::new(Kind::Anvil);
+            menu.set_slot(env, 0, stack("iron_sword", 1));
+            assert_eq!(menu.anvil_update(), None);
+            menu.set_slot(env, 1, stack("diamond", 5));
+            let mut update = menu.anvil_update().unwrap();
+            assert_eq!((update.output.as_ref(), update.material_cost), (None, 0));
+            update.output = stack("netherite_sword", 1);
+            update.cost = 7;
+            update.material_cost = 2;
+            menu.anvil_updated(update.clone(), false);
+            assert_eq!(menu.slot(2), stack("netherite_sword", 1).as_ref());
+            assert_eq!(menu.data[0], 7);
+            menu.levels = 30;
+            menu.click(env, 2, 0, Input::Pickup).unwrap();
+            assert_eq!(menu.carried, stack("netherite_sword", 1));
+            assert_eq!(menu.slot(1), stack("diamond", 3).as_ref());
+            assert_eq!(menu.slot(0), None);
 
-        // The inventory full of dirt but for one stack with room for 2.
-        let mut menu = furnace(true);
-        for s in 3..39 {
-            menu.set_slot(env, s, stack("dirt", 64));
-        }
-        menu.set_slot(env, 3, stack("iron_ingot", 62));
-        menu.click(env, 2, 0, Input::QuickMove).unwrap();
-        assert_eq!(menu.slot(2), stack("iron_ingot", 62).as_ref());
-        assert_eq!(
-            menu.item_smelted,
-            [(stack("iron_ingot", 64), 2), (stack("iron_ingot", 62), 0),]
-        );
+            let mut menu = Menu::new(Kind::Anvil);
+            menu.set_slot(env, 0, stack("iron_sword", 1));
+            menu.set_slot(env, 1, stack("diamond", 5));
+            menu.anvil_updated(update, true);
+            assert_eq!((menu.slot(2), menu.data[0]), (None, 1));
+        });
+    }
 
-        let mut menu = furnace(false);
-        menu.click(env, 2, 0, Input::Pickup).unwrap();
-        assert!(menu.item_smelted.is_empty());
+    /// `GrindstoneEvent`: a placed output with its experience is what the
+    /// take reports; the take's answer sets the inputs and the experience,
+    /// and a cancelled take keeps the inputs and gives nothing.
+    #[test]
+    fn grindstone_events_set_the_result_the_inputs_and_the_experience() {
+        bare_env(|env| {
+            let grindstone = || {
+                let mut menu = Menu::new(Kind::Grindstone);
+                menu.grind_hook = true;
+                menu.set_slot(env, 0, stack("iron_sword", 1));
+                menu.set_slot(env, 1, stack("iron_sword", 1));
+                let mut place = menu.grindstone_place();
+                place.output = stack("stick", 1);
+                place.xp = 5;
+                menu.grindstone_placed(place, false);
+                menu.click(env, 2, 0, Input::Pickup).unwrap();
+                menu
+            };
+            let mut menu = grindstone();
+            assert_eq!(menu.carried, stack("stick", 1));
+            let mut take = menu.grind_take.take().unwrap();
+            assert_eq!(
+                (&take.top, &take.bottom, take.xp),
+                (&stack("iron_sword", 1), &stack("iron_sword", 1), 5)
+            );
+            // The inputs wait for the mods.
+            assert_eq!(menu.slot(0), stack("iron_sword", 1).as_ref());
+            take.new_top = stack("dirt", 1);
+            assert_eq!(menu.grindstone_taken(env, take.clone(), false), Some(5));
+            assert_eq!(
+                (menu.slot(0), menu.slot(1)),
+                (stack("dirt", 1).as_ref(), None)
+            );
+
+            let mut menu = grindstone();
+            let take = menu.grind_take.take().unwrap();
+            assert_eq!(menu.grindstone_taken(env, take, true), None);
+            assert_eq!(menu.slot(1), stack("iron_sword", 1).as_ref());
+            assert_eq!(menu.ground, None);
+
+            // A cancelled placement leaves no result.
+            let mut menu = Menu::new(Kind::Grindstone);
+            menu.set_slot(env, 0, stack("iron_sword", 1));
+            let place = menu.grindstone_place();
+            menu.grindstone_placed(place, true);
+            assert_eq!(menu.slot(2), None);
+        });
     }
 
     #[test]

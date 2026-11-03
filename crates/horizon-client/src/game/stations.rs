@@ -956,6 +956,11 @@ impl Game<'_> {
     /// for everyone around.
     pub(super) fn grindstone_taken(&mut self, pos: [i32; 3], amount: i32) {
         let xp = stations::grindstone_xp_roll(amount, &mut self.world.random);
+        self.grindstone_award(pos, xp);
+    }
+    /// The rest of `onTake` with the experience `xp` decided: the orbs and
+    /// level event 1042.
+    pub(super) fn grindstone_award(&mut self, pos: [i32; 3], xp: u32) {
         if xp > 0 {
             self.spawn_orbs(pos.map(|v| f64::from(v) + 0.5), xp);
         }

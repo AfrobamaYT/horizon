@@ -122,6 +122,9 @@ mod tests {
             }
             pub mod menu {
                 pub struct AnvilCraft;
+                pub struct AnvilUpdate;
+                pub struct GrindstonePlace;
+                pub struct GrindstoneTake;
             }
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "anvil_update",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_update",
+      "neoforge": "AnvilUpdateEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a cancellable anvil result question (`native_anvil_update`).",
+  "doc_summary": "`native_anvil_update(player, player_entity_id, pos, update, cancel)`, in `AnvilMenu.createResult` with both inputs in, whenever an input or the name changes. `update` (`AnvilUpdate`) holds the inputs, the rename text, the level cost from their repair costs, and no output: set `output`, `cost` and `material_cost` to replace vanilla's result, or `cancel` for none. Before `prepare_anvil`. Server-side. Bundles need \"hooks\": @API:anvil_update@."
+}

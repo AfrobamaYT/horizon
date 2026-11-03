@@ -5716,6 +5716,84 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_anvil_craft_post(self, mod_api::mods(), player, name, pos, craft);
     }
+    /// An anvil at `pos` made its result with both inputs in, for the server
+    /// player `player` (UUID) and `player_entity_id` (`AnvilUpdateEvent`, in
+    /// `AnvilMenu.createResult`): `update` holds the inputs, the rename text,
+    /// the level cost from their repair costs, and no output. Set its
+    /// `output` (with `cost` and `material_cost`) to replace vanilla's
+    /// result; set `cancel` for no result. Asked again whenever an input or
+    /// the name changes, before `prepare_anvil`. Server-side.
+    /// @API:anvil_update@.
+    pub(super) fn native_anvil_update(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        update: &mut horizon_client::menu::AnvilUpdate,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_anvil_update(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            update,
+            cancel,
+        );
+    }
+    /// A grindstone at `pos` made its result after its inputs changed, for
+    /// the server player `player` (UUID) and `player_entity_id`
+    /// (`GrindstoneEvent.OnPlaceItem`, in `GrindstoneMenu.createResult`):
+    /// `place` holds the inputs and no output. Set its `output` to replace
+    /// vanilla's result, and with it `xp` (0 or more) for what taking it
+    /// gives; set `cancel` for no result. Before `prepare_grindstone`.
+    /// Server-side. @API:grindstone_place@.
+    pub(super) fn native_grindstone_place(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        place: &mut horizon_client::menu::GrindstonePlace,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_grindstone_place(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            place,
+            cancel,
+        );
+    }
+    /// The server player `player` (UUID) and `player_entity_id` took a
+    /// grindstone's result at `pos` (`GrindstoneEvent.OnTakeItem`, in its
+    /// result slot's `onTake`): `take` holds the inputs, the experience (-1
+    /// for vanilla's, or what `grindstone_place` set) and what the inputs
+    /// hold afterwards (empty). Set `xp` (0 or more) to give that much
+    /// experience, `new_top` and `new_bottom` to leave items in the inputs.
+    /// Set `cancel` to skip the rest of `onTake`: the result is still taken,
+    /// but no experience, no sound, and the inputs stay. Server-side.
+    /// @API:grindstone_take@.
+    pub(super) fn native_grindstone_take(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        take: &mut horizon_client::menu::GrindstoneTake,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_grindstone_take(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            take,
+            cancel,
+        );
+    }
     /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. 289.
     pub(super) fn native_prepare_grindstone(
         &mut self,
