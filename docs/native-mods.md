@@ -2434,6 +2434,17 @@ a dimension.
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
   slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
   preserve complete stacks for all mob slots.
+- `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
+  trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types; not a trident a player
+  threw); `projectile.entity()` goes back. `owner(host)` resolves the owner to a current `EntityRef` (None when gone
+  or in another level) and `set_owner(host, owner)` takes a player or mob (`Projectile.setOwner`; false for another
+  kind). `deflect(host, deflection, by, new_owner, by_attack, power)` is `Projectile.deflect`: `NativeDeflection::Reverse`
+  draws one float for the turn from the arrow's own random (the level's random for other kinds), `AimDeflect` and
+  `MomentumDeflect` use the look or movement of `by` and do nothing without it; the new owner is set and a fireball's
+  or wind charge's acceleration power becomes 0.1 by an attack, else halves. Arrows (and a mob's trident for
+  `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
+  `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
+  server-only as in vanilla.
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.

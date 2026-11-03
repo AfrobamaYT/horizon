@@ -717,6 +717,44 @@ impl ItemEntityRef {
     }
 }
 
+/// A projectile of the open world (vanilla's `Projectile`), narrowed with
+/// `host.projectile`: arrows, mob-thrown tridents, thrown items, fireballs,
+/// wind charges, skulls, shulker bullets and mods' thrown types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ProjectileRef(EntityRef);
+
+impl ProjectileRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
+/// `ProjectileDeflection`: how `ProjectileRef::deflect` turns a projectile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeDeflection {
+    /// `REVERSE`: backwards at `-power / 2` of the speed, turned about 180
+    /// degrees by a random amount.
+    Reverse,
+    /// `AIM_DEFLECT`: along the deflecting entity's look.
+    AimDeflect,
+    /// `MOMENTUM_DEFLECT`: along the deflecting entity's movement.
+    MomentumDeflect,
+}
+
+/// `AbstractArrow.Pickup`: who may pick an arrow up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeArrowPickup {
+    Disallowed,
+    Allowed,
+    CreativeOnly,
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
