@@ -482,6 +482,7 @@ pub struct NativePlayerFood {
 
 /// Damage sources supported for a mod effect tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeEffectDamage {
     /// Poison's magic damage.
     Magic,
