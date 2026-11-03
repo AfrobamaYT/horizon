@@ -70,9 +70,7 @@ then says the mods were made for other versions. Their horizon-mixins pins may d
 newest of them and the launcher's own, never one older than a mod was made with. A bundle with no pin builds on
 the commit of the installed version the build starts from.
 
-Trait-mod builds require source with the structurally named `ModEntry` API. Older source is refused
-before staging a generated executable; update Horizon and rebuild the mods against that game. An
-installed native build with a missing or invalid build record must be rebuilt from an installed
+An installed native build with a missing or invalid build record must be rebuilt from an installed
 Horizon version rather than used as a source revision.
 
 ### Mods on the hook points
