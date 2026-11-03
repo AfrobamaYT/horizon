@@ -491,6 +491,37 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn misplaced_packages_follow_their_actual_kind() {
+        let dir = std::env::temp_dir().join(format!("horizon-misplaced-{}", std::process::id()));
+        let content = dir.join("horizon-mods");
+        let native = dir.join("horizon-native-mods");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::create_dir_all(&native).unwrap();
+        hmod(&content, "built");
+        let file = std::fs::File::create(native.join("plain.hmod")).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("horizon-mod.toml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"content").unwrap();
+        zip.finish().unwrap();
+        let built = built_ids(r#"{"mods":[{"id":"built"}]}"#);
+        let enabled = std::collections::BTreeSet::from(["plain".to_string()]);
+        assert!(content_enabled(
+            "built",
+            horizon_mods::index::native::holds(&content.join("built.hmod")),
+            &enabled,
+            &built
+        ));
+        assert!(content_enabled(
+            "plain",
+            horizon_mods::index::native::holds(&native.join("plain.hmod")),
+            &enabled,
+            &built
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Only a build whose `native-mods.json` lists a mod counts as built with mods.
     #[test]
     fn only_a_listed_mod_makes_a_build_a_mod_build() {
