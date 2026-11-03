@@ -1174,11 +1174,11 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    [
-        m.extra.head.as_deref(),
-        m.extra.chest.as_deref(),
-        m.extra.legs.as_deref(),
-        m.extra.feet.as_deref(),
+    ![
+        m.extra.head_id(),
+        m.extra.slot_id(horizon_items::equipment::CHEST),
+        m.extra.slot_id(horizon_items::equipment::LEGS),
+        m.extra.slot_id(horizon_items::equipment::FEET),
         m.extra.body_id(),
     ]
     .into_iter()
@@ -1256,7 +1256,7 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         // WanderingTrader.getAmbientSound: only the trade branch, it never sleeps.
         Species::WanderingTrader if m.extra.flag2 => "entity.wandering_trader.trade",
         Species::Bat if m.extra.flag && m.random.next_int_bound(4).unwrap_or(1) != 0 => return,
-        Species::Allay if m.extra.main_hand.is_some() => "entity.allay.ambient_with_item",
+        Species::Allay if m.extra.main_hand_id().is_some() => "entity.allay.ambient_with_item",
         // Strider.getAmbientSound: quiet while panicking or tempted.
         Species::Strider if m.ai.panicking || m.ai.goals.is_running("Tempt") => return,
         // HappyGhast: its own voice, never pitched up.
@@ -2421,7 +2421,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         }
         // Husk.doHurtTarget: hunger for 140 ticks per whole point of the
         // local difficulty, only with an empty main hand.
-        Species::Husk if m.extra.main_hand.is_none() => {
+        Species::Husk if m.extra.main_hand_id().is_none() => {
             let ticks = 140 * cx.w.difficulty.effective as i32;
             if ticks > 0 {
                 cx.events.push(MobEvent::EffectPlayer {
@@ -2657,7 +2657,7 @@ fn flower_contact_effects(m: &mut Mob, w: &MobWorld) {
 
 /// MobEffect ticking for the effects mobs receive (poison, wither,
 /// regeneration), and a content mod's on a server.
-fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
+pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
     // LivingEntity.tickEffects ticks each active effect with the mob's list
     // still in place: the damage a Poison or Wither tick deals reads the
     // list it finds (Resistance softens the hit, Infested spawns silverfish,
@@ -2723,6 +2723,14 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             let ticks = &mut m.extra.effects[i].1;
             *ticks = if expired { 0 } else { *ticks - 1 };
         }
+        // LivingEntity.tickEffects refreshes a surviving effect every 600 ticks.
+        if m.extra
+            .effects
+            .get(i)
+            .is_some_and(|e| e.0 == effect && e.1 > 0 && e.1 % 600 == 0)
+        {
+            m.effects_dirty = true;
+        }
         i += 1;
     }
     // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
@@ -2732,13 +2740,19 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             m.absorption = (m.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
         }
     }
-    m.extra.effects.retain(|e| e.1 > 0 || e.1 == -1);
+    m.retain_effects(|e| e.1 > 0 || e.1 == -1);
     m.extra
         .hidden_effects
         .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
     m.extra
         .ambient_effects
         .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
+    if m.effects_dirty {
+        let invisible = m.has_effect("minecraft:invisibility");
+        m.needs_sync |= m.invisible != invisible;
+        m.invisible = invisible;
+        m.effects_dirty = false;
+    }
 }
 
 /// `Entity.getMovementEmission` is not NONE (silverfish, endermites,
@@ -3073,6 +3087,53 @@ mod poison_effect_tests {
         assert_eq!(pig.effective_gravity(), full);
     }
 
+    #[test]
+    fn invisibility_flag_updates_only_when_effects_change() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("invisibility", 4, 0);
+        tick_effects(&mut pig, None);
+        assert!(pig.is_invisible());
+        pig.invisible = false;
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.add_effect("speed", 10, 0);
+        tick_effects(&mut pig, None);
+        assert!(pig.is_invisible());
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+    }
+
+    #[test]
+    fn effect_refresh_every_600_ticks_resets_manual_visibility() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("speed", 602, 0);
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.invisible = true;
+        tick_effects(&mut pig, None);
+        assert_eq!(pig.extra.effects[0].1, 600);
+        assert!(
+            !pig.is_invisible(),
+            "LivingEntity's periodic effect update clears the manual flag at duration 600"
+        );
+    }
+
     /// `LivingEntity.tickEffects` ticks each effect with the mob's list in
     /// place: a Poison hit reads Resistance there (0.8 of 1.0 at level I).
     #[test]
@@ -3294,7 +3355,10 @@ mod same_vehicle_push_tests {
                 Vec3::ZERO,
                 0.0,
             );
-            horse.extra.head = Some("minecraft:iron_helmet".into());
+            horse.extra.set_slot_id(
+                horizon_items::equipment::HEAD,
+                Some("minecraft:iron_helmet".into()),
+            );
             let mut events = Vec::new();
             for _ in 0..1000 {
                 burn_undead(&mut horse, &world, &mut events);
@@ -3358,7 +3422,10 @@ mod same_vehicle_push_tests {
             zombie
                 .extra
                 .set_main_hand(Some(std::sync::Arc::from("minecraft:iron_sword")));
-            zombie.extra.feet = Some(std::sync::Arc::from("minecraft:iron_boots"));
+            zombie.extra.set_slot_id(
+                horizon_items::equipment::FEET,
+                Some(std::sync::Arc::from("minecraft:iron_boots")),
+            );
             let worn = zombie.equipment_stacks();
             assert_eq!(
                 worn[0].as_ref().unwrap().item.as_ref(),

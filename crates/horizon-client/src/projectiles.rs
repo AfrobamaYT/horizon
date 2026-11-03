@@ -325,8 +325,7 @@ pub struct Projectile {
     /// `Entity.remainingFireTicks`: a thrown projectile that flew through a
     /// fire block burns for 160 ticks, with the flame drawn over it.
     pub fire_ticks: i32,
-    /// `Entity.random` of a projectile that is not an arrow (an arrow's is in
-    /// `arrow`): what `Projectile.deflect` hands to the deflection.
+    /// `Entity.random` of a projectile.
     pub random: OwnRandom,
     /// `WindCharge.noDeflectTicks`: five ticks after it is made, it refuses
     /// every deflection. Counted down after its tick; zero for other kinds.
@@ -500,8 +499,7 @@ impl Projectile {
             // Entity.random: seeded unpredictably, the position stands in.
             random: OwnRandom(unique_random(position)),
             no_deflect_ticks,
-            arrow: kind_is_arrow
-                .then(|| Box::new(crate::arrows::ArrowState::new(unique_random(position)))),
+            arrow: kind_is_arrow.then(|| Box::new(crate::arrows::ArrowState::new())),
         }
     }
     /// Entity box from the feet (`EntityType.sized` cube of `kind.size()`).
@@ -517,12 +515,9 @@ impl Projectile {
             ),
         )
     }
-    /// `Entity.random`: an arrow's own, else the projectile's.
+    /// `Entity.random`.
     pub fn entity_random(&mut self) -> &mut horizon_core::random::LegacyRandom {
-        match self.arrow.as_mut() {
-            Some(a) => &mut a.random,
-            None => &mut self.random.0,
-        }
+        &mut self.random.0
     }
     /// `AbstractHurtingProjectile`: the kinds with an acceleration power.
     pub fn is_hurting(&self) -> bool {
@@ -571,11 +566,10 @@ impl Projectile {
         }
         true
     }
-    /// The arrow's own random from now on (`Entity.random`).
-    pub fn with_arrow_random(mut self, random: horizon_core::random::LegacyRandom) -> Self {
-        if let Some(a) = self.arrow.as_mut() {
-            a.random = random;
-        }
+    /// The entity random from now on (`Entity.random`): a probe's fixture
+    /// seeds it.
+    pub fn with_entity_random(mut self, random: horizon_core::random::LegacyRandom) -> Self {
+        self.random.0 = random;
         self
     }
     /// The shooter's bow enchantments; Flame spawns the arrow burning for 100
@@ -1240,11 +1234,23 @@ impl Projectile {
             self.left_owner = owner_box
                 .is_none_or(|b| !b.inflate(Vec3::new(1.0, 1.0, 1.0)).contains(self.position));
         }
-        if impact && let Some((who, at, _)) = best {
+        // LlamaSpit never discards on an entity: `onHitEntity` only hurts, so
+        // the spit flies on through what it hit (its block hit discards).
+        let spit = self.kind == ProjectileKind::LlamaSpit;
+        let spit_hit = best
+            .filter(|_| impact && spit)
+            .map_or(Hit::None, |(who, at, _)| Hit::Entity { who, at });
+        if impact
+            && !spit
+            && let Some((who, at, _)) = best
+        {
             self.position = at;
             return (false, Hit::Entity { who, at });
         }
-        if impact && let Some((at, pos, face)) = block {
+        if impact
+            && !(spit && best.is_some())
+            && let Some((at, pos, face)) = block
+        {
             self.position = at;
             return (false, Hit::Block { pos, at, face });
         }
@@ -1272,7 +1278,7 @@ impl Projectile {
                 self.velocity.z * 0.99,
             );
             self.update_rotation();
-            return (self.position.y > -128.0 && self.age < 6000, Hit::None);
+            return (self.position.y > -128.0 && self.age < 6000, spit_hit);
         }
         self.position = to;
         if !self.is_fireball() {
@@ -1285,7 +1291,7 @@ impl Projectile {
         (alive, Hit::None)
     }
     /// AbstractArrow.onHitEntity damage: ceil(speed * base) plus crit bonus.
-    pub fn arrow_damage(&self, random: &mut impl RandomSource) -> f32 {
+    pub fn arrow_damage(&mut self) -> f32 {
         let ProjectileKind::Arrow {
             base_damage,
             critical,
@@ -1298,7 +1304,7 @@ impl Projectile {
         let speed = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
         let mut damage = (speed * base_damage).clamp(0.0, f64::from(i32::MAX)).ceil() as i32;
         if critical {
-            let bonus = random.next_int_bound(damage / 2 + 2).unwrap_or(0);
+            let bonus = self.random.0.next_int_bound(damage / 2 + 2).unwrap_or(0);
             damage = damage.saturating_add(bonus);
         }
         damage as f32
@@ -1352,8 +1358,6 @@ impl Projectile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_core::random::LegacyRandom;
-
     struct Empty(Vec<(Who, Aabb)>);
     impl ProjectileWorld for Empty {
         fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
@@ -1798,9 +1802,8 @@ mod tests {
             None,
         );
         p.velocity = Vec3::new(3.0, 0.0, 0.0);
-        let mut r = LegacyRandom::new(1);
         // ceil(3 * 2) = 6 for a non-critical arrow.
-        assert_eq!(p.arrow_damage(&mut r), 6.0);
+        assert_eq!(p.arrow_damage(), 6.0);
     }
     #[test]
     fn fireball_accelerates_along_its_direction() {
@@ -2001,8 +2004,7 @@ mod deflect_tests {
         );
     }
 
-    /// `REVERSE` takes exactly one float from the projectile's own random:
-    /// the arrow's for an arrow, else `Entity.random`.
+    /// `REVERSE` takes exactly one float from the projectile's `Entity.random`.
     #[test]
     fn reverse_draws_one_float_from_the_projectiles_own_random() {
         let mut ball = Projectile::fireball(

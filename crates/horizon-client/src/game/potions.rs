@@ -1392,6 +1392,7 @@ impl Game<'_> {
             age: 0,
             duration: 300,
             from_dragon: false,
+            victims: Vec::new(),
             potion: Some(PotionCloud {
                 effects,
                 hidden,
@@ -1760,6 +1761,7 @@ impl Game<'_> {
                     age: 0,
                     duration: 600,
                     from_dragon: false,
+                    victims: Vec::new(),
                     potion: Some(PotionCloud {
                         effects: def.effects.to_vec(),
                         hidden: Vec::new(),
@@ -1943,8 +1945,9 @@ mod tests {
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
 
     fn effect_test_mod() {
-        use horizon_client::mod_api::*;
+        use horizon_client::mod_api::{self, *};
         struct TestMod;
+        #[mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn should_apply_effect_tick_this_tick(
                 &self,
@@ -2034,7 +2037,8 @@ mod tests {
                 .unwrap()
                 .clone();
             let mut mob = Mob::new(12, kind, Vec3::new(1.0, 64.0, 1.0), 0.0);
-            mob.extra.main_hand = Some(Arc::from("minecraft:iron_sword"));
+            mob.extra
+                .set_main_hand(Some(Arc::from("minecraft:iron_sword")));
             mob.extra.drop_chances = Some(Box::new([2.0; 8]));
             mob.add_effect(brewing::effect("test:effect").unwrap().id, 10, 2);
             game.mobs.push(mob);

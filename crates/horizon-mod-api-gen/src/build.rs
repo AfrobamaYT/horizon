@@ -118,6 +118,7 @@ pub fn inject(code: &str, injections: &str) -> Result<String, String> {
         })
         .collect();
     let mut structs = Vec::new();
+    let mut injected_ids = Vec::new();
     for injection in injections {
         let method: syn::TraitItemFn = syn::parse_str(&injection.declaration)
             .map_err(|e| format!("trait injection {}: {e}", injection.name))?;
@@ -135,9 +136,61 @@ pub fn inject(code: &str, injections: &str) -> Result<String, String> {
         if !events.insert(injection.event.clone()) {
             return Err(format!("duplicate generated event {}", injection.event));
         }
+        let name = method.sig.ident.clone();
+        let variant = syn::Ident::new(
+            event
+                .ident
+                .to_string()
+                .strip_suffix("Event")
+                .ok_or("injected event must end in Event")?,
+            event.ident.span(),
+        );
+        injected_ids.push((name, variant));
         hooks.items.push(syn::TraitItem::Fn(method));
         structs.push(syn::Item::Struct(event));
     }
+    let ids = file
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            syn::Item::Enum(item) if item.ident == "HookId" => Some(item),
+            _ => None,
+        })
+        .ok_or("generated API missing HookId")?;
+    for (_, variant) in &injected_ids {
+        if ids
+            .variants
+            .iter()
+            .any(|existing| existing.ident == *variant)
+        {
+            return Err(format!("duplicate generated hook id {variant}"));
+        }
+        ids.variants.push(syn::parse_quote!(#variant));
+    }
+    let count = ids.variants.len();
+    let constants = file
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            syn::Item::Mod(item) if item.ident == "hook_ids" => {
+                item.content.as_mut().map(|(_, items)| items)
+            }
+            _ => None,
+        })
+        .ok_or("generated API missing hook_ids")?;
+    for (name, variant) in injected_ids {
+        constants
+            .push(syn::parse_quote!(pub const #name: Option<super::HookId> = Some(super::HookId::#variant);));
+    }
+    let hook_count = file
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            syn::Item::Const(item) if item.ident == "HOOK_COUNT" => Some(item),
+            _ => None,
+        })
+        .ok_or("generated API missing HOOK_COUNT")?;
+    *hook_count.expr = syn::parse_quote!(#count);
     file.items.extend(structs);
     Ok(file.into_token_stream().to_string())
 }

@@ -530,13 +530,11 @@ impl Game<'_> {
         m.anim.attack_anim_o = attack.0;
         m.anim.attack_anim = attack.1;
         m.extra.set_main_hand_stack(main);
-        m.extra.off_hand = off;
-        m.extra.head = self.armor[0].as_ref().map(|s| s.item.clone());
-        m.extra.chest = self.armor[1].as_ref().map(|s| s.item.clone());
-        m.extra.legs = self.armor[2].as_ref().map(|s| s.item.clone());
-        m.extra.feet = self.armor[3].as_ref().map(|s| s.item.clone());
+        m.extra.set_slot_id(horizon_items::equipment::OFFHAND, off);
         // The worn stacks, for the elytra's glint (`WingsLayer`).
-        m.extra.armor = armor;
+        for (slot, stack) in horizon_items::equipment::ARMOR.into_iter().zip(armor) {
+            m.extra.set_slot_stack(slot, stack);
+        }
         m.extra.crouching = crouching;
         // Guests and server players take their pose from DATA_POSE, not here.
         m.extra.avatar_pose = pose;
@@ -888,8 +886,9 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<horizon_client::mesher::Vertex>,
     ) {
-        let stack = m.extra.armor[1]
-            .as_ref()
+        let stack = m
+            .extra
+            .slot_stack(horizon_items::equipment::CHEST)
             .filter(|s| chest == Some(&*s.item));
         self.wings_geometry(
             chest,
@@ -1030,7 +1029,7 @@ impl Game<'_> {
         else {
             return;
         };
-        if horizon_client::mobs::trader::is_invisible(m) {
+        if m.is_invisible() {
             return;
         }
         let layers = chest

@@ -40,14 +40,16 @@ fn enchants_spawn_gear(s: Species) -> bool {
 }
 /// The item a mob holds or wears in an equipment slot.
 fn slot_item(m: &horizon_client::mobs::Mob, slot: usize) -> Option<std::sync::Arc<str>> {
-    match slot {
-        gear::MAIN => m.extra.main_hand.clone(),
-        gear::OFF => m.extra.off_hand.clone(),
-        gear::HEAD => m.extra.head.clone(),
-        gear::CHEST => m.extra.chest.clone(),
-        gear::LEGS => m.extra.legs.clone(),
-        _ => m.extra.feet.clone(),
-    }
+    use horizon_items::equipment as eq;
+    let slot = match slot {
+        gear::MAIN => eq::MAINHAND,
+        gear::OFF => eq::OFFHAND,
+        gear::HEAD => eq::HEAD,
+        gear::CHEST => eq::CHEST,
+        gear::LEGS => eq::LEGS,
+        _ => eq::FEET,
+    };
+    horizon_client::mobs::finalize::item(m, slot)
 }
 
 impl Game<'_> {
@@ -191,14 +193,20 @@ impl Game<'_> {
                     0
                 };
                 if level > 0 {
-                    m.extra.set_main_hand(Some("minecraft:crossbow".into()));
-                    gear::set(m, MAIN, Vec::new());
+                    horizon_client::mobs::finalize::set_item(
+                        m,
+                        horizon_client::mobs::finalize::MAINHAND,
+                        "minecraft:crossbow",
+                    );
                     gear::upgrade(m, MAIN, "minecraft:quick_charge", level);
                 }
             }
             RaiderType::Vindicator => {
-                m.extra.set_main_hand(Some("minecraft:iron_axe".into()));
-                gear::set(m, MAIN, Vec::new());
+                horizon_client::mobs::finalize::set_item(
+                    m,
+                    horizon_client::mobs::finalize::MAINHAND,
+                    "minecraft:iron_axe",
+                );
                 if enchant {
                     let level = if wave > raid::num_groups(2) { 2 } else { 1 };
                     gear::upgrade(m, MAIN, "minecraft:sharpness", level);

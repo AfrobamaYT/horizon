@@ -76,10 +76,52 @@ jobs:
   # playhorizon's checks runners (label playhorizon-ci); a fork's pull request never does (and the runners refuse it
   # themselves). There the build folder persists (CARGO_TARGET_DIR, outside the checkout), so the apt packages,
   # Python and the Rust cache steps are GitHub's only.
+  # Formatting and clippy on GitHub's own runners, in parallel with verify's tests on Dyna's: the fork's account has
+  # its own hosted pool, so both pools work on every run and a run's wall time is the longer of the two, not the sum.
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this pull request need Rust checks?
+        if: github.event_name == 'pull_request'
+        id: rust
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Install Rust toolchain and the ALSA and udev headers the client links against
+        if: steps.rust.outputs.required != 'false'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.rust.outputs.required != 'false'
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check formatting and lint
+        if: steps.rust.outputs.required != 'false'
+        run: |
+          cargo +stable fmt --all -- --check
+          cargo +stable clippy --workspace --all-targets -- -D warnings
+          # The server build (released as horizon-engine): the game without sound or controllers.
+          cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+
   verify:
     needs: changes
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
+    # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
+    # verify's tests were written to skip GPU work when no adapter exists, and one of them
+    # (gfx::frame_gen::optical_flow, horizon-rust/horizon#8627) fails on lavapipe, so verify hides the driver and runs
+    # exactly as before. ignored-tests is where the GPU tests run.
+    env:
+      VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
+      VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
     steps:
       - uses: actions/checkout@v4
         with:
@@ -135,17 +177,9 @@ jobs:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # A dyna-medium runner has a hard 8 GiB limit and 4 CPUs; four horizon-client rustc processes at about 2.6 GB
-      # each go past it, so Dyna runs build two crates at a time. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
+      # each go past it, so Dyna runs build two crates at a time. Formatting and lint run in parallel on GitHub's
+      # runners (the lint job), so this job only tests. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
       # CARGO_* variables, and that would split the runners' cache from the boxes'.
-      - name: Check formatting and lint
-        if: steps.rust.outputs.required != 'false'
-        env:
-          JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
-        run: |
-          cargo +stable fmt --all -- --check
-          cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
-          # The server build (released as horizon-engine): the game without sound or controllers.
-          cargo +stable clippy $JOBS -p horizon-client --all-targets --no-default-features -- -D warnings
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which clippy above already
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
@@ -161,6 +195,65 @@ jobs:
           # recompiling the workspace with a different dependency graph.
           cargo +stable test $JOBS --workspace --lib --bins --tests mod_content::tests:: -- --ignored
           cargo +stable test $JOBS --workspace --doc
+  # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main's pushes and this
+  # repository's own pull requests only, on Dyna's large runner where that data lives; a fork's pull request never
+  # runs here. tools/ci/ignored_tests.py fails on a new failure and on a known one that passes, and prints only test
+  # names and results: the data is Mojang's.
+  ignored-tests:
+    needs: changes
+    if: needs.changes.outputs.self_hosted == 'true' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: dyna-large
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Does this pull request need Rust checks?
+        if: github.event_name == 'pull_request'
+        id: rust
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Install Dyna runner dependencies
+        if: steps.rust.outputs.required != 'false'
+        run: bash tools/ci/dyna_ci_deps.sh
+      - name: Install Rust toolchain
+        if: steps.rust.outputs.required != 'false'
+        run: |
+          if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
+          fi
+          rustup toolchain install stable --profile minimal
+      # Not every dyna-large runner has the data yet. A pull request's run skips the tests there; a push to main fails.
+      - name: Link prepared vanilla data
+        if: steps.rust.outputs.required != 'false'
+        id: data
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          for dir in minecraft datagen horizon-client tools; do
+            if [ ! -d "/cache/horizon-local/$dir" ]; then
+              echo "no prepared data on this runner ($RUNNER_NAME): /cache/horizon-local/$dir is missing"
+              if [ "$EVENT" = push ]; then exit 1; fi
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          mkdir -p .local
+          for dir in minecraft datagen horizon-client tools; do
+            ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
+          done
+      - name: Run the ignored tests that need prepared data
+        if: steps.rust.outputs.required != 'false' && steps.data.outputs.present != 'false'
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          export HORIZON_TEST_RESOURCES="$PWD/.local/horizon-client/26.3"
+          python3 tools/ci/ignored_tests.py horizon-client horizon-client-lib horizon-client-render
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).

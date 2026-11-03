@@ -84,9 +84,6 @@ pub fn register(m: &mut Mob) {
 fn invisible(m: &Mob) -> bool {
     m.extra.effects.iter().any(|e| e.0 == INVISIBILITY)
 }
-pub fn is_invisible(m: &Mob) -> bool {
-    invisible(m)
-}
 /// `UseItemGoal`: drink a potion of invisibility once it is dark outside,
 /// or milk to clear it by day.
 #[derive(Clone, Debug)]
@@ -142,8 +139,8 @@ impl Goal for DrinkItem {
         if m.extra.using_item > DRINK_TICKS {
             // LivingEntity.completeUsingItem: the potion or the milk takes effect.
             if self.dark {
-                m.extra.effects.retain(|e| e.0 != INVISIBILITY);
-                m.extra.effects.push((INVISIBILITY, 3600, 0));
+                m.retain_effects(|e| e.0 != INVISIBILITY);
+                m.add_effect(INVISIBILITY, 3600, 0);
                 cx.events.push(MobEvent::Sound(
                     "entity.wandering_trader.drink_potion",
                     m.center(),
@@ -151,7 +148,7 @@ impl Goal for DrinkItem {
                     1.0,
                 ));
             } else {
-                m.extra.effects.clear();
+                m.retain_effects(|_| false);
                 cx.events.push(MobEvent::Sound(
                     "entity.wandering_trader.drink_milk",
                     m.center(),

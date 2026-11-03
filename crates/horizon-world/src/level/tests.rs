@@ -55,10 +55,16 @@ pub(crate) struct TestLevel {
     /// What `adjust_signal` answers at a position: the weak and direct signal,
     /// and the only direction they go in, if any.
     pub signals: HashMap<BlockPos, (i32, i32, Option<Direction>)>,
+    /// Overrides the conductor check for individual signal queries.
+    pub weak_power: HashMap<BlockPos, bool>,
+    pub weak_power_directions: std::cell::RefCell<Vec<Direction>>,
     /// What `adjust_analog_output` answers at a position, for the states in
     /// `analog_states` (`adjust_has_analog_output`).
     pub analog: HashMap<BlockPos, i32>,
     pub analog_states: HashSet<BlockStateId>,
+    /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
+    /// redstone wire connects there.
+    pub wire_connect: HashMap<BlockPos, bool>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -83,8 +89,11 @@ impl TestLevel {
             air: b.air(),
             random: LegacyRandom::new(42),
             signals: HashMap::new(),
+            weak_power: HashMap::new(),
+            weak_power_directions: std::cell::RefCell::new(Vec::new()),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
+            wire_connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -108,6 +117,31 @@ impl LevelAccess for TestLevel {
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
+    }
+    fn has_weak_power_hook(&self) -> bool {
+        !self.weak_power.is_empty()
+    }
+    fn adjust_should_check_weak_power(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+        direction: Direction,
+        vanilla: bool,
+    ) -> bool {
+        self.weak_power_directions.borrow_mut().push(direction);
+        self.weak_power.get(&pos).copied().unwrap_or(vanilla)
+    }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        !self.wire_connect.is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -1159,6 +1193,64 @@ fn redstone_lever_wire_and_lamp() {
         w.tick();
     }
     assert_eq!(w.prop(BlockPos::new(6, 1, 0), "lit"), "false");
+}
+
+#[test]
+fn weak_power_hook_controls_indirect_signal_at_its_block() {
+    let mut w = world!();
+    let glass = w.id("glass", &[]);
+    let stone = w.id("stone", &[]);
+    let pos = BlockPos::new(4, 1, 0);
+    let source = BlockPos::new(5, 1, 0);
+    w.put(pos, glass);
+    w.level.signals.insert(source, (0, 15, None));
+    let signal = |w: &mut World<'_>| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .signal(pos, Direction::East)
+    };
+    assert_eq!(signal(&mut w), 0);
+    w.level.weak_power.insert(pos, true);
+    assert_eq!(signal(&mut w), 15);
+    assert_eq!(
+        *w.level.weak_power_directions.borrow(),
+        vec![Direction::East]
+    );
+    w.put(pos, stone);
+    w.level.weak_power.insert(pos, false);
+    assert_eq!(signal(&mut w), 0);
+    w.level.weak_power.clear();
+    assert_eq!(signal(&mut w), 15);
+}
+
+#[test]
+fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to() {
+    let mut w = world!();
+    w.floor(0, 20, "stone");
+    let wire = w.id("redstone_wire", &[]);
+    let glass = w.id("glass", &[]);
+    w.set(BlockPos::new(4, 1, 0), glass);
+    w.set(BlockPos::new(5, 1, 0), wire);
+    w.set(BlockPos::new(6, 1, 0), glass);
+    let pos = BlockPos::new(5, 1, 0);
+    let connection = |w: &mut World<'_>| {
+        w.f.behaviours
+            .sim(&mut w.level, &mut w.ticks)
+            .wire_connection_state(wire, pos)
+    };
+    let before = connection(&mut w);
+    assert_eq!(
+        w.f.registry.state(before).unwrap().properties["east"],
+        "none"
+    );
+    w.level.wire_connect.insert(BlockPos::new(6, 1, 0), true);
+    let connected = connection(&mut w);
+    assert_eq!(
+        w.f.registry.state(connected).unwrap().properties["east"],
+        "side"
+    );
+    w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
+    assert_eq!(connection(&mut w), before);
 }
 
 #[test]
@@ -2222,8 +2314,11 @@ fn replacing_moving_piston_skips_the_same_effects_with_or_without_flag() {
         ));
         assert!(w.b().set_block(&mut w.level, &mut w.ticks, pos, air, flags));
         assert_eq!(w.get(pos), air);
-        // Current engine behavior, not vanilla: horizon-rust/horizon#7863.
-        assert_eq!(w.get(base), air);
+        assert_eq!(
+            w.get(base),
+            extended,
+            "setBlock over the head keeps the extended base"
+        );
         assert!(!w.ticks.moving_pistons.iter().any(|(p, _)| *p == pos));
     }
 }
