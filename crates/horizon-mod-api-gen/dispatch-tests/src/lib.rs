@@ -290,10 +290,7 @@ mod tests {
         Parts
     }
     impl Parts {
-        fn block<'k>(
-            &self,
-            _: impl FnOnce() -> Option<&'k str>,
-        ) -> &'static [&'static dyn BlockPart] {
+        fn block_state(&self, _: BlockStateId) -> &'static [&'static dyn BlockPart] {
             &[]
         }
         fn block_entity<'k>(
@@ -528,7 +525,7 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn use_item_on(&self, _: &mut dyn Host, _: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, _: &mut dyn Host, _: &mut UseOnEvent<'_>) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
@@ -909,7 +906,7 @@ mod tests {
         install(mods.clone());
         calls.lock().unwrap().clear();
         let mut claimed = false;
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &ItemStack::default(),
             [0; 3],
@@ -923,7 +920,7 @@ mod tests {
         assert!(claimed);
         assert_eq!(*calls.lock().unwrap(), [1]);
         calls.lock().unwrap().clear();
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &ItemStack::default(),
             [0; 3],
