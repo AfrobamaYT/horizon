@@ -946,32 +946,35 @@ pub struct ToolUse {
     pub simulated: bool,
 }
 
-/// The ordered list of mods shared by the client and server.
-pub type Mods = Arc<[Box<dyn Hooks>]>;
+/// One native mod, with its bundle's `[mod] id` and hook implementation.
+pub struct ModEntry {
+    id: &'static str,
+    pub(crate) hooks: Box<dyn Hooks>,
+}
+
+impl ModEntry {
+    /// Bind a hook implementation to its nonempty bundle id.
+    pub fn new(id: &'static str, hooks: Box<dyn Hooks>) -> Self {
+        assert!(!id.is_empty(), "native mod id must not be empty");
+        Self { id, hooks }
+    }
+}
+
+/// The ordered list of named mods shared by the client and server.
+pub type Mods = Arc<[ModEntry]>;
 
 pub(crate) static MODS: OnceLock<Mods> = OnceLock::new();
 
 /// The process-wide list in dispatch order, or an empty list before installation.
-pub fn mods() -> &'static [Box<dyn Hooks>] {
+pub fn mods() -> &'static [ModEntry] {
     MODS.get().map_or(&[], |mods| mods.as_ref())
-}
-
-/// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
-static MOD_IDS: OnceLock<&'static [&'static str]> = OnceLock::new();
-
-/// Names the entries of [`mods`] by their bundles' `[mod] id`s, so a panic in a hook names its mod.
-/// The launcher's generated executable calls it before `entry::main_with`.
-pub fn name_mods(ids: &'static [&'static str]) {
-    if MOD_IDS.set(ids).is_err() {
-        log::warn!("Trait mods already named; ignoring the second list");
-    }
 }
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
-fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
+fn entered<'a>(mods: &'a [ModEntry], hook: &'static str) -> Entered<'a> {
     Entered {
-        mods: mods.iter().enumerate(),
+        mods: mods.iter(),
         hook,
         guard: None,
     }
@@ -989,11 +992,7 @@ fn entered_parts<'a, P: ?Sized>(
         drop(guard.take());
         guard = Some(crate::crash::enter_native_mod(
             crate::crash::NativeModCall {
-                id: MOD_IDS
-                    .get()
-                    .and_then(|ids| ids.get(attached.mod_index))
-                    .copied(),
-                index: attached.mod_index,
+                id: attached.mod_id,
                 hook,
                 part: Some(attached.type_name),
             },
@@ -1002,36 +1001,27 @@ fn entered_parts<'a, P: ?Sized>(
     })
 }
 
-/// Mod `index` of [`mods`] by its `[mod] id`, or by its place when the build didn't name them.
-fn mod_name(index: usize) -> String {
-    MOD_IDS
-        .get()
-        .and_then(|ids| ids.get(index))
-        .map_or_else(|| format!("native mod #{index}"), |id| (*id).to_owned())
-}
-
 struct Entered<'a> {
-    mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
+    mods: std::slice::Iter<'a, ModEntry>,
     hook: &'static str,
     guard: Option<crate::crash::NativeModGuard>,
 }
 
 impl<'a> Iterator for Entered<'a> {
-    type Item = &'a Box<dyn Hooks>;
+    type Item = &'a dyn Hooks;
 
     fn next(&mut self) -> Option<Self::Item> {
         // The last mod's mark goes first, so the next one's puts back what was there before.
         drop(self.guard.take());
-        let (index, hooks) = self.mods.next()?;
+        let entry = self.mods.next()?;
         self.guard = Some(crate::crash::enter_native_mod(
             crate::crash::NativeModCall {
-                id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
-                index,
+                id: entry.id,
                 hook: self.hook,
                 part: None,
             },
         ));
-        Some(hooks)
+        Some(&*entry.hooks)
     }
 }
 
@@ -1253,7 +1243,7 @@ mod tests {
 
     #[test]
     fn phantom_listener_can_increase_the_default_count() {
-        let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        let mods = [ModEntry::new("phantoms", Box::new(MorePhantoms))];
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
@@ -1293,9 +1283,25 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_before_installation_is_empty() {
+        let mut components = Vec::new();
+        dispatch_component_types(mods(), &mut components);
+        assert!(mods().is_empty());
+        assert!(components.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "native mod id must not be empty")]
+    fn an_entry_requires_a_nonempty_id() {
+        ModEntry::new("", Box::new(Quiet));
+    }
+
+    #[test]
     fn a_panic_in_a_hook_names_the_mod_and_the_hook() {
-        name_mods(&["quiet", "broken"]);
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Quiet), Box::new(Broken)];
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("quiet", Box::new(Quiet)),
+            ModEntry::new("broken", Box::new(Broken)),
+        ];
         let caught = Arc::new(Mutex::new(Vec::new()));
         let sink = caught.clone();
         let previous = std::panic::take_hook();
@@ -1341,7 +1347,10 @@ mod tests {
             block: "",
             lines: Vec::new(),
         };
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Turn), Box::new(Turn)];
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("turn-1", Box::new(Turn)),
+            ModEntry::new("turn-2", Box::new(Turn)),
+        ];
         let mut sensitivity = 0.25;
         let mut cinematic = false;
         dispatch_calculate_player_turn(&host, &mods, 42, 123, &mut sensitivity, &mut cinematic);
@@ -1353,7 +1362,7 @@ mod tests {
     fn a_test_host_implements_only_what_its_hook_calls() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
-        let mods = [Box::new(Probe) as Box<dyn Hooks>];
+        let mods = [ModEntry::new("probe", Box::new(Probe))];
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
             let mut host = Reader {
@@ -1414,7 +1423,7 @@ mod tests {
 
     #[test]
     fn damage_v2_exposes_weapon_geometry_and_host_without_changing_v1() {
-        let mods = [Box::new(Backstab) as Box<dyn Hooks>];
+        let mods = [ModEntry::new("backstab", Box::new(Backstab))];
         let mut weapon = stick();
         weapon.enchant("probe:backstab", 3);
         for (entity, source_z, expected, canceled_expected) in [
@@ -1483,7 +1492,10 @@ mod tests {
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods = [Box::new(MiningProbe(seen.clone())) as Box<dyn Hooks>];
+        let mods = [ModEntry::new(
+            "mining-probe",
+            Box::new(MiningProbe(seen.clone())),
+        )];
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -1513,7 +1525,7 @@ mod tests {
     fn an_unexpected_host_call_names_the_method() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
-        let mods = [Box::new(Chatty) as Box<dyn Hooks>];
+        let mods = [ModEntry::new("chatty", Box::new(Chatty))];
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -1567,7 +1579,7 @@ mod tests {
     #[test]
     fn a_block_use_hears_the_hand_the_hit_and_the_player() {
         mark_game_thread();
-        let mods = [Box::new(OffHandTop) as Box<dyn Hooks>];
+        let mods = [ModEntry::new("off-hand-top", Box::new(OffHandTop))];
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -1683,7 +1695,7 @@ mod tests {
             lines: Vec::new(),
         };
         // What `tick_brewing_stand` does once the brew is due.
-        let brew = |mods: &[Box<dyn Hooks>], host: &mut Reader, stand: &mut BrewingStand| {
+        let brew = |mods: &[ModEntry], host: &mut Reader, stand: &mut BrewingStand| {
             let mut stacks = stand.items.clone();
             let mut cancel = false;
             dispatch_potion_brew_pre(host, mods, [1, 2, 3], &mut stacks, &mut cancel);
@@ -1696,7 +1708,10 @@ mod tests {
         };
 
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewSwapper(seen.clone()))];
+        let mods: Vec<ModEntry> = vec![ModEntry::new(
+            "brew-swapper",
+            Box::new(BrewSwapper(seen.clone())),
+        )];
         let mut stand = fresh();
         assert!(!brew(&mods, &mut host, &mut stand));
         assert_eq!(*seen.lock().unwrap(), ["pre", "post minecraft:diamond"]);
@@ -1704,7 +1719,7 @@ mod tests {
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(2));
 
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewEditor)];
+        let mods: Vec<ModEntry> = vec![ModEntry::new("brew-editor", Box::new(BrewEditor))];
         let mut stand = fresh();
         assert!(brew(&mods, &mut host, &mut stand));
         assert_eq!(stand.items[0], Some(awkward));
@@ -1735,9 +1750,9 @@ mod tests {
     #[test]
     fn a_game_rule_change_reaches_every_mod_once_the_rule_is_set() {
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![
-            Box::new(Recorder(seen.clone())),
-            Box::new(Recorder(seen.clone())),
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("recorder-10", Box::new(Recorder(seen.clone()))),
+            ModEntry::new("recorder-11", Box::new(Recorder(seen.clone()))),
         ];
         let mut host = Reader {
             block: "minecraft:air",
@@ -1772,9 +1787,9 @@ mod tests {
     #[test]
     fn each_saved_level_reaches_every_mod() {
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![
-            Box::new(Recorder(seen.clone())),
-            Box::new(Recorder(seen.clone())),
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("recorder-12", Box::new(Recorder(seen.clone()))),
+            ModEntry::new("recorder-13", Box::new(Recorder(seen.clone()))),
         ];
         let mut host = Reader {
             block: "minecraft:air",
@@ -1827,7 +1842,10 @@ mod tests {
             block: "minecraft:water",
             lines: Vec::new(),
         };
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper), Box::new(Unreached)];
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("cod-keeper", Box::new(CodKeeper)),
+            ModEntry::new("unreached", Box::new(Unreached)),
+        ];
         let ask = |host: &mut Reader, item: &str| {
             let drops = [ItemStack::new(item, 1)];
             let fished = NativeItemFished {
@@ -1840,7 +1858,7 @@ mod tests {
             (rod_damage, cancel)
         };
         assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper)];
+        let mods: Vec<ModEntry> = vec![ModEntry::new("cod-keeper", Box::new(CodKeeper))];
         let drops = [ItemStack::new("minecraft:salmon", 1)];
         let fished = NativeItemFished {
             hook: 9,
@@ -1905,7 +1923,10 @@ mod tests {
         };
         let potion = ItemStack::new("minecraft:potion", 1);
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewWatcher(seen.clone()))];
+        let mods: Vec<ModEntry> = vec![ModEntry::new(
+            "brew-watcher",
+            Box::new(BrewWatcher(seen.clone())),
+        )];
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),

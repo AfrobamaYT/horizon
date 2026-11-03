@@ -3,8 +3,8 @@
 //! after every mod's `Hooks` method. Parts attached by tag are resolved by each game against its
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread.
 use super::{
-    BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, Hooks, Host,
-    ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, PlaceProvider,
+    BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, Host, ItemCapabilityKey,
+    ItemPart, ItemPlace, MenuPart, ModEntry, PlaceProvider,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -19,6 +19,8 @@ use std::{
 
 /// A part, with the mod that attached it.
 pub struct Attached<P: ?Sized> {
+    /// The mod's bundle id, retained for diagnostics after registration.
+    pub(super) mod_id: &'static str,
     /// The mod's place in dispatch order.
     pub(super) mod_index: usize,
     /// Its place in its mod's registrations: a mod's parts on one thing keep this order, key or
@@ -33,6 +35,7 @@ pub struct Attached<P: ?Sized> {
 impl<P: ?Sized> Clone for Attached<P> {
     fn clone(&self) -> Self {
         Self {
+            mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.order,
             kind: self.kind,
@@ -60,7 +63,7 @@ pub struct Parts {
     /// Item capability providers by capability name, then by item, in registration order.
     item_capabilities: Capabilities,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
-    place_providers: HashMap<&'static str, (usize, Arc<dyn PlaceProvider>)>,
+    place_providers: HashMap<&'static str, (&'static str, Arc<dyn PlaceProvider>)>,
 }
 
 type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
@@ -69,7 +72,7 @@ type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>
 /// of the capability's handler trait.
 #[derive(Clone)]
 pub(crate) struct CapabilityPart {
-    mod_index: usize,
+    mod_id: &'static str,
     /// Asked ahead of the game's own provider.
     before_game: bool,
     provider: Arc<dyn Any + Send + Sync>,
@@ -206,8 +209,7 @@ fn unknown_keys<'a, P: ?Sized>(
             list.iter().map(move |part| {
                 format!(
                     "{} attached {} to {scope} {id}, which this game does not have",
-                    super::mod_name(part.mod_index),
-                    part.type_name
+                    part.mod_id, part.type_name
                 )
             })
         })
@@ -225,7 +227,7 @@ fn add_tagged<P: ?Sized>(
         let Some(members) = tags.get(&**tag) else {
             log::warn!(
                 "{} attached {} to {scope} tag #{tag}, which does not exist",
-                super::mod_name(part.mod_index),
+                part.mod_id,
                 part.type_name
             );
             continue;
@@ -237,9 +239,13 @@ fn add_tagged<P: ?Sized>(
                     log::warn!(
                         "{} is attached to {member} twice, by {} and {} (#{tag}); {}'s is kept",
                         part.type_name,
-                        super::mod_name(other.mod_index),
-                        super::mod_name(part.mod_index),
-                        super::mod_name(other.mod_index.min(part.mod_index)),
+                        other.mod_id,
+                        part.mod_id,
+                        if other.mod_index < part.mod_index {
+                            other.mod_id
+                        } else {
+                            part.mod_id
+                        },
                     );
                     if part.mod_index < other.mod_index {
                         *other = part.clone();
@@ -333,7 +339,7 @@ pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
                 let provider = part.provider.downcast_ref::<Arc<P>>()?;
                 Some(Capability {
                     handler: call(provider, host)?,
-                    owner: Some(part.mod_index),
+                    owner: Some(part.mod_id),
                 })
             })
     };
@@ -390,8 +396,8 @@ fn attached<'a, 'k, P: ?Sized>(
 
 /// What a mod's [`Hooks::register`] attaches its parts with. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-#[derive(Default)]
 pub struct Registrar {
+    mod_id: &'static str,
     mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
     registered: usize,
@@ -401,6 +407,17 @@ pub struct Registrar {
 }
 
 impl Registrar {
+    fn new(mod_id: &'static str) -> Self {
+        Self {
+            mod_id,
+            mod_index: 0,
+            registered: 0,
+            parts: Parts::default(),
+            tags: TagParts::default(),
+            refused: Vec::new(),
+        }
+    }
+
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
     pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
         self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
@@ -503,21 +520,20 @@ impl Registrar {
         if !namespaced(name) {
             self.refused.push(format!(
                 "{} provides item places {name:?}, which is not a namespaced name",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return;
         }
         if let Some((other, _)) = self.parts.place_providers.get(name) {
             self.refused.push(format!(
                 "item places {name} are provided twice, by {} and {}",
-                super::mod_name(*other),
-                super::mod_name(self.mod_index)
+                *other, self.mod_id
             ));
             return;
         }
         self.parts
             .place_providers
-            .insert(name, (self.mod_index, provider));
+            .insert(name, (self.mod_id, provider));
     }
 
     /// Adds `provider` for capability `name` and `id` to `table`; refused for an id with no
@@ -533,7 +549,7 @@ impl Registrar {
         if !namespaced(id) {
             self.refused.push(format!(
                 "{} answered {name} for {id:?}, which is not a namespaced id",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return;
         }
@@ -542,7 +558,7 @@ impl Registrar {
             .entry(id.into())
             .or_default()
             .push(CapabilityPart {
-                mod_index: self.mod_index,
+                mod_id: self.mod_id,
                 before_game,
                 provider: Arc::new(provider),
             });
@@ -562,7 +578,7 @@ impl Registrar {
         if tag.starts_with('#') || !namespaced(tag) {
             self.refused.push(format!(
                 "{} attached {name} to tag {tag:?}, which is not a namespaced tag name (write it without #)",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return None;
         }
@@ -570,6 +586,7 @@ impl Registrar {
         Some((
             tag.into(),
             Attached {
+                mod_id: self.mod_id,
                 mod_index: self.mod_index,
                 order: self.registered,
                 kind: TypeId::of::<K>(),
@@ -590,7 +607,7 @@ impl Registrar {
         if !namespaced(id) {
             self.refused.push(format!(
                 "{} attached {name} to {id:?}, which is not a namespaced id",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return false;
         }
@@ -598,13 +615,13 @@ impl Registrar {
         if let Some(other) = list.iter().find(|a| a.kind == TypeId::of::<K>()) {
             self.refused.push(format!(
                 "{name} is attached to {id} twice, by {} and {}",
-                super::mod_name(other.mod_index),
-                super::mod_name(self.mod_index)
+                other.mod_id, self.mod_id
             ));
             return false;
         }
         self.registered += 1;
         list.push(Attached {
+            mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.registered,
             kind: TypeId::of::<K>(),
@@ -622,18 +639,23 @@ fn namespaced(id: &str) -> bool {
 
 /// Builds the parts from every mod's [`Hooks::register`], in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
-pub(crate) fn install_parts(mods: &[Box<dyn Hooks>]) -> Result<(), Vec<String>> {
-    let mut registrar = Registrar::default();
-    for (index, hooks) in super::entered(mods, "register").enumerate() {
-        registrar.mod_index = index;
-        hooks.register(&mut registrar);
-    }
-    if !registrar.refused.is_empty() {
-        return Err(registrar.refused);
-    }
-    let installed = Installed {
-        keys: registrar.parts,
-        tags: registrar.tags,
+pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
+    let installed = if let Some(first) = mods.first() {
+        let mut registrar = Registrar::new(first.id);
+        for (index, hooks) in super::entered(mods, "register").enumerate() {
+            registrar.mod_id = mods[index].id;
+            registrar.mod_index = index;
+            hooks.register(&mut registrar);
+        }
+        if !registrar.refused.is_empty() {
+            return Err(registrar.refused);
+        }
+        Installed {
+            keys: registrar.parts,
+            tags: registrar.tags,
+        }
+    } else {
+        Installed::default()
     };
     if INSTALLED.set(installed).is_err() {
         log::warn!("Mod parts already installed; keeping the first table");
@@ -1388,15 +1410,15 @@ pub(crate) mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub(crate) fn game_thread() -> Vec<Box<dyn Hooks>> {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Doubler)];
+    pub(crate) fn game_thread() -> Vec<ModEntry> {
+        let mods: Vec<ModEntry> = vec![ModEntry::new("doubler", Box::new(Doubler))];
         install_parts(&mods).unwrap();
         mark_game_thread();
         mods
     }
 
     /// The comparator reading of state `state`, from 1.
-    fn read(mods: &[Box<dyn Hooks>], state: u32) -> i32 {
+    fn read(mods: &[ModEntry], state: u32) -> i32 {
         let mut output = 1;
         dispatch_analog_output(
             &Level,
@@ -1475,12 +1497,14 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].starts_with("doubler attached "));
         assert!(refused[0].contains("Gauge to block test:gauge, which this game does not have"));
     }
 
     #[test]
     fn a_tag_giving_a_part_twice_keeps_the_earlier_mod() {
         let part = |mod_index| Attached::<dyn BlockPart> {
+            mod_id: ["earlier", "later"][mod_index],
             mod_index,
             order: 0,
             kind: TypeId::of::<Gauge>(),
@@ -1788,9 +1812,7 @@ pub(crate) mod tests {
         assert_eq!(shelf_.dropped, [bread(36)]);
         assert_eq!(shelf_.items(), 64 * 3 + 36);
         // Warned once, naming the mod that registered it.
-        assert!(super::super::item_place::warned_about(
-            &super::super::mod_name(0)
-        ));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -1817,9 +1839,7 @@ pub(crate) mod tests {
         assert_eq!(shelf_.slots, [Some(apples(2)), None, None]);
         assert_eq!(shelf_.dropped, [apples(5)]);
         assert_eq!(shelf_.items() + 3, 10);
-        assert!(super::super::item_place::warned_about(
-            &super::super::mod_name(0)
-        ));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -1848,9 +1868,7 @@ pub(crate) mod tests {
         );
         assert_eq!(shelf_.slots, [Some(apples(7)), None, None]);
         assert_eq!(shelf_.dropped, [dirt(3)]);
-        assert!(super::super::item_place::warned_about(
-            &super::super::mod_name(0)
-        ));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -1884,14 +1902,18 @@ pub(crate) mod tests {
 
     #[test]
     fn a_place_provider_given_twice_is_refused() {
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("first");
         r.place_provider("test:charms", Arc::new(Charms));
+        r.mod_id = "second";
         r.mod_index = 1;
         r.place_provider("test:charms", Arc::new(Charms));
         r.place_provider("charms", Arc::new(Charms));
         r.block_entity_capability(&ITEMS, "pipe", |_, _| Some(Box::new(Pipe)));
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("item places test:charms are provided twice"));
+        assert!(
+            r.refused[0]
+                .contains("item places test:charms are provided twice, by first and second")
+        );
         assert!(r.refused[1].contains("not a namespaced name"));
         assert!(r.refused[2].contains("not a namespaced id"));
     }
@@ -2510,9 +2532,7 @@ pub(crate) mod tests {
                 .is_none()
         );
         assert_eq!(world.held(SOURCE), Some(water.clone()));
-        assert!(super::super::fluid_capability::warned_about(
-            "native mod #0"
-        ));
+        assert!(super::super::fluid_capability::warned_about("doubler"));
         // A source that can't take it back: fluid has no item form to drop, so it is lost.
         world.tanks.get_mut(&SOURCE).unwrap().fills = false;
         let host: &mut dyn Host = &mut world;
@@ -2575,14 +2595,12 @@ pub(crate) mod tests {
         let host: &mut dyn Host = &mut world;
         assert_eq!(host.transfer_fluids(SOURCE, None, TANK, None, 300), None);
         assert_eq!((world.amount(SOURCE), world.amount(TANK)), (1000, 0));
-        assert!(super::super::fluid_capability::warned_about(
-            "native mod #0"
-        ));
+        assert!(super::super::fluid_capability::warned_about("doubler"));
     }
 
     #[test]
     fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("registrar-test");
         r.block_part_tag("test:gauged", TagGauge);
         r.block_part("test:gauge", Gauge);
         let tags = HashMap::from([(
@@ -2635,8 +2653,9 @@ pub(crate) mod tests {
     fn the_same_part_twice_on_one_block_is_refused() {
         struct Other;
         impl BlockPart for Other {}
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("first");
         r.block_part("test:gauge", Gauge);
+        r.mod_id = "second";
         r.mod_index = 1;
         r.block_part("test:gauge", Other);
         r.block_part("test:gauge", Gauge);
@@ -2644,7 +2663,9 @@ pub(crate) mod tests {
         r.block_part_tag("#test:gauged", Other);
         assert_eq!(r.parts.block(|| Some("test:gauge")).len(), 2);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("Gauge is attached to test:gauge twice"));
+        assert!(
+            r.refused[0].contains("Gauge is attached to test:gauge twice, by first and second")
+        );
         assert!(r.refused[1].contains("not a namespaced id"));
         assert!(r.refused[2].contains("write it without #"));
     }

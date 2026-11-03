@@ -27,7 +27,7 @@ pub struct BlockSide {
 pub struct Capability<T: ?Sized> {
     pub(super) handler: Box<T>,
     /// The mod whose provider answered; none for the game.
-    pub(super) owner: Option<usize>,
+    pub(super) owner: Option<&'static str>,
 }
 
 impl<T: ?Sized> Deref for Capability<T> {
@@ -40,8 +40,7 @@ impl<T: ?Sized> Deref for Capability<T> {
 impl<T: ?Sized> Capability<T> {
     /// The id of the mod whose provider answered, or "the game", for warnings.
     pub fn owner(&self) -> String {
-        self.owner
-            .map_or_else(|| "the game".to_owned(), super::mod_name)
+        self.owner.unwrap_or("the game").to_owned()
     }
 }
 

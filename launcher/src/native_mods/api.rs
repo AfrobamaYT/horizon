@@ -81,8 +81,12 @@ fn path_dep(path: &str) -> toml::Value {
 
 /// The generated executable's `main`: the trait mods of bundles `ids`, in that order.
 fn main_rs(ids: &[&str]) -> String {
-    let entries = (0..ids.len())
-        .map(|i| format!("        mod_{i}::hooks(),\n"))
+    let entries = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            format!("        horizon_client::mod_api::ModEntry::new({id:?}, mod_{i}::hooks()),\n")
+        })
         .collect::<String>();
     // Mirrors crates/horizon-client/src/main.rs, with trait mods passed to main_with.
     format!(
@@ -98,7 +102,6 @@ fn main() {{
     std::hint::black_box(&MOD_API_LEVEL);
     let mods: horizon_client::mod_api::Mods = vec![
 {entries}    ].into();
-    horizon_client::mod_api::name_mods(&{ids:?});
     horizon_client::entry::main_with(mods);
 }}
 "#
@@ -355,20 +358,16 @@ mod tests {
             let text = main_rs(&ids[..count]);
             assert!(text.contains("entry::main_with(mods)"));
             assert_eq!(text.matches("::hooks()").count(), count);
-            assert!(text.contains("name_mods"));
+            assert_eq!(text.matches("ModEntry::new").count(), count);
             if count == 2 {
                 assert!(
                     text.find("mod_0::hooks()").unwrap() < text.find("mod_1::hooks()").unwrap()
                 );
             }
         }
-        // The ids follow the same order, before main_with.
         let named = main_rs(&ids);
-        let naming = named
-            .find(r#"mod_api::name_mods(&["base", "extra"]);"#)
-            .unwrap();
-        assert!(named.find("mod_1::hooks()").unwrap() < naming);
-        assert!(naming < named.find("entry::main_with(mods)").unwrap());
+        assert!(named.contains(r#"ModEntry::new("base", mod_0::hooks())"#));
+        assert!(named.contains(r#"ModEntry::new("extra", mod_1::hooks())"#));
     }
 
     #[test]
@@ -432,11 +431,11 @@ mod tests {
             Some("horizon-client/default")
         );
         let main = || fs::read_to_string(stage_dir.join(GAME).join("src/main.rs")).unwrap();
-        assert!(main().contains(r#"name_mods(&["example"]);"#));
+        assert!(main().contains(r#"ModEntry::new("example", mod_0::hooks())"#));
         fs::write(stage_dir.join("crates/horizon-client/Cargo.toml"), "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n").unwrap();
         let bundle = super::super::bundle(&dir, None).unwrap();
         stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap();
-        assert!(main().contains(r#"name_mods(&["example"]);"#));
+        assert!(main().contains(r#"ModEntry::new("example", mod_0::hooks())"#));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
         assert_eq!(
             game["build-dependencies"]["horizon-mod-api-gen"]["path"].as_str(),

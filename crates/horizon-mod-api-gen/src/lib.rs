@@ -934,7 +934,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         dispatch_params.push(if is_render {
             format!("{mod_list}: &[&dyn RenderHooks]")
         } else {
-            format!("{mod_list}: &[Box<dyn Hooks>]")
+            format!("{mod_list}: &[ModEntry]")
         });
         let mut lifetimes = EventLifetimes::default();
         let mut fields = String::new();

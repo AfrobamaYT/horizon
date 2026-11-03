@@ -2903,9 +2903,12 @@ Trait dispatch follows dependency order, with ties kept in bundle order. Mixin i
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
 
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
-and in the server thread's log line, with the bundle's `[mod] id` (the generated executable passes the ids to
-`mod_api::name_mods`; a build that doesn't gives the mod's place in dispatch order, `#0` first). The game still
-stops as before. Render hooks and trait injections are not named yet.
+and in the server thread's log line, with the bundle's `[mod] id`. Each entry passed to
+`entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
+The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
+Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
+id for startup errors and hook panics. The game still stops as before. Render hooks and trait injections
+are not named yet.
 
 A bundle with an `[api]` package may declare its own injection in the trait:
 
@@ -3212,7 +3215,7 @@ impl Host for Stone {
         "minecraft:stone".to_string()
     }
 }
-let mods = [Box::new(MyMod) as Box<dyn Hooks>];
+let mods = [ModEntry::new("my-mod", Box::new(MyMod))];
 let mut claimed = false;
 let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
 dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], Hand::Main, hit, 7, &mut claimed);

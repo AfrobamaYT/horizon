@@ -203,8 +203,8 @@ static BROKEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 /// `owner`'s item handler at `at` moved other than it was asked or its simulation said: a mod
 /// bug, warned once per mod.
-pub(crate) fn warn_broken(owner: Option<usize>, at: &dyn std::fmt::Debug) {
-    let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
+pub(crate) fn warn_broken(owner: Option<&'static str>, at: &dyn std::fmt::Debug) {
+    let owner = owner.unwrap_or("the game").to_owned();
     let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
     if warned.get_or_insert_default().insert(owner.clone()) {
         log::warn!(
@@ -235,7 +235,7 @@ fn is_exactly(out: Option<&ItemStack>, old: &ItemStack, count: u32) -> bool {
 
 impl Container<'_> {
     /// The mod that registered the handler; none for the game's own.
-    fn owner(&self) -> Option<usize> {
+    fn owner(&self) -> Option<&'static str> {
         match self {
             Self::Block(h, ..) => h.owner,
             Self::Item(h, _) => h.owner,

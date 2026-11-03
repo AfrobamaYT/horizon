@@ -73,7 +73,7 @@ mod tests {
         pub(super) struct NativeBlockRim;
         pub(super) struct NativeColoredLight;
         pub(super) struct NativeMinimap;
-        pub(super) struct NativeMod;
+        pub(super) struct ModEntry;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
         pub(super) struct ModBlockEntity {
@@ -166,13 +166,22 @@ mod tests {
         static ENTERED: std::cell::RefCell<Vec<(usize, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
     fn entered<'a>(
-        mods: &'a [Box<dyn Hooks>],
+        mods: &'a [ModEntry],
         hook: &'static str,
     ) -> impl Iterator<Item = &'a Box<dyn Hooks>> {
         mods.iter().enumerate().map(move |(index, hooks)| {
             ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
-            hooks
+            &hooks.hooks
         })
+    }
+    struct ModEntry {
+        _id: &'static str,
+        hooks: Box<dyn Hooks>,
+    }
+    impl ModEntry {
+        fn new(id: &'static str, hooks: Box<dyn Hooks>) -> Self {
+            Self { _id: id, hooks }
+        }
     }
     struct Registrar;
     /// No parts: the scoped dispatch calls the mods only.
@@ -307,12 +316,15 @@ mod tests {
     #[test]
     fn block_entity_submit_dispatches_in_order_with_shared_draw() {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![
-            Box::new(Mod {
-                id: 1,
-                calls: calls.clone(),
-            }),
-            Box::new(Mod { id: 2, calls }),
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new(
+                "mod-0",
+                Box::new(Mod {
+                    id: 1,
+                    calls: calls.clone(),
+                }),
+            ),
+            ModEntry::new("mod-1", Box::new(Mod { id: 2, calls })),
         ];
         let mut draw = BlockEntityDraw(Vec::new());
         dispatch_block_entity_submit(
@@ -329,10 +341,13 @@ mod tests {
 
     #[test]
     fn slot_rules_mutate_and_item_tick_can_cancel() {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Mod {
-            id: 1,
-            calls: Arc::new(Mutex::new(Vec::new())),
-        })];
+        let mods: Vec<ModEntry> = vec![ModEntry::new(
+            "mod-2",
+            Box::new(Mod {
+                id: 1,
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )];
         let (mut may_place, mut max_stack) = (true, 64);
         dispatch_menu_slot_rules(
             &mods,
@@ -358,10 +373,13 @@ mod tests {
 
     #[test]
     fn item_finish_can_clear_vanilla_result() {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Mod {
-            id: 1,
-            calls: Arc::new(Mutex::new(Vec::new())),
-        })];
+        let mods: Vec<ModEntry> = vec![ModEntry::new(
+            "mod-3",
+            Box::new(Mod {
+                id: 1,
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )];
         let mut result = Some(ItemStack::default());
         dispatch_living_entity_use_item_finish(
             &mut TestHost,
@@ -378,15 +396,21 @@ mod tests {
     #[test]
     fn fragment_cancel_stops_later_mods() {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![
-            Box::new(Mod {
-                id: 1,
-                calls: calls.clone(),
-            }),
-            Box::new(Mod {
-                id: 2,
-                calls: calls.clone(),
-            }),
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new(
+                "mod-4",
+                Box::new(Mod {
+                    id: 1,
+                    calls: calls.clone(),
+                }),
+            ),
+            ModEntry::new(
+                "mod-5",
+                Box::new(Mod {
+                    id: 2,
+                    calls: calls.clone(),
+                }),
+            ),
         ];
         let mut canceled = false;
         dispatch_mouse_button_pre(&mut TestHost, &mods, 0, true, 0, &mut canceled);
@@ -413,9 +437,9 @@ mod tests {
             }
         }
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![
-            Box::new(Refuse(calls.clone(), 1)),
-            Box::new(Refuse(calls.clone(), 2)),
+        let mods: Vec<ModEntry> = vec![
+            ModEntry::new("refuse-6", Box::new(Refuse(calls.clone(), 1))),
+            ModEntry::new("refuse-7", Box::new(Refuse(calls.clone(), 2))),
         ];
         let mut answer = None;
         dispatch_state_for_placement(
@@ -451,7 +475,7 @@ mod tests {
                 }
             }
         }
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Property)];
+        let mods: Vec<ModEntry> = vec![ModEntry::new("property-8", Box::new(Property))];
         let host = TestHost;
         let mut value = false;
         dispatch_item_model_property(
@@ -512,7 +536,7 @@ mod tests {
                 Flow::Continue
             }
         }
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Backstab)];
+        let mods: Vec<ModEntry> = vec![ModEntry::new("backstab-9", Box::new(Backstab))];
         let held = ItemStack::default();
         for (source_z, weapon, expected) in [
             (-1.0, Some(&held), 12.0),
@@ -554,7 +578,7 @@ mod tests {
                 Flow::Cancel
             }
         }
-        let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
+        let weapon_mods: Vec<ModEntry> = vec![ModEntry::new("weapon-10", Box::new(Weapon))];
         let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
         dispatch_living_knockback_v2(
             &weapon_mods,
@@ -571,12 +595,15 @@ mod tests {
         assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
         assert!(canceled);
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = (1..=2)
+        let mods: Vec<ModEntry> = (1..=2)
             .map(|id| {
-                Box::new(Mod {
-                    id,
-                    calls: calls.clone(),
-                }) as Box<dyn Hooks>
+                ModEntry::new(
+                    "mod-11",
+                    Box::new(Mod {
+                        id,
+                        calls: calls.clone(),
+                    }),
+                )
             })
             .collect();
         let mut table = serde_json::json!([]);
@@ -619,12 +646,15 @@ mod tests {
         // Each mod sees the one before: (1 × 2 + 1) × 2 + 2, kept though mod 2 cancels.
         assert_eq!(amount, 8.0);
         assert!(canceled);
-        let chained: Vec<Box<dyn Hooks>> = [1, 3]
+        let chained: Vec<ModEntry> = [1, 3]
             .map(|id| {
-                Box::new(Mod {
-                    id,
-                    calls: calls.clone(),
-                }) as Box<dyn Hooks>
+                ModEntry::new(
+                    "mod-12",
+                    Box::new(Mod {
+                        id,
+                        calls: calls.clone(),
+                    }),
+                )
             })
             .into();
         let mut amount = 1.0;

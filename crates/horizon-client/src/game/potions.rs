@@ -1970,7 +1970,10 @@ mod tests {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
             crate::mod_api::MODS
-                .set(std::sync::Arc::from([Box::new(TestMod) as Box<dyn Hooks>]))
+                .set(std::sync::Arc::from([crate::mod_api::ModEntry::new(
+                    "test-potions",
+                    Box::new(TestMod),
+                )]))
                 .unwrap_or_else(|_| panic!("mods already installed"));
             brewing::register_mod_effects([("test:effect".into(), 0, brewing::Category::Neutral)]);
             let _ =
