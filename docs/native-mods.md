@@ -3229,9 +3229,14 @@ so check `is_loaded` first. It also answers tag and fluid questions without a `H
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
-`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events). Whole-block writes wait for a
-later slice that creates block entities, as vanilla's `setBlock` does. The game owns
+`LevelWriteHost` adds random access, `set_block`, `native_set_block_property`, `native_play_sound` and
+`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events).
+`set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
+removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
+the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
+it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
+an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
 renderer list is installed once alongside the mod list. `render_needs` collects requests;
@@ -3479,7 +3484,14 @@ between these and block or item handlers inside a transaction.
 
 #### A menu's slots
 
-`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`host.menu(player)`). It is
+Client hooks can read the local player's menu with `host.local_player()?.container_menu(host)`,
+including the inventory when no container is open. `MenuRef::slot_count`, `slot` and `carried`
+read on either side; `slot` and `carried` return an outer `None` when the handle or slot is
+unavailable and `Some(None)` for an empty slot. Each read checks the world epoch and menu generation,
+so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
+change slots.
+
+`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
 (`MenuSlotBacking`), and a write goes to that storage through its own handler, so it is kept once by the transaction

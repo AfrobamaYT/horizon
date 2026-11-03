@@ -1892,6 +1892,7 @@ impl BossBarOverlay {
 }
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
+/// Client menu handles are also invalidated on respawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
@@ -2728,8 +2729,23 @@ pub trait LevelTicksHost: LevelHost {
     }
 }
 
-/// Mutable level services, like vanilla's `ServerLevel`. Whole-block writes wait for block entity support.
+/// Mutable level services, like vanilla's `ServerLevel`.
 pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
+    /// Replace the block at `pos` with `state` through `Level.setBlock(pos, state, flags)`, as
+    /// `LevelRef::set_block` does: the old block's block entity goes and the new block's is
+    /// created in the write, its neighbour and shape updates run per `flags`, and its level events
+    /// queue in order with the caller's. A mod block entity starts with empty data
+    /// (`native_block_entity` needs a full `Host`). True when the block changed; false off an
+    /// authoritative server, for a position that is not loaded or outside the build height, an
+    /// invalid state, or the state it already is. It never loads a chunk.
+    fn set_block(
+        &mut self,
+        _pos: [i32; 3],
+        _state: BlockStateId,
+        _flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        unimplemented!("LevelWriteHost::set_block")
+    }
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(
         &mut self,
