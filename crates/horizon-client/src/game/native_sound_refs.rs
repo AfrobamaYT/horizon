@@ -296,4 +296,78 @@ mod tests {
             assert!(packets(&rx_far).is_empty());
         });
     }
+
+    /// `Level.playSound` draws its seed at the call, from the level random,
+    /// so two sounds queued in one tick keep their order; and a player
+    /// exactly at the range edge is outside `PlayerList.broadcast`.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn queued_sounds_draw_seeds_at_play_and_cut_at_the_range_edge() {
+        use horizon_core::random::RandomSource;
+
+        with_game(|game| {
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 3)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 3,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let (near, rx_near) = guest(31, 31, [0.5, 64.0, 1.0]);
+            let (edge, rx_edge) = guest(32, 32, [0.5, 64.0, 16.0]);
+            game.lan.as_mut().unwrap().hub.guests.extend([near, edge]);
+
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let sound = "minecraft:entity.player.burp";
+            let mut expected = game.world.random.clone();
+            let seeds = [expected.next_long(), expected.next_long()];
+            for _ in seeds {
+                assert!(
+                    game.native_queue_sound(
+                        level,
+                        sound,
+                        [0.5, 64.0, 0.0],
+                        NativeSoundSource::Neutral,
+                        1.0,
+                        1.0,
+                        None,
+                    )
+                    .is_some()
+                );
+            }
+            game.flush_native_sounds();
+
+            let got = packets(&rx_near);
+            assert_eq!(got.len(), 2, "both queued sounds reach the near player");
+            for (packet, seed) in got.iter().zip(seeds) {
+                let Clientbound::Sound(p) = packet else {
+                    panic!("expected sound")
+                };
+                assert_eq!(p.seed, seed, "seeds follow the level random's draw order");
+            }
+            assert!(
+                packets(&rx_edge).is_empty(),
+                "a player exactly at the range edge hears nothing"
+            );
+        });
+    }
 }

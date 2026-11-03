@@ -2,6 +2,7 @@
 //! `ClientboundLevelParticlesPacket` (`ServerLevel.sendParticles`, which
 //! `/particle` uses) and `ClientboundExplodePacket` (`ServerLevel.explode`).
 use super::{Game, lan::LanHost};
+use horizon_client::lan::containers::within_range;
 use horizon_client::lan::hub::Hub;
 use horizon_client::particles::{ParticleOptions, ParticleType};
 use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -559,10 +560,7 @@ impl Game<'_> {
                 packet,
                 false,
                 sound.except,
-                |position| {
-                    let distance: f64 = (0..3).map(|k| (position[k] - sound.at[k]).powi(2)).sum();
-                    distance < range * range
-                },
+                |position| within_range(sound.at, position, range),
             );
         }
     }

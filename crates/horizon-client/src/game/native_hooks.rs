@@ -64,6 +64,7 @@ use horizon_client::{
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
+    random::RandomSource,
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::{
