@@ -229,6 +229,7 @@ mod tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            ask_taming: false,
             border: None,
         };
         for no_ai in [false, true] {

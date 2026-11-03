@@ -209,7 +209,9 @@ mod native_components;
 mod native_criteria;
 mod native_data_maps;
 mod native_entities;
+mod native_entity_data;
 mod native_entity_motion;
+mod native_entity_moves;
 mod native_entity_refs;
 mod native_explosions;
 mod native_falling;
@@ -219,6 +221,7 @@ mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
 mod native_item_places;
+mod native_level_effects;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
@@ -3118,6 +3121,8 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// Guests whose records are displaced by nested player swaps, outer first.
+    lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -3996,7 +4001,7 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             age: 0,
-            pickup_delay,
+            pickup_delay: i64::from(pickup_delay),
             bob_offset: bob,
             ticks: 0,
             needs_sync: false,
@@ -12892,7 +12897,11 @@ impl Game<'_> {
         }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
-        let mut hand = powder_snow::HeldSlot { game: self, slot };
+        let mut hand = powder_snow::HeldSlot {
+            game: self,
+            slot,
+            dropper: None,
+        };
         let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
         if result.outcome == Outcome::Pass {
             return Ok(false);
@@ -19168,6 +19177,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,

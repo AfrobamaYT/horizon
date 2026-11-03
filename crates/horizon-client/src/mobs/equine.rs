@@ -361,17 +361,29 @@ impl Goal for RunAroundLikeCrazy {
             return;
         }
         let temper = i32::from(m.extra.variant3);
-        let max = max_temper(m.species());
-        if m.random.next_int_bound(max).unwrap_or(0) < temper {
-            // tameWithName
-            m.extra.tame = true;
+        if m.random
+            .next_int_bound(max_temper(m.species()))
+            .unwrap_or(0)
+            < temper
+        {
+            // tameWithName. When the game asks AnimalTameEvent it sets
+            // `tame` itself, so nothing sees a horse tame that a mod refuses.
+            if !cx.w.ask_taming {
+                m.extra.tame = true;
+            }
             cx.events.push(MobEvent::Tamed { mob: m.id });
             return;
         }
-        m.extra.variant3 = (temper + 5).min(max) as u8;
-        cx.events.push(MobEvent::Buck { mob: m.id });
-        make_mad(m, cx.events);
+        refuse_rider(m, cx.events);
     }
+}
+/// `RunAroundLikeCrazyGoal.tick`'s failed taming: `modifyTemper(5)`, the
+/// rider thrown off (with entity event 6) and `makeMad`.
+pub fn refuse_rider(m: &mut Mob, events: &mut Vec<MobEvent>) {
+    let max = max_temper(m.species());
+    m.extra.variant3 = (i32::from(m.extra.variant3) + 5).min(max) as u8;
+    events.push(MobEvent::Buck { mob: m.id });
+    make_mad(m, events);
 }
 /// `AbstractHorse.standIfPossible`: `setStanding(20)` (which also stops the
 /// eating) when `canPerformRearing`.
@@ -1055,6 +1067,22 @@ mod tests {
         k.species = species;
         k.max_health = 53.0;
         Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// A failed taming adds 5 to the temper, up to the species' most, and
+    /// throws the rider off before the angry rear.
+    #[test]
+    fn a_refused_rider_raises_the_temper_and_is_thrown() {
+        let mut m = horse(Species::Horse);
+        m.extra.variant3 = 20;
+        let mut events = Vec::new();
+        refuse_rider(&mut m, &mut events);
+        assert_eq!(m.extra.variant3, 25);
+        assert!(matches!(events[0], MobEvent::Buck { mob: 1 }));
+        assert_eq!(m.extra.counter, 20, "rears");
+        m.extra.variant3 = 98;
+        refuse_rider(&mut m, &mut Vec::new());
+        assert_eq!(i32::from(m.extra.variant3), max_temper(Species::Horse));
     }
 
     /// The rolled health is the attribute's base, which the server syncs: a
