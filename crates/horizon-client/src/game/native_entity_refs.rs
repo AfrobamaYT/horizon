@@ -634,6 +634,116 @@ pub(super) mod tests {
             assert!(game.guest_entity_events.is_empty() && game.guest_cooldowns.is_empty());
             assert_eq!(host.hub.guests[1].sender.pending.load(Ordering::Relaxed), 0);
             assert!(rx.try_recv().is_err());
+            let outer = game.enter_guest(&mut host, real_id).unwrap();
+            game.guest_cooldowns.push(("minecraft:real".into(), 7));
+            game.guest_player_sounds
+                .push(("outer".into(), [0.0; 3], 1.0, 1.0));
+            game.as_guest(&mut host, fake_id, |game| {
+                game.guest_cooldowns.push(("minecraft:fake".into(), 20));
+            })
+            .unwrap();
+            assert_eq!(game.guest_cooldowns.len(), 1);
+            assert_eq!(&*game.guest_cooldowns[0].0, "minecraft:real");
+            assert_eq!(game.guest_player_sounds[0].0, "outer");
+            game.guest_player_sounds.clear();
+            game.leave_guest(&mut host, outer);
+            let out = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+            let horizon_client::lan::Out::Packet(body) = out else {
+                panic!("expected cooldown packet")
+            };
+            let mut reader = horizon_protocol::buf::Reader::new(&body);
+            let id = reader.varint().unwrap();
+            let packet = Clientbound::decode(id, reader.rest()).unwrap();
+            let Clientbound::Cooldown(cooldown) = packet else {
+                panic!("expected cooldown")
+            };
+            assert_eq!(cooldown.group, "minecraft:real");
+            assert_eq!(cooldown.duration, 7);
+            assert!(rx.try_recv().is_err());
+
+            // A real turn nested in a fake must not receive the fake's cooldown.
+            let outer = game.enter_guest(&mut host, fake_id).unwrap();
+            game.guest_cooldowns
+                .push(("minecraft:fake_outer".into(), 8));
+            game.guest_player_sounds
+                .push(("fake_outer".into(), [0.0; 3], 1.0, 1.0));
+            game.as_guest(&mut host, real_id, |game| {
+                game.guest_cooldowns
+                    .push(("minecraft:real_inner".into(), 9));
+            })
+            .unwrap();
+            assert_eq!(&*game.guest_cooldowns[0].0, "minecraft:fake_outer");
+            assert_eq!(game.guest_player_sounds[0].0, "fake_outer");
+            game.guest_player_sounds.clear();
+            game.leave_guest(&mut host, outer);
+            let horizon_client::lan::Out::Packet(body) =
+                rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap()
+            else {
+                panic!("expected cooldown")
+            };
+            let mut reader = horizon_protocol::buf::Reader::new(&body);
+            let id = reader.varint().unwrap();
+            let Clientbound::Cooldown(cooldown) = Clientbound::decode(id, reader.rest()).unwrap()
+            else {
+                panic!("expected cooldown")
+            };
+            assert_eq!(cooldown.group, "minecraft:real_inner");
+            assert!(rx.try_recv().is_err());
+
+            // Two real nested turns deliver each queue to its own connection.
+            let (tx2, rx2) = std::sync::mpsc::channel();
+            let mut second = Guest::new(
+                Joined {
+                    conn: 3,
+                    uuid: 3,
+                    name: "second".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx2, Arc::default()),
+                    latency: Arc::default(),
+                    address: ([127, 0, 0, 1], 3).into(),
+                },
+                3,
+                [0.0; 3],
+                10,
+            );
+            second.placed = true;
+            host.hub.guests.push(second);
+            let outer = game.enter_guest(&mut host, real_id).unwrap();
+            game.guest_cooldowns
+                .push(("minecraft:real_outer".into(), 10));
+            game.guest_player_sounds
+                .push(("real_outer".into(), [0.0; 3], 1.0, 1.0));
+            game.as_guest(&mut host, 3, |game| {
+                game.guest_cooldowns
+                    .push(("minecraft:real_second".into(), 11))
+            })
+            .unwrap();
+            assert_eq!(&*game.guest_cooldowns[0].0, "minecraft:real_outer");
+            assert_eq!(game.guest_player_sounds[0].0, "real_outer");
+            game.guest_player_sounds.clear();
+            game.leave_guest(&mut host, outer);
+            for (receiver, expected) in [
+                (&rx, "minecraft:real_outer"),
+                (&rx2, "minecraft:real_second"),
+            ] {
+                let horizon_client::lan::Out::Packet(body) = receiver
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap()
+                else {
+                    panic!("expected cooldown")
+                };
+                let mut reader = horizon_protocol::buf::Reader::new(&body);
+                let id = reader.varint().unwrap();
+                let Clientbound::Cooldown(cooldown) =
+                    Clientbound::decode(id, reader.rest()).unwrap()
+                else {
+                    panic!("expected cooldown")
+                };
+                assert_eq!(cooldown.group, expected);
+                assert!(receiver.try_recv().is_err());
+            }
         });
     }
 
