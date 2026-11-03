@@ -14,8 +14,8 @@ use std::{
 /// with, and the game's own answer where no part is registered, if the game has one.
 pub struct CapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    default: Option<fn(&dyn Host, [i32; 3]) -> Option<Arc<T>>>,
-    handler: PhantomData<fn() -> Arc<T>>,
+    pub(super) default: Option<fn(&dyn Host, [i32; 3]) -> Option<Arc<T>>>,
+    pub(super) handler: PhantomData<fn() -> Arc<T>>,
 }
 
 impl<T: ?Sized + 'static> CapabilityKey<T> {

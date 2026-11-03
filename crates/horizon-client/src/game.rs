@@ -213,6 +213,8 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
+mod native_level_refs;
+mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
 mod native_menus;
@@ -7679,11 +7681,23 @@ impl Game<'_> {
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
     fn apply_mouse_look(&mut self) {
-        let look = self.look_options();
+        let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
         let pointer = self.captured || self.agent_pointer;
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
+        if active
+            && grabbed
+            && !crate::mod_api::mods().is_empty()
+            && let Some(remote) = &self.remote
+        {
+            self.native_calculate_player_turn(
+                self.own_entity_id(),
+                remote.profile,
+                &mut look.sensitivity,
+                &mut look.smooth_camera,
+            );
+        }
         if let Some((xo, yo)) = self
             .mouse
             .handle_accumulated_movement(time, active, grabbed, look)
@@ -11264,8 +11278,14 @@ impl Game<'_> {
         let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
         ((self.attack_ticks as f32 + 0.5) / delay).clamp(0.0, 1.0)
     }
-    /// `Player.isSweepAttack`: a charged, grounded sword hit below the movement limit.
-    pub(super) fn sweep_attack_position(&mut self, scale: f32, crit: bool) -> Option<[f64; 3]> {
+    /// `Player.isSweepAttack`: a charged, grounded sword hit below the movement
+    /// limit, which `native_sweep_attack` may force or stop for the hit on `target`.
+    pub(super) fn sweep_attack_position(
+        &mut self,
+        scale: f32,
+        crit: bool,
+        target: &str,
+    ) -> Option<[f64; 3]> {
         // Player.getSpeed: the movement speed attribute as it is now (the
         // field is only refreshed by the local movement step, never for a
         // server's player).
@@ -11273,17 +11293,10 @@ impl Game<'_> {
         if let Ok(speed) = p.attribute("minecraft:movement_speed") {
             p.speed = speed as f32;
         }
-        let p = self.player.as_ref()?;
-        let sword = self.held().is_some_and(|s| {
-            self.res
-                .items()
-                .item_tags
-                .get("minecraft:swords")
-                .is_some_and(|tag| tag.contains(&*s.item))
-        });
-        if !p.is_sweep_attack(scale, crit, sword) {
+        if !self.sweep_decision(scale, crit, target) {
             return None;
         }
+        let p = self.player.as_ref()?;
         // Mth.sin / Mth.cos of yRot * (PI / 180), from its sine table.
         use horizon_core::geometry::trig;
         let yaw = f64::from(self.yaw * trig::DEG_TO_RAD);
@@ -11292,6 +11305,25 @@ impl Game<'_> {
             p.position.y + f64::from(p.dimensions.height) * 0.5,
             p.position.z + f64::from(trig::cos(yaw)),
         ])
+    }
+    /// `Player.isSweepAttack` with the player's speed as it is, then
+    /// `native_sweep_attack`, on either side: whether the hit on `target` sweeps.
+    pub(super) fn sweep_decision(&mut self, scale: f32, crit: bool, target: &str) -> bool {
+        let Some(p) = self.player.as_ref() else {
+            return false;
+        };
+        let sword = self.held().is_some_and(|s| {
+            self.res
+                .items()
+                .item_tags
+                .get("minecraft:swords")
+                .is_some_and(|tag| tag.contains(&*s.item))
+        });
+        let vanilla = p.is_sweep_attack(scale, crit, sword);
+        let (mut sweeping, mut canceled) = (vanilla, false);
+        // `setCanceled` skips later mods and keeps the current `sweeping`.
+        self.native_sweep_attack(target, vanilla, &mut sweeping, &mut canceled);
+        sweeping
     }
     /// `Player.doSweepAttack` after a successful hit, in vanilla's order: the
     /// sweep sound, the victims around `target` (its box, and the mob that
@@ -11327,21 +11359,34 @@ impl Game<'_> {
             randomization: 0,
         });
     }
-    /// `Player.attack`'s sounds when a vehicle takes the hit (it always does,
-    /// and can't be hit critically): knockback when sprinting at full
-    /// strength, then strong or weak, or the sweep around the vehicle's
+    /// `Player.attack`'s `isSweepAttack`, decided before the hit as vanilla does
+    /// (`crit`: the hit on a living target is critical): where the sweep plays,
+    /// none without one. Reads the charge, so before the hit resets it.
+    pub(super) fn sweep_before_hit(&mut self, target: &str, crit: bool) -> Option<[f64; 3]> {
+        let scale = self.attack_strength_scale();
+        self.sweep_attack_position(scale, crit, target)
+    }
+    /// `Player.attack`'s sounds when a vehicle takes the hit (it always does, and
+    /// can't be hit critically): knockback when sprinting at full strength, then
+    /// strong or weak, or the `sweep` decided before the hit around the vehicle's
     /// box `area`. Before the hit resets the charge (`Player.onAttack`).
-    pub(super) fn vehicle_attack_sounds(&mut self, area: Aabb, magic: Option<i32>) {
-        self.attack_effects(area, None, false, mace::Spared::Nothing, magic);
+    pub(super) fn vehicle_attack_sounds(
+        &mut self,
+        area: Aabb,
+        sweep: Option<[f64; 3]>,
+        magic: Option<i32>,
+    ) {
+        self.attack_effects(area, sweep, None, false, mace::Spared::Nothing, magic);
     }
     /// `Player.attack` after a target that is not a mob took the hit:
     /// the sprint knockback sound, a living target's critical hit (`living`:
     /// its entity id; `crit`: whether `melee_damage` decided the hit critical,
-    /// mods' `critical_hit` included), the sweep around the target's box `area`
-    /// and the strong or weak sound.
+    /// mods' `critical_hit` included), the `sweep` decided before the hit
+    /// (`sweep_before_hit`) around the target's box `area` and the strong or weak sound.
     pub(super) fn attack_effects(
         &mut self,
         area: Aabb,
+        sweep: Option<[f64; 3]>,
         living: Option<i32>,
         crit: bool,
         spared: mace::Spared,
@@ -11356,7 +11401,6 @@ impl Game<'_> {
                 .play("minecraft:entity.player.attack.knockback", from, 1.0, 1.0);
         }
         let crit = living.is_some() && crit;
-        let sweep = self.sweep_attack_position(scale, crit);
         if let Some(at) = sweep {
             self.sweep_attack(at, from, Some((area, spared)), scale);
         }
@@ -11450,7 +11494,7 @@ impl Game<'_> {
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
         let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
-        let sweep = self.sweep_attack_position(scale, crit);
+        let sweep = self.sweep_attack_position(scale, crit, &target_kind);
         let (knockback, knockback_attack) = self.extra_knockback(&target_kind, scale);
         self.attack_ticks = 0;
         let player = self.player.as_ref();
@@ -11564,14 +11608,16 @@ impl Game<'_> {
             } else {
                 "minecraft:entity.player.attack.weak"
             };
-            // Player.playServerSideSound: at the player.
+            // Player.playServerSideSound: at the player. A critical hit a mod
+            // let sweep has both sounds (attackVisualEffects).
             if let Some(at) = sweep {
                 let target = (
                     self.mobs[index].bounds(),
                     mace::Spared::Mob(self.mobs[index].id),
                 );
                 self.sweep_attack(at, from, Some(target), scale);
-            } else {
+            }
+            if crit || sweep.is_none() {
                 self.audio.play(sound, from, 1.0, 1.0);
             }
             // The hurt or death sound the mob raised (getHurtSound / getDeathSound,
@@ -20986,6 +21032,7 @@ pub fn run_with() -> Result<()> {
     let _ = horizon_client::health::HURT_SERVER.set(native_hooks::hurt_server);
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
+    let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
     horizon_threads::put_helpers_behind();

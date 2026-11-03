@@ -449,10 +449,12 @@ impl Game<'_> {
             || before(self.mob_hit().map(|h| h.1))
             || before(self.redirectable_hit().map(|h| h.1))
     }
-    /// `LocalPlayer.isHandsBusy`: paddling a boat.
+    /// `LocalPlayer.isHandsBusy`: paddling a boat this player controls
+    /// (`getControlledVehicle`: its first passenger, on a server's client).
     pub(super) fn hands_busy(&self) -> bool {
         self.riding
             .is_some_and(|id| self.boats.iter().any(|b| b.id == id))
+            && self.remote.as_ref().is_none_or(|r| r.first_passenger)
             && [
                 winit::keyboard::KeyCode::KeyW,
                 winit::keyboard::KeyCode::KeyS,
