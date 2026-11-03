@@ -3066,6 +3066,7 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    /// Entities whose copies are held out of storage; their handles refuse until stored back.
     held_out: Vec<u32>,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
