@@ -917,8 +917,7 @@ impl Game<'_> {
             auto: p.flags & 4 != 0,
         };
         // The confirmation (`advMode.setCommand.success`) is the editing player's alone.
-        let Some(mut host) = self.lan.take() else { return; };
-        self.as_guest_messaged(&mut host, conn, |game| {
+        self.as_guest_messaged(conn, |game| {
             if allowed {
                 game.apply_command_block(&edit);
                 // BaseCommandBlock.onUpdated: the clients get the new command.
@@ -927,7 +926,6 @@ impl Game<'_> {
                 game.system_message(Text::translate("advMode.notAllowed", &[]));
             }
         });
-        self.lan = Some(host);
     }
     /// `ServerPlayer.openCommandBlock`: the command block's data
     /// (`saveCustomOnly`) goes to the guest whose use opened it, as the

@@ -845,10 +845,8 @@ impl Game<'_> {
     /// with it first (`repairPlayerItems`), then the rest goes to their
     /// experience (`Player.giveExperiencePoints`), with the level-up sound
     /// every fifth level. No orb pickup sound. False, and nothing given, for
-    /// a player who isn't here or is dead, and for another player than the one
-    /// whose state is swapped in (inside that player's hook, only they are
-    /// reached), and while the server's player list is busy elsewhere in the
-    /// tick: give first, and cancel an orb only when this returned true.
+    /// a player who isn't here or is dead: give first, and cancel an orb only
+    /// when this returned true.
     /// Their bar follows as for any change to their experience.
     pub(super) fn native_give_experience(&mut self, uuid: u128, points: u32) -> bool {
         self.native_as_player(uuid, |game| {
@@ -869,7 +867,7 @@ impl Game<'_> {
     }
     /// Runs `f` with the player `uuid`'s state in place: theirs already when
     /// they are the acting player (the host, or a guest swapped in), else a
-    /// guest's through `as_guest`, only where no other player is swapped in.
+    /// guest's through `as_guest`, including within another guest's turn.
     /// False when it didn't run: no such player here, or dead.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
         if uuid == self.native_acting_id() {
@@ -883,10 +881,7 @@ impl Game<'_> {
             f(self);
             return true;
         }
-        if self.lan_acting.is_some() {
-            return false;
-        }
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return false;
         };
         let conn = host
@@ -895,11 +890,7 @@ impl Game<'_> {
             .iter()
             .find(|g| g.placed && !g.dead && g.uuid == uuid)
             .map(|g| g.conn);
-        let ran = conn
-            .and_then(|conn| self.as_guest(&mut host, conn, f))
-            .is_some();
-        self.lan = Some(host);
-        ran
+        conn.and_then(|conn| self.as_guest(conn, f)).is_some()
     }
 }
 
@@ -946,7 +937,10 @@ impl Game<'_> {
     /// (`native_player_commands_sent`) and stores the answer in the hub,
     /// which sends the trees without what the mods took out: for `only`, or
     /// for every placed player.
-    pub(super) fn native_filter_commands(&mut self, host: &mut LanHost, only: Option<u32>) {
+    pub(super) fn native_filter_commands(&mut self, only: Option<u32>) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let players: Vec<(u32, u128, String)> = host
             .hub
             .guests
@@ -955,6 +949,9 @@ impl Game<'_> {
             .map(|g| (g.conn, g.uuid, g.name.clone()))
             .collect();
         for (conn, uuid, name) in players {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let names = host.hub.command_names(conn);
             let mut kept = names.clone();
             let placed = host.hub.guest(conn).is_some_and(|g| g.placed);
@@ -964,11 +961,11 @@ impl Game<'_> {
             } else if self.lan_acting == Some(conn) {
                 self.native_player_commands_sent(uuid, &name, &mut kept);
             } else {
-                self.as_guest(host, conn, |g| {
+                self.as_guest(conn, |g| {
                     g.native_player_commands_sent(uuid, &name, &mut kept);
                 });
             }
-            if let Some(g) = host.hub.guest_mut(conn) {
+            if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
                 g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
             }
         }
@@ -976,13 +973,14 @@ impl Game<'_> {
 
     /// `Hub::resend_commands` with the mods' say on each tree.
     pub(super) fn resend_commands_filtered(&mut self) {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
         host.hub.refresh_permissions();
-        self.native_filter_commands(&mut host, None);
-        host.hub.resend_commands();
-        self.lan = Some(host);
+        self.native_filter_commands(None);
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.resend_commands();
+        }
     }
 
     /// The level a guest needs for a mod's command (`line`, without its

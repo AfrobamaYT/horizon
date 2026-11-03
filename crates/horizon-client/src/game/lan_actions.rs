@@ -309,6 +309,7 @@ fn direction(face: i32) -> [i32; 3] {
 
 impl Game<'_> {
     /// Run `f` as the guest `conn`: the host's player state is swapped for theirs.
+    /// Returns `None` if the guest is missing or already active in a nested turn.
     pub(super) fn as_guest<R>(&mut self, conn: u32, f: impl FnOnce(&mut Self) -> R) -> Option<R> {
         let swap = self.enter_guest(conn)?;
         super::dedicated::crash_fixture("guest", || {
@@ -357,12 +358,12 @@ impl Game<'_> {
     /// queued for them are kept and restored too.
     pub(super) fn enter_guest(&mut self, conn: u32) -> Option<GuestSwap> {
         let host = self.lan.as_mut()?;
-        // The guest whose turn it is is in place already (their record holds
-        // the game's state until their turn ends).
-        if self.lan_acting == Some(conn) {
+        // An active guest's record holds an outer player's state, not theirs.
+        if self.lan_guest_turns.contains(&conn) {
             return None;
         }
         let i = host.hub.guests.iter().position(|g| g.conn == conn)?;
+        self.lan_guest_turns.push(conn);
         // `ServerPlayer.permissions()`: the guest's own command level for its
         // turn, so game-master checks see it (not the host's).
         let permission = std::mem::replace(
@@ -1155,6 +1156,8 @@ impl Game<'_> {
         }
         // The turn's teleports are in the hub now: the mods hear them.
         self.flush_teleport_notes();
+        let finished = self.lan_guest_turns.pop();
+        debug_assert_eq!(finished, Some(conn));
     }
 
     /// `ServerLevel.broadcastDamageEvent` for a guest that took an unblocked hit.

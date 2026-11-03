@@ -189,8 +189,7 @@ impl Game<'_> {
         let guest = &host.hub.guests[gi];
         let (conn, uuid, entity_id) = (guest.conn, guest.uuid, guest.entity_id);
         if !brewed.is_empty() || !brewed_potion_takes.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for stack in &brewed_potion_takes {
                     g.native_player_brewed_potion(uuid, entity_id, stack);
                 }
@@ -198,35 +197,28 @@ impl Game<'_> {
                     g.trigger_brewed_potion(stack);
                 }
             });
-            self.lan = Some(host);
         }
         if !crafted.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for (recipe, ingredients) in &crafted {
                     g.trigger_recipe_crafted(recipe, ingredients);
                 }
             });
-            self.lan = Some(host);
         }
         if !item_crafted.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 let player = g.native_acting_id();
                 for (recipe, stack) in &item_crafted {
                     g.native_item_crafted(player, recipe, stack);
                 }
             });
-            self.lan = Some(host);
         }
         if !equipped.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for (slot, stack) in equipped {
                     g.player_equipped(slot, stack.as_ref());
                 }
             });
-            self.lan = Some(host);
         }
         self.drop_guest_items(gi, dropped);
         Some(result)
