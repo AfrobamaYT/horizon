@@ -4561,6 +4561,19 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn create_spawn_position(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CreateSpawnPositionEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
     /// `entity` (None for a player, whom `native_acting_player` names):
     /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
@@ -15012,6 +15025,33 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::create_spawn_position`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreateSpawnPositionEvent<'a> {
+    pub position: &'a mut [i32; 3],
+    pub rotation: &'a mut [f32; 2],
+}
+pub fn dispatch_create_spawn_position(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    position: &mut [i32; 3],
+    rotation: &mut [f32; 2],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CreateSpawnPositionEvent { position, rotation };
+    for mod_hook in super::entered(mods, "create_spawn_position") {
+        if matches!(
+            mod_hook.create_spawn_position(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

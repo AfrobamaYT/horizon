@@ -2549,6 +2549,9 @@ struct Game<'a> {
     loading_progress_at: Option<std::time::Instant>,
     /// The world spawn search's origin chunk and fallback height, once known.
     spawn_origin: Option<((i32, i32), i32)>,
+    /// `native_create_spawn_position` was asked, and a mod chose the spawn.
+    spawn_hook_fired: bool,
+    spawn_hook_cancelled: bool,
     spawn_spiral: horizon_client::world_spawn::ChunkSpiral,
     /// A new player's spawn search, while its candidates' chunks load.
     player_spawn: Option<horizon_client::world_spawn::PlayerSpawnFinder>,
@@ -7140,8 +7143,9 @@ impl Game<'_> {
                 // before the first save must not become it.
                 self.level.world_spawn.get_or_insert([x, y, z]);
                 // The "Bonus Chest" create-world option, placed once with the spawn.
-                if horizon_client::save::WorldGen::read(&self.world_root)
-                    .is_some_and(|g| g.bonus_chest)
+                if !self.spawn_hook_cancelled
+                    && horizon_client::save::WorldGen::read(&self.world_root)
+                        .is_some_and(|g| g.bonus_chest)
                 {
                     self.place_bonus_chest([x, y, z])?;
                 }
@@ -12001,6 +12005,8 @@ impl Game<'_> {
             .as_ref()
             .map(respawn_anchor::RespawnConfig::from_saved);
         self.spawn_origin = None;
+        self.spawn_hook_fired = false;
+        self.spawn_hook_cancelled = false;
         self.spawn_spiral = Default::default();
         self.player_spawn = None;
         self.creatures.reset_trader();
@@ -18506,6 +18512,8 @@ impl<'a> Game<'a> {
             creation_job: None,
             loading_progress_at: None,
             spawn_origin: None,
+            spawn_hook_fired: false,
+            spawn_hook_cancelled: false,
             spawn_spiral: Default::default(),
             player_spawn: None,
             spawn_wait: Vec::new(),

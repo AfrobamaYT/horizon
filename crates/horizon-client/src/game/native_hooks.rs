@@ -6411,6 +6411,16 @@ impl Game<'_> {
     pub(super) fn native_player_logged_out(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_logged_out(self, mod_api::mods(), player, name);
     }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    pub(super) fn native_create_spawn_position(
+        &mut self,
+        position: &mut [i32; 3],
+        rotation: &mut [f32; 2],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_create_spawn_position(self, mod_api::mods(), position, rotation, cancel);
+    }
     /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
     /// end of `PlayerList.respawn`, once they are placed and their health,
     /// food and experience reset, with their state swapped in. Once for each
