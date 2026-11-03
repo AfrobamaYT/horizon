@@ -466,8 +466,8 @@ impl Game<'_> {
         {
             return;
         }
-        let group = phantoms
-            .unwrap_or_else(|| phantom_group_size(&mut self.world.random, difficulty_id));
+        let group =
+            phantoms.unwrap_or_else(|| phantom_group_size(&mut self.world.random, difficulty_id));
         for _ in 0..group {
             let _ = self.spawn_mob(
                 "minecraft:phantom",

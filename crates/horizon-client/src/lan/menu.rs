@@ -509,8 +509,8 @@ pub fn click(
                     }
                 }
             }
-            input::PICKUP if (0..=1).contains(&button) => pickup(view, slot, button, rules),
-            input::QUICK_MOVE if (0..=1).contains(&button) => {
+            input::PICKUP => pickup(view, slot, button, rules),
+            input::QUICK_MOVE => {
                 if let Ok(i) = usize::try_from(slot)
                     && i < view.len()
                 {
@@ -1031,9 +1031,19 @@ mod tests {
         let (drops, changed) = click(&mut view, &mut drag, 0, 2, input::PICKUP, &rules);
         assert!(drops.is_empty() && changed.is_empty());
         assert_eq!(view.get(0).unwrap().count, 10);
-        assert_eq!(view.guest.carried.as_ref().unwrap().item.as_ref(), "minecraft:bundle");
+        assert_eq!(
+            view.guest.carried.as_ref().unwrap().item.as_ref(),
+            "minecraft:bundle"
+        );
         let mut creative_drag = Some((2, vec![0]));
-        let (drops, changed) = click(&mut view, &mut creative_drag, 0, 10, input::QUICK_CRAFT, &rules);
+        let (drops, changed) = click(
+            &mut view,
+            &mut creative_drag,
+            0,
+            10,
+            input::QUICK_CRAFT,
+            &rules,
+        );
         assert!(drops.is_empty() && changed.is_empty());
         assert_eq!(view.get(0).unwrap().count, 10);
     }

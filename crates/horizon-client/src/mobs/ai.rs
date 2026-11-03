@@ -1351,12 +1351,7 @@ fn ageable_step(
 }
 
 /// LivingEntity.aiStep (and Mob/AgeableMob/Animal additions).
-fn ai_step(
-    m: &mut Mob,
-    w: &MobWorld,
-    level_random: &mut LegacyRandom,
-    events: &mut Vec<MobEvent>,
-) {
+fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Parrot {
         super::parrot::ai_step(m, w, level_random, events);
     }
