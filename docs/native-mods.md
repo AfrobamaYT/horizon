@@ -2459,7 +2459,8 @@ the server entity and level reads available on a client.
   `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
   `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any
   level the server has loaded, not only the one in place. A block in a chunk that isn't loaded or a `y` outside
-  the world's height reads as `None`.
+  the world's height reads as `None`. `level.brightness(host, LightLayer::Block | Sky, pos)` reads the stored light
+  (`getBrightness`) the same way, as the game's own light query holds it, and is `None` where the block read is.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
@@ -3070,7 +3071,13 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
+`state_with_property`. It also reads light and loaded state, through the game's own queries:
+`brightness(LightLayer::Block | Sky, pos)` (`getBrightness`, the stored 0 to 15),
+`raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
+and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk).
+None of them loads a chunk. Light above the build height reads as full sky and below it as
+none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
+so check `is_loaded` first. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
