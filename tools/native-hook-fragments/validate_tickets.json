@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "validate_tickets",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_validate_tickets",
+      "neoforge": "LoadingValidationCallback",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

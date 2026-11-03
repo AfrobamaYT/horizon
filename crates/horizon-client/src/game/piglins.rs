@@ -72,11 +72,7 @@ impl Game<'_> {
         {
             return false;
         }
-        let holds_loved = m
-            .extra
-            .off_hand
-            .as_deref()
-            .is_some_and(|o| self.piglin_loved(o));
+        let holds_loved = m.extra.off_hand_id().is_some_and(|o| self.piglin_loved(o));
         if item == "minecraft:gold_ingot" {
             return !holds_loved;
         }
@@ -101,7 +97,7 @@ impl Game<'_> {
         let mut replace = self.piglin_can_replace(m, item, slot);
         if slot > 1 && !replace {
             slot = 0;
-            replace = m.extra.main_hand.is_none();
+            replace = m.extra.main_hand_id().is_none();
         }
         if !replace {
             return false;
@@ -273,7 +269,7 @@ impl Game<'_> {
     /// distance squared to `NEAREST_VISIBLE_WANTED_ITEM` and whether that item is loved.
     fn admire_seen_item(&mut self, index: usize, nearest: Option<f64>, loved: bool) {
         let m = &mut self.mobs[index];
-        let holding = m.extra.off_hand.is_some();
+        let holding = m.extra.off_hand_id().is_some();
         m.extra.piglin.admire_seen(holding, nearest, loved);
     }
     fn start_admiring(&mut self, index: usize, item: std::sync::Arc<str>) {
@@ -310,7 +306,10 @@ impl Game<'_> {
         let Some(i) = self.mobs.iter().position(|m| m.id == mob) else {
             return;
         };
-        let Some(item) = self.mobs[i].extra.off_hand.take() else {
+        let Some(item) = self.mobs[i]
+            .extra
+            .take_slot_id(horizon_items::equipment::OFFHAND)
+        else {
             return;
         };
         if self.mobs[i].is_baby() {

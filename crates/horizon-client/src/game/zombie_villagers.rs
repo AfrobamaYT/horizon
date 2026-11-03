@@ -218,22 +218,15 @@ fn carry_over(from: &Mob, to: &mut Mob) {
     to.name_visible = from.name_visible;
     to.invisible = from.invisible;
     to.extra.pick_up_loot = from.extra.pick_up_loot;
-    to.extra.set_main_hand(from.extra.main_hand.clone());
-    if let Some(stack) = from.extra.main_hand_stack() {
-        to.extra.set_main_hand_stack(Some(stack.clone()));
+    for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::BODY {
+        to.extra
+            .set_slot_stack(slot, from.extra.slot_stack(slot).cloned());
     }
-    to.extra.off_hand = from.extra.off_hand.clone();
-    to.extra.head = from.extra.head.clone();
-    to.extra.body = from.extra.body.clone();
-    to.extra.body_count = from.extra.body_count;
-    to.extra.body_damage = from.extra.body_damage;
-    to.extra.body_extra = from.extra.body_extra.clone();
-    to.extra.chest = from.extra.chest.clone();
-    to.extra.legs = from.extra.legs.clone();
-    to.extra.feet = from.extra.feet.clone();
-    to.extra.armor = from.extra.armor.clone();
     to.extra.gear = from.extra.gear.clone();
-    to.extra.effects = from.extra.effects.clone();
+    to.retain_effects(|_| false);
+    for &(effect, ticks, amplifier) in &from.extra.effects {
+        to.load_effect(effect, ticks, amplifier);
+    }
     // VillagerData and the trades, experience and gossip.
     to.extra.variant = from.extra.variant;
     to.extra.variant2 = from.extra.variant2;
@@ -276,21 +269,20 @@ mod tests {
             )
         };
         let mut source = mob(1, "minecraft:villager");
-        source.extra.body = Some("minecraft:wolf_armor".into());
-        source.extra.body_damage = 7;
         let mut armor = horizon_client::items::ItemStack::new("minecraft:wolf_armor", 1);
+        armor.damage = 7;
         armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
-        source.extra.body_extra = armor.extra;
+        source.extra.set_body_stack(Some(armor));
         let mut zombie = mob(2, "minecraft:zombie_villager");
         convert_to_zombie_villager(&source, &mut zombie);
-        assert_eq!(zombie.extra.body.as_deref(), Some("minecraft:wolf_armor"));
-        assert_eq!(zombie.extra.body_damage, 7);
-        assert_eq!(zombie.extra.body_extra, source.extra.body_extra);
+        assert_eq!(zombie.extra.body_id(), Some("minecraft:wolf_armor"));
+        assert_eq!(zombie.extra.body_damage(), 7);
+        assert_eq!(zombie.extra.body_stack(), source.extra.body_stack());
         let mut cured = mob(3, "minecraft:villager");
         convert_to_villager(&zombie, &mut cured);
-        assert_eq!(cured.extra.body.as_deref(), Some("minecraft:wolf_armor"));
-        assert_eq!(cured.extra.body_damage, 7);
-        assert_eq!(cured.extra.body_extra, source.extra.body_extra);
+        assert_eq!(cured.extra.body_id(), Some("minecraft:wolf_armor"));
+        assert_eq!(cured.extra.body_damage(), 7);
+        assert_eq!(cured.extra.body_stack(), source.extra.body_stack());
     }
 
     #[test]

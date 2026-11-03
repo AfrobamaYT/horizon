@@ -13,6 +13,7 @@
 //! game rules) is kept from the loaded files and written back unchanged.
 //! Worlds saved by older Horizon builds (`region/`, `DIM-1/`, `Player` in
 //! `level.dat`) are migrated on open.
+use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
 use crate::{
     Result,
     beehive::BeehiveExt,
@@ -639,7 +640,7 @@ pub use horizon_items::item_nbt::{
 };
 /// Whether a mod block entity is temporarily out of the world for its tick.
 pub fn block_entity_placeholder(entity: &crate::containers::BlockEntity) -> bool {
-    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id.is_empty())
+    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id().is_empty())
 }
 
 /// The block entity type ID for the block it sits in (a chest-like container
@@ -664,7 +665,7 @@ pub fn encode_block_entity(
     use crate::containers::BlockEntity;
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
-        map.insert("id".into(), string(&m.id));
+        map.insert("id".into(), string(m.id()));
         if m.items.iter().any(Option::is_some) {
             map.insert("Items".into(), encode_items(&m.items));
         }
@@ -929,15 +930,14 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     } else {
         items.clear();
     }
-    Some(
+    Some(crate::containers::ModBlockEntity::new(
+        id,
         crate::containers::ModBlockEntityFields {
-            id,
             nbt,
             items,
             data: Vec::new(),
-        }
-        .into(),
-    )
+        },
+    ))
 }
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
@@ -2429,6 +2429,56 @@ pub struct SaveDir {
     /// What older chunks are upgraded with, found on the first one read.
     datafix_context: OnceLock<Option<DatafixContext>>,
 }
+fn mod_ticket_to_nbt(ticket: &ModTicket, controller: &str) -> Tag {
+    let owner = match ticket.owner {
+        TicketOwner::Block(pos) => ("block", Tag::IntArray(pos.to_vec())),
+        TicketOwner::Entity(uuid) => (
+            "entity",
+            Tag::IntArray((0..4).map(|i| (uuid >> (96 - 32 * i)) as i32).collect()),
+        ),
+    };
+    Tag::compound([
+        ("controller", Tag::String(controller.into())),
+        ("owner", Tag::compound([owner])),
+        (
+            "chunk_pos",
+            Tag::IntArray(vec![ticket.chunk.0, ticket.chunk.1]),
+        ),
+        (
+            "natural_spawning",
+            Tag::Byte(i8::from(ticket.natural_spawning)),
+        ),
+    ])
+}
+/// A saved ticket: the id of the controller that held it, and the ticket without its slot.
+fn mod_ticket_from_nbt(tag: &Tag) -> Option<(String, ModTicket)> {
+    let Some(Tag::String(controller)) = tag.get("controller") else {
+        return None;
+    };
+    let owner = tag.get("owner")?;
+    let owner = match (owner.get("block"), owner.get("entity")) {
+        (Some(Tag::IntArray(p)), _) if p.len() == 3 => TicketOwner::Block([p[0], p[1], p[2]]),
+        (_, Some(Tag::IntArray(u))) if u.len() == 4 => TicketOwner::Entity(
+            u.iter()
+                .fold(0u128, |acc, &n| acc << 32 | u128::from(n as u32)),
+        ),
+        _ => return None,
+    };
+    let Some(Tag::IntArray(pos)) = tag.get("chunk_pos") else {
+        return None;
+    };
+    let controller = controller.to_string().ok()?;
+    (pos.len() == 2).then(|| {
+        let ticket = ModTicket {
+            controller: 0,
+            owner,
+            chunk: (pos[0], pos[1]),
+            // Tickets saved without the flag don't force natural spawning.
+            natural_spawning: matches!(tag.get("natural_spawning"), Some(Tag::Byte(b)) if *b != 0),
+        };
+        (controller, ticket)
+    })
+}
 fn is_forced_ticket(ticket: &Tag) -> bool {
     matches!(ticket.get("type"), Some(Tag::String(t)) if *t == JavaString::from("minecraft:forced"))
 }
@@ -2571,6 +2621,74 @@ impl SaveDir {
         }));
         put(&mut data, "tickets", Tag::List(tickets));
         write_saved_data(&self.root, "chunk_tickets", data)
+    }
+    /// The chunk tickets of mods (`data/horizon/mod_chunk_tickets.dat`), kept
+    /// out of vanilla's `chunk_tickets.dat` because vanilla decodes its ticket
+    /// types through a registry. Each is saved under its controller's id;
+    /// `slot_of` gives the slot of an id a loaded mod registered. A ticket of
+    /// any other id (a mod that is gone, or a file from before controllers) is
+    /// dropped with a warning, as NeoForge drops a controller nobody registers,
+    /// and one that doesn't read is skipped.
+    pub fn load_mod_tickets(&self, slot_of: impl Fn(&str) -> Option<u32>) -> Vec<ModTicket> {
+        let Some(root) = read_dat(&self.mod_tickets_path()) else {
+            return Vec::new();
+        };
+        let Some(Tag::List(tickets)) = root.get("data").and_then(|data| data.get("tickets")) else {
+            return Vec::new();
+        };
+        let mut dropped = std::collections::BTreeSet::new();
+        let loaded = tickets
+            .iter()
+            .filter_map(|tag| {
+                let Some((controller, ticket)) = mod_ticket_from_nbt(tag) else {
+                    log::warn!("Dropping a saved mod chunk ticket that has no readable controller");
+                    return None;
+                };
+                let Some(slot) = slot_of(&controller) else {
+                    dropped.insert(controller);
+                    return None;
+                };
+                Some(ModTicket {
+                    controller: slot,
+                    ..ticket
+                })
+            })
+            .collect();
+        for controller in dropped {
+            log::warn!(
+                "Dropping the saved chunk tickets of ticket controller {controller}: no loaded mod registers it"
+            );
+        }
+        loaded
+    }
+    /// Save the tickets of mods under their controllers' ids (`id_of` gives the id of a slot);
+    /// nothing while there are none and never were.
+    pub fn save_mod_tickets(
+        &self,
+        tickets: &ModTickets,
+        id_of: impl Fn(u32) -> Option<&'static str>,
+    ) -> Result<()> {
+        let path = self.mod_tickets_path();
+        let list: Vec<Tag> = tickets
+            .to_save()
+            .filter_map(|t| Some(mod_ticket_to_nbt(t, id_of(t.controller)?)))
+            .collect();
+        if list.is_empty() && !path.exists() {
+            return Ok(());
+        }
+        write_dat(
+            &path,
+            Tag::compound([
+                ("data", Tag::compound([("tickets", Tag::List(list))])),
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+            ]),
+        )
+    }
+    fn mod_tickets_path(&self) -> PathBuf {
+        self.root
+            .join("data")
+            .join("horizon")
+            .join("mod_chunk_tickets.dat")
     }
     /// Whether chunk `x z` is in its region file, from a chunk list kept
     /// `LOD_REGION_TTL`. Far terrain asks for every column of the view: it
@@ -4969,22 +5087,10 @@ fn decode_lod_surfaces(
         }
     }
     // Spans are pushed top down, so the reverse puts the topmost last, as
-    // `Column::from_chunk` leaves them. Open water is then lit as open sky,
-    // exactly as the live path does: without it a saved column kept each
-    // water block's own faded skylight and drew a dark band through the sea
-    // where saved columns met the generator's (`grid`'s stride limit).
-    // Only where there is a sky to be lit by: the Nether's water must not
-    // gain skylight it never had.
-    let is_water = |state| {
-        sky_light
-            && assets
-                .registry
-                .state(state)
-                .is_some_and(|block| block.name == "minecraft:water")
-    };
+    // `Column::from_chunk` leaves them. Water keeps the chunk's own light,
+    // a level less per block, as the generator's far columns shade it.
     for column in &mut *columns {
         column.spans.reverse();
-        column.light_open_water_where(is_water);
     }
     Some(Arc::from(columns))
 }
@@ -5793,20 +5899,6 @@ mod tests {
         let underwater = surfaces[4 * 16 + 4].surface.unwrap();
         assert_eq!((underwater.height, underwater.state), (55, sand));
         assert_eq!(underwater.water, Some((64, water)));
-        // Open water reads as open sky, as the generator's far columns do.
-        // Saved columns that kept each block's own faded skylight drew a dark
-        // band through the sea where the two met.
-        let sea = &surfaces[4 * 16 + 4].spans;
-        let lit: Vec<_> = sea
-            .iter()
-            .filter(|span| span.state == water)
-            .map(|span| span.light & 0xf0)
-            .collect();
-        assert!(!lit.is_empty(), "the column keeps its water spans");
-        assert!(
-            lit.iter().all(|sky| *sky == 0xf0),
-            "saved open water is lit as open sky, got {lit:?}"
-        );
         let chorus_column = &surfaces[2 * 16 + 12];
         assert_eq!(
             chorus_column
@@ -6329,7 +6421,7 @@ mod tests {
         let crate::containers::BlockEntity::Mod(m) = &back else {
             panic!("not a mod's");
         };
-        assert_eq!(m.id, "gtmod:macerator");
+        assert_eq!(m.id(), "gtmod:macerator");
         // The mod sees its own fields only.
         for key in ["id", "x", "y", "z"] {
             assert!(!m.nbt.contains_key(&key.into()), "{key}");

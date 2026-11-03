@@ -50,7 +50,7 @@ pub fn start_converting(
     events: &mut Vec<MobEvent>,
 ) {
     villager::ext_mut(m).cure = Some(Cure { time, starter });
-    m.extra.effects.retain(|e| e.0 != "minecraft:weakness");
+    m.retain_effects(|e| e.0 != "minecraft:weakness");
     // Strength amplifier: min(difficulty id - 1, 0), always 0 with monsters.
     m.add_effect("minecraft:strength", time, 0);
     let pitch = m.random.next_float() * 0.7 + 0.3;
@@ -229,7 +229,8 @@ mod tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
-            ask_mods: false,
+            asks_animal_tame: false,
+            asks_living_destroy_block: false,
             asks_baby_spawn: false,
             border: None,
         };

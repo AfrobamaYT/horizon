@@ -480,7 +480,7 @@ pub enum Op {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Modifier {
     pub attr: Attr,
-    pub id: &'static str,
+    pub id: std::borrow::Cow<'static, str>,
     pub amount: f64,
     pub op: Op,
 }
@@ -490,6 +490,14 @@ pub struct Modifier {
 pub struct Attributes {
     pub bases: Vec<(Attr, f64)>,
     pub modifiers: Vec<Modifier>,
+}
+/// The attribute `/attribute` names (`follow_range`, not
+/// `minecraft:follow_range`) when gameplay reads it from this store. Armor
+/// has its own map (`armor_attributes`).
+pub fn command_attr(short: &str) -> Option<Attr> {
+    Attr::ALL
+        .into_iter()
+        .find(|a| *a != Attr::Armor && a.name() == short)
 }
 /// The type's default value of an attribute, if the mob has it.
 pub fn default_value(m: &Mob, a: Attr) -> Option<f64> {
@@ -636,11 +644,18 @@ pub fn modifier_amount(m: &Mob, a: Attr, id: &str) -> Option<f64> {
         .map(|x| x.amount)
 }
 /// `addOrReplacePermanentModifier`.
-pub fn add_modifier(m: &mut Mob, a: Attr, id: &'static str, amount: f64, op: Op) {
+pub fn add_modifier(
+    m: &mut Mob,
+    a: Attr,
+    id: impl Into<std::borrow::Cow<'static, str>>,
+    amount: f64,
+    op: Op,
+) {
+    let id = id.into();
     let s = m.extra.attributes.get_or_insert_with(Box::default);
     let new = Modifier {
         attr: a,
-        id,
+        id: id.clone(),
         amount,
         op,
     };
@@ -947,13 +962,8 @@ pub fn set_baby(m: &mut Mob, baby: bool) {
 
 /// `EquipmentSlot` names (the `drops::SLOTS` order).
 pub const SLOT_NAMES: [&str; 8] = super::drops::SLOTS;
-pub const MAINHAND: usize = 0;
-pub const OFFHAND: usize = 1;
-pub const FEET: usize = 2;
-pub const LEGS: usize = 3;
-pub const CHEST: usize = 4;
-pub const HEAD: usize = 5;
-const SADDLE: usize = 7;
+pub use horizon_items::equipment::{CHEST, FEET, HEAD, LEGS, MAINHAND, OFFHAND};
+const SADDLE: usize = horizon_items::equipment::SADDLE;
 /// The `gear` slot of an `EquipmentSlot`.
 fn gear_slot(slot: usize) -> usize {
     match slot {
@@ -967,37 +977,21 @@ fn gear_slot(slot: usize) -> usize {
 }
 pub fn item(m: &Mob, slot: usize) -> Option<Arc<str>> {
     match slot {
-        MAINHAND => m.extra.main_hand.clone(),
-        OFFHAND => m.extra.off_hand.clone(),
-        FEET => m.extra.feet.clone(),
-        LEGS => m.extra.legs.clone(),
-        CHEST => m.extra.chest.clone(),
-        HEAD => m.extra.head.clone(),
-        SADDLE => m.extra.saddled.then(|| Arc::from("minecraft:saddle")),
+        MAINHAND..=HEAD | SADDLE => m.extra.slot_stack(slot).map(|s| s.item.clone()),
         _ => None,
     }
 }
 /// The whole stack a mob keeps in `slot` (damage, name, components, count,
 /// enchantments and trim), when it kept more than the item id.
 pub fn stored_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
-    let id = item(m, slot)?;
+    if slot > HEAD {
+        return None;
+    }
+    let mut stack = m.extra.slot_stack(slot)?.clone();
+    if stack.damage == 0 && stack.count <= 1 && stack.extra.is_none() {
+        return None;
+    }
     let index = gear_slot(slot);
-    let mut stack = if slot == MAINHAND {
-        m.extra.main_hand_stack()?.clone()
-    } else {
-        let armor = match slot {
-            HEAD => m.extra.armor[0].as_ref(),
-            CHEST => m.extra.armor[1].as_ref(),
-            LEGS => m.extra.armor[2].as_ref(),
-            FEET => m.extra.armor[3].as_ref(),
-            _ => None,
-        };
-        armor.filter(|s| s.item == id).cloned().or_else(|| {
-            gear::gear(m)?.stacks[index]
-                .clone()
-                .filter(|s| s.item == id)
-        })?
-    };
     if let Some(g) = gear::gear(m) {
         if !g.slots[index].is_empty() {
             stack.data_mut().enchantments = g.slots[index].clone();
@@ -1032,37 +1026,19 @@ pub fn set_item_stack(m: &mut Mob, slot: usize, stack: crate::items::ItemStack) 
             stack.data().and_then(|d| d.trim.clone()),
         );
     }
-    if slot == MAINHAND {
-        m.extra.set_main_hand_stack(Some(stack));
-    } else if slot <= HEAD {
-        gear::set_stack(m, gear_slot(slot), stack);
+    if slot <= HEAD {
+        m.extra.set_slot_stack(slot, Some(stack));
     }
 }
 /// `setItemSlot` with a fresh stack (enchantments cleared).
 pub fn set_item(m: &mut Mob, slot: usize, id: &str) {
-    let v = Some(Arc::from(id));
     match slot {
-        MAINHAND => m.extra.set_main_hand(v),
-        OFFHAND => m.extra.off_hand = v,
-        FEET => m.extra.feet = v,
-        LEGS => m.extra.legs = v,
-        CHEST => m.extra.chest = v,
-        HEAD => m.extra.head = v,
+        MAINHAND..=HEAD => m.extra.set_slot_id(slot, Some(Arc::from(id))),
         SADDLE => {
-            m.extra.saddled = true;
-            m.extra.saddle_stack = None;
+            m.extra.set_saddled(true);
             return;
         }
         _ => return,
-    }
-    if let Some(index) = match slot {
-        HEAD => Some(0),
-        CHEST => Some(1),
-        LEGS => Some(2),
-        FEET => Some(3),
-        _ => None,
-    } {
-        m.extra.armor[index] = None;
     }
     gear::set(m, gear_slot(slot), Vec::new());
 }
@@ -1141,7 +1117,7 @@ pub fn halloween_head(m: &mut Mob, random: &mut impl RandomSource, halloween: bo
     if !(zombie(m.species()) || skeleton(m.species())) {
         return;
     }
-    if m.extra.head.is_none() && halloween && random.next_float() < 0.25 {
+    if m.extra.head_id().is_none() && halloween && random.next_float() < 0.25 {
         let head = if random.next_float() < 0.1 {
             "minecraft:jack_o_lantern"
         } else {
@@ -1511,7 +1487,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
     }
     fn drowned(&mut self, m: &mut Mob, g: Option<Group>, reason: Reason) -> Option<Group> {
         let g = self.zombie(m, g, reason);
-        if m.extra.off_hand.is_none() && self.float() < 0.03 {
+        if m.extra.off_hand_id().is_none() && self.float() < 0.03 {
             set_item(m, OFFHAND, "minecraft:nautilus_shell");
             set_drop_chance(m, OFFHAND, 2.0);
         }
@@ -1521,7 +1497,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             m.position.z.floor() as i32,
         ];
         if matches!(reason, Reason::Natural | Reason::Structure)
-            && m.extra.main_hand.as_deref() == Some("minecraft:trident")
+            && m.extra.main_hand_id() == Some("minecraft:trident")
             && self.float() < 0.5
             && !m.is_baby()
             && !self
@@ -2481,6 +2457,99 @@ mod tests {
             "minecraft:cow"
         ));
         assert!(!spawn_egg_is_for("minecraft:stick", "minecraft:cow"));
+    }
+    /// #7877: `/attribute <mob> <attr> modifier add` hands `add_modifier` an
+    /// id typed at run time; it lands in the value, reads back, and goes.
+    #[test]
+    fn a_command_modifier_with_a_runtime_id_changes_the_value() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(data.types.get("minecraft:zombie").unwrap().clone());
+        let mut m = crate::mobs::Mob::new(
+            2,
+            kind,
+            horizon_core::geometry::Vec3::new(0.0, 4.0, 0.0),
+            0.0,
+        );
+        set_base(&mut m, Attr::AttackDamage, 4.0);
+        let id = String::from("test:typed");
+        add_modifier(&mut m, Attr::AttackDamage, id.clone(), 3.0, Op::AddValue);
+        assert!(has_modifier(&m, Attr::AttackDamage, &id));
+        assert_eq!(modifier_amount(&m, Attr::AttackDamage, &id), Some(3.0));
+        assert_eq!(m.attrs.attack_damage, 7.0);
+        assert_eq!(value(&m, Attr::AttackDamage), 7.0);
+        remove_modifier(&mut m, Attr::AttackDamage, &id);
+        assert!(!has_modifier(&m, Attr::AttackDamage, &id));
+        assert_eq!(m.attrs.attack_damage, 4.0);
+    }
+    /// #7877: every attribute `/attribute` can name on a mob is edited in the
+    /// store the mob reads: base, modifier and removal reach the cached field
+    /// gameplay uses, for each attribute the mob types hold.
+    #[test]
+    fn every_command_attribute_reaches_the_store_the_mob_reads() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let mut covered = 0;
+        for a in Attr::ALL {
+            let short = a.name();
+            assert_eq!(command_attr(short), (a != Attr::Armor).then_some(a));
+            if a == Attr::Armor {
+                continue;
+            }
+            // Any type holding the attribute, in a stable order.
+            let mut names: Vec<_> = data.types.keys().collect();
+            names.sort();
+            let Some(kind) = names
+                .into_iter()
+                .map(|n| &data.types[n])
+                .find(|k| k.attributes.contains_key(a.id()))
+            else {
+                continue;
+            };
+            let mut m = crate::mobs::Mob::new(
+                2,
+                std::sync::Arc::new(kind.clone()),
+                horizon_core::geometry::Vec3::new(0.0, 4.0, 0.0),
+                0.0,
+            );
+            let cached = |m: &crate::mobs::Mob| match a {
+                Attr::MaxHealth => Some(f64::from(m.attrs.max_health)),
+                Attr::MovementSpeed => Some(m.attrs.speed),
+                Attr::FollowRange => Some(m.attrs.follow_range),
+                Attr::AttackDamage => Some(f64::from(m.attrs.attack_damage)),
+                Attr::KnockbackResistance => Some(m.attrs.knockback_resistance),
+                Attr::SpawnReinforcements => Some(m.attrs.spawn_reinforcements),
+                Attr::JumpStrength => Some(m.attrs.jump_strength),
+                _ => None,
+            };
+            // Max health clamps below 1.
+            let base = if a == Attr::MaxHealth { 2.0 } else { 0.5 };
+            set_base(&mut m, a, base);
+            assert_eq!(base_value(&m, a), base, "{short} base");
+            add_modifier(&mut m, a, format!("test:{short}"), 0.25, Op::AddValue);
+            assert_eq!(modifier_amount(&m, a, &format!("test:{short}")), Some(0.25));
+            assert_eq!(value(&m, a), base + 0.25, "{short} value");
+            if let Some(c) = cached(&m) {
+                assert_eq!(c, base + 0.25, "{short} cached field");
+            }
+            remove_modifier(&mut m, a, &format!("test:{short}"));
+            assert!(!has_modifier(&m, a, &format!("test:{short}")));
+            if let Some(c) = cached(&m) {
+                assert_eq!(c, base, "{short} cached field after removal");
+            }
+            covered += 1;
+        }
+        assert!(covered >= 7, "only {covered} attributes had a mob type");
     }
     /// #7877: `/attribute <mob> movement_speed|attack_damage base set` goes
     /// through `AttributeInstance.setBaseValue`, so the value survives the

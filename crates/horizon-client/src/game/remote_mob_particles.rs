@@ -25,7 +25,9 @@ impl Game<'_> {
         else {
             return;
         };
-        let Some(item) = m.extra.main_hand.clone() else {
+        let Some(item) =
+            horizon_client::mobs::finalize::item(m, horizon_client::mobs::finalize::MAINHAND)
+        else {
             return;
         };
         // Entity.calculateViewVector(xRot, yRot): the look's x and z.

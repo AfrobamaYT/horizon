@@ -76,9 +76,8 @@ impl Game<'_> {
             .map(|g| (g.vehicle_order, g.entity_id as u32))
             .collect();
         players.sort_unstable();
-        // A guest action can take the hub out of the game: the acting
-        // player, whose vehicle is in `riding` then, goes first, as
-        // `addPassenger` puts a player first.
+        // An acting player absent from the placed list still rides through
+        // `riding`; `addPassenger` puts that player first.
         if let Some(me) = self.lan_acting_entity
             && self.lan_acting_uuid.is_some()
             && !acting_listed
@@ -99,6 +98,177 @@ impl Game<'_> {
     pub(super) fn native_entity_is_vehicle(&self, entity: EntityRef) -> Option<bool> {
         Some(!self.native_entity_passengers(entity)?.is_empty())
     }
+    /// Attempts one mount, shared by handle writes and the ride command.
+    pub(super) fn start_riding_target(
+        &mut self,
+        rider: Target,
+        vehicle: Target,
+        force: bool,
+    ) -> bool {
+        if let Target::Guest(conn) = rider {
+            if self
+                .command_guest(conn)
+                .is_none_or(|guest| guest.dimension != self.dim.id())
+            {
+                return false;
+            }
+            return self
+                .for_player(rider, |game| {
+                    game.start_riding_target(Target::Player, vehicle, force)
+                })
+                .unwrap_or(false);
+        }
+        let vehicle_id = match vehicle {
+            Target::Mob(id) | Target::Boat(id) | Target::Cart(id) => id,
+            _ => return false,
+        };
+        if !matches!(rider, Target::Player | Target::Mob(_))
+            || rider == vehicle
+            || self.native_vehicle_id(rider) == Some(vehicle_id)
+        {
+            return false;
+        }
+        let mut current = Some(vehicle);
+        for _ in 0..64 {
+            let Some(target) = current else { break };
+            if target == rider {
+                return false;
+            }
+            current = self
+                .native_vehicle_id(target)
+                .and_then(|id| self.native_entity(id))
+                .and_then(|e| self.native_entity_target(e));
+        }
+        if current.is_some() {
+            return false;
+        }
+        if !force {
+            match rider {
+                Target::Player if self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft) => {
+                    return false;
+                }
+                Target::Mob(id)
+                    if self.mobs.iter().find(|m| m.id == id).is_none_or(|m| {
+                        m.extra.boarding_cooldown > 0
+                            || matches!(
+                                m.species(),
+                                horizon_client::mobs::Species::Warden
+                                    | horizon_client::mobs::Species::Wither
+                            )
+                    }) =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        match vehicle {
+            Target::Boat(id) => {
+                let Some(index) = self.boats.iter().position(|b| b.id == id) else {
+                    return false;
+                };
+                if self.boat_passengers(id) >= self.boats[index].max_passengers()
+                    || (!force && !self.boat_has_room(index))
+                {
+                    return false;
+                }
+            }
+            Target::Cart(id) => {
+                if !self.carts.iter().any(|cart| cart.id == id)
+                    || self.riding == Some(id)
+                    || self.ridden_by_guest(id)
+                    || self
+                        .mobs
+                        .iter()
+                        .any(|m| !m.removed && m.extra.mount == Some(id))
+                {
+                    return false;
+                }
+            }
+            Target::Mob(id) => {
+                if !self.mobs.iter().any(|m| m.id == id && m.alive())
+                    || self.riding == Some(id)
+                    || self.ridden_by_guest(id)
+                    || self
+                        .mobs
+                        .iter()
+                        .any(|m| !m.removed && m.extra.mount == Some(id))
+                {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+        let allowed = match rider {
+            Target::Player => self.native_may_board(vehicle_id),
+            Target::Mob(id) => self.native_mob_may_ride(id, vehicle_id, true),
+            _ => false,
+        };
+        if !allowed {
+            return false;
+        }
+        if self.native_vehicle_id(rider).is_some() {
+            match rider {
+                Target::Player => self.stop_riding(),
+                Target::Mob(id) => self.dismount_mob(id),
+                _ => return false,
+            }
+            if self.native_vehicle_id(rider).is_some() {
+                return false;
+            }
+        }
+        match rider {
+            Target::Player => {
+                match vehicle {
+                    Target::Boat(id) => {
+                        if let Some(boat) = self.boats.iter().find(|b| b.id == id) {
+                            self.yaw = boat.yaw;
+                        }
+                    }
+                    Target::Mob(id) => {
+                        if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                            mob.extra.flag = false;
+                            mob.extra.counter = 0;
+                            self.yaw = mob.yaw;
+                        }
+                        self.mount.jump_ticks = 0;
+                        self.mount.jump_scale = 0.0;
+                    }
+                    _ => {}
+                }
+                self.riding = Some(vehicle_id);
+                self.trigger_player("minecraft:started_riding");
+            }
+            Target::Mob(id) => horizon_client::mobs::riders::link(&mut self.mobs, id, vehicle_id),
+            _ => return false,
+        }
+        self.native_vehicle_id(rider) == Some(vehicle_id)
+    }
+
+    /// Attempts to board a vehicle through the shared server mount path.
+    ///
+    /// Players and mobs can ride a mob, boat or minecart. Returns false for
+    /// unsupported entity pairs, stale or held-out handles, a full stored
+    /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicles and
+    /// minecarts store one passenger; boats store one mob and up to two
+    /// passengers in total. `force` bypasses normal admission checks, not
+    /// these storage limits. Player boarding cooldown and the strider's
+    /// eye-in-lava admission check are not yet represented by the game.
+    pub(super) fn native_entity_start_riding(
+        &mut self,
+        entity: EntityRef,
+        vehicle: EntityRef,
+        force: bool,
+    ) -> bool {
+        let Some(rider) = self.native_entity_target(entity) else {
+            return false;
+        };
+        let Some(vehicle) = self.native_entity_target(vehicle) else {
+            return false;
+        };
+        self.start_riding_target(rider, vehicle, force)
+    }
+
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the
     /// vehicle lets it out, as `/ride ... dismount` does. False when it rode
     /// nothing, a mod's `mob_ride` hook kept it on, or for a stale handle.
@@ -130,5 +300,182 @@ impl Game<'_> {
             any |= self.native_entity_stop_riding(p);
         }
         any
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::commands::Target;
+    use horizon_client::{
+        mobs::Mob,
+        mod_api::{self, EntityMountEvent, Flow, Hooks, ServerHost},
+    };
+    use horizon_core::geometry::Vec3;
+    use std::sync::{Arc, Mutex};
+
+    struct MountObserver(Arc<Mutex<Vec<bool>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for MountObserver {
+        fn entity_mount(&self, _: &mut dyn ServerHost, event: &mut EntityMountEvent<'_>) -> Flow {
+            self.0.lock().unwrap().push(event.mounting);
+            if event.mounting {
+                Flow::Continue
+            } else {
+                Flow::Cancel
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn canceled_dismount_keeps_old_mount_and_mount_hook_fires_once() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mount_observer",
+            Box::new(MountObserver(events.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                for id in [40, 41, 42] {
+                    let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+                }
+                assert!(game.start_riding_target(Target::Mob(40), Target::Mob(41), true));
+                assert!(!game.start_riding_target(Target::Mob(40), Target::Mob(42), true));
+                assert_eq!(game.mobs[0].extra.mount, Some(41));
+                assert_eq!(*events.lock().unwrap(), [true, true, false]);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn full_vehicles_do_not_fire_mount_hooks_for_commands_or_handles() {
+        use super::super::boats::Boat;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mount_observer",
+            Box::new(MountObserver(events.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.ui.registries.permission = 4;
+                for (id, name) in [
+                    (40, "minecraft:zombie"),
+                    (41, "minecraft:pig"),
+                    (42, "minecraft:sheep"),
+                    (43, "minecraft:cow"),
+                ] {
+                    let kind = game.res.mob_types().get(name).unwrap().clone();
+                    game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+                }
+                game.boats
+                    .push(Boat::new(44, "oak".into(), Vec3::ZERO, 0.0));
+                let pig =
+                    "ride @e[type=minecraft:zombie,limit=1] mount @e[type=minecraft:pig,limit=1]";
+                let boat = "ride @e[type=minecraft:zombie,limit=1] mount @e[type=minecraft:oak_boat,limit=1]";
+                assert!(game.run_command(pig));
+                game.mobs[0].extra.mount = None;
+                game.mobs[1].extra.rider = None;
+                assert!(game.run_command(boat));
+                game.mobs[0].extra.mount = None;
+                game.mobs[2].extra.mount = Some(41);
+                game.mobs[1].extra.rider = Some(42);
+                game.mobs[3].extra.mount = Some(44);
+                game.riding = Some(44);
+                events.lock().unwrap().clear();
+                assert!(!game.run_command(pig));
+                assert!(!game.run_command(boat));
+                let rider = game.native_entity(40).unwrap();
+                for id in [41, 44] {
+                    let vehicle = game.native_entity(id).unwrap();
+                    assert!(!game.native_entity_start_riding(rider, vehicle, true));
+                }
+                assert!(events.lock().unwrap().is_empty());
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn boat_and_cart_interactions_use_shared_mount_path() {
+        use super::super::{
+            InteractTarget,
+            boats::Boat,
+            minecarts::{CartKind, Minecart},
+        };
+        use horizon_client::motion::PlayerMotion;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.boats
+                .push(Boat::new(60, "oak".into(), Vec3::ZERO, 45.0));
+            assert!(game.interact_boat(Some(InteractTarget {
+                id: 60,
+                location: [0.0; 3]
+            })));
+            assert_eq!(game.riding, Some(60));
+            assert_eq!(game.yaw, 45.0);
+            game.riding = None;
+            game.carts
+                .push(Minecart::new(61, CartKind::Rideable, Vec3::ZERO));
+            assert!(game.interact_cart(Some(InteractTarget {
+                id: 61,
+                location: [0.0; 3]
+            })));
+            assert_eq!(game.riding, Some(61));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn handles_reject_held_out_and_stale_entities() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for id in [50, 51] {
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            let rider = game.native_entity(50).unwrap();
+            let vehicle = game.native_entity(51).unwrap();
+            let stale = mod_api::EntityRef::new(
+                mod_api::NativeWorldEpoch::new(rider.epoch().get().wrapping_add(1)),
+                rider.id(),
+            );
+            assert!(!game.native_entity_start_riding(stale, vehicle, true));
+            game.held_out.push(51);
+            assert!(!game.native_entity_start_riding(rider, vehicle, true));
+            game.held_out.pop();
+            assert!(game.native_entity_start_riding(rider, vehicle, true));
+            assert_eq!(game.mobs[0].extra.mount, Some(51));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mount_rejects_cycles_and_respects_cooldown_unless_forced() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for id in [30, 31, 32] {
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            game.mobs[0].extra.boarding_cooldown = 10;
+            assert!(!game.start_riding_target(Target::Mob(30), Target::Mob(31), false));
+            assert!(game.start_riding_target(Target::Mob(30), Target::Mob(31), true));
+            assert!(!game.start_riding_target(Target::Mob(30), Target::Mob(31), true));
+            assert!(!game.start_riding_target(Target::Mob(31), Target::Mob(30), true));
+            assert!(!game.start_riding_target(Target::Mob(32), Target::Mob(31), true));
+            assert_eq!(game.mobs[0].extra.mount, Some(31));
+            assert_eq!(game.mobs[1].extra.rider, Some(30));
+            assert_eq!(game.mobs[2].extra.mount, None);
+            game.dismount_mob(30);
+            assert_eq!(game.mobs[0].extra.mount, None);
+            assert_eq!(game.mobs[0].extra.boarding_cooldown, 60);
+            assert!(!game.start_riding_target(Target::Mob(30), Target::Mob(32), false));
+            assert!(game.start_riding_target(Target::Mob(30), Target::Mob(32), true));
+            assert_eq!(game.mobs[0].extra.mount, Some(32));
+        });
     }
 }

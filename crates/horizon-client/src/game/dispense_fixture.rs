@@ -954,16 +954,9 @@ impl Game<'_> {
             .ok_or_else(|| format!("no mob type {kind}"))?;
         let mut mob = Mob::new(id, t, at, yaw);
         // EntityType.create equips nothing (that is finalizeSpawn's job).
-        for slot in [
-            &mut mob.extra.main_hand,
-            &mut mob.extra.off_hand,
-            &mut mob.extra.head,
-            &mut mob.extra.body,
-            &mut mob.extra.chest,
-            &mut mob.extra.legs,
-            &mut mob.extra.feet,
-        ] {
-            *slot = None;
+        mob.extra.set_body_stack(None);
+        for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::HEAD {
+            mob.extra.set_slot_stack(slot, None);
         }
         let s = mob.species();
         let flag = |name: &str| e[name].as_bool().unwrap_or(false);

@@ -2,8 +2,8 @@
 //! `Capabilities.Fluid.BLOCK`, a [`ResourceHandler`] of [`FluidResource`]s as
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
 use super::{
-    BlockSide, CapabilityKey, Host, ItemCapabilityKey, ItemPlace, ItemResource, ItemStack,
-    ResourceHandler, Transaction,
+    BlockSide, CapabilityKey, ItemCapabilityKey, ItemPlace, ItemResource, ItemStack,
+    ResourceHandler, ServerHost, Transaction,
 };
 use crate::item_data::StackData;
 use std::{fmt, marker::PhantomData, sync::Arc};
@@ -105,29 +105,29 @@ pub const FLUIDS: CapabilityKey<dyn ResourceHandler<FluidResource>> = Capability
 /// The game's own [`FLUIDS`]: a mod block's tanks `.side` reaches by its table, and cauldrons.
 struct GameFluids(BlockSide);
 impl ResourceHandler<FluidResource> for GameFluids {
-    fn size(&self, host: &mut dyn Host) -> usize {
+    fn size(&self, host: &mut dyn ServerHost) -> usize {
         crate::mod_api::backend_of(host)
             .and_then(|backend| backend.fluid_tank_count(self.0))
             .unwrap_or(0)
     }
-    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<FluidResource> {
+    fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<FluidResource> {
         let held = crate::mod_api::backend_of(host)
             .and_then(|backend| backend.fluid_tank(self.0, index))?;
         Some(FluidResource::of(&held))
     }
-    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
         crate::mod_api::backend_of(host)
             .and_then(|backend| backend.fluid_tank(self.0, index))
             .map_or(0, |held| held.amount)
     }
-    fn capacity(&self, host: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+    fn capacity(&self, host: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
         crate::mod_api::backend_of(host).map_or(0, |backend| {
             backend.fluid_tank_capacity(self.0, index, &resource.to_stack(1))
         })
     }
     fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &FluidResource,
@@ -141,7 +141,7 @@ impl ResourceHandler<FluidResource> for GameFluids {
     }
     fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &FluidResource,
@@ -188,7 +188,7 @@ const BUCKET: u32 = 1000;
 struct GameBucket(ItemPlace);
 impl GameBucket {
     /// What the bucket here holds: none for an empty one, or where no bucket is now.
-    fn held(&self, host: &mut dyn Host) -> Option<&'static str> {
+    fn held(&self, host: &mut dyn ServerHost) -> Option<&'static str> {
         let stack = self.0.stack(host)?;
         BUCKETS
             .iter()
@@ -206,7 +206,7 @@ impl GameBucket {
         Some(bucket)
     }
     /// One bucket here exchanged for `bucket`: `BUCKET` when that goes through, else 0.
-    fn exchange(&self, host: &mut dyn Host, tx: &Transaction, bucket: &str) -> u32 {
+    fn exchange(&self, host: &mut dyn ServerHost, tx: &Transaction, bucket: &str) -> u32 {
         let bucket = ItemResource::of(&ItemStack::new(bucket, 1));
         match self.0.exchange(host, tx, &bucket, 1) {
             1 => BUCKET,
@@ -215,20 +215,20 @@ impl GameBucket {
     }
 }
 impl ResourceHandler<FluidResource> for GameBucket {
-    fn size(&self, _: &mut dyn Host) -> usize {
+    fn size(&self, _: &mut dyn ServerHost) -> usize {
         1
     }
-    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<FluidResource> {
+    fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<FluidResource> {
         let fluid = self.held(host).filter(|_| index == 0)?;
         Some(FluidResource::of(&FluidStack::new(fluid, 1)))
     }
-    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+    fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
         match self.resource(host, index) {
             Some(_) => BUCKET,
             None => 0,
         }
     }
-    fn capacity(&self, _: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+    fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &FluidResource) -> u32 {
         match Self::bucket_of(resource) {
             Some(_) if index == 0 => BUCKET,
             _ => 0,
@@ -236,7 +236,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
     }
     fn insert(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &FluidResource,
@@ -253,7 +253,7 @@ impl ResourceHandler<FluidResource> for GameBucket {
     }
     fn extract(
         &self,
-        host: &mut dyn Host,
+        host: &mut dyn ServerHost,
         tx: &Transaction,
         index: usize,
         resource: &FluidResource,

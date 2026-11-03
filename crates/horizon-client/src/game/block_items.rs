@@ -8,7 +8,7 @@ use horizon_client::{
     items::ItemStack, save,
 };
 use horizon_world::{
-    level::classes::Class,
+    level::{Behaviours, classes::Class},
     nbt::{Compound, JavaString, Tag},
     registry::BlockStateId,
 };
@@ -19,6 +19,16 @@ fn components(stack: &ItemStack) -> Compound {
         Some(Tag::Compound(c)) => c,
         _ => Compound::new(),
     }
+}
+
+/// `patch`'s components onto `stack`, over its own.
+fn apply_patch(stack: &mut ItemStack, patch: Compound) {
+    if patch.is_empty() {
+        return;
+    }
+    let mut all = components(stack);
+    all.extend(patch);
+    (stack.damage, stack.extra) = item_data::decode_components(Some(&Tag::Compound(all)));
 }
 
 /// `BlockState.getCloneItemStack`'s item: the block's own item, unless the
@@ -53,6 +63,21 @@ fn clone_item<'a>(name: &str, block_item: &'a str) -> &'a str {
     }
 }
 
+fn picked_item<'a>(
+    behaviours: &'a Behaviours,
+    state: BlockStateId,
+    item: &'a str,
+) -> Option<&'a str> {
+    let plant = behaviours.data(state);
+    let potted = plant
+        .is(Class::FlowerPot)
+        .then_some(plant.link)
+        .flatten()
+        .map(|block| &*behaviours.block_data(block).item)
+        .filter(|item| *item != "minecraft:air");
+    Some(potted.unwrap_or(item)).filter(|item| *item != "minecraft:air")
+}
+
 impl Game<'_> {
     /// The block entity at `key` as vanilla saves it, with its custom name.
     fn saved_block_entity(&self, key: (i32, i32, i32)) -> Option<Tag> {
@@ -72,6 +97,25 @@ impl Game<'_> {
     /// `BlockState.getCloneItemStack` of the block at `pos`, then, with
     /// `include_data`, `ServerGamePacketListenerImpl.addBlockDataToItem`.
     pub(super) fn picked_stack(&self, pos: [i32; 3], include_data: bool) -> Option<ItemStack> {
+        let mut stack = self.clone_stack(pos, include_data)?;
+        if include_data {
+            self.add_block_data(pos, &mut stack);
+        }
+        Some(stack)
+    }
+
+    /// `ServerGamePacketListenerImpl.addBlockDataToItem`: the block entity at
+    /// `pos`, if any, onto `stack` (`BlockItem.setBlockEntityData`, then
+    /// `ItemStack.applyComponents(collectComponents())`).
+    pub(super) fn add_block_data(&self, pos: [i32; 3], stack: &mut ItemStack) {
+        if let Some(saved) = self.saved_block_entity((pos[0], pos[1], pos[2])) {
+            apply_patch(stack, block_entity_item::pick(&saved));
+        }
+    }
+
+    /// `BlockState.getCloneItemStack` of the block at `pos`: the item alone,
+    /// with what the block itself puts on it; `include_data` as vanilla passes it.
+    pub(super) fn clone_stack(&self, pos: [i32; 3], include_data: bool) -> Option<ItemStack> {
         let key = (pos[0], pos[1], pos[2]);
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let facts = self.res.facts().get(state);
@@ -87,20 +131,10 @@ impl Game<'_> {
                 _ => "minecraft:piston",
             });
         let item = clone_item(&facts.name, head.unwrap_or(&facts.item));
-        if item == "minecraft:air" {
-            return None;
-        }
         // FlowerPotBlock.getCloneItemStack: a potted plant picks as that plant
         // (`new ItemStack(potted)`), an empty pot as the pot itself.
-        let behaviours = self.res.behaviours();
-        let plant = behaviours.data(state);
-        let plant_item = plant
-            .is(Class::FlowerPot)
-            .then_some(plant.link)
-            .flatten()
-            .map(|block| behaviours.block_data(block).item.clone())
-            .filter(|item| &**item != "minecraft:air");
-        let mut stack = ItemStack::new(plant_item.as_deref().unwrap_or(item), 1);
+        let item = picked_item(self.res.behaviours(), state, item)?;
+        let mut stack = ItemStack::new(item, 1);
         let mut patch = Compound::new();
         // BeehiveBlock.getCloneItemStack: the honey level as the item's block state.
         if include_data
@@ -154,22 +188,18 @@ impl Game<'_> {
             Some(BlockEntity::Banner(_))
         );
         // DecoratedPotBlock.getCloneItemStack: createDecoratedPotInstance, the
-        // sherds only; the pot's item comes with include_data.
+        // sherds only.
         let pot = &*facts.name == "minecraft:decorated_pot";
-        if (include_data || banner || pot)
+        if (banner || pot)
             && let Some(saved) = self.saved_block_entity(key)
         {
             let mut picked = block_entity_item::pick(&saved);
-            if pot && !include_data {
+            if pot {
                 picked.retain(|k, _| *k == JavaString::from("minecraft:pot_decorations"));
             }
             patch.extend(picked);
         }
-        if !patch.is_empty() {
-            let mut all = components(&stack);
-            all.extend(patch);
-            (stack.damage, stack.extra) = item_data::decode_components(Some(&Tag::Compound(all)));
-        }
+        apply_patch(&mut stack, patch);
         Some(stack)
     }
 
@@ -276,7 +306,40 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::clone_item;
+    use super::{clone_item, picked_item};
+
+    #[test]
+    fn a_potted_plant_picks_its_plant_and_an_empty_pot_the_pot() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("block-behaviours.json").exists() {
+            return;
+        }
+        let registry = horizon_world::level::data::load_registry(&root).unwrap();
+        let behaviours = horizon_world::level::Behaviours::load(&registry, &root).unwrap();
+        let pick = |block: &str, own: &'static str| {
+            let state = registry.default_state(block).unwrap();
+            picked_item(&behaviours, state, own).map(str::to_owned)
+        };
+        assert_eq!(
+            pick("minecraft:potted_dandelion", "minecraft:air").as_deref(),
+            Some("minecraft:dandelion")
+        );
+        assert_eq!(
+            pick("minecraft:potted_oak_sapling", "minecraft:air").as_deref(),
+            Some("minecraft:oak_sapling")
+        );
+        assert_eq!(
+            pick("minecraft:flower_pot", "minecraft:flower_pot").as_deref(),
+            Some("minecraft:flower_pot")
+        );
+        assert_eq!(
+            pick("minecraft:stone", "minecraft:stone").as_deref(),
+            Some("minecraft:stone")
+        );
+        assert_eq!(pick("minecraft:fire", "minecraft:air"), None);
+    }
 
     /// `StemBlock.getCloneItemStack` and `AttachedStemBlock.getCloneItemStack`:
     /// pumpkin and melon stems, attached or not, pick the seed they grew from;

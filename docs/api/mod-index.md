@@ -61,8 +61,8 @@ changing what one means, makes schema 2.
 1. Its size and SHA-256 are the ones the entry lists, and it isn't revoked.
 2. With a project key: its signature verifies with that key (minisign's prehashed and legacy signatures both).
 3. What the file says matches the entry: a mod's `horizon-mod.toml` (id, version, API, side, capabilities) and its
-   content's fence ([mods.md](../mods.md#content-mods-api-02)); a native mod's `horizon-native.json` and
-   `horizon-mixin.toml` (id, version, the pinned Horizon and horizon-mixins revisions); a modpack's manifest (id, version, format, game,
+   content's fence ([mods.md](../mods.md#content-mods-api-02)); for code, the same manifest's `[native]`
+   (game, the exact Horizon and horizon-mixins revisions) and checked root Cargo project; a modpack's manifest (id, version, format, game,
    mods); a resource pack's `pack.mcmeta`; a shader pack's `horizon_shader_api::check` and manifest (id, version,
    shader API).
 4. A kind this build can't install is refused with "this Horizon can't install a … yet".
@@ -120,8 +120,8 @@ license = "MIT"
 **Versions come from the releases.** For each entry with a `repo`, the registry's CI lists its GitHub releases (drafts
 and pre-releases are skipped) and, for each release it has not read yet, downloads the asset with the kind's extension
 (and its `<name>.minisig` when the project has a key), runs the checks of a submission (below), and if they pass
-adds the version. The version, the game and the pins are the file's own manifest (`horizon-mod.toml`,
-`horizon-native.json`, `horizon-modpack.toml`, the shader manifest); the release's tag stands in where the file
+adds the version. The version, the game and the pins are the file's own manifest (`horizon-mod.toml`
+for both content and code, `horizon-modpack.toml`, the shader manifest); the release's tag stands in where the file
 names none (a leading `v` is dropped). `published` is the release's date, `changelog` its notes (cut at 6000
 characters), `file.url` the asset's address in the repository, `file.sha256` and `size` are computed by the CI and, when GitHub
 gives the asset a digest, must equal it. Tags and asset names use letters, digits, `.`, `-`, `_` and `+`. A release

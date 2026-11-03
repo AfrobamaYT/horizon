@@ -616,6 +616,15 @@ impl Game<'_> {
                             "minecraft:air"
                         };
                         if &*self.block_name(p) != name {
+                            // Portal arrivals rebuild the platform with drops enabled.
+                            self.with_level(|b, level, ticks| {
+                                b.destroy_block(
+                                    level,
+                                    ticks,
+                                    BlockPos::new(p[0], p[1], p[2]),
+                                    true,
+                                );
+                            });
                             self.set_state_named(p, name, &[])?;
                         }
                     }
@@ -1396,10 +1405,7 @@ impl Game<'_> {
             self.trigger_enter_block(state);
             return;
         };
-        if let Some(mut host) = self.lan.take() {
-            self.as_guest(&mut host, conn, |g| g.trigger_enter_block(state));
-            self.lan = Some(host);
-        }
+        self.as_guest(conn, |g| g.trigger_enter_block(state));
     }
 
     /// `Entity.handlePortal` for the entities in an End gateway: they go

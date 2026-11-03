@@ -39,20 +39,10 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     to.extra.passenger = from.extra.passenger;
     if params.keep_equipment {
         // Every slot, copyAndClear, and setDropChance from the old mob.
-        to.extra.set_main_hand(from.extra.main_hand.clone());
-        if let Some(stack) = from.extra.main_hand_stack() {
-            to.extra.set_main_hand_stack(Some(stack.clone()));
+        for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::BODY {
+            to.extra
+                .set_slot_stack(slot, from.extra.slot_stack(slot).cloned());
         }
-        to.extra.off_hand = from.extra.off_hand.clone();
-        to.extra.head = from.extra.head.clone();
-        to.extra.body = from.extra.body.clone();
-        to.extra.body_count = from.extra.body_count;
-        to.extra.body_damage = from.extra.body_damage;
-        to.extra.body_extra = from.extra.body_extra.clone();
-        to.extra.chest = from.extra.chest.clone();
-        to.extra.legs = from.extra.legs.clone();
-        to.extra.feet = from.extra.feet.clone();
-        to.extra.armor = from.extra.armor.clone();
         to.extra.gear = from.extra.gear.clone();
         to.extra.drop_chances = from.extra.drop_chances.clone();
     }
@@ -159,7 +149,10 @@ mod tests {
             s.absorption = 3.5;
             s.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
-            s.extra.chest = Some("minecraft:chainmail_chestplate".into());
+            s.extra.set_slot_id(
+                horizon_items::equipment::CHEST,
+                Some("minecraft:chainmail_chestplate".into()),
+            );
             let mut offhand = ItemStack::new("minecraft:shield", 2);
             offhand.damage = 5;
             crate::mobs::finalize::set_item_stack(
@@ -167,11 +160,10 @@ mod tests {
                 crate::mobs::finalize::OFFHAND,
                 offhand.clone(),
             );
-            s.extra.body = Some("minecraft:wolf_armor".into());
-            s.extra.body_damage = 7;
             let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
+            armor.damage = 7;
             armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
-            s.extra.body_extra = armor.extra;
+            s.extra.set_body_stack(Some(armor));
             s.extra.leash = Some(crate::mobs::leash::Holder::Knot([3, 71, -3]));
             s.extra.mount = Some(7);
             s.extra.passenger = true;
@@ -186,7 +178,7 @@ mod tests {
                 Some("minecraft:bow")
             );
             assert_eq!(
-                st.extra.chest.as_deref(),
+                st.extra.slot_id(horizon_items::equipment::CHEST),
                 Some("minecraft:chainmail_chestplate")
             );
             assert_eq!(
@@ -194,10 +186,10 @@ mod tests {
                 Some(crate::mobs::leash::Holder::Knot([3, 71, -3]))
             );
             assert_eq!(st.extra.mount, Some(7));
-            assert_eq!(st.extra.body.as_deref(), Some("minecraft:wolf_armor"));
-            assert_eq!(st.extra.body_damage, 7);
+            assert_eq!(st.extra.body_id(), Some("minecraft:wolf_armor"));
+            assert_eq!(st.extra.body_damage(), 7);
             assert_eq!(st.equipment_stacks()[1], Some(offhand));
-            assert_eq!(st.extra.body_extra, s.extra.body_extra);
+            assert_eq!(st.extra.body_stack(), s.extra.body_stack());
             // Health is the new type's own, not copied.
             assert_eq!(st.health, mob(3, "minecraft:stray").health);
             // Without keepEquipment the gear stays behind.
@@ -211,9 +203,12 @@ mod tests {
                 },
             );
             assert!(
-                bare.extra.main_hand.is_none()
-                    && bare.extra.chest.is_none()
-                    && bare.extra.body.is_none()
+                bare.extra.main_hand_id().is_none()
+                    && bare
+                        .extra
+                        .slot_stack(horizon_items::equipment::CHEST)
+                        .is_none()
+                    && bare.extra.body_id().is_none()
             );
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));
         });

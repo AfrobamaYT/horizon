@@ -367,13 +367,12 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ServerHost;
 
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn joins_follow_insertion_order_and_canceled_entities_never_leave() {
-        use crate::mod_api::{
-            self, EntityJoinLevelEvent, EntityLeaveLevelEvent, Flow, Hooks, Host,
-        };
+        use crate::mod_api::{self, EntityJoinLevelEvent, EntityLeaveLevelEvent, Flow, Hooks};
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
         use std::sync::{Arc, Mutex};
@@ -383,10 +382,11 @@ mod tests {
             joins: Joins,
             leaves: Arc<Mutex<Vec<u32>>>,
         }
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.joins.lock().unwrap().push((
@@ -400,7 +400,11 @@ mod tests {
                     Flow::Continue
                 }
             }
-            fn entity_leave_level(&self, _: &mut dyn Host, event: &mut EntityLeaveLevelEvent<'_>) {
+            fn entity_leave_level(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut EntityLeaveLevelEvent<'_>,
+            ) {
                 self.leaves.lock().unwrap().push(event.entity);
             }
         }

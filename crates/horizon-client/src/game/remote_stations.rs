@@ -22,7 +22,7 @@ impl Game<'_> {
         pos: [i32; 3],
     ) {
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((container, menu));
+            r.menu.set(Some((container, menu)));
             r.menu_title = Some(title);
         }
         self.craft_size = 2;
@@ -147,10 +147,7 @@ impl Game<'_> {
         if let Some((container, _)) = self.remote.as_ref().and_then(|r| r.menu.as_ref())
             && self.remote_station_open(*container)
         {
-            self.send(S::ContainerButtonClick(play::ContainerButtonClick {
-                container: *container,
-                button,
-            }));
+            let _ = self.native_click_menu_button(button);
         }
     }
 }

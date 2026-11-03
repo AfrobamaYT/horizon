@@ -265,7 +265,8 @@ pub fn activity(m: &Mob) -> Activity {
     // `ADMIRING_ITEM`: a gold item in the off hand being admired (a charging
     // crossbow counts `using_item` up too), or one `StartAdmiringItemIfSeen`
     // saw lying around.
-    if piglin && ((m.extra.off_hand.is_some() && m.extra.using_item > 0) || b.seen_admire > 0) {
+    if piglin && ((m.extra.off_hand_id().is_some() && m.extra.using_item > 0) || b.seen_admire > 0)
+    {
         Activity::Admire
     } else if m.ai.target.is_some() {
         Activity::Fight
@@ -781,11 +782,12 @@ fn hoglin_hurt(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, by: Who) {
 /// ingot is not bartered and is gone; anything else ends its admiring next
 /// tick, as if the time ran out, and the game side puts it away.
 pub fn stop_admiring(m: &mut Mob) {
-    if m.extra.off_hand.as_deref() == Some("minecraft:gold_ingot") {
-        m.extra.off_hand = None;
+    if m.extra.off_hand_id() == Some("minecraft:gold_ingot") {
+        m.extra
+            .set_slot_stack(horizon_items::equipment::OFFHAND, None);
         m.extra.using_item = 0;
     } else {
-        m.extra.using_item = i32::from(m.extra.off_hand.is_some() && m.extra.using_item > 0);
+        m.extra.using_item = i32::from(m.extra.off_hand_id().is_some() && m.extra.using_item > 0);
     }
 }
 /// Whether two entities are of one type: both the player, or both mobs of
@@ -1128,7 +1130,7 @@ fn hostile_to_player(m: &Mob, w: &MobWorld) -> bool {
 struct BackUpIfTooClose;
 impl BackUpIfTooClose {
     fn too_close(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
-        if m.extra.main_hand.as_deref() != Some("minecraft:crossbow") || !m.ai.nav.is_done() {
+        if m.extra.main_hand_id() != Some("minecraft:crossbow") || !m.ai.nav.is_done() {
             return None;
         }
         let who = m.ai.target?;
@@ -1498,7 +1500,7 @@ impl Goal for AdmireSeen {
         MOVE | LOOK
     }
     fn can_use(&mut self, m: &mut Mob, _: &mut Cx) -> bool {
-        m.extra.piglin.seen_admire > 0 && m.extra.off_hand.is_none()
+        m.extra.piglin.seen_admire > 0 && m.extra.off_hand_id().is_none()
     }
     fn every_tick(&self) -> bool {
         true
@@ -1517,7 +1519,7 @@ impl Goal for Admire {
         MOVE | LOOK
     }
     fn can_use(&mut self, m: &mut Mob, _: &mut Cx) -> bool {
-        m.extra.using_item > 0 && m.extra.off_hand.is_some()
+        m.extra.using_item > 0 && m.extra.off_hand_id().is_some()
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.nav_stop();
@@ -1701,7 +1703,7 @@ pub fn ai_step(
     b.walk_off = (b.walk_off - 1).max(0);
     b.seen_admire = (b.seen_admire - 1).max(0);
     // The admired item is in the off hand; a spear in use counts up instead.
-    if m.extra.using_item > 0 && m.extra.off_hand.is_some() {
+    if m.extra.using_item > 0 && m.extra.off_hand_id().is_some() {
         m.extra.using_item -= 1;
         if m.extra.using_item == 0 {
             events.push(MobEvent::FinishAdmiring { mob: m.id });
@@ -1715,9 +1717,11 @@ pub fn ai_step(
             // the item the piglin is admiring leaves the off hand and lands
             // where it stands, so the zombified piglin never carries it.
             if m.species() == Species::Piglin {
-                let admiring = (m.extra.off_hand.is_some() && m.extra.using_item > 0)
+                let admiring = (m.extra.off_hand_id().is_some() && m.extra.using_item > 0)
                     || m.extra.piglin.seen_admire > 0;
-                if admiring && let Some(item) = m.extra.off_hand.take() {
+                if admiring
+                    && let Some(item) = m.extra.take_slot_id(horizon_items::equipment::OFFHAND)
+                {
                     events.push(MobEvent::DropItem {
                         mob: m.id,
                         item,
@@ -1882,11 +1886,10 @@ pub fn piglin_anim(m: &Mob, s: &State, p: &mut Poses) {
     // too), which charges while a spear is in use (an admired item is not).
     let spear = m
         .extra
-        .main_hand
-        .as_deref()
+        .main_hand_id()
         .and_then(crate::spear::Kinetic::of)
         .map(|kinetic| {
-            let using = m.extra.using_item > 0 && m.extra.off_hand.is_none();
+            let using = m.extra.using_item > 0 && m.extra.off_hand_id().is_none();
             (
                 kinetic,
                 if using {
@@ -1899,13 +1902,13 @@ pub fn piglin_anim(m: &Mob, s: &State, p: &mut Poses) {
     // Piglin.getArmPose: dancing comes first.
     let pose = if m.extra.scratch[0] > 0 {
         PiglinPose::Dancing
-    } else if m.extra.using_item > 0 && m.extra.off_hand.is_some() {
+    } else if m.extra.using_item > 0 && m.extra.off_hand_id().is_some() {
         PiglinPose::AdmiringItem
     } else if m.extra.flag {
         PiglinPose::CrossbowCharge
-    } else if m.extra.main_hand.as_deref() == Some("minecraft:crossbow") && m.ai.aggressive {
+    } else if m.extra.main_hand_id() == Some("minecraft:crossbow") && m.ai.aggressive {
         PiglinPose::CrossbowHold
-    } else if m.ai.aggressive && m.extra.main_hand.is_some() && spear.is_none() {
+    } else if m.ai.aggressive && m.extra.main_hand_id().is_some() && spear.is_none() {
         PiglinPose::MeleeWeapon
     } else {
         PiglinPose::Default
@@ -2260,7 +2263,10 @@ mod conversion_tests {
                 Vec3::new(0.5, 64.0, 0.5),
                 0.0,
             );
-            m.extra.off_hand = Some("minecraft:gold_ingot".into());
+            m.extra.set_slot_id(
+                horizon_items::equipment::OFFHAND,
+                Some("minecraft:gold_ingot".into()),
+            );
             m.extra.using_item = 60;
             m.extra.counter2 = CONVERSION + 1;
             let mut lr = LegacyRandom::new(0);
@@ -2281,7 +2287,11 @@ mod conversion_tests {
                     _ => None,
                 })
                 .expect("the piglin converts");
-            assert_eq!(from.extra.off_hand, None, "the new mob carries nothing");
+            assert_eq!(
+                from.extra.off_hand_id(),
+                None,
+                "the new mob carries nothing"
+            );
         });
         let _ = ran;
     }
