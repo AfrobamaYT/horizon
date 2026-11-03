@@ -196,7 +196,13 @@ fn another_guests_services_work_during_a_turn() {
         let a = game.native_player_ref(12).unwrap();
         game.as_guest(12, |game| {
             assert_eq!(game.native_entity_target(a.entity()), Some(Target::Player));
-            assert_eq!(game.player_named("guest12"), Some(Target::Player));
+            assert_eq!(
+                game.select(&Selector {
+                    player_name: Some("guest12".into()),
+                    ..Default::default()
+                }),
+                [Target::Player]
+            );
             assert!(game.native_inventory(12, Player).is_err());
             assert_eq!(
                 game.native_inventory(13, Player).unwrap().slots[0],
@@ -226,16 +232,30 @@ fn another_guests_services_work_during_a_turn() {
                 assert!(!game.native_run_command("give @a[name=guest12] minecraft:dirt 1"));
                 // The native-only filter is restored, including after failure:
                 // ordinary names, UUIDs and selectors still see the outer guest.
-                assert_eq!(game.player_named("guest12"), Some(Target::Guest(12)));
-                assert_eq!(game.target_by_uuid(12), Some(Target::Guest(12)));
-                assert!(
-                    game.player_candidates(&Selector {
-                        kind: 'a',
+                for selector in [
+                    Selector {
+                        player_name: Some("guest12".into()),
                         ..Default::default()
-                    })
-                    .contains(&Target::Guest(12))
+                    },
+                    Selector {
+                        uuid: Some(12),
+                        ..Default::default()
+                    },
+                    Selector {
+                        kind: 'a',
+                        names: vec![("guest12".into(), false)],
+                        ..Default::default()
+                    },
+                ] {
+                    assert_eq!(game.select(&selector), [Target::Guest(12)]);
+                }
+                assert_eq!(
+                    game.select(&Selector {
+                        player_name: Some("guest13".into()),
+                        ..Default::default()
+                    }),
+                    [Target::Player]
                 );
-                assert_eq!(game.player_named("guest13"), Some(Target::Player));
             })
             .unwrap();
         })
