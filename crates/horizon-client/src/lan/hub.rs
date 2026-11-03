@@ -182,6 +182,15 @@ pub enum HostEvent {
         sender: u128,
         text: String,
     },
+    /// A chat message the sender's chain and the chat filter let through,
+    /// not yet broadcast: with server mods loaded, the game tells them
+    /// (`native_server_chat`, NeoForge's `ServerChatEvent`) and then
+    /// broadcasts it with `Hub::broadcast_chat`.
+    ChatSubmitted {
+        message: Box<chat::ChatMessage>,
+        bound: Box<play::ChatTypeBound>,
+        name: String,
+    },
     /// A player's text the chat filter refused (docs/chat-filter.md): relayed to nobody, for the
     /// game to log and to carry out `action`.
     ChatFiltered {

@@ -226,6 +226,16 @@ impl Hub {
             name: self.player_display_name(uuid, &name),
             target: None,
         };
+        // NeoForge's `broadcastChatMessage` fires `ServerChatEvent` here:
+        // the game tells the mods, then broadcasts what they left.
+        if crate::native_client_hooks::has_mods() {
+            events.push(HostEvent::ChatSubmitted {
+                message: Box::new(message),
+                bound: Box::new(bound),
+                name,
+            });
+            return;
+        }
         let line = format!("<{name}> {}", message.content);
         self.broadcast_chat(&message, &bound, line, events);
         events.push(HostEvent::PlayerChat {
