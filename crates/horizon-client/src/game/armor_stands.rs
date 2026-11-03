@@ -787,12 +787,7 @@ impl Game<'_> {
             extra: None,
         };
         self.spawn_item(stand, center, [0.0; 3], 10);
-        self.armor_stand_death_drops(
-            a.id,
-            at,
-            "minecraft:player_attack",
-            self.own_entity_id() as u32,
-        );
+        self.armor_stand_death_drops(a.id, "minecraft:player_attack", self.own_entity_id() as u32);
         for stack in a.equipment.into_iter().flatten() {
             let r = &mut self.world.random;
             let v = [
@@ -924,7 +919,7 @@ impl Game<'_> {
     /// loot of its own, so the list is empty and a mod may add to it or hear
     /// that the stand broke (`native_living_drops`). The stand item and the
     /// equipment pop outside the list, as in vanilla.
-    fn armor_stand_death_drops(&mut self, id: u32, at: [f64; 3], damage_type: &str, causing: u32) {
+    fn armor_stand_death_drops(&mut self, id: u32, damage_type: &str, causing: u32) {
         let source = (!horizon_client::mod_api::mods().is_empty())
             .then(|| super::creatures::death_hurt_source(damage_type, causing));
         let dying = super::creatures::DyingDrops {
@@ -934,7 +929,7 @@ impl Game<'_> {
             source,
             recently_hit: false,
         };
-        self.drop_death_items(&dying, Vec::new(), at, 10, |_| {
+        self.drop_death_items(&dying, Vec::new(), 10, |_| {
             super::dispenser::new_item_motion()
         });
     }
@@ -949,7 +944,7 @@ impl Game<'_> {
     ) {
         let a = self.armor_stands.remove(i);
         let at = [a.position.x, a.position.y, a.position.z];
-        self.armor_stand_death_drops(a.id, at, damage_type, causing);
+        self.armor_stand_death_drops(a.id, damage_type, causing);
         let (pos, drops) = broken_armor_stand_equipment(a);
         for stack in drops {
             self.pop_resource(pos, stack);

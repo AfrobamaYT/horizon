@@ -1789,10 +1789,18 @@ impl Game<'_> {
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
+        let mut stacks: Vec<(ItemStack, [f64; 3])> =
+            stacks.into_iter().map(|stack| (stack, pos)).collect();
         if m.species() == Species::CopperGolem {
             // CopperGolem.dropEquipment: the preserved equipment is part of
-            // dropAllDeathLoot, so the mods hear it with the rest.
-            stacks.extend(Self::golem_preserved_equipment(m));
+            // dropAllDeathLoot, so the mods hear it with the rest. It is
+            // `spawnAtLocation` with no offset: at the golem's feet.
+            let feet = [m.position.x, m.position.y, m.position.z];
+            stacks.extend(
+                Self::golem_preserved_equipment(m)
+                    .into_iter()
+                    .map(|stack| (stack, feet)),
+            );
         }
         // Every death drop is its own ItemEntity, and the drop entity's own
         // random (not the level's) gives it the constructor's horizontal push
@@ -1806,24 +1814,24 @@ impl Game<'_> {
             source: hurt,
             recently_hit: by_player,
         };
-        self.drop_death_items(&dying, stacks, pos, 10, |_| dispenser::new_item_motion());
+        self.drop_death_items(&dying, stacks, 10, |_| dispenser::new_item_motion());
         if let Some(reward) = experience {
             let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
             self.spawn_orbs(pos, amount as u32);
         }
     }
-    /// Adds the items a dying entity dropped to the level. With mods, they
-    /// first hear the list (`native_living_drops`): edited or canceled.
+    /// Adds the items a dying entity dropped to the level, each at its own
+    /// position. With mods, they first hear the list (`native_living_drops`):
+    /// edited or canceled.
     pub(super) fn drop_death_items(
         &mut self,
         dying: &DyingDrops<'_>,
-        stacks: Vec<ItemStack>,
-        position: [f64; 3],
+        stacks: Vec<(ItemStack, [f64; 3])>,
         pickup_delay: u32,
         mut velocity: impl FnMut(&mut Self) -> [f64; 3],
     ) {
         let Some(source) = &dying.source else {
-            for stack in stacks {
+            for (stack, position) in stacks {
                 let motion = velocity(self);
                 self.spawn_item(stack, position, motion, pickup_delay);
             }
@@ -1833,7 +1841,9 @@ impl Game<'_> {
         // collects the drop, before the event sees the list.
         let mut drops: Vec<NativeItemDrop> = stacks
             .into_iter()
-            .map(|stack| NativeItemDrop::new(stack, position, velocity(self), pickup_delay))
+            .map(|(stack, position)| {
+                NativeItemDrop::new(stack, position, velocity(self), pickup_delay)
+            })
             .collect();
         let mut cancel = false;
         self.native_living_drops(

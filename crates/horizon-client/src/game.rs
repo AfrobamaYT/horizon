@@ -4055,7 +4055,8 @@ impl Game<'_> {
             stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
             self.apply_equipment();
         }
-        self.drop_death_items(dying, stacks, at, 40, |game| {
+        let stacks = stacks.into_iter().map(|stack| (stack, at)).collect();
+        self.drop_death_items(dying, stacks, 40, |game| {
             let r = &mut game.world.random;
             let strength = f64::from(r.next_float()) * 0.5;
             let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
