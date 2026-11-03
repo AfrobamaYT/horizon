@@ -146,8 +146,9 @@ pub struct NativeLootDrops<'a> {
     /// sheep, a mooshroom, a snow golem or a bogged, a brush on an armadillo or
     /// a suspicious block, shears carving a pumpkin, picking sweet berries or
     /// cave vines, a hit taking an item frame or its item, or untying a lead
-    /// or cutting it with shears. `player` names them; `block` or `entity` says
-    /// what dropped them. API 100. A mob that a player killed while
+    /// or cutting it with shears. `player` names them, or is `None` when a
+    /// dispenser's shears sheared a mooshroom; `block` or `entity` says what
+    /// dropped them. API 100. A mob that a player killed while
     /// leashed drops its lead on its next tick as a call of its own (`entity`
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.

@@ -1810,7 +1810,8 @@ impl Game<'_> {
         self.spawn_item(stack, [at.x, at.y + y_offset, at.z], v, 10);
         v
     }
-    pub(super) fn shear_mooshroom(&mut self, index: usize, tool: &ItemStack) {
+    /// `MushroomCow.shear`: `player` is who sheared it, none for a dispenser.
+    pub(super) fn shear_mooshroom(&mut self, index: usize, player: Option<u128>, tool: &ItemStack) {
         let old = self.mobs[index].clone();
         let at = old.position;
         let height = f64::from(old.height());
@@ -1841,6 +1842,7 @@ impl Game<'_> {
                     [at.x, at.y, at.z],
                     None,
                     Some((old.id, "minecraft:mooshroom")),
+                    player,
                     Some(tool),
                     &mut drops,
                 );
@@ -1972,7 +1974,7 @@ impl Game<'_> {
                     }
                 }
                 Species::Mooshroom if !m.is_baby() => {
-                    self.shear_mooshroom(i, &shears);
+                    self.shear_mooshroom(i, None, &shears);
                 }
                 _ => continue,
             }

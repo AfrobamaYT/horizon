@@ -5628,7 +5628,8 @@ impl Game<'_> {
                 }
             }
             Species::Mooshroom if item == "minecraft:shears" && !m.is_baby() => {
-                self.shear_mooshroom(index, held.as_ref().expect("held shears"));
+                let player = Some(self.native_acting_id());
+                self.shear_mooshroom(index, player, held.as_ref().expect("held shears"));
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
                 self.post_game_event("minecraft:shear", feet, ctx);
                 self.damage_held_tool();
@@ -6177,11 +6178,13 @@ impl Game<'_> {
             .map(|(item, count)| ItemStack::new(&item, count))
             .collect();
         if !drops.is_empty() {
+            let player = Some(self.native_acting_id());
             self.native_use_drops(
                 &drops_table,
                 feet,
                 None,
                 Some((mob.0, &mob.1)),
+                player,
                 held.as_ref(),
                 &mut drops,
             );
@@ -6242,11 +6245,13 @@ impl Game<'_> {
         self.mobs[index].extra.sheared = true;
         let mut stacks = self.sequence_loot(table, table, tool.as_ref());
         let origin = [at.x, at.y, at.z];
+        let player = Some(self.native_acting_id());
         self.native_use_drops(
             table,
             origin,
             None,
             Some((mob.0, &mob.1)),
+            player,
             tool.as_ref(),
             &mut stacks,
         );
@@ -6275,11 +6280,13 @@ impl Game<'_> {
         let table = "minecraft:brush/armadillo";
         let mut stacks = self.sequence_loot(table, table, tool.as_ref());
         let kind = super::native_hooks::mob_kind(&self.mobs[index]);
+        let player = Some(self.native_acting_id());
         self.native_use_drops(
             table,
             feet,
             None,
             Some((id, &kind)),
+            player,
             tool.as_ref(),
             &mut stacks,
         );

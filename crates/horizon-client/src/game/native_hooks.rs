@@ -9897,18 +9897,19 @@ impl Game<'_> {
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
-    /// The mods' say on what the acting player's use drops
-    /// (`NativeLootDrops::used`): `table` is the loot table rolled, if any.
+    /// The mods' say on what a use drops (`NativeLootDrops::used`): `table`
+    /// is the loot table rolled, if any, and `player` the user, none for a
+    /// dispenser.
     pub(super) fn native_use_drops(
         &mut self,
         table: &str,
         origin: [f64; 3],
         block: Option<([i32; 3], BlockStateId)>,
         entity: Option<(u32, &str)>,
+        player: Option<u128>,
         tool: Option<&ItemStack>,
         drops: &mut Vec<ItemStack>,
     ) {
-        let player = Some(self.native_acting_id());
         let context = NativeLootDrops {
             table,
             dimension: self.dim.id(),
