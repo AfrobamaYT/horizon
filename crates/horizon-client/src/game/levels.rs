@@ -141,6 +141,22 @@ impl Levels {
             .map(|(_, level)| &level.world)
     }
 
+    /// The streaming of the level not in place whose dimension is `dimension`.
+    pub(super) fn parked_streaming_of(&self, dimension: &str) -> Option<&Streaming> {
+        self.parked
+            .iter()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &level.streaming)
+    }
+
+    /// The streaming of the level not in place whose dimension is `dimension`, to change.
+    pub(super) fn parked_streaming_of_mut(&mut self, dimension: &str) -> Option<&mut Streaming> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &mut level.streaming)
+    }
+
     pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
         self.parked.get(&dim).map(|level| &level.anims)
     }
@@ -169,7 +185,7 @@ impl Levels {
     /// The forced chunks of every level not in place, released.
     pub(super) fn release_parked_forced_chunks(&mut self) {
         for level in self.parked.values_mut() {
-            level.streaming.forced.clear();
+            level.streaming.clear_forced();
         }
     }
 
@@ -359,6 +375,8 @@ impl Game<'_> {
             if opened {
                 // The new streaming's radius and meshing options.
                 self.apply_settings();
+                // ServerLevel's constructor reads the level's raids.
+                self.read_raids();
                 self.native_level_opened(target);
             }
         }
@@ -618,7 +636,7 @@ impl Game<'_> {
                         .get(d)
                         .is_some_and(|p| !p.streaming.forced.is_empty())
                 };
-                guests.iter().any(|g| g.dimension == d.id())
+                guests.iter().any(|g| g.dimension == d.id() && g.participates_in_player_simulation())
                     // A viewer count not yet told to 0 (`tick_mod_container_viewers`).
                     || self.mod_container_viewers.keys().any(|(k, _)| *k == d.id())
                     || self.player_bed_levels().any(|b| b == *d)

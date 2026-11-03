@@ -73,15 +73,14 @@ impl Game<'_> {
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None on a client, with no world open, or for no such entity
     /// in the level in place or among the server's players. During a nested
-    /// player swap, an outer player's displaced record is unavailable. API
-    /// @API:entity_handles@.
+    /// player swap, an outer player's displaced record is unavailable.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
         self.native_entity_target(entity).map(|_| entity)
     }
     /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
     /// client, with no world open, or for a dimension the server hasn't
-    /// loaded. API @API:entity_handles@.
+    /// loaded.
     pub(super) fn native_level(&self, dimension: &str) -> Option<LevelRef> {
         if !self.is_logical_server() {
             return None;
@@ -104,7 +103,6 @@ impl Game<'_> {
     /// acting player are not listed: their handles cannot resolve there yet.
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
-    /// API @API:level_entities_in@.
     pub(super) fn native_level_entities_in(
         &self,
         level: LevelRef,
@@ -129,7 +127,10 @@ impl Game<'_> {
             }
         });
         for guest in self.lan.iter().flat_map(|h| &h.hub.guests) {
-            if !guest.placed || guest.dimension != level.dimension() {
+            if !guest.participates_in_player_simulation()
+                || !guest.placed
+                || guest.dimension != level.dimension()
+            {
                 continue;
             }
             let body = if self.lan_acting == Some(guest.conn)
@@ -161,7 +162,7 @@ impl Game<'_> {
     /// Set a block in the level in place (`Level.setBlock`). Parked levels,
     /// stale handles, clients and unloaded or out-of-height positions return
     /// false. Client-update and client-render flags are not supported; Horizon
-    /// sends every change to clients. API @API:level_block_writes@.
+    /// sends every change to clients.
     pub(super) fn native_level_set_block(
         &mut self,
         level: LevelRef,
@@ -176,7 +177,6 @@ impl Game<'_> {
     }
     /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
     /// dropping its resources. Parked levels and invalid positions return false.
-    /// API @API:level_block_writes@.
     pub(super) fn native_level_destroy_block(
         &mut self,
         level: LevelRef,
@@ -204,7 +204,6 @@ impl Game<'_> {
     /// visual, occlusion and support shapes are not exposed. Returns None on a
     /// client, for a stale handle, or for a closed level. Unloaded blocks read
     /// as air; collision errors return no boxes, like `native_block_collision`.
-    /// API @API:level_shapes@.
     pub(super) fn native_level_block_shape(
         &self,
         level: LevelRef,
@@ -241,7 +240,7 @@ impl Game<'_> {
     /// None for clients, stale or closed levels, unloaded or out-of-height blocks,
     /// dynamic-shape states (including moving pistons and shulker boxes), or an
     /// exporter error. Dynamic support is a follow-up on #29. False means not
-    /// sturdy. API @API:level_shapes@.
+    /// sturdy.
     pub(super) fn native_level_block_face_sturdy(
         &self,
         level: LevelRef,
@@ -272,7 +271,6 @@ impl Game<'_> {
 
     /// Clip an empty-context ray against collider or outline shapes, without fluids.
     /// None on failed reads, dynamic shapes, invalid rays or traversal limits.
-    /// API @API:level_shapes@.
     pub(super) fn native_level_clip(
         &self,
         level: LevelRef,
@@ -338,29 +336,26 @@ impl Game<'_> {
     }
 
     /// The entity's position (`Entity.position`): its feet, the middle of
-    /// its box for a painting or an item frame. API @API:entity_handles@.
+    /// its box for a painting or an item frame.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
         self.target_position(self.native_entity_target(entity)?)
     }
-    /// The block the entity's position is in (`Entity.blockPosition`). API
-    /// @API:entity_handles@.
+    /// The block the entity's position is in (`Entity.blockPosition`).
     pub(super) fn native_entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
         self.native_entity_position(entity)
             .map(|p| p.map(|v| v.floor() as i32))
     }
     /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
-    /// for the kinds that don't turn. API @API:entity_handles@.
+    /// for the kinds that don't turn.
     pub(super) fn native_entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
         Some(self.target_rotation(self.native_entity_target(entity)?))
     }
-    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
-    /// @API:entity_handles@.
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`.
     pub(super) fn native_entity_kind(&self, entity: EntityRef) -> Option<String> {
         Some(self.target_type(self.native_entity_target(entity)?))
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
     /// entity that has none yet gets it now, as a new vanilla entity does.
-    /// API @API:entity_handles@.
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
         let words = match self.native_entity_target(entity)? {
             Target::Player => return self.lan_acting_uuid,
@@ -369,7 +364,7 @@ impl Game<'_> {
         };
         Some(uuid_from_words(words))
     }
-    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    /// The level the entity is in (`Entity.level`).
     pub(super) fn native_entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         let dim: Dim = self.target_level(self.native_entity_target(entity)?);
         Some(LevelRef::new(entity.epoch(), dim.id()))
@@ -994,6 +989,7 @@ pub(super) mod tests {
             let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             let fake = Guest::connectionless(fake_id, 2, "fake".into(), 2, [0.0; 3], motion);
             assert!(fake.placed && fake.motion.is_some());
+            assert!(fake.loaded && fake.client_loaded());
             assert!(!fake.participates_online() && !fake.participates_in_player_simulation());
             assert_eq!((fake.game_mode, fake.permission, fake.input), (0, 0, 0));
             assert!(fake.vehicle.is_none() && fake.bed.is_none() && fake.menu.is_none());
@@ -1062,6 +1058,13 @@ pub(super) mod tests {
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
+            // A fake record in the Nether does not keep that level ticking.
+            game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
+            let ticking = game.levels_to_tick();
+            assert!(!ticking.contains(&super::super::Dim::Nether));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            assert!(game.levels_to_tick().contains(&super::super::Dim::Nether));
+            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:overworld".into();
             game.lan_acting = Some(real_id);
             let selector = horizon_client::command::args::Selector {
                 kind: 'a',
@@ -1078,10 +1081,38 @@ pub(super) mod tests {
             assert!(!game.run_command_quietly("tp fake 0 64 0"));
             game.lan_acting = None;
             let mut host = game.lan.take().unwrap();
+            for (conn, learns) in [(fake_id, false), (real_id, true)] {
+                game.as_guest(&mut host, conn, |game| {
+                    let mut book =
+                        horizon_client::items::ItemStack::new("minecraft:knowledge_book", 1);
+                    book.data_mut().set_other(
+                        "minecraft:recipes",
+                        Some(horizon_world::nbt::Tag::List(vec![
+                            horizon_world::nbt::Tag::String("minecraft:stick".into()),
+                        ])),
+                    );
+                    let slot = game.held_slot();
+                    *game.stack_in_mut(slot) = Some(book.clone());
+                    assert!(game.use_knowledge_book(&book));
+                    assert!(game.stack_in(slot).is_none());
+                    assert_eq!(game.level.recipe_book.knows("minecraft:stick"), learns);
+                })
+                .unwrap();
+            }
             game.guest_packets
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(&mut host, fake_id, |game| {
                 assert!(game.lan_acting_fake);
+                assert!(game.player.as_ref().is_some_and(|p| p.client_loaded));
+                assert!(game.player_view().is_none());
+                let mut visited = 0;
+                game.for_each_player(|_| visited += 1);
+                assert_eq!(visited, 0);
+                let before = game.stats.get("custom", "minecraft:jump");
+                game.award_stat("custom", "minecraft:jump", 1);
+                assert_eq!(game.stats.get("custom", "minecraft:jump"), before);
+                game.trigger("minecraft:tick", |_, _| panic!("fake criterion evaluated"));
+                assert_eq!(game.award_recipes(&["minecraft:test".into()]), 0);
                 let source = horizon_client::command::args::Selector {
                     kind: 's',
                     limit: 1,
@@ -1152,6 +1183,9 @@ pub(super) mod tests {
                 .push(("fake_outer".into(), [0.0; 3], 1.0, 1.0));
             game.as_guest(&mut host, real_id, |game| {
                 assert!(!game.lan_acting_fake);
+                let before = game.stats.get("custom", "minecraft:jump");
+                game.award_stat("custom", "minecraft:jump", 1);
+                assert_eq!(game.stats.get("custom", "minecraft:jump"), before + 1);
                 game.guest_cooldowns
                     .push(("minecraft:real_inner".into(), 9));
             })

@@ -211,6 +211,8 @@ mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
+mod native_display_refs;
+mod native_dragon_refs;
 mod native_entities;
 mod native_entity_data;
 mod native_entity_invulnerable;
@@ -232,6 +234,7 @@ mod native_item_entity_refs;
 mod native_item_places;
 mod native_level_effects;
 mod native_level_events;
+mod native_level_items;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
@@ -239,6 +242,8 @@ mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
 mod native_menus;
+mod native_merchant_refs;
+mod native_minecart_refs;
 mod native_mob_draw;
 mod native_mob_navigation;
 mod native_mob_refs;
@@ -252,11 +257,14 @@ mod native_player_cooldowns;
 mod native_player_food;
 mod native_player_modes;
 mod native_player_stats;
+mod native_projectile_refs;
 mod native_projectiles;
 mod native_quick_move;
+mod native_raid_refs;
 mod native_recipes;
 mod native_server;
 mod native_shaders;
+mod native_sound_refs;
 mod native_ticks;
 mod native_visuals;
 mod native_world_columns;
@@ -4464,12 +4472,12 @@ impl Game<'_> {
         let mut removed = removed.into_iter();
         items.retain(|_| !removed.next().unwrap_or(false));
         let Some(p) = self.player.as_ref() else {
-            self.dropped = items;
+            self.put_back_dropped(items);
             self.spawn_destroyed_contents(destroyed);
             return;
         };
         if p.health.dead_or_dying() || self.spectator() {
-            self.dropped = items;
+            self.put_back_dropped(items);
             self.spawn_destroyed_contents(destroyed);
             return;
         }
@@ -4551,8 +4559,18 @@ impl Game<'_> {
             }
             kept.push(item);
         }
-        self.dropped = kept.into();
+        self.put_back_dropped(kept);
         self.spawn_destroyed_contents(destroyed);
+    }
+    /// The item entities `tick_dropped_items` took out, back in the level,
+    /// before those its hooks spawned meanwhile (`addFreshEntity` appends).
+    /// They keep their join numbers; the spawned ones got theirs on joining.
+    fn put_back_dropped(
+        &mut self,
+        items: impl Into<horizon_client::join_seq::JoinList<ItemEntity>>,
+    ) {
+        let spawned = std::mem::replace(&mut self.dropped, items.into());
+        self.dropped.extend(spawned);
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
     /// becomes an item entity where that item lay (`new ItemEntity(level, x,
@@ -5749,6 +5767,9 @@ impl Game<'_> {
     }
     /// Menus opened by PlayerEffect::OpenMenu.
     fn open_menu(&mut self, pos: [i32; 3]) {
+        if self.lan_acting_fake {
+            return;
+        }
         let name = self
             .res
             .facts()
@@ -6216,7 +6237,7 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck)
         {
             self.native_player_harvest_check(
                 self.own_entity_id() as u32,
@@ -6241,7 +6262,7 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if !crate::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck) {
                 self.native_player_harvest_check(
                     self.own_entity_id() as u32,
                     pos,
@@ -9307,9 +9328,7 @@ impl Game<'_> {
             .iter()
             .map(|(r, _)| horizon_client::crafting::qualified(r))
             .collect();
-        let index = &world_stations!(self).recipe_index;
-        let (_, unlocked) = self.level.recipe_book.add_recipes(index, &recipes);
-        self.recipe_unlocked(&unlocked);
+        self.award_recipes(&recipes);
     }
     fn craft_recipe(&self) -> Option<(String, ItemStack)> {
         let n = self.craft_size;
@@ -12404,12 +12423,17 @@ impl Game<'_> {
         // Warm the loot data with this world's packs before chunks decode
         // (`save::roll_loaded_loot` reads the cached copy).
         self.load_server_loot();
-        // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
-        // its chunks and players are.
         // MinecraftServer's constructor reads CustomBossEvents before any
         // server event.
         self.bosses = Default::default();
         self.load_bossbars();
+        // ServerLevel's constructor reads its Raids saved data before any
+        // server event; their randoms are seeded on the first raid tick.
+        if self.remote.is_none() {
+            self.read_raids();
+        }
+        // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
+        // its chunks and players are.
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
@@ -13781,12 +13805,17 @@ impl Game<'_> {
     /// adding their counts and keeping the smaller age. Server only.
     fn merge_orbs(&mut self) {
         let mut removed = vec![false; self.orbs.len()];
-        for i in 0..self.orbs.len() {
+        // Only the orbs of the tick's start tick; an orb a merge hook awards
+        // joins the level at once, so each later orb's own entity query sees it.
+        let ticking = removed.len();
+        for i in 0..ticking {
             if removed[i] || self.orbs[i].ticks % 20 != 1 {
                 continue;
             }
             let area = self.orbs[i].bounds().inflate(Vec3::new(0.5, 0.5, 0.5));
-            for j in 0..self.orbs.len() {
+            removed.resize(self.orbs.len(), false);
+            let found = removed.len();
+            for j in 0..found {
                 if j == i || removed[j] || !self.orbs[j].bounds().intersects(area) {
                     continue;
                 }
@@ -14735,6 +14764,9 @@ impl Game<'_> {
     /// and (outside creative) no monsters within 8 blocks; the bed becomes the
     /// respawn point either way.
     fn try_sleep(&mut self, pos: [i32; 3]) {
+        if self.lan_acting_fake {
+            return;
+        }
         let Some((position, yaw)) = self.player.as_ref().map(|p| (p.position, p.yaw)) else {
             return;
         };
@@ -22213,7 +22245,8 @@ mod tests {
                 ));
             }
         }
-        let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
         mod_api::install_parts(&mods).unwrap();
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
@@ -22262,11 +22295,10 @@ mod tests {
         let allowed = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
         let calls = Arc::new(AtomicUsize::new(0));
-        let mods: mod_api::Mods =
-            Arc::from(vec![
-                Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
-                    as Box<dyn Hooks>,
-            ]);
+        let mods: mod_api::Mods = Arc::from([mod_api::ModEntry::new(
+            "right-click-observer",
+            Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone())),
+        )]);
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());

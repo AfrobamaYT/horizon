@@ -13,6 +13,7 @@ use horizon_client::{
     hud_layout, hud_overlays,
     mesher::Vertex,
     mobs::{Damage, DamageKind, Who},
+    mod_api::NativeDragonPhase,
     particles::{ParticleOptions, ParticleType},
     projectiles::ProjectileKind,
     text::Text,
@@ -72,13 +73,13 @@ const AMBIENT_INTERVAL: i32 = 80;
 
 #[derive(Default)]
 pub(super) struct Fight {
-    loaded: bool,
+    pub(super) loaded: bool,
     needs_scan: bool,
     pub killed: bool,
     pub previously_killed: bool,
     gateways: Vec<i32>,
     exit_portal: Option<[i32; 3]>,
-    alive_crystals: i32,
+    pub(super) alive_crystals: i32,
     crystal_scan: i32,
     /// `ticksSinceLastPlayerScan`, and whether the last scan found a player
     /// for the fight (`dragonEvent.getPlayers()` is not empty).
@@ -334,6 +335,15 @@ pub(super) struct Dragon {
     pub old_flap: f32,
     in_wall: bool,
     phase: Phase,
+    /// `Mob.isAggressive` (the synced mob flag), `persistenceRequired` and
+    /// the target a mod set (`Mob.target`): kept for native mods, the
+    /// dragon's own flight never reads them.
+    pub(super) aggressive: bool,
+    pub(super) persistent: bool,
+    pub(super) target: Option<u32>,
+    /// The phase left was `Flaming` (`DragonSittingFlamingPhase.end`) and its
+    /// cloud is still to be discarded.
+    pub(super) flame_ended: bool,
     flame_count: i32,
     sitting_damage: f32,
     growl: i32,
@@ -371,7 +381,7 @@ pub(super) struct FightPlayer {
 }
 impl FightPlayer {
     /// `Player.canBeSeenAsEnemy`: alive, neither creative nor spectator.
-    fn enemy(&self) -> bool {
+    pub(super) fn enemy(&self) -> bool {
         self.alive && !self.creative && !self.spectator
     }
 }
@@ -468,6 +478,10 @@ impl Dragon {
                 target: None,
                 clockwise: false,
             },
+            aggressive: false,
+            persistent: false,
+            target: None,
+            flame_ended: false,
             flame_count: 0,
             sitting_damage: 0.0,
             growl: 100,
@@ -704,9 +718,24 @@ impl Dragon {
             self.strafe_request = Some(p.who);
         }
     }
+    /// The phase as a native mod sees it.
+    pub(super) fn native_phase(&self) -> NativeDragonPhase {
+        NativeDragonPhase::from_id(self.phase.id()).expect("the phases are the vanilla ones")
+    }
+    /// `EnderDragonPhaseManager.setPhase`: nothing when it is the phase it
+    /// holds (a strafing dragon too), else the new phase begins fresh.
+    pub(super) fn set_native_phase(&mut self, phase: NativeDragonPhase) {
+        if phase != self.native_phase() {
+            self.set_phase(Phase::from_id(phase.id()));
+        }
+    }
     fn set_phase(&mut self, phase: Phase) {
         if self.phase.id() == phase.id() && phase.id() != 1 {
             return;
+        }
+        // `EnderDragonPhaseManager.setPhase`: the outgoing `end()` first.
+        if matches!(self.phase, Phase::Flaming { .. }) {
+            self.flame_ended = true;
         }
         if let Phase::Flaming { .. } = phase {
             self.flame_count += 1;
@@ -2563,7 +2592,18 @@ impl Game<'_> {
     }
     /// The dragon's breath clouds (`AreaEffectCloud` with instant damage at
     /// a quarter duration scale): shrinking, puffing particles, harming the player.
-    fn tick_breath(&mut self) {
+    /// `DragonSittingFlamingPhase.end`: the flame cloud goes once the
+    /// phase is left.
+    pub(super) fn end_dragon_flame(&mut self) {
+        if self
+            .dragon
+            .as_mut()
+            .is_some_and(|d| std::mem::take(&mut d.flame_ended))
+        {
+            self.breath_clouds.retain(|c| !c.from_dragon);
+        }
+    }
+    pub(super) fn tick_breath(&mut self) {
         // What instant damage reaches: neither creative nor spectator players.
         let players: Vec<FightPlayer> = self
             .fight_players()
@@ -2571,7 +2611,7 @@ impl Game<'_> {
             .filter(|p| p.alive && !p.creative && !p.spectator)
             .collect();
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
-        // DragonSittingFlamingPhase.end discards the flame cloud.
+        self.end_dragon_flame();
         let flame_over = self
             .dragon
             .as_ref()
@@ -3198,6 +3238,9 @@ impl Dragon {
             map.insert("Health".into(), Tag::Float(self.health.to_bits()));
             map.insert("DragonPhase".into(), Tag::Int(self.phase.id()));
             map.insert("DragonDeathTime".into(), Tag::Int(self.death_time));
+            if self.persistent {
+                map.insert("PersistenceRequired".into(), Tag::Byte(1));
+            }
             map.insert(
                 "sitting_damage_received".into(),
                 Tag::Float(self.sitting_damage.to_bits()),
@@ -3218,6 +3261,7 @@ impl Dragon {
         if let Some(Tag::Int(t)) = tag.get("DragonDeathTime") {
             d.death_time = *t;
         }
+        d.persistent = horizon_client::entity_nbt::flag(tag, "PersistenceRequired");
         Some(d)
     }
 }
@@ -3332,6 +3376,10 @@ impl Game<'_> {
         if health != 1.0 {
             meta.push((9, serializer::FLOAT, Value::Float(health)));
         }
+        // Mob.DATA_MOB_FLAGS_ID: aggressive is 4.
+        if d.aggressive {
+            meta.push((15, serializer::BYTE, Value::Byte(4)));
+        }
         let phase = d.phase.id();
         if phase != 10 {
             meta.push((16, serializer::INT, Value::Int(phase)));
@@ -3349,7 +3397,14 @@ impl Game<'_> {
             minecart_steps: None,
             data: 0,
             meta,
-            defaults: Vec::new(),
+            forced_meta: [0; 4],
+            // Back at their defaults the values leave `meta`, and the clients
+            // still hold the old ones.
+            defaults: vec![
+                (9, serializer::FLOAT, Value::Float(1.0)),
+                (15, serializer::BYTE, Value::Byte(0)),
+                (16, serializer::INT, Value::Int(10)),
+            ],
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
@@ -4865,5 +4920,25 @@ mod tests {
         let hurt = d.hurt(0, 5.0, HIT, false);
         assert_eq!(hurt, Hurt::Landed { full: true });
         assert_eq!(d.hurt_time, 10);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_tracked_dragon_lists_its_data_defaults() {
+        use horizon_protocol::entity_data::serializer;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let state = game.lan_dragon_state().unwrap();
+            assert_eq!(
+                state.defaults,
+                vec![
+                    (9, serializer::FLOAT, Value::Float(1.0)),
+                    (15, serializer::BYTE, Value::Byte(0)),
+                    (16, serializer::INT, Value::Int(10)),
+                ]
+            );
+        });
     }
 }
