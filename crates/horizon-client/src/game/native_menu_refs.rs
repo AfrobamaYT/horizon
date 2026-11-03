@@ -15,7 +15,7 @@ use horizon_client::{
 };
 
 impl Game<'_> {
-    fn native_client_menu_layout(&self, menu: MenuRef) -> Option<&str> {
+    fn native_client_menu_name(&self, menu: MenuRef) -> Option<&str> {
         let remote = self.remote.as_ref().filter(|remote| remote.logged_in)?;
         let epoch = self.native_lifecycle.epoch()?;
         (menu.player.entity.epoch() == epoch
@@ -122,7 +122,7 @@ impl Game<'_> {
     /// Number of slots in AbstractContainerMenu.slots.
     pub(super) fn native_menu_slot_count(&self, menu: MenuRef) -> Option<usize> {
         if self.remote.is_some() {
-            let name = self.native_client_menu_layout(menu)?;
+            let name = self.native_client_menu_name(menu)?;
             return Some((0..).map_while(|slot| Self::menu_slot(name, slot)).count());
         }
         let guest = self.native_menu_guest(menu)?;
@@ -188,7 +188,7 @@ impl Game<'_> {
     /// range; Some(None) means an empty slot.
     pub(super) fn native_menu_slot(&self, menu: MenuRef, slot: usize) -> Option<Option<ItemStack>> {
         if self.remote.is_some() {
-            let name = self.native_client_menu_layout(menu)?;
+            let name = self.native_client_menu_name(menu)?;
             let index = Self::menu_slot(name, i32::try_from(slot).ok()?)?;
             return Some(self.slot_view(index));
         }
@@ -301,7 +301,7 @@ impl Game<'_> {
     /// Carried (cursor) stack; outer None means unavailable.
     pub(super) fn native_menu_carried(&self, menu: MenuRef) -> Option<Option<ItemStack>> {
         if self.remote.is_some() {
-            self.native_client_menu_layout(menu)?;
+            self.native_client_menu_name(menu)?;
             return Some(self.carried.clone());
         }
         Some(self.native_menu_guest(menu)?.carried.clone())

@@ -524,16 +524,6 @@ pub struct Menu {
     pub mount: Option<String>,
 }
 
-/// The container and index addressed by a menu slot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum MenuSlotAddress {
-    Player(usize),
-    Main(usize),
-    Grid(usize),
-    Result(usize),
-}
-
 /// `AnvilMenu`'s state besides its slots and `cost`.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Anvil {
@@ -1624,18 +1614,6 @@ impl Menu {
 
     pub fn slot_count(&self) -> usize {
         self.slots.len()
-    }
-
-    /// The backing container and index of a menu slot.
-    pub fn slot_address(&self, index: usize) -> Option<MenuSlotAddress> {
-        let slot = self.slots.get(index)?;
-        Some(match slot.container {
-            PLAYER => MenuSlotAddress::Player(slot.index),
-            MAIN => MenuSlotAddress::Main(slot.index),
-            GRID => MenuSlotAddress::Grid(slot.index),
-            RESULT => MenuSlotAddress::Result(slot.index),
-            _ => return None,
-        })
     }
 
     pub fn slot(&self, i: usize) -> Option<&ItemStack> {

@@ -9,10 +9,13 @@ struct Keys;
 impl Hooks for Keys {
     fn input_key(&self, host: &mut dyn ClientHost, event: &mut InputKeyEvent<'_>) {
         let _: &winit::event::KeyEvent = event.event;
-        if let Some(menu) = host.client_menu() {
-            let _ = menu.client_slot_count(host);
-            let _ = menu.client_slot(host, 0);
-            let _ = menu.client_carried(host);
+        if let Some(menu) = host
+            .local_player()
+            .and_then(|player| player.container_menu(host))
+        {
+            let _ = menu.slot_count(host);
+            let _ = menu.slot(host, 0);
+            let _ = menu.carried(host);
         }
     }
 }

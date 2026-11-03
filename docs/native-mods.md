@@ -3402,16 +3402,14 @@ between these and block or item handlers inside a transaction.
 
 #### A menu's slots
 
-Client hooks can read the local player's supported menu with ClientHost::client_menu, including
-the inventory when no container is open. MenuRef::client_slot_count, client_slot and
-client_carried take a ClientHost; client_slot and client_carried return an outer None when the
-handle or slot is unavailable and Some(None) for an empty slot. Each read checks the world epoch
-and menu generation, so a handle cannot read a replacement, reopened or respawned menu. This first
-client slice supports the inventory, crafting table, generic chests, shulker boxes, hoppers,
-dispensers, furnaces and brewing stands; other screens return None. These methods do not click or
+Client hooks can read the local player's menu with `host.local_player()?.container_menu(host)`,
+including the inventory when no container is open. `MenuRef::slot_count`, `slot` and `carried`
+read on either side; `slot` and `carried` return an outer `None` when the handle or slot is
+unavailable and `Some(None)` for an empty slot. Each read checks the world epoch and menu generation,
+so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
 change slots.
 
-`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`host.menu(player)`). It is
+`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
 (`MenuSlotBacking`), and a write goes to that storage through its own handler, so it is kept once by the transaction
