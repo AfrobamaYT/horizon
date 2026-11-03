@@ -26,7 +26,7 @@ once no loaded mod overrides it. Vanilla properties do not enter the hook.
 ```rust,ignore
 fn item_model_property(
     &self,
-    _host: &dyn Host,
+    _host: &dyn ClientHost,
     event: &mut ItemModelPropertyEvent<'_>,
 ) {
     if event.property == "example:charged" {
@@ -36,7 +36,7 @@ fn item_model_property(
 }
 ```
 
-`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
@@ -3251,7 +3251,7 @@ move undone, in its transaction, and is warned once naming the mod, and `move_re
 neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
 panic the game.
 
-`host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
+On a `ServerHost`, import `HostTransaction` to call `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`). It runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
 what every handler and place write takes, so none happens outside one. Inside, a capability write applies at once, so later steps see it,
 and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
@@ -3309,14 +3309,15 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{Hooks, Host, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
 impl Host for HostDouble {}
+impl ServerHost for HostDouble {}
 struct Counter(Arc<AtomicUsize>);
 impl Hooks for Counter {
-    fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
+    fn tick(&self, _: &mut dyn ServerHost, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -3384,7 +3385,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
     sync: false,
 };
-// Inside a server hook, or mixin code, with `host: &mut dyn Host`:
+// Inside a server hook, or mixin code, with `host: &mut dyn ServerHost`:
 if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
