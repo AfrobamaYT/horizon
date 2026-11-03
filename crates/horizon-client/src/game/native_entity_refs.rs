@@ -1049,6 +1049,10 @@ pub(super) mod tests {
             game.lan.as_ref().unwrap().hub.lan.shared.next_id();
             game.lan.as_ref().unwrap().hub.lan.shared.next_id();
             let level = game.native_level(game.dim.id()).unwrap();
+            let role = game.options.execution_role;
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            assert!(game.native_fake_player(level, 1234, "machine").is_none());
+            game.options.execution_role = role;
             let made = game.native_fake_player(level, 1234, "machine").unwrap();
             assert_eq!(game.native_fake_player(level, 1234, "machine"), Some(made));
             assert!(game.native_fake_player(level, 1234, "other").is_none());
