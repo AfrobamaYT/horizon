@@ -54,60 +54,66 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
 
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_players_last_death_location_reads_from_their_record() {
+    use super::super::Game;
+    use horizon_client::mod_api::PlayerRef;
+
+    /// Opens the game to a LAN host with one placed guest (UUID 123, conn 1).
+    fn add_guest(game: &mut Game<'_>) -> PlayerRef {
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
-        with_game(|game| {
-            let settings = super::super::lan::LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            };
-            let net = NetConfig {
-                announce: false,
-                ..NetConfig::lan(0, "DeathTest".into(), 2)
-            };
-            let config = HubConfig {
-                default_game_mode: 0,
-                guest_commands: false,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 10,
-                simulation_distance: 10,
-                dimension: "minecraft:overworld".into(),
-                allow_flight: false,
-                seed: 0,
-                max_players: 2,
-                integrated: false,
-                levels: Default::default(),
-            };
-            game.lan_host(settings, net, config).unwrap();
-            let (tx, _rx) = mpsc::channel();
-            let mut guest = Guest::new(
-                Joined {
-                    conn: 1,
-                    uuid: 123,
-                    name: "guest".into(),
-                    properties: Vec::new(),
-                    info: ClientInformation::new(8),
-                    brand: String::new(),
-                    sender: PlayerSender::new(tx, Arc::default()),
-                    latency: Arc::new(AtomicI32::new(0)),
-                    address: "127.0.0.1:1".parse().unwrap(),
-                },
-                20,
-                [0.0; 3],
-                8,
-            );
-            guest.placed = true;
+        let settings = super::super::lan::LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        };
+        let net = NetConfig {
+            announce: false,
+            ..NetConfig::lan(0, "DeathTest".into(), 2)
+        };
+        let config = HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 10,
+            simulation_distance: 10,
+            dimension: "minecraft:overworld".into(),
+            allow_flight: false,
+            seed: 0,
+            max_players: 2,
+            integrated: false,
+            levels: Default::default(),
+        };
+        game.lan_host(settings, net, config).unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn: 1,
+                uuid: 123,
+                name: "guest".into(),
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::default()),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+            },
+            20,
+            [0.0; 3],
+            8,
+        );
+        guest.placed = true;
+        game.lan.as_mut().unwrap().hub.guests.push(guest);
+        game.native_player_ref(123).unwrap()
+    }
 
-            let host = game.lan.as_mut().unwrap();
-            host.hub.guests.push(guest);
-            let player = game.native_player_ref(123).unwrap();
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_players_last_death_location_reads_from_their_record() {
+        with_game(|game| {
+            let player = add_guest(game);
             // Never died.
             assert_eq!(game.native_player_last_death_location(player), None);
 
@@ -166,6 +172,33 @@ mod tests {
                 game.native_player_last_death_location(player),
                 Some((fresh, [7, 8, 9]))
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_death_records_the_floored_block_and_dimension() {
+        with_game(|game| {
+            let player = add_guest(game);
+            {
+                // Dying in the Nether at a fractional position.
+                let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                guest.dimension = "minecraft:the_nether".into();
+                guest.position = [-1.2, 64.9, 7.1];
+                guest.health = 0.0;
+            }
+            let mut host = game.lan.take().unwrap();
+            game.guest_die(&mut host, 0, 1);
+            game.lan = Some(host);
+
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert!(guest.dead);
+            assert_eq!(
+                guest.last_death,
+                Some(("minecraft:the_nether".into(), [-2, 64, 7]))
+            );
+            // The nether is not an open level here, so the read finds none.
+            assert_eq!(game.native_player_last_death_location(player), None);
         });
     }
 }
