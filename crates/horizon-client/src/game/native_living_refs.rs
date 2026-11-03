@@ -1457,7 +1457,12 @@ mod tests {
                 .native_living_drop(player, item, false, true)
                 .unwrap()
                 .id();
-            let mod_velocity = game.dropped.iter().find(|entity| entity.id == id).unwrap().velocity;
+            let mod_velocity = game
+                .dropped
+                .iter()
+                .find(|entity| entity.id == id)
+                .unwrap()
+                .velocity;
             assert_eq!(key_velocity, mod_velocity);
         });
     }
@@ -1466,11 +1471,12 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn armor_stand_drop_does_not_swing() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            game.armor_stands.push(horizon_client::entities::ArmorStand::new(
-                90,
-                horizon_core::geometry::Vec3::ZERO,
-                0.0,
-            ));
+            game.armor_stands
+                .push(horizon_client::entities::ArmorStand::new(
+                    90,
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                ));
             let stand = game.native_living(game.native_entity(90).unwrap()).unwrap();
             let before = game.swings_started;
             assert!(
