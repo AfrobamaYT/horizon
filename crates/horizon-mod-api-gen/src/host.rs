@@ -94,7 +94,7 @@ pub(super) fn generate(
                 let receiver = receiver
                     .as_str()
                     .ok_or("helper receiver must be a string")?;
-                let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
+                let (handle, code) = handle_method(method, name, receiver, side, &types.handles)?;
                 let methods = handles.entry(handle).or_default();
                 methods.push_str(side_doc);
                 methods.push_str(&code);

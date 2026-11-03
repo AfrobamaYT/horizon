@@ -23,6 +23,15 @@ pub(super) fn validate(
             return Err(format!("{name}: invalid host marker"));
         }
     }
+    if !is_level
+        && hook.side == HelperSide::Both
+        && mutable == Some(false)
+        && hook["host"].as_str() != Some("read")
+    {
+        return Err(format!(
+            "{name}: a both-side hook with a &self target takes host \"read\""
+        ));
+    }
     if is_level && hook.side == HelperSide::Both && (mutable == Some(true) || ticks) {
         return Err(format!(
             "{name}: a both-side level hook takes the read kind until a client level seam exists"

@@ -1,7 +1,7 @@
 {
   "hooks": [],
   "helpers": [
-    {"name": "transaction_open", "side": "both", "target": "horizon_client::game::transactions::Game<'_>::native_transaction_open", "mod_api": {}},
-    {"name": "transaction_close", "side": "both", "target": "horizon_client::game::transactions::Game<'_>::native_transaction_close", "mod_api": {}}
+    {"name": "transaction_open", "side": "server", "target": "horizon_client::game::transactions::Game<'_>::native_transaction_open", "mod_api": {}},
+    {"name": "transaction_close", "side": "server", "target": "horizon_client::game::transactions::Game<'_>::native_transaction_close", "mod_api": {}}
   ]
 }

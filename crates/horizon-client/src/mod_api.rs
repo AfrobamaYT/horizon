@@ -2062,6 +2062,16 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 /// }
 /// ```
 ///
+/// Wrong-side services do not compile:
+/// ```compile_fail
+/// use horizon_client::mod_api::ClientHost;
+/// fn wrong(host: &mut dyn ClientHost) { host.action_bar(0, todo!()); }
+/// ```
+/// ```compile_fail
+/// use horizon_client::mod_api::ServerHost;
+/// fn wrong(host: &mut dyn ServerHost) { host.mod_screen_open("example"); }
+/// ```
+///
 /// A read-only hook receives only the base host, which cannot be used for a
 /// server or client operation, or opened as a backend by a mod:
 /// ```compile_fail

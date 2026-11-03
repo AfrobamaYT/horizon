@@ -1128,17 +1128,17 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
+        }
+    }
+    impl crate::mod_api::ServerHost for PipeWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
-        }
-    }
-    impl crate::mod_api::ServerHost for PipeWorld {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
@@ -1514,14 +1514,14 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
+    }
+    impl crate::mod_api::ServerHost for Player {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-    }
-    impl crate::mod_api::ServerHost for Player {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
@@ -1806,17 +1806,17 @@ pub(crate) mod tests {
             };
             (item == "minecraft:iron_sword").then_some(default)
         }
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
+        }
+    }
+    impl crate::mod_api::ServerHost for Shelf {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
-        }
-    }
-    impl crate::mod_api::ServerHost for Shelf {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
@@ -2495,17 +2495,17 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
+        fn block_entity(&self, _: LevelRef, _: [i32; 3]) -> Option<BlockEntityRef> {
+            None
+        }
+    }
+    impl crate::mod_api::ServerHost for TwoChests {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-        fn block_entity(&self, _: LevelRef, _: [i32; 3]) -> Option<BlockEntityRef> {
-            None
-        }
-    }
-    impl crate::mod_api::ServerHost for TwoChests {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
@@ -3608,12 +3608,6 @@ pub(crate) mod tests {
         }
     }
     impl Host for TankWorld {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
@@ -3622,6 +3616,12 @@ pub(crate) mod tests {
         }
     }
     impl crate::mod_api::ServerHost for TankWorld {
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
+        }
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
@@ -3817,12 +3817,6 @@ pub(crate) mod tests {
         }
     }
     impl Host for EnergyWorld {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
@@ -3831,6 +3825,12 @@ pub(crate) mod tests {
         }
     }
     impl crate::mod_api::ServerHost for EnergyWorld {
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
+        }
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }

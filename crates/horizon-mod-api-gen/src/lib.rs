@@ -403,6 +403,7 @@ fn handle_method<'a>(
     method: &syn::ItemFn,
     name: &str,
     receiver: &str,
+    side: HelperSide,
     handles: &'a BTreeMap<String, String>,
 ) -> Result<(&'a str, String), String> {
     let handle = handles
@@ -418,6 +419,19 @@ fn handle_method<'a>(
         syn::parse_str(short).map_err(|_| format!("{name}: {short} is not a method name"))?;
     let mut inputs = sig.inputs.iter();
     let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
+    if mutable {
+        match side {
+            HelperSide::Server => {}
+            HelperSide::Both => {
+                return Err(format!("{name}: a both-side handle write is not allowed"));
+            }
+            HelperSide::Client => {
+                return Err(format!(
+                    "{name}: client handle writes need a client backend accessor; add it with the first one"
+                ));
+            }
+        }
+    }
     let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
@@ -1070,8 +1084,14 @@ mod tests {
                 "fn native_{name}(&self, value: {ty}) -> Option<()> {{}}"
             ))
             .unwrap();
-            let (handle, code) =
-                super::handle_method(&method, &name, receiver, &types.handles).unwrap();
+            let (handle, code) = super::handle_method(
+                &method,
+                &name,
+                receiver,
+                super::HelperSide::Server,
+                &types.handles,
+            )
+            .unwrap();
             assert_eq!(handle, ty);
             assert!(code.contains(&format!("backend_of(host)?.{name}(self)")));
         }
@@ -1086,9 +1106,15 @@ mod tests {
             "missing",
         ] {
             assert!(
-                super::handle_method(&method, "hidden_kind", receiver, &types.handles)
-                    .unwrap_err()
-                    .contains("unknown receiver")
+                super::handle_method(
+                    &method,
+                    "hidden_kind",
+                    receiver,
+                    super::HelperSide::Server,
+                    &types.handles
+                )
+                .unwrap_err()
+                .contains("unknown receiver")
             );
         }
         assert_eq!(
@@ -1106,8 +1132,14 @@ mod tests {
             /// Where it is.
             fn native_entity_position(&self, entity: EntityRef, mut scale: f64) -> Option<[f64; 3]> { todo!() }
         };
-        let (handle, code) =
-            super::handle_method(&read, "entity_position", "entity", &types.handles).unwrap();
+        let (handle, code) = super::handle_method(
+            &read,
+            "entity_position",
+            "entity",
+            super::HelperSide::Server,
+            &types.handles,
+        )
+        .unwrap();
         assert_eq!(handle, "EntityRef");
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
@@ -1115,9 +1147,31 @@ mod tests {
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_level_set(&mut self, level: LevelRef) -> bool { todo!() }
         };
-        let (handle, code) =
-            super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
+        let (handle, code) = super::handle_method(
+            &write,
+            "level_set",
+            "level",
+            super::HelperSide::Server,
+            &types.handles,
+        )
+        .unwrap();
         assert_eq!(handle, "LevelRef");
+        for (side, error) in [
+            (
+                super::HelperSide::Both,
+                "level_set: a both-side handle write is not allowed",
+            ),
+            (
+                super::HelperSide::Client,
+                "level_set: client handle writes need a client backend accessor; add it with the first one",
+            ),
+        ] {
+            assert_eq!(
+                super::handle_method(&write, "level_set", "level", side, &types.handles)
+                    .unwrap_err(),
+                error
+            );
+        }
         assert!(code.contains("host : & mut dyn ServerHost"));
         assert!(code.contains(
             "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
@@ -1162,9 +1216,15 @@ mod tests {
         ] {
             let method: syn::ItemFn = method;
             assert!(
-                super::handle_method(&method, name, receiver, &types.handles)
-                    .unwrap_err()
-                    .contains(error),
+                super::handle_method(
+                    &method,
+                    name,
+                    receiver,
+                    super::HelperSide::Server,
+                    &types.handles
+                )
+                .unwrap_err()
+                .contains(error),
                 "{name}"
             );
         }
@@ -1319,6 +1379,10 @@ mod tests {
         assert_eq!(
             host_param(&game, Some(true), false),
             param("HostSide", "HostSide::of(self)")
+        );
+        assert_eq!(
+            super::host_param::validate(&game, "test", false, Some(false), false).unwrap_err(),
+            "test: a both-side hook with a &self target takes host \"read\""
         );
         let read = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
