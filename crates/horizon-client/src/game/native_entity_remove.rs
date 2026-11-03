@@ -177,4 +177,55 @@ mod tests {
             std::fs::remove_dir_all(root).unwrap();
         });
     }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn discard_mob_and_refuse_players_and_stale_handles() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::{mobs::Mob, motion::PlayerMotion};
+        use horizon_core::geometry::Vec3;
+
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let mob = game.native_entity(12).unwrap();
+            assert!(mob.discard(game));
+            assert!(game.mobs[0].removed);
+            assert!(!mob.discard(game));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.native_entity(20).unwrap();
+            assert!(!player.discard(game));
+            assert!(game.player.is_some());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn kill_command_forgets_other_entity_data() {
+        use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
+        use horizon_core::geometry::Vec3;
+        use horizon_world::nbt::{Compound, Tag};
+
+        with_game(|game| {
+            game.others.push(OtherEntity {
+                id: 12,
+                kind: "minecraft:marker".into(),
+                position: Vec3::ZERO,
+                yaw: 0.0,
+                pitch: 0.0,
+            });
+            game.persist.raw.insert(12, Tag::Compound(Compound::new()));
+            game.ui.registries.permission = 4;
+            assert!(game.run_command("kill @e[type=minecraft:marker]"));
+            assert!(game.others.is_empty());
+            assert!(!game.persist.raw.contains_key(&12));
+        });
+    }
 }
