@@ -203,6 +203,20 @@ impl Drop for Unstage {
 /// The owners of item handlers whose real calls disagreed with their simulation, warned once.
 static BROKEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// `owner`'s item handler at `at` moved other than it was asked or its simulation said: a mod
+/// bug, warned once per mod.
+pub(crate) fn warn_broken(owner: Option<usize>, at: &dyn std::fmt::Debug) {
+    let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
+    let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
+    if warned.get_or_insert_default().insert(owner.clone()) {
+        log::warn!(
+            "Horizon: {owner}'s item handler at {at:?} moved other than it was asked or its \
+             simulation said; what it left out is put back or dropped there. Its simulate must \
+             answer as its real call does."
+        );
+    }
+}
+
 #[cfg(test)]
 pub(super) fn warned_about(owner: &str) -> bool {
     let broken = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -260,14 +274,14 @@ impl Container<'_> {
     }
     /// Inserts `stack` into `slot` for real, in passes until one takes nothing, as
     /// `Inventory.add` and NeoForge's insert loops do: a handler may take less per call than
-    /// it holds. What is left.
+    /// it holds. What is left: of the offered item, and never more than was offered.
     fn insert_all(&self, host: &mut dyn Host, slot: usize, stack: ItemStack) -> Option<ItemStack> {
         let mut left = stack;
         loop {
             let count = left.count;
-            match self.insert(host, slot, left, false) {
-                Some(rest) if rest.count >= count => return Some(rest),
-                Some(rest) if rest.count > 0 => left = rest,
+            match self.insert(host, slot, left.clone(), false) {
+                Some(rest) if rest.count >= count => return Some(left),
+                Some(rest) if rest.count > 0 => left.count = rest.count,
                 _ => return None,
             }
         }
@@ -425,15 +439,7 @@ impl Container<'_> {
             Self::Block(h, ..) => super::capability_mod(h),
             Self::Item(h, _) => super::capability_mod(h),
         };
-        let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
-        let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
-        if warned.get_or_insert_default().insert(owner.clone()) {
-            log::warn!(
-                "Horizon: {owner}'s item handler at {place:?} moved other than its simulation said; \
-                 what it left out is put back or dropped there. Its simulate must answer as its real call does."
-            );
-        }
-        drop(warned);
+        warn_broken(owner, place);
         let Self::Block(_, pos, _) = self else {
             return false;
         };

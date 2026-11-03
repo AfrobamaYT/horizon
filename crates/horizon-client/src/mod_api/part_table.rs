@@ -610,6 +610,7 @@ mod tests {
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
             r.block_entity_capability(&ITEMS, "test:liar", Arc::new(Liar));
+            r.block_entity_capability(&ITEMS, "test:item_overstates", Arc::new(ItemOverstates));
             r.item_capability(&ITEM_ITEMS, "test:pouch", Arc::new(Pouch));
             r.item_capability(&ITEM_ITEMS, "test:bag", Arc::new(Bag));
             r.place_provider("test:charms", Arc::new(Charms));
@@ -946,6 +947,7 @@ mod tests {
         one_per_insert: bool,
         whole_extract: bool,
         liar: bool,
+        overstates: bool,
         dropped: Vec<ItemStack>,
     }
     fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
@@ -956,6 +958,7 @@ mod tests {
             one_per_insert: false,
             whole_extract: false,
             liar: false,
+            overstates: false,
             dropped: Vec::new(),
         }
     }
@@ -969,7 +972,11 @@ mod tests {
     }
     impl Host for Shelf {
         fn block_entity_type(&self, _: [i32; 3]) -> Option<String> {
-            self.liar.then(|| "test:liar".into())
+            match (self.liar, self.overstates) {
+                (true, _) => Some("test:liar".into()),
+                (_, true) => Some("test:item_overstates".into()),
+                _ => None,
+            }
         }
         fn container_capacity(
             &self,
@@ -1114,6 +1121,63 @@ mod tests {
             _: &ItemStack,
         ) -> u32 {
             u32::MAX
+        }
+    }
+
+    /// A mod's handler for the shelf whose real calls overstate: an extract gives 5 more than
+    /// asked, and an insert keeps nothing and answers 5 more than was offered.
+    struct ItemOverstates;
+    impl ItemHandler for ItemOverstates {
+        fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            host.container_size(at, side).unwrap_or(0)
+        }
+        fn stack(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+        ) -> Option<ItemStack> {
+            host.container_stack(at, side, slot)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: ItemStack,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            if simulate {
+                return host.container_insert(at, side, slot, stack, true);
+            }
+            Some(ItemStack {
+                count: stack.count + 5,
+                ..stack
+            })
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<ItemStack> {
+            let more = if simulate { 0 } else { 5 };
+            host.container_extract(at, side, slot, max + more, simulate)
+        }
+        fn capacity(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            slot: usize,
+            stack: &ItemStack,
+        ) -> u32 {
+            host.container_capacity(at, side, slot, stack)
         }
     }
 
@@ -1535,6 +1599,35 @@ mod tests {
         assert_eq!(shelf_.dropped, [bread(36)]);
         assert_eq!(shelf_.items(), 64 * 3 + 36);
         // Warned once, naming the mod that registered it.
+        assert!(super::super::item_place::warned_about(
+            &super::super::mod_name(0)
+        ));
+    }
+
+    #[test]
+    fn an_item_handler_answering_more_than_it_was_asked_or_offered_moves_no_more() {
+        game_thread();
+        let apples = |count| stack("minecraft:apple", count, 0);
+        let mut shelf_ = shelf([Some(apples(10)), None, None]);
+        shelf_.whole_extract = true;
+        shelf_.overstates = true;
+        let host: &mut dyn Host = &mut shelf_;
+        let handler = host.capability(&ITEMS, SHELF).unwrap();
+        // Asked for 3, it gives 8: 3 come out, and the 5 more, which its insert won't keep, are
+        // dropped at the shelf.
+        let out = host.extract_checked(&handler, SHELF, None, 0, 3);
+        assert_eq!(out, Some(apples(3)));
+        // Offered 2, it keeps none and answers 7 left: 2 come back, not 7.
+        let rest = host.insert_checked(&handler, SHELF, None, 1, apples(2));
+        assert_eq!(rest, Some(apples(2)));
+        // Offered 2 through a set, the same: the old stack stays and nothing is made.
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(1), apples(2), false, false),
+            Some(apples(2))
+        );
+        assert_eq!(shelf_.slots, [Some(apples(2)), None, None]);
+        assert_eq!(shelf_.dropped, [apples(5)]);
+        assert_eq!(shelf_.items() + 3, 10);
         assert!(super::super::item_place::warned_about(
             &super::super::mod_name(0)
         ));
