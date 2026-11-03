@@ -932,11 +932,7 @@ impl Game<'_> {
         match who {
             FightWho::Host => f(self),
             FightWho::Guest(conn) => {
-                let Some(mut host) = self.lan.take() else {
-                    return;
-                };
-                self.guest_hit_by(&mut host, conn, f);
-                self.lan = Some(host);
+                self.guest_hit_by(conn, f);
             }
         }
     }
@@ -1304,14 +1300,8 @@ impl Game<'_> {
             _ => None,
         };
         let credited = guest.is_some_and(|conn| {
-            let Some(mut host) = self.lan.take() else {
-                return false;
-            };
-            let done = self
-                .as_guest(&mut host, conn, |g| g.award_dragon_kill(id, &view, blow))
-                .is_some();
-            self.lan = Some(host);
-            done
+            self.as_guest(conn, |g| g.award_dragon_kill(id, &view, blow))
+                .is_some()
         });
         if !credited {
             self.award_dragon_kill(id, &view, blow);
