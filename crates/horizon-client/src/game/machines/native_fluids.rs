@@ -194,7 +194,7 @@ impl Game<'_> {
             // The block entity is out of the world while it ticks.
             return matches!(
                 self.world.block_entities.get(&key),
-                Some(horizon_client::containers::BlockEntity::Mod(m)) if !m.id.is_empty()
+                Some(horizon_client::containers::BlockEntity::Mod(m)) if !m.id().is_empty()
             )
             .then(|| FluidAt::Mod(Arc::clone(tanks)));
         }
@@ -398,6 +398,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {
@@ -480,7 +482,7 @@ mod tests {
     fn a_cauldron_move_the_target_takes_part_of_gives_the_whole_levels_that_fit() {
         use super::super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
-        use horizon_client::mod_api::{FLUIDS, Host, NativeBlockUpdateFlags, move_resources};
+        use horizon_client::mod_api::{FLUIDS, NativeBlockUpdateFlags, move_resources};
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -501,7 +503,7 @@ mod tests {
             assert!(game.native_level_set_block(level, to, one, flags));
             // The target has room for two levels: the bucket the source first gives doesn't
             // fit, so the move is undone and tried again with what fit, two levels' worth.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let source = level.capability(host, &FLUIDS, from, None).unwrap();
             let target = level.capability(host, &FLUIDS, to, None).unwrap();
             let moved = host

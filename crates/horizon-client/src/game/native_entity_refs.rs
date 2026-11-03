@@ -394,6 +394,9 @@ pub(super) mod tests {
         .unwrap();
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+        // A game that opened its world resolves its parts; the harness stops
+        // short of the open, so do it here for the by-state part table.
+        game.resolve_parts().unwrap();
         test(&mut game);
     }
 
@@ -1161,7 +1164,7 @@ pub(super) mod tests {
                 8
             );
             assert_ne!(overworld_actor, nether_actor);
-            let host: &mut dyn crate::mod_api::Host = game;
+            let host: &mut dyn crate::mod_api::ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
                 attachment.set(host, holder, 99).unwrap();
                 Err(())
@@ -1182,7 +1185,7 @@ pub(super) mod tests {
                 "minecraft:stick",
                 1,
             ));
-            let host: &mut dyn crate::mod_api::Host = game;
+            let host: &mut dyn crate::mod_api::ServerHost = game;
             let rolled_back: Result<(), ()> = host.transaction(|host, tx| {
                 assert_eq!(place.insert(host, tx, &sticks, 1), 1);
                 Err(())
@@ -1201,7 +1204,7 @@ pub(super) mod tests {
                     .inventory[0],
                 None
             );
-            let host: &mut dyn crate::mod_api::Host = game;
+            let host: &mut dyn crate::mod_api::ServerHost = game;
             assert_eq!(
                 host.transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &sticks, 1))),
                 Ok(1)
@@ -1506,7 +1509,7 @@ pub(super) mod tests {
             impl crate::mod_api::Hooks for Logout {
                 fn player_logged_out(
                     &self,
-                    _: &mut dyn crate::mod_api::Host,
+                    _: &mut dyn crate::mod_api::ServerHost,
                     _: &mut crate::mod_api::PlayerLoggedOutEvent<'_>,
                 ) {
                     self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

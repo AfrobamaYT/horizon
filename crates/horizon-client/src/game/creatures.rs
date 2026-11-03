@@ -7968,11 +7968,12 @@ mod mob_subscription_tests {
 #[cfg(test)]
 mod breeding_tests {
     use super::*;
+    use crate::mod_api::ServerHost;
 
     #[test]
     #[ignore = "needs prepared resources"]
     fn breeding_announces_the_orb_before_the_lower_id_child() {
-        use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks, Host};
+        use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -7985,7 +7986,7 @@ mod breeding_tests {
         impl Hooks for Observer {
             fn baby_entity_spawn(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 _: &mut BabyEntitySpawnEvent<'_>,
             ) -> Flow {
                 if self.cancel.load(Ordering::SeqCst) {
@@ -7996,7 +7997,7 @@ mod breeding_tests {
             }
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.joins
@@ -8534,7 +8535,7 @@ mod dye_mix_tests {
 #[cfg(test)]
 mod conversion_subscriber_tests {
     use super::*;
-    use crate::mod_api::{self, Hooks, Host, LivingConversionPostEvent, ModEntry};
+    use crate::mod_api::{self, Hooks, LivingConversionPostEvent, ModEntry, ServerHost};
     use std::sync::Mutex;
 
     #[test]
@@ -8546,7 +8547,7 @@ mod conversion_subscriber_tests {
         impl Hooks for PostOnly {
             fn living_conversion_post(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut LivingConversionPostEvent<'_>,
             ) {
                 assert_eq!(event.kind, "minecraft:zombie");
@@ -8597,6 +8598,7 @@ mod conversion_subscriber_tests {
 #[cfg(test)]
 mod living_drops_tests {
     use super::*;
+    use crate::mod_api::ServerHost;
 
     #[test]
     fn a_projectile_blow_has_no_known_direct_entity_and_a_melee_one_is_its_causer() {
@@ -8614,14 +8616,18 @@ mod living_drops_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
-        use horizon_client::mod_api::{Flow, Hooks, Host, LivingDropsEvent};
+        use horizon_client::mod_api::{Flow, Hooks, LivingDropsEvent};
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, Ordering},
         };
         struct Observer(Arc<Mutex<Vec<String>>>, Arc<AtomicBool>);
         impl Hooks for Observer {
-            fn living_drops(&self, _: &mut dyn Host, event: &mut LivingDropsEvent<'_>) -> Flow {
+            fn living_drops(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut LivingDropsEvent<'_>,
+            ) -> Flow {
                 let items: Vec<_> = event
                     .drops
                     .iter()
