@@ -1,0 +1,30 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "level_level_event",
+      "target": "horizon_client::game::native_level_events::Game<'_>::native_level_level_event",
+      "receiver": "level"
+    },
+    {
+      "name": "level_game_event",
+      "target": "horizon_client::game::native_level_events::Game<'_>::native_level_game_event",
+      "receiver": "level"
+    },
+    {
+      "name": "level_explode",
+      "target": "horizon_client::game::native_level_events::Game<'_>::native_level_explode",
+      "receiver": "level"
+    },
+    {
+      "name": "level_strike_lightning",
+      "target": "horizon_client::game::native_level_events::Game<'_>::native_level_strike_lightning",
+      "receiver": "level"
+    }
+  ],
+  "rust_summary": "level events, game events, explosions and lightning through a `LevelRef` (`native_level_level_event`, `native_level_game_event`, `native_level_explode`, `native_level_strike_lightning`).",
+  "doc_summary": "events, explosions and lightning in a level through a `LevelRef`, as vanilla's `Level`: `level.level_event(host, id, pos, data)` (`Level.levelEvent`), `game_event(host, event, at)` (`Level.gameEvent`, heard by sculk sensors, wardens and allays), `explode(host, center, radius, fire, interaction)` (`Level.explode` with no source; `NativeExplosionInteraction::None`, `Block` or `Tnt`) and `strike_lightning(host, at, visual_only)`. They act on the level in place; a parked level returns false. Bundles need \"hooks\": @API:level_events@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_level_events.rs"
+  ]
+}

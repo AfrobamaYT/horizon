@@ -511,6 +511,19 @@ pub enum ChunkStatus {
     Full,
 }
 
+/// What an explosion a mod sets off does to blocks
+/// (`Level.ExplosionInteraction`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeExplosionInteraction {
+    /// Blocks stay; entities are hurt and pushed (`NONE`).
+    None,
+    /// Blocks break and drop by the `block_explosion_drop_decay` rule (`BLOCK`).
+    #[default]
+    Block,
+    /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
+    Tnt,
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {
