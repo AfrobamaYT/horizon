@@ -118,12 +118,12 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             assert!(game.native_entity_set_head_yaw(b.entity(), 45.0));
             assert_eq!(game.native_entity_head_yaw(b.entity()), Some(45.0));
             assert!(game.native_entity_push(b.entity(), [0.25, 0.5, -0.25]));
-            assert_eq!(
-                game.native_entity_velocity(b.entity()),
-                Some([0.25, 0.5, -0.25])
-            );
             assert!(game.native_entity_push(a.entity(), [0.5, 0.0, 0.0]));
             game.as_guest(13, |game| {
+                assert_eq!(
+                    game.player.as_ref().unwrap().velocity,
+                    Vec3::new(0.25, 0.5, -0.25)
+                );
                 assert!(game.native_menu_ref(a).is_none());
                 assert!(game.native_menu_ref(b).is_none());
                 assert_eq!(b_menu.slot_count(game), None);
@@ -131,15 +131,24 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             })
             .unwrap();
             assert_eq!(
-                game.native_entity_velocity(a.entity()),
-                Some([0.5, 0.0, 0.0])
+                game.player.as_ref().unwrap().velocity,
+                Vec3::new(0.5, 0.0, 0.0)
             );
         })
         .unwrap();
         assert_eq!(b_menu.slot(game, 36), Some(Some(stone)));
         assert_eq!(
-            game.native_entity_velocity(b.entity()),
-            Some([0.25, 0.5, -0.25])
+            game.lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guest(13)
+                .unwrap()
+                .motion
+                .as_ref()
+                .unwrap()
+                .velocity,
+            Vec3::new(0.25, 0.5, -0.25)
         );
     });
 }
