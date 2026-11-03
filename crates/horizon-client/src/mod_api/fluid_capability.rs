@@ -252,10 +252,10 @@ impl End {
     }
 }
 
-/// `handler` at `at` gave `excess` more from tank `tank` than it was asked: a mod bug, warned
-/// once naming its mod. The excess goes back into that tank, else its others; what none of
-/// them takes is lost, with a warning naming that mod.
-pub(crate) fn give_back(
+/// `handler` at `at` gave `excess` from tank `tank` beyond what it was asked, or another fluid
+/// than its tank showed: a mod bug, warned once naming its mod. The excess goes back into that
+/// tank, else its others; what none of them takes is lost, with a warning naming that mod.
+fn give_back(
     host: &mut dyn Host,
     handler: Arc<dyn FluidHandler>,
     at: [i32; 3],
@@ -267,7 +267,7 @@ pub(crate) fn give_back(
     let end = End { handler, at, side };
     if let Some(lost) = end.back(host, tank, excess) {
         log::warn!(
-            "Horizon: {} mB of {} given at {at:?} were lost: {}'s fluid handler gave more than \
+            "Horizon: {} mB of {} given at {at:?} were lost: {}'s fluid handler gave other than \
              it was asked",
             lost.amount,
             lost.fluid,
@@ -277,6 +277,47 @@ pub(crate) fn give_back(
 }
 
 impl dyn Host + '_ {
+    /// Drains up to `max` millibuckets out of `handler`'s tanks at `at`, through `side`: one
+    /// fluid, the first there, and none with components, as the API 54 helper names a fluid by
+    /// its id alone. What came out. A tank giving more than asked, or another fluid than it
+    /// showed, gives it back (`give_back`); the other fluid ends the drain.
+    pub(crate) fn drain_one_named_fluid(
+        &mut self,
+        handler: &Arc<dyn FluidHandler>,
+        at: [i32; 3],
+        side: Option<Direction>,
+        max: u32,
+    ) -> Option<FluidStack> {
+        let mut out: Option<FluidStack> = None;
+        for tank in 0..handler.tanks(self, at, side) {
+            let taken = out.as_ref().map_or(0, |out| out.amount);
+            let want = max - taken;
+            if want == 0 {
+                break;
+            }
+            let Some(there) = handler.fluid(self, at, side, tank) else {
+                continue;
+            };
+            let first = out.as_ref().unwrap_or(&there);
+            if there.has_components() || !there.same_fluid_same_components(first) {
+                continue;
+            }
+            let Some(got) = handler.extract(self, at, side, tank, want, false) else {
+                continue;
+            };
+            if !got.same_fluid_same_components(&there) {
+                give_back(self, handler.clone(), at, side, tank, got);
+                break;
+            }
+            if got.amount > want {
+                let excess = got.with_amount(got.amount - want);
+                give_back(self, handler.clone(), at, side, tank, excess);
+            }
+            out = Some(there.with_amount(taken + got.amount.min(want)));
+        }
+        out.filter(|out| out.amount > 0)
+    }
+
     /// Moves up to `max` millibuckets of one fluid from the block at `from`, through its side
     /// `from_side`, into the one at `to`, through `to_side`, by their [`FLUIDS`] handlers, in
     /// rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, each source tank in turn

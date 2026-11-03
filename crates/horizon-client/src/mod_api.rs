@@ -783,7 +783,6 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 mod capability;
 pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
-pub(crate) use fluid_capability::give_back;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};

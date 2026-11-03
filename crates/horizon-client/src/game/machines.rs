@@ -971,7 +971,8 @@ impl Game<'_> {
                 continue;
             }
             let host: &mut dyn Host = self;
-            let Some(one) = host.extract_checked(part, at, Some(Direction::Down), slot, 1) else {
+            let Some(one) = host.extract_checked(part, at, Some(Direction::Down), slot, &one)
+            else {
                 continue;
             };
             match self.add_item(None, hopper, one, None) {
