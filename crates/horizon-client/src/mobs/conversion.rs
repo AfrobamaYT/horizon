@@ -75,7 +75,13 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
 
 /// State shared by single and split conversions, without spawn finalization.
 pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
-    to.absorption = from.absorption;
+    // setAbsorptionAmount runs before the effects are copied to the fresh mob.
+    let maximum = *to
+        .kind
+        .attributes
+        .get("minecraft:max_absorption")
+        .unwrap_or(&0.0) as f32;
+    to.absorption = from.absorption.clamp(0.0, maximum);
     to.extra.effects = from.extra.effects.clone();
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
@@ -149,7 +155,7 @@ mod tests {
             single(&s, &mut st, Params::KEEP_ALL);
             assert_eq!(st.custom_name.as_deref(), Some("Frosty"));
             assert!(st.no_ai);
-            assert_eq!(st.absorption, 3.5);
+            assert_eq!(st.absorption, 0.0);
             assert_eq!(st.yaw, 90.0);
             assert_eq!(
                 st.extra.main_hand_stack().map(|s| &*s.item),

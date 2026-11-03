@@ -1810,24 +1810,59 @@ impl Game<'_> {
         self.spawn_item(stack, [at.x, at.y + y_offset, at.z], v, 10);
         v
     }
-    /// `Mob.convertTo(type, ConversionParams.single(this, false, false))`: a
-    /// new mob of `kind` in the same place (no spawn finalization, so no
-    /// random draws) keeps the name, flags, persistence and age; the old one
-    /// is discarded.
-    pub(super) fn convert_mob(&mut self, index: usize, kind: &str) -> Option<u32> {
+    pub(super) fn shear_mooshroom(&mut self, index: usize, tool: &ItemStack) {
         let old = self.mobs[index].clone();
+        let at = old.position;
+        let height = f64::from(old.height());
+        let table = if old.extra.variant == 1 {
+            "minecraft:shearing/mooshroom/brown"
+        } else {
+            "minecraft:shearing/mooshroom/red"
+        };
+        self.audio.play(
+            "minecraft:entity.mooshroom.shear",
+            Some([at.x, at.y, at.z]),
+            1.0,
+            1.0,
+        );
         self.convert_to(
             &old,
-            kind,
+            "minecraft:cow",
             horizon_client::mobs::conversion::Params {
                 keep_equipment: false,
                 preserve_can_pick_up_loot: false,
             },
-        )
+            |game, _| {
+                game.mooshroom_shear_puff([at.x, at.y, at.z], height);
+                let mut drops =
+                    game.sequence_loot("minecraft:shearing/mooshroom", table, Some(tool));
+                game.native_use_drops(
+                    table,
+                    [at.x, at.y, at.z],
+                    None,
+                    Some((old.id, "minecraft:mooshroom")),
+                    Some(tool),
+                    &mut drops,
+                );
+                for stack in drops {
+                    for _ in 0..stack.count {
+                        game.spawn_item(
+                            ItemStack {
+                                count: 1,
+                                ..stack.clone()
+                            },
+                            [at.x, at.y + height, at.z],
+                            new_item_motion(),
+                            0,
+                        );
+                    }
+                }
+            },
+        );
     }
     /// `ShearsDispenseItemBehavior.tryShearEntity`: the first live, ready
     /// `Shearable` in the block is sheared.
-    fn shear_entity(&mut self, target: Pos) -> Result<bool> {
+    pub(super) fn shear_entity(&mut self, target: Pos) -> Result<bool> {
         let shears = ItemStack::new("minecraft:shears", 1);
         for t in self.targets_at(target) {
             // Entity.shearOffAllLeashConnections comes first, for any entity.
@@ -1937,29 +1972,7 @@ impl Game<'_> {
                     }
                 }
                 Species::Mooshroom if !m.is_baby() => {
-                    let variant = if m.extra.variant == 1 { "brown" } else { "red" };
-                    let height = f64::from(m.height());
-                    self.audio
-                        .play("minecraft:entity.mooshroom.shear", sound_at, 1.0, 1.0);
-                    // convertTo(COW): the cow takes its place, then the mushrooms drop.
-                    // A canceled conversion (LivingConversionEvent.Pre) drops nothing.
-                    if self.convert_mob(i, "minecraft:cow").is_some() {
-                        self.mooshroom_shear_puff([at.x, at.y, at.z], height);
-                        let drops = self.sequence_loot(
-                            "minecraft:shearing/mooshroom",
-                            &format!("minecraft:shearing/mooshroom/{variant}"),
-                            Some(&shears),
-                        );
-                        for stack in drops {
-                            for _ in 0..stack.count {
-                                let one = ItemStack {
-                                    count: 1,
-                                    ..stack.clone()
-                                };
-                                self.spawn_at_location(at, height, one);
-                            }
-                        }
-                    }
+                    self.shear_mooshroom(i, &shears);
                 }
                 _ => continue,
             }

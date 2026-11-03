@@ -629,6 +629,7 @@ impl Game<'_> {
         from: &Mob,
         kind: &str,
         params: horizon_client::mobs::conversion::Params,
+        after: impl FnOnce(&mut Self, &mut Mob),
     ) -> Option<u32> {
         // Tick conversions can have been removed from the tick list before
         // their queued event is handled. Restore them until Post has returned.
@@ -680,16 +681,17 @@ impl Game<'_> {
             }
             _ => {}
         }
+        after(self, &mut mob);
         let id = mob.id;
-        // ConversionType.SINGLE: the passengers get off and board the new mob.
+        self.mobs.push(mob);
+        self.native_mobs_joined(self.mobs.len() - 1, false);
+        let transformed_kind = self.mobs.iter().find(|m| m.id == id)?.kind.id.clone();
+        // Only move passengers once the new mob's join has succeeded.
         for rider in self.mobs.iter_mut() {
             if rider.extra.mount == Some(from.id) {
                 rider.extra.mount = Some(id);
             }
         }
-        self.mobs.push(mob);
-        self.native_mobs_joined(self.mobs.len() - 1, false);
-        let transformed_kind = self.mobs.iter().find(|m| m.id == id)?.kind.id.clone();
         self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
         if let Some(old) = self.mobs.iter_mut().find(|m| m.id == from.id) {
             old.removed = true;
@@ -2482,7 +2484,7 @@ impl Game<'_> {
                     }
                 }
                 MobEvent::Convert { from, kind, params } => {
-                    self.convert_to(&from, kind, params);
+                    self.convert_to(&from, kind, params, |_, _| {});
                 }
                 MobEvent::ThrowItem {
                     mob,
@@ -5567,11 +5569,10 @@ impl Game<'_> {
         let mut handled = true;
         let mut ignited_creeper = false;
         let mut drops: Vec<(String, u32)> = Vec::new();
-        // The shearing table rolled, for the mods (none for a mooshroom).
+        // The shearing table rolled, for the mods.
         let mut drops_table = String::new();
         let mob = (m.id, super::native_hooks::mob_kind(m));
-        // `Sheep.shear`'s drops add a spread on top of the ItemEntity's own
-        // motion; `MushroomCow.shear`'s do not.
+        // `Sheep.shear` adds a spread on top of the ItemEntity's own motion.
         let mut wool = false;
         let is_food = m.kind.food.contains(&item);
         let baby_turtle = species == Species::Turtle && m.is_baby();
@@ -5585,8 +5586,6 @@ impl Game<'_> {
         // `Some(true)` for the four spell particles, `Some(false)` for the two
         // smoke puffs of a cow that already holds effects.
         let mut stew_particles: Option<bool> = None;
-        // `MushroomCow.shear`: where, and how tall, the mooshroom that was sheared stood.
-        let mut shear_puff: Option<([f64; 3], f64)> = None;
         // `Ocelot.mobInteract`: whether the fish won its trust.
         let mut ocelot_trust: Option<bool> = None;
         match species {
@@ -5623,30 +5622,9 @@ impl Game<'_> {
                 }
             }
             Species::Mooshroom if item == "minecraft:shears" && !m.is_baby() => {
-                // MushroomCow.shear: becomes a cow and drops five mushrooms.
-                let mushroom = if m.extra.variant == 1 {
-                    "minecraft:brown_mushroom"
-                } else {
-                    "minecraft:red_mushroom"
-                };
-                drops.push((mushroom.into(), 5));
-                shear_puff = Some((
-                    [m.position.x, m.position.y, m.position.z],
-                    f64::from(m.height()),
-                ));
-                m.removed = true;
-                let setup = SpawnSetup {
-                    yaw: m.yaw,
-                    persistent: true,
-                    ..Default::default()
-                };
-                let pos = [m.position.x, m.position.y, m.position.z];
-                sound = Some("entity.mooshroom.shear");
-                self.handle_mob_events(vec![MobEvent::SpawnKind {
-                    kind: "minecraft:cow".into(),
-                    at: pos,
-                    setup,
-                }])?;
+                self.shear_mooshroom(index, held.as_ref().expect("held shears"));
+                let ctx = self.who_context(Some(horizon_client::mobs::Who::Player), None);
+                self.post_game_event("minecraft:shear", feet, ctx);
                 self.damage_held_tool();
             }
             // MushroomCow.mobInteract: a brown adult takes the flower's effects
@@ -6188,9 +6166,6 @@ impl Game<'_> {
             self.trigger_item_entity("minecraft:player_sheared_equipment", &stack, &target);
             self.spawn_item(stack, [center[0], center[1] + 0.5, center[2]], [0.0; 3], 10);
         }
-        if let Some((at, height)) = shear_puff {
-            self.mooshroom_shear_puff(at, height);
-        }
         let mut drops: Vec<ItemStack> = drops
             .into_iter()
             .map(|(item, count)| ItemStack::new(&item, count))
@@ -6209,9 +6184,7 @@ impl Game<'_> {
             for _ in 0..stack.count {
                 // `spawnAtLocation(stack, 1.0)`: an ItemEntity a block above
                 // the feet that starts with the constructor's own motion, and
-                // `setDefaultPickUpDelay`. Sheep.shear adds its spread on top;
-                // MushroomCow.shear builds the entity by hand instead, so its
-                // mushrooms keep the constructor's motion and no pickup delay.
+                // `setDefaultPickUpDelay`. Sheep.shear adds its spread on top.
                 let mut v = dispenser::new_item_motion();
                 if wool {
                     v[0] += (self.world.random.next_float() - self.world.random.next_float())
