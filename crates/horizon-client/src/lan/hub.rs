@@ -133,10 +133,6 @@ pub enum HostEvent {
     /// A guest left (state to save, entities to drop).
     Left(Box<Guest>),
     Packet(u32, Box<S>),
-    /// A guest changed the dominant hand in their client options.
-    MainHandChanged(u32, bool),
-    /// A guest changed their client language option.
-    LocaleChanged(u32, String),
     /// A guest sent new client information: the values before and after, for the mods.
     ClientInformation(
         u32,
@@ -3330,8 +3326,6 @@ impl Hub {
                 }
                 S::ClientInformation(info) => {
                     let g = &mut self.guests[i];
-                    let old_main_hand = g.info.main_hand;
-                    let old_language = g.info.language.clone();
                     // PlayerModelPart.HAT (bit 6): the tab list shows the hat layer.
                     let was_hat = g.info.model_customisation & 0x40 != 0;
                     g.view_distance =
@@ -3341,12 +3335,6 @@ impl Hub {
                     if let Some(old) = old_info {
                         let new = Box::new(g.info.clone());
                         events.push(HostEvent::ClientInformation(conn, old, new));
-                    }
-                    if g.info.main_hand != old_main_hand {
-                        events.push(HostEvent::MainHandChanged(conn, g.info.main_hand == 0));
-                    }
-                    if g.info.language != old_language {
-                        events.push(HostEvent::LocaleChanged(conn, g.info.language.clone()));
                     }
                     g.center = None;
                     let hat = g.info.model_customisation & 0x40 != 0;

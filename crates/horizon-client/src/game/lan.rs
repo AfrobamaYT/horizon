@@ -1996,18 +1996,6 @@ impl Game<'_> {
                         });
                     }
                 }
-                HostEvent::MainHandChanged(conn, left) => {
-                    if let Some(g) = host.hub.guest(conn) {
-                        let (uuid, name) = (g.uuid, g.name.clone());
-                        self.native_player_change_main_hand(uuid, &name, left);
-                    }
-                }
-                HostEvent::LocaleChanged(conn, locale) => {
-                    if let Some(g) = host.hub.guest(conn) {
-                        let (uuid, name) = (g.uuid, g.name.clone());
-                        self.native_player_locale_change(uuid, &name, &locale);
-                    }
-                }
                 HostEvent::ClientInformation(conn, old, new) => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
