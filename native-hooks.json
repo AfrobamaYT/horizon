@@ -153,10 +153,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_carried_stack", "side": "server"
     },
     {
-      "name": "set_block",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block", "side": "server"
-    },
-    {
       "name": "edit_blocks",
       "target": "horizon_client::game::native_world_edit::Game<'_>::native_edit_blocks", "side": "server"
     },
@@ -596,14 +592,6 @@
       "name": "hud",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_hud",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "key",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_key",
       "mod_api": {
         "contract": "listen"
       }
@@ -3476,16 +3464,6 @@
       "name": "world_border_center_changed",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_center_changed",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
-      "name": "world_game_rule_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_game_rule_change",
       "neoforge": "none (NeoForge has no such event)",
       "side": "server",
       "mod_api": {
