@@ -9487,7 +9487,11 @@ mod tests {
         }
         #[horizon_client::mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(
+                &self,
+                registrar: &mut Registrar,
+                _: &crate::mod_api::RegistrationContext<'_>,
+            ) {
                 let kind = registrar
                     .block_entity_type("shared")
                     .blocks(if self.invalid {

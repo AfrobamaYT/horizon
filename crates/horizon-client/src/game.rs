@@ -22439,7 +22439,11 @@ mod tests {
         struct ReloadMod;
         #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
-            fn register(&self, registrar: &mut Registrar) {
+            fn register(
+                &self,
+                registrar: &mut Registrar,
+                _: &crate::mod_api::RegistrationContext<'_>,
+            ) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
             fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {

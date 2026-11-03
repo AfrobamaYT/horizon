@@ -2766,7 +2766,7 @@ mod tests {
         struct StickMod<P>(P);
         #[mod_api::__subscriptions]
         impl<P: ItemPart + Clone> Hooks for StickMod<P> {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.item_part("minecraft:stick", self.0.clone());
             }
         }
@@ -3216,7 +3216,7 @@ mod tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for OffHandTop {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.item_part("minecraft:stick", HeardStick);
         }
 

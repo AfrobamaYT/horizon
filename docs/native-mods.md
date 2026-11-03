@@ -3222,7 +3222,7 @@ impl BlockPart for Gauge {
 
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
-    fn register(&self, r: &mut Registrar) {
+    fn register(&self, r: &mut Registrar, _: &RegistrationContext<'_>) {
         r.block_part("minecraft:stone", Gauge);
     }
 }

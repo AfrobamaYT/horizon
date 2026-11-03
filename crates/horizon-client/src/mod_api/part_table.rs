@@ -937,7 +937,7 @@ pub(crate) mod tests {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl super::super::Hooks for Invalid {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 for path in ["", "other:press", "Uppercase", "has space"] {
                     r.block_entity_type(path).build();
                 }
@@ -1054,7 +1054,7 @@ pub(crate) mod tests {
     struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.block_part("test:gauge", Gauge);
             r.block_part("test:connector", Connector);
             r.block_part_tag("test:gauged", TagGauge);
@@ -2237,7 +2237,7 @@ pub(crate) mod tests {
     struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
                 Some(Box::new(ChemTank(at)))
             });
@@ -2247,7 +2247,7 @@ pub(crate) mod tests {
     struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
-        fn register(&self, r: &mut Registrar) {
+        fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
             for id in ["chem_tank", "chem_vat"] {
                 r.block_entity_type(id)
                     .blocks(&[&format!("test:{id}")])
@@ -2302,7 +2302,7 @@ pub(crate) mod tests {
         struct WeakPowerMod;
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", WeakPower);
             }
         }
@@ -2318,7 +2318,7 @@ pub(crate) mod tests {
         struct RedstoneMod;
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
-            fn register(&self, r: &mut Registrar) {
+            fn register(&self, r: &mut Registrar, _: &crate::mod_api::RegistrationContext<'_>) {
                 r.block_part("minecraft:glass", Connector);
             }
         }
