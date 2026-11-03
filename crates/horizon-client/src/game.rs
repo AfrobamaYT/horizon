@@ -9515,6 +9515,7 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
+        menu.brewed_potion_hook = !crate::mod_api::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
@@ -9705,9 +9706,9 @@ impl Game<'_> {
         }
         if !predicting {
             if !brewed_potion_takes.is_empty() {
-                let player = self.native_acting_id();
+                let (player, entity_id) = (self.native_acting_id(), self.own_entity_id());
                 for stack in &brewed_potion_takes {
-                    self.native_player_brewed_potion(player, stack);
+                    self.native_player_brewed_potion(player, entity_id, stack);
                 }
             }
             for stack in dropped {

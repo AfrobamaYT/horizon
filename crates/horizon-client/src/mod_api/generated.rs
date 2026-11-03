@@ -4624,7 +4624,9 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// A player took a potion from a brewing stand bottle slot. @API:player_brewed_potion@.
+    /// A server player took `stack` from a brewing stand bottle slot
+    /// (`BrewingStandMenu.PotionSlot.onTake`): `player` is their UUID and
+    /// `player_entity_id` their network id. @API:player_brewed_potion@.
     fn player_brewed_potion(&self, host: &mut dyn Host, event: &mut PlayerBrewedPotionEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -15182,15 +15184,21 @@ pub fn dispatch_movement_input(
 #[non_exhaustive]
 pub struct PlayerBrewedPotionEvent<'a> {
     pub player: u128,
+    pub player_entity_id: i32,
     pub stack: &'a ItemStack,
 }
 pub fn dispatch_player_brewed_potion(
     host: &mut dyn Host,
     mods: &[Box<dyn Hooks>],
     player: u128,
+    player_entity_id: i32,
     stack: &ItemStack,
 ) {
-    let mut event = PlayerBrewedPotionEvent { player, stack };
+    let mut event = PlayerBrewedPotionEvent {
+        player,
+        player_entity_id,
+        stack,
+    };
     for mod_hook in super::entered(mods, "player_brewed_potion") {
         mod_hook.player_brewed_potion(host, &mut event);
     }

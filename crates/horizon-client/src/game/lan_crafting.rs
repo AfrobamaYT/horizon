@@ -134,6 +134,7 @@ impl Game<'_> {
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
+        menu.brewed_potion_hook = !horizon_client::mod_api::mods().is_empty();
         let result = op(menu, &env);
         if let Some(maps) = maps {
             self.register_made_maps(maps);
@@ -153,13 +154,13 @@ impl Game<'_> {
         menu.drops.clear();
         store_player(menu, &mut host.hub.guests[gi]);
         if !brewed.is_empty() || !brewed_potion_takes.is_empty() {
-            let conn = host.hub.guests[gi].conn;
+            let (conn, uuid, entity_id) = {
+                let guest = &host.hub.guests[gi];
+                (guest.conn, guest.uuid, guest.entity_id)
+            };
             self.as_guest(host, conn, |g| {
-                if !brewed_potion_takes.is_empty() {
-                    let player = g.native_acting_id();
-                    for stack in &brewed_potion_takes {
-                        g.native_player_brewed_potion(player, stack);
-                    }
+                for stack in &brewed_potion_takes {
+                    g.native_player_brewed_potion(uuid, entity_id, stack);
                 }
                 for stack in &brewed {
                     g.trigger_brewed_potion(stack);

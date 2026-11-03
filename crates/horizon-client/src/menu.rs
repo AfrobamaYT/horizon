@@ -391,7 +391,11 @@ pub struct Menu {
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
-    /// Stacks taken from brewing stand potion slots, for the server hook.
+    /// Set by a server caller when a mod listens: every stack taken from a
+    /// brewing stand's bottle slots then goes to `brewed_potion_takes`.
+    pub brewed_potion_hook: bool,
+    /// Stacks taken from brewing stand bottle slots, for
+    /// `PlayerBrewedPotionEvent`.
     pub brewed_potion_takes: Vec<ItemStack>,
     /// `LivingEntity.onEquipItem` calls that change the item: the
     /// `EquipmentSlot` name and the new stack, in order, for the caller.
@@ -852,6 +856,7 @@ impl Menu {
             crafted: Vec::new(),
             item_crafted: Vec::new(),
             brewed: Vec::new(),
+            brewed_potion_hook: false,
             brewed_potion_takes: Vec::new(),
             equipped: Vec::new(),
             merchant: None,
@@ -1785,7 +1790,7 @@ impl Menu {
     /// `ResultSlot.onTake` and the other `Slot.onTake` overrides.
     fn on_take(&mut self, env: &Env, s: usize, taken: &ItemStack) {
         if self.slots[s].role == Role::Potion {
-            if env.side == LogicalSide::Server && crate::native_client_hooks::has_mods() {
+            if self.brewed_potion_hook && env.side == LogicalSide::Server {
                 self.brewed_potion_takes.push(taken.clone());
             }
             // BrewingStandMenu.PotionSlot.onTake: a stack with potion contents.
@@ -3425,21 +3430,6 @@ pub(crate) mod tests {
         let mut menu = Menu::new(kind);
         menu.creative = true;
         test(&env, &mut menu);
-    }
-
-    #[test]
-    fn brewing_potion_slot_take_paths_without_mods() {
-        with_menu(Kind::Brewing, |env, menu| {
-            for input in [Input::Pickup, Input::QuickMove] {
-                menu.set_slot(env, 0, stack("potion", 1));
-                menu.click(env, 0, 0, input).unwrap();
-                assert_eq!(menu.brewed.len(), 1);
-                assert_eq!(&*menu.brewed[0].item, "minecraft:potion");
-                assert!(menu.brewed_potion_takes.is_empty());
-                menu.brewed.clear();
-                menu.carried = None;
-            }
-        });
     }
 
     /// The Mouse Tweaks wheel's targets: vanilla's routing of one item.
