@@ -72,7 +72,10 @@ impl Game<'_> {
     /// `/forceload add` or `remove` of one chunk (`ServerLevel.setChunkForced`):
     /// true when the forced set changed. A forced chunk is kept loaded and
     /// entity ticking, saved with the level, and the level keeps ticking
-    /// without a player. Unlike vanilla, the chunk is not loaded before
+    /// without a player. This is the world's own `/forceload` state, not a
+    /// ticket the mod owns: the chunk stays forced across restarts, and after
+    /// the mod is unloaded or removed, until `set_forced(false)` or
+    /// `/forceload remove` clears it. Unlike vanilla, the chunk is not loaded before
     /// this returns: it loads over the next ticks, as after `/forceload`.
     /// False for a stale handle, on a client, and for a level the server
     /// has not opened.
@@ -91,14 +94,7 @@ impl Game<'_> {
         } else {
             return false;
         };
-        if !forced {
-            return streaming.forced.remove(&(x, z));
-        }
-        let added = streaming.forced.insert((x, z));
-        if added {
-            streaming.rank_forced(x, z, x, z);
-        }
-        added
+        streaming.set_forced(x, z, forced)
     }
     /// The level's force-loaded chunks (`/forceload query`), sorted as
     /// the command lists them. None for a stale handle or on a client.
@@ -218,7 +214,8 @@ mod tests {
             // The command's own set and order.
             assert!(game.streaming.forced.contains(&(40, -7)));
             let listed = game.native_level_forced_chunks(level).unwrap();
-            assert_eq!(listed.len(), 2);
+            // Signed packed positions: z first, then x.
+            assert_eq!(listed, vec![[40, -7], [-3, 2]]);
             assert!(game.native_chunk_set_forced(far, false));
             assert!(!game.native_chunk_set_forced(far, false), "already clear");
             assert_eq!(game.native_level_forced_chunks(level), Some(vec![[-3, 2]]));

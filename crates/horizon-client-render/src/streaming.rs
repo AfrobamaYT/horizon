@@ -2590,6 +2590,18 @@ impl Streaming {
     pub fn band(&self) -> Option<Band> {
         self.band
     }
+    /// `ServerLevel.setChunkForced` for one chunk: true when the forced set
+    /// changed. An added chunk is ranked for decoration as `/forceload add` does.
+    pub fn set_forced(&mut self, x: i32, z: i32, forced: bool) -> bool {
+        if !forced {
+            return self.forced.remove(&(x, z));
+        }
+        let added = self.forced.insert((x, z));
+        if added {
+            self.rank_forced(x, z, x, z);
+        }
+        added
+    }
     /// Rank the chunks `/forceload add` over chunks `(x0, z0)..=(x1, z1)`
     /// decorates in vanilla's order (`forced_order`), after every chunk
     /// ranked before.
