@@ -633,9 +633,14 @@ pub(super) fn level_shapes(
         "minecraft:the_end",
     ] {
         let shape = overrides.level_height(level).and_then(|h| {
-            LevelShape::new(h.min_y, h.height, h.logical_height, h.has_skylight)
-                .ok()
-                .map(|shape| shape.with_ceiling(h.has_ceiling))
+            LevelShape::new(
+                h.min_y,
+                h.height,
+                h.logical_height,
+                h.has_skylight,
+                h.has_ceiling,
+            )
+            .ok()
         });
         match shape {
             Some(shape) => *shapes.get_mut(level) = shape,
