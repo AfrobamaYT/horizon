@@ -84,7 +84,7 @@ impl Game<'_> {
     /// Mobs, armor stands and the dragon return None until they have live
     /// attribute maps.
     pub(super) fn native_living_attribute_value(
-        &mut self,
+        &self,
         living: LivingRef,
         id: &str,
     ) -> Option<f64> {
@@ -98,7 +98,7 @@ impl Game<'_> {
     /// The base value of an attribute, before modifiers. Mobs, armor stands
     /// and the dragon return None until they have live attribute maps.
     pub(super) fn native_living_attribute_base(
-        &mut self,
+        &self,
         living: LivingRef,
         id: &str,
     ) -> Option<f64> {
@@ -106,20 +106,14 @@ impl Game<'_> {
     }
 
     fn native_living_attribute(
-        &mut self,
+        &self,
         living: LivingRef,
         name: &str,
         kind: horizon_world::attribute_map::ValueKind,
     ) -> Option<f64> {
         let player = match self.native_living_target(living)? {
-            Target::Player => self.player.as_mut()?,
-            Target::Guest(conn) => self
-                .lan
-                .as_mut()?
-                .hub
-                .guest_mut(conn)?
-                .motion
-                .as_deref_mut()?,
+            Target::Player => self.player.as_ref()?,
+            Target::Guest(conn) => self.command_guest(conn)?.motion.as_deref()?,
             _ => return None,
         };
         let key = player.attributes.key(name)?;
@@ -159,7 +153,7 @@ impl Game<'_> {
     /// map; a mob, an armor stand and the dragon their own fields (the
     /// armor stand the fixed 20 the game seeds it with, the dragon its
     /// 200) until live attribute maps cover them.
-    pub(super) fn native_living_max_health(&mut self, living: LivingRef) -> Option<f32> {
+    pub(super) fn native_living_max_health(&self, living: LivingRef) -> Option<f32> {
         match self.native_living_target(living)? {
             Target::Player | Target::Guest(_) => self
                 .native_living_attribute(
@@ -332,6 +326,33 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn immutable_host_attribute_read_refreshes_live_cache() {
+        use horizon_client::{mod_api::Host, motion::PlayerMotion};
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::{Modifier, Operation};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let attributes = &mut game.player.as_mut().unwrap().attributes;
+            let key = attributes.key("minecraft:max_health").unwrap();
+            let instance = attributes.get_instance(Some(key.clone())).unwrap().unwrap();
+            assert_eq!(attributes.instance(&instance).unwrap().value(), 20.0);
+            attributes.edit(&instance, |a, o| a.add_transient(Modifier::new("test:bonus", 5.0, Operation::AddValue).unwrap(), o)).unwrap();
+            assert_eq!(attributes.cached_value(Some(&key)).unwrap(), 20.0);
+            let host: &dyn Host = game;
+            assert_eq!(living.attribute_base(host, "minecraft:max_health"), Some(20.0));
+            assert_eq!(game.player.as_ref().unwrap().attributes.cached_value(Some(&key)).unwrap(), 20.0);
+            assert_eq!(living.attribute_value(host, "minecraft:max_health"), Some(25.0));
+            assert_eq!(living.max_health(host), Some(25.0));
+            assert_eq!(living.attribute_value(host, "missing:attribute"), None);
+            assert_eq!(game.player.as_ref().unwrap().attributes.cached_value(Some(&key)).unwrap(), 25.0);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
