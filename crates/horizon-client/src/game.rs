@@ -220,6 +220,7 @@ mod native_hooks;
 mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
+mod native_item_entity_refs;
 mod native_item_fluids;
 mod native_item_places;
 mod native_level_effects;
