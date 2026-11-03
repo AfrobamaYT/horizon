@@ -5,9 +5,14 @@
       "name": "level_block_shape",
       "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_block_shape",
       "receiver": "level"
+    },
+    {
+      "name": "level_block_face_sturdy",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_block_face_sturdy",
+      "receiver": "level"
     }
   ],
   "rust_summary": "level block outline and collision shapes.",
-  "doc_summary": "Read a level's block-local outline or collision boxes with `level.block_shape(host, pos, kind)`. These reads resolve the level in place and parked levels. Bundles need \"hooks\": @API:level_shapes@.",
+  "doc_summary": "Read a level's block-local outline or collision boxes with `level.block_shape(host, pos, kind)`. Shape reads resolve the level in place and parked levels. `level.block_face_sturdy(host, pos, face, support)` uses the level in place; false means not sturdy. It returns None for clients, stale or parked levels, dynamic-shape states (including moving pistons and shulker boxes), or an exporter error. Unloaded positions read as air. Bundles need \"hooks\": @API:level_shapes@.",
   "comments": ["crates/horizon-client/src/game/native_entity_refs.rs"]
 }
