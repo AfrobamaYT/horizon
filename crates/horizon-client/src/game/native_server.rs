@@ -36,7 +36,7 @@ pub(crate) struct NativeSidebar {
 /// server's scoreboard never holds it.
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
 
-/// The brigadier parser of an argument kind, and its properties.
+/// The argument kinds a native usage may name, each with a [`parser`].
 const KINDS: [&str; 8] = [
     "word",
     "text",
@@ -48,6 +48,7 @@ const KINDS: [&str; 8] = [
     "block_pos",
 ];
 
+/// The brigadier parser of an argument kind, its properties and its dispatcher type.
 fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
     Some(match kind {
         "word" => ("brigadier:string", json!({"type": "word"}), ArgType::Word),
