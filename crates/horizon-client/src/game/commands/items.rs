@@ -256,6 +256,40 @@ impl Game<'_> {
             },
         }
     }
+    /// `LivingEntity.createEquipmentSlotAccess`'s predicate for the slots of a
+    /// stand or the dragon that are not the head or a hand: an empty stack, or
+    /// one whose `getEquipmentSlotForItem` is this very slot. A stand's
+    /// `canUseSlot` refuses body, saddle and the slots its `DisabledSlots`
+    /// lock, so such an item is MAINHAND's. Every other slot takes anything.
+    fn equipment_slot_accepts(&self, slot: &Slot, stack: &Option<ItemStack>) -> bool {
+        use horizon_items::equipment::{BODY, CHEST, FEET, LEGS, MAINHAND, SADDLE};
+        let (index, stand) = match slot {
+            Slot::Stand(id, i) => (*i, self.armor_stands.iter().find(|a| a.id == *id)),
+            Slot::Dragon(_, i) => (*i, None),
+            _ => return true,
+        };
+        let Some(stack) = stack else { return true };
+        if ![FEET, LEGS, CHEST, BODY, SADDLE].contains(&index) {
+            return true;
+        }
+        let worn = self.equippable_slot_sound(stack).map(|(s, _)| s as usize);
+        let usable = |s: usize| match (&stand, slot) {
+            (Some(a), _) => s != BODY && s != SADDLE && !a.is_disabled(s),
+            (None, Slot::Stand(..)) => false,
+            _ => true,
+        };
+        worn.filter(|s| usable(*s)).unwrap_or(MAINHAND) == index
+    }
+    /// `SlotAccess.set` of a command: `slot_set` when the slot's predicate
+    /// takes the stack. A mod's `set_equipment` calls `slot_set` itself and is
+    /// not asked.
+    pub(in crate::game) fn slot_set_by_command(
+        &mut self,
+        slot: &Slot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        self.equipment_slot_accepts(slot, &stack) && self.slot_set(slot, stack)
+    }
     /// Put a stack (or nothing) in a slot; false when the slot cannot take it.
     pub(in crate::game) fn slot_set(&mut self, s: &Slot, stack: Option<ItemStack>) -> bool {
         match s {
@@ -759,7 +793,7 @@ impl Game<'_> {
                     s.count = s.count.min(max);
                     s
                 });
-                if self.slot_set(slot, new) {
+                if self.slot_set_by_command(slot, new) {
                     changed += 1;
                 }
             }
@@ -896,7 +930,7 @@ impl Game<'_> {
                 // ItemStack.isEmpty: air (or a count of 0) is an empty slot.
                 // SlotAccess.set counts every slot it sets, the same item too.
                 let item = item.filter(|s| &*s.item != "minecraft:air" && s.count > 0);
-                if self.slot_set(slot, item) {
+                if self.slot_set_by_command(slot, item) {
                     changed += 1;
                 }
             }

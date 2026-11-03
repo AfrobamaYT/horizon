@@ -151,6 +151,8 @@ mod interaction_shapes;
 mod interactions;
 mod item_draw;
 mod item_particles;
+#[cfg(test)]
+mod item_slot_command_tests;
 mod item_use;
 mod jigsaw_blocks;
 mod jigsaw_edit;
