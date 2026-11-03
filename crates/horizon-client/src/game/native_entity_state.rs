@@ -442,6 +442,46 @@ mod tests {
         });
     }
 
+    fn with_player(test: impl FnOnce(&mut Game<'_>, EntityRef)) {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.native_entity(20).unwrap();
+            test(game, player);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_invisibility_write_is_refused() {
+        with_player(|game, player| assert!(!player.set_invisible(game, true)));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_glowing_write_is_refused() {
+        with_player(|game, player| assert!(!player.set_glowing(game, true)));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_no_gravity_write_is_refused() {
+        with_player(|game, player| assert!(!player.set_no_gravity(game, true)));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_frozen_write_updates_server_state() {
+        with_player(|game, player| {
+            assert!(player.set_ticks_frozen(game, 53));
+            assert_eq!(game.player.as_ref().unwrap().ticks_frozen, 53);
+        });
+    }
+
     #[test]
     fn max_air_follows_the_species() {
         assert_eq!(max_air(None), 300);
