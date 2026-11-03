@@ -1,7 +1,7 @@
 {
   "hooks": [],
   "helpers": [
-    {"name":"item_entity", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_ref"},
+    {"name":"item_entity", "side": "both", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_ref"},
     {"name":"item_entity_stack", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_stack", "receiver":"item_entity"},
     {"name":"item_entity_set_stack", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_stack", "receiver":"item_entity"},
     {"name":"item_entity_pickup_delay", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_pickup_delay", "receiver":"item_entity"},
