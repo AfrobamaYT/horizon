@@ -134,13 +134,33 @@ impl Manifest {
 /// A content mod as found on disk.
 pub struct Package {
     pub manifest: Manifest,
+    pub icon: Option<crate::icon::Icon>,
 }
 impl Package {
     /// A `.hmod` (a zip holding `horizon-mod.toml`, `assets/` and `data/`)
     /// or a folder holding the same. Executable components are unsupported.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        let mut icon = None;
         let toml = if metadata.is_dir() {
+            let icon_path = path.join("icon.png");
+            match std::fs::symlink_metadata(&icon_path) {
+                Ok(metadata) => {
+                    check_folder_file(path, "icon.png")?;
+                    if metadata.len() > crate::icon::MAX_ICON as u64 {
+                        return Err("icon.png exceeds 256 KiB".into());
+                    }
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(&icon_path)
+                        .map_err(|e| format!("icon.png: {e}"))?
+                        .take(crate::icon::MAX_ICON as u64 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(|e| format!("icon.png: {e}"))?;
+                    icon = Some(crate::icon::Icon::parse(bytes)?);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("icon.png: {e}")),
+            }
             check_folder_file(path, MANIFEST)?;
             for (name, _) in crate::content::folder_files(path)? {
                 check_folder_file(path, &name)?;
@@ -163,6 +183,21 @@ impl Package {
                     continue;
                 }
                 check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
+                if name == "icon.png" {
+                    if icon.is_some() {
+                        return Err("duplicate icon.png".into());
+                    }
+                    if entry.size() > crate::icon::MAX_ICON as u64 {
+                        return Err("icon.png exceeds 256 KiB".into());
+                    }
+                    let mut bytes = Vec::new();
+                    zip.by_index(i)
+                        .map_err(|e| e.to_string())?
+                        .take(crate::icon::MAX_ICON as u64 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(|e| format!("icon.png: {e}"))?;
+                    icon = Some(crate::icon::Icon::parse(bytes)?);
+                }
             }
             let mut toml = String::new();
             zip.by_name(MANIFEST)
@@ -177,6 +212,7 @@ impl Package {
         };
         Ok(Package {
             manifest: Manifest::parse(&toml)?,
+            icon,
         })
     }
     /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
@@ -203,7 +239,11 @@ impl Package {
         };
         put(MANIFEST, manifest_text.as_bytes())?;
         for (name, bytes) in files {
-            crate::content::check_path(name)?;
+            if *name == "icon.png" {
+                crate::icon::Icon::parse(bytes.to_vec())?;
+            } else {
+                crate::content::check_path(name)?;
+            }
             check_file(name, 0, || Ok(*bytes)).map_err(|e| e.to_string())?;
             put(name, bytes)?;
         }
