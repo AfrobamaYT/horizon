@@ -1023,6 +1023,8 @@ struct GameLevel<'w> {
     /// Only the integrated or dedicated server dispatches native observations.
     native_authoritative: bool,
     native_player: Option<u128>,
+    /// The acting player's entity id, beside `native_player`.
+    native_player_entity: Option<i32>,
     /// `Level.isDebug`: `setBlock` changes nothing.
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
@@ -1309,7 +1311,7 @@ impl LevelAccess for GameLevel<'_> {
     fn note_block_change(
         &self,
         pos: BlockPos,
-        instrument: &str,
+        instrument: u8,
         old: i32,
         mut new: i32,
     ) -> Option<i32> {
@@ -1318,28 +1320,21 @@ impl LevelAccess for GameLevel<'_> {
             let context = horizon_client::mod_api::NativeNoteBlockChange {
                 dimension: self.dimension,
                 pos,
-                instrument,
+                instrument: horizon_client::mod_api::NativeNoteInstrument::ALL
+                    [usize::from(instrument)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);
         }
         (!cancel).then_some(new)
     }
-    fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
-        let mut cancel = false;
-        if self.native_authoritative {
-            self.native_note_play(
-                self.dimension,
-                self.native_player,
-                pos,
-                instrument,
-                note,
-                &mut cancel,
-            );
-        }
-        !cancel
-    }
-    fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+    fn note_block_play(
+        &self,
+        pos: BlockPos,
+        by_player: bool,
+        instrument: &mut u8,
+        note: &mut i32,
+    ) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;
         if !self.native_authoritative || crate::mod_api::mods().is_empty() {
             return true;
@@ -1347,8 +1342,15 @@ impl LevelAccess for GameLevel<'_> {
         let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
         let mut played = *note;
         let mut cancel = false;
+        let (player, player_entity_id) = if by_player {
+            (self.native_player, self.native_player_entity)
+        } else {
+            (None, None)
+        };
         self.native_note_block_play(
             self.dimension,
+            player,
+            player_entity_id,
             pos,
             &mut played_instrument,
             &mut played,
@@ -4696,6 +4698,7 @@ impl Game<'_> {
             client_side: self.remote.is_some(),
             native_authoritative,
             native_player: self.lan_acting_uuid,
+            native_player_entity: self.lan_acting_entity.map(|id| id as i32),
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
             native_particles: &mut self.creatures.lan_particles,
