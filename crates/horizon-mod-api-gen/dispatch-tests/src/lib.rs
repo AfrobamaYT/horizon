@@ -154,6 +154,7 @@ mod tests {
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
+        pub(super) struct ServerReloadListeners;
     }
     use serde_json::{Map, Value};
     use stubs::*;
