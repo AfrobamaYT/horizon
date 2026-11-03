@@ -68,7 +68,7 @@ pub(super) fn content_root(
     dev: &[std::path::PathBuf],
 ) -> std::path::PathBuf {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::{Capability, Content, Package};
+    use horizon_mods::{Content, Package};
     let here = std::env::current_dir().unwrap_or_default();
     let mut paths: Vec<_> = horizon_mods::find(&here.join(mod_list::DIR))
         .into_iter()
@@ -97,10 +97,7 @@ pub(super) fn content_root(
         };
         let m = &package.manifest;
         let on = content_enabled(&m.id, *native, enabled, &built) || dev.contains(path);
-        if !on
-            || !m.capabilities.contains(&Capability::Registries)
-            || mods.iter().any(|c| c.id == m.id)
-        {
+        if !on || mods.iter().any(|c| c.id == m.id) {
             continue;
         }
         // The items this mod's native code declares may be a file item's crafting remainder.

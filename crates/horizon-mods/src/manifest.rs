@@ -139,20 +139,28 @@ impl Package {
     /// A `.hmod` (a zip holding `horizon-mod.toml`, `assets/` and `data/`)
     /// or a folder holding the same. Executable components are unsupported.
     pub fn read(path: &Path) -> Result<Self, String> {
-        let toml = if path.is_dir() {
-            if path.join(WASM).exists() {
-                return Err(format!(
-                    "{WASM}: unsupported executable file in a content mod"
-                ));
-            }
+        let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        let toml = if metadata.is_dir() {
+            check_folder(path, path)?;
             std::fs::read_to_string(path.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?
         } else {
+            if !metadata.is_file() {
+                return Err(format!(
+                    "{}: unsupported file type in a content mod",
+                    path.display()
+                ));
+            }
             let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
             let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            if zip.index_for_name(WASM).is_some() {
-                return Err(format!(
-                    "{WASM}: unsupported executable file in a content mod"
-                ));
+            for i in 0..zip.len() {
+                let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+                let name = entry.name().map_err(|e| e.to_string())?.into_owned();
+                let mode = entry.unix_mode().unwrap_or_default();
+                if entry.is_dir() && matches!(mode & 0o170000, 0 | 0o040000) {
+                    continue;
+                }
+                check_entry(&name, mode)?;
+                check_header(&name, &mut entry)?;
             }
             let mut toml = String::new();
             zip.by_name(MANIFEST)
@@ -194,10 +202,98 @@ impl Package {
         put(MANIFEST, manifest_text.as_bytes())?;
         for (name, bytes) in files {
             crate::content::check_path(name)?;
+            check_entry(name, 0)?;
+            check_header(name, *bytes)?;
             put(name, bytes)?;
         }
         Ok(zip.finish().map_err(err)?.into_inner())
     }
+}
+
+/// Check entry types before opening anything: links and special files are not content.
+fn check_entry(name: &str, mode: u32) -> Result<(), String> {
+    if !matches!(mode & 0o170000, 0 | 0o100000) {
+        return Err(format!("{name}: unsupported file type in a content mod"));
+    }
+    let extension = name
+        .rsplit(['/', '\\'])
+        .next()
+        .and_then(|n| n.rsplit_once('.'));
+    let executable = extension.is_some_and(|(_, ext)| {
+        [
+            "wasm", "exe", "dll", "so", "dylib", "class", "jar", "com", "bat", "cmd", "ps1",
+        ]
+        .iter()
+        .any(|kind| ext.eq_ignore_ascii_case(kind))
+    });
+    if executable || mode & 0o111 != 0 {
+        return Err(format!(
+            "{name}: unsupported executable file in a content mod"
+        ));
+    }
+    Ok(())
+}
+
+/// File names and permissions are not enough: executable bytes may have any name.
+fn check_header(name: &str, mut file: impl Read) -> Result<(), String> {
+    let mut header = [0; 4];
+    let mut read = 0;
+    while read < header.len() {
+        let size = file
+            .read(&mut header[read..])
+            .map_err(|e| format!("{name}: {e}"))?;
+        if size == 0 {
+            break;
+        }
+        read += size;
+    }
+    let executable = matches!(
+        &header,
+        b"\0asm"
+            | b"\x7fELF"
+            | b"\xfe\xed\xfa\xce"
+            | b"\xce\xfa\xed\xfe"
+            | b"\xfe\xed\xfa\xcf"
+            | b"\xcf\xfa\xed\xfe"
+            | b"\xca\xfe\xba\xbe"
+            | b"\xbe\xba\xfe\xca"
+    ) || header.starts_with(b"MZ")
+        || (header.starts_with(b"#!") && header[2] != b'[');
+    if executable {
+        return Err(format!(
+            "{name}: unsupported executable file in a content mod"
+        ));
+    }
+    Ok(())
+}
+
+fn check_folder(root: &Path, dir: &Path) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if metadata.is_dir() {
+            check_folder(root, &path)?;
+            continue;
+        }
+        let name = path.strip_prefix(root).unwrap().to_string_lossy();
+        let mode = if metadata.is_file() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                metadata.mode()
+            }
+            #[cfg(not(unix))]
+            {
+                0
+            }
+        } else {
+            0o120000
+        };
+        check_entry(&name, mode)?;
+        let file = std::fs::File::open(&path).map_err(|e| format!("{name}: {e}"))?;
+        check_header(&name, file)?;
+    }
+    Ok(())
 }
 
 /// The `.hmod` files and mod folders in `dir`, by name.
@@ -273,27 +369,119 @@ capabilities = ["registries"]
     #[test]
     fn content_round_trips_and_executable_files_are_refused() {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("horizon-mods-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("horizon-mods-{}", std::process::id()));
+        let dir = root.join("folder");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(MANIFEST), EXAMPLE).unwrap();
-        let path = dir.join("ruby.hmod");
-        std::fs::write(&path, Package::write_files(EXAMPLE, &[]).unwrap()).unwrap();
-        assert_eq!(Package::read(&path).unwrap().manifest.id, "ruby");
+        let archive = root.join("ruby.hmod");
+        std::fs::write(&archive, Package::write_files(EXAMPLE, &[]).unwrap()).unwrap();
+        assert_eq!(Package::read(&archive).unwrap().manifest.id, "ruby");
         assert_eq!(Package::read(&dir).unwrap().manifest.id, "ruby");
-        for wasm in [b"".as_slice(), b"\0asm"] {
-            std::fs::write(dir.join(WASM), wasm).unwrap();
+        let cases: &[(&str, &[u8])] = &[
+            ("mod.wasm", b""),
+            ("./mod.wasm", b"\0asm"),
+            ("MOD.WASM", b""),
+            ("sub/mod.wasm", b""),
+            ("assets/ruby/CODE.WaSm", b""),
+            ("assets/ruby/model.bin", b"\0asm"),
+            ("assets/ruby/native.bin", b"\x7fELF"),
+            ("assets/ruby/windows.bin", b"MZ"),
+            ("assets/ruby/mac.bin", b"\xcf\xfa\xed\xfe"),
+            ("assets/ruby/script", b"#!/bin/sh"),
+            ("assets/ruby/program.EXE", b""),
+        ];
+        for (name, bytes) in cases {
+            let file = dir.join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, bytes).unwrap();
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file(MANIFEST, options).unwrap();
+            zip.write_all(EXAMPLE.as_bytes()).unwrap();
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+            zip.finish().unwrap();
+            for source in [&dir, &archive] {
+                let error = Package::read(source).err().unwrap();
+                assert!(
+                    error.contains("unsupported executable file"),
+                    "{name}: {error}"
+                );
+            }
+            std::fs::remove_file(file).unwrap();
+        }
+        assert!(Package::write_files(EXAMPLE, &[("assets/ruby/model.bin", b"\0asm")]).is_err());
+        // Native bundle sources can start with Rust inner attributes, not a script shebang.
+        assert!(
+            Package::write_files(
+                EXAMPLE,
+                &[("assets/ruby/source.txt", b"#![allow(dead_code)]")]
+            )
+            .is_ok()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn archive_links_and_executable_modes_are_refused() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("horizon-mods-kinds-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("ruby.hmod");
+        for link in [false, true] {
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
             let options = zip::write::SimpleFileOptions::default();
             zip.start_file(MANIFEST, options).unwrap();
             zip.write_all(EXAMPLE.as_bytes()).unwrap();
-            zip.start_file(WASM, options).unwrap();
-            zip.write_all(wasm).unwrap();
-            zip.finish().unwrap();
-            for source in [&dir, &path] {
-                let e = Package::read(source).err().unwrap();
-                assert_eq!(e, "mod.wasm: unsupported executable file in a content mod");
+            if link {
+                zip.add_symlink("assets/ruby/link", "missing", options)
+                    .unwrap();
+            } else {
+                zip.start_file("assets/ruby/program", options.unix_permissions(0o755))
+                    .unwrap();
+                zip.write_all(b"ordinary bytes").unwrap();
             }
+            zip.finish().unwrap();
+            let error = Package::read(&path).err().unwrap();
+            assert!(
+                error.contains(if link {
+                    "unsupported file type"
+                } else {
+                    "unsupported executable"
+                }),
+                "{error}"
+            );
         }
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_links_and_executable_modes_are_refused() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root =
+            std::env::temp_dir().join(format!("horizon-mods-folder-kinds-{}", std::process::id()));
+        let dir = root.join("folder");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(MANIFEST), EXAMPLE).unwrap();
+        let file = dir.join("program");
+        std::fs::write(&file, b"ordinary bytes").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = Package::read(&dir).err().unwrap();
+        assert!(error.contains("unsupported executable"), "{error}");
+        std::fs::remove_file(&file).unwrap();
+        for name in ["mod.wasm", "nested/link"] {
+            let link = dir.join(name);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            symlink("missing", &link).unwrap();
+            let error = Package::read(&dir).err().unwrap();
+            assert!(error.contains("unsupported file type"), "{error}");
+            std::fs::remove_file(link).unwrap();
+        }
+        let link = root.join("linked-folder");
+        symlink(&dir, &link).unwrap();
+        let error = Package::read(&link).err().unwrap();
+        assert!(error.contains("unsupported file type"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

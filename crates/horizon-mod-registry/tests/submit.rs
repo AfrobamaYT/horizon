@@ -419,7 +419,10 @@ async fn a_submission_becomes_a_pull_request() {
             "{body}"
         );
         assert!(body.contains("/mods/submit) by @alice."), "{body}");
-        assert!(body.contains("may draw text on your screen"), "{body}");
+        assert!(
+            body.contains("may add blocks, items, mob effects"),
+            "{body}"
+        );
     }
     // The same version again: its pull request is open.
     let (status, json) = client.submit(&csrf, &form(), &file).await;
@@ -562,11 +565,15 @@ async fn what_the_form_refuses() {
     refused(status, &json, "the file's id is \"coords_hud\"");
     // A broken signature.
     let mut f = form();
-    f["signature"] = json!(
-        std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.hmod.minisig"))
-            .unwrap()
-            .replace("RUTV", "RUTW")
-    );
+    let signature =
+        std::fs::read_to_string(fixtures().join("coords_hud-0.1.0.hmod.minisig")).unwrap();
+    let mut lines: Vec<_> = signature.lines().map(str::to_owned).collect();
+    let mut bytes = STANDARD.decode(&lines[1]).unwrap();
+    bytes[10] ^= 1;
+    lines[1] = STANDARD.encode(bytes);
+    let broken = lines.join("\n");
+    assert_ne!(broken, signature.trim_end());
+    f["signature"] = json!(broken);
     let (status, json) = client.submit(&csrf, &f, &file).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
     // A shader pack runs the game's own check: a mod's file isn't one.
