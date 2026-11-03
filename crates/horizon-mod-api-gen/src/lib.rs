@@ -217,7 +217,7 @@ fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<
             .sig;
         for arg in &mut sig.inputs {
             if let syn::FnArg::Typed(arg) = arg {
-                arg.pat = Box::new(syn::parse_quote!(_));
+                *arg.pat = syn::parse_quote!(_);
             }
         }
         Ok(sig.to_token_stream().to_string())
