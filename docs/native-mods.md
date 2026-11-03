@@ -978,7 +978,7 @@ context or retained-listener lookup here.
 ```rust,ignore
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
-    AddServerReloadListenersEvent, FileToIdConverter, Hooks, Identifier, ServerReloadApply,
+    AddServerReloadListenersEvent, FileToIdConverter, Host, Hooks, Identifier, ServerReloadApply,
     ServerReloadContext, ServerReloadError, ServerReloadListener,
 };
 
