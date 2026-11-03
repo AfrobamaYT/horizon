@@ -7,7 +7,7 @@ pub const MANIFEST: &str = "horizon-native.json";
 pub const SOURCE: &str = "native/";
 pub const SOURCE_MANIFEST: &str = "horizon-mixin.toml";
 pub const RUST: &str = "rust";
-pub const MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
+pub const MIXINS_REV: &str = "e8cd0aa38cffef49cb2e088ef716baa107148c02";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SourceLayoutError {
@@ -97,8 +97,6 @@ pub struct Manifest {
     /// Exact source revisions tested together, never mutable tags.
     pub horizon: String,
     pub mixins: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hooks: Option<u32>,
 }
 
 pub fn revision(value: &str) -> bool {
@@ -116,7 +114,6 @@ impl Manifest {
             || self.game.is_empty()
             || !revision(&self.horizon)
             || !revision(&self.mixins)
-            || self.hooks == Some(0)
         {
             return Err(
                 "invalid native manifest: schema 1, id, version, game and exact revisions required"
@@ -396,7 +393,6 @@ mod tests {
             game: "26.3".into(),
             horizon: "a".repeat(40),
             mixins: "b".repeat(40),
-            hooks: None,
         }
     }
     fn read(name: &str, extras: &[(&str, &[u8])], mixin: &str) -> Result<Bundle, String> {
@@ -483,6 +479,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn archive_with_an_unknown_manifest_field_is_refused() {
+        let path = std::env::temp_dir().join(format!("native-unknown-{}.hmod", std::process::id()));
+        for name in ["hooks", "banana"] {
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            zip.start_file(MANIFEST, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            let mut json = serde_json::to_value(manifest()).unwrap();
+            json[name] = serde_json::json!(1);
+            zip.write_all(&serde_json::to_vec(&json).unwrap()).unwrap();
+            zip.finish().unwrap();
+            let error = Bundle::read(&path).err().unwrap();
+            assert!(error.contains("unknown field"), "{error}");
+            assert!(error.contains(name), "{error}");
+        }
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn package_kind_does_not_depend_on_install_folder() {
         let root = std::env::temp_dir().join(format!("native-kind-{}", std::process::id()));
@@ -639,23 +652,5 @@ capabilities = ["registries"]
             .check()
             .is_err()
         );
-    }
-    #[test]
-    fn hooks_is_optional_and_kept() {
-        let hooked = Manifest {
-            hooks: Some(1),
-            ..manifest()
-        };
-        assert!(hooked.check().is_ok());
-        let text = serde_json::to_string(&hooked).unwrap();
-        assert!(text.contains("\"hooks\":1"), "{text}");
-        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap(), hooked);
-        let plain = serde_json::to_string(&manifest()).unwrap();
-        assert!(!plain.contains("hooks"), "{plain}");
-        let zero = Manifest {
-            hooks: Some(0),
-            ..manifest()
-        };
-        assert!(zero.check().is_err());
     }
 }

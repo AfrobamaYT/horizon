@@ -34,6 +34,7 @@ pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
+pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
@@ -160,10 +161,9 @@ pub struct NativeLootDrops<'a> {
     /// cave vines, a hit taking an item frame or its item, or untying a lead
     /// or cutting it with shears. `player` names them, or is `None` when a
     /// dispenser's shears sheared a mooshroom; `block` or `entity` says what
-    /// dropped them. API 100. A mob that a player killed while
+    /// dropped them. A mob that a player killed while
     /// leashed drops its lead on its next tick as a call of its own (`entity`
-    /// the mob, `player` its killer, `table` empty, `used` false). API
-    /// 102.
+    /// the mob, `player` its killer, `table` empty, `used` false).
     pub used: bool,
 }
 
@@ -388,7 +388,7 @@ pub struct NativeScreenView<'a> {
     /// on it. Every container, station and mod window draws on the inventory
     /// screen and so reports `inventory`: tell them apart by `menu` and
     /// `title` (both None on a window the client opened itself) and by
-    /// `slots`. The title's own screens report theirs (API 326): `title`,
+    /// `slots`. The title's own screens report theirs: `title`,
     /// `world_select`, `world_create`, `world_create_flat`, `world_edit`,
     /// `multiplayer`, `add_server`, `direct_connect`…, with no menu, no title
     /// and no slots.
@@ -553,10 +553,10 @@ pub struct NativeServerPlayer {
     pub position: [f64; 3],
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
     pub game_mode: i32,
-    /// Health points, 20 at full; 0 once dead. API 21.
+    /// Health points, 20 at full; 0 once dead.
     pub health: f32,
     /// Where they look, in degrees (`yRot`, `xRot`), as their last move told
-    /// the server. API 49.
+    /// the server.
     pub yaw: f32,
     pub pitch: f32,
 }
@@ -1027,6 +1027,41 @@ pub enum NativeArrowPickup {
     CreativeOnly,
 }
 
+/// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MinecartRef(EntityRef);
+
+impl MinecartRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
+/// Which minecart an entity is: one per vanilla `AbstractMinecart` subclass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeMinecartKind {
+    /// `Minecart`.
+    Rideable,
+    /// `MinecartChest`.
+    Chest,
+    /// `MinecartFurnace`.
+    Furnace,
+    /// `MinecartTNT`.
+    Tnt,
+    /// `MinecartHopper`.
+    Hopper,
+    /// `MinecartCommandBlock`.
+    CommandBlock,
+    /// `MinecartSpawner`.
+    Spawner,
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1334,6 +1369,23 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
+/// current interaction ranges. Entity ids identify this world's network
+/// entities, including dragon parts; they are not persistent handles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum NativeCrosshairTarget {
+    Block {
+        pos: BlockPos,
+        state: BlockStateId,
+        hit: BlockHit,
+    },
+    Entity {
+        id: i32,
+        point: [f64; 3],
+    },
+}
+
 /// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeItemCooldown {
@@ -1345,6 +1397,8 @@ pub struct NativeItemCooldown {
 }
 
 /// An online player in one open server world, keyed by UUID.
+/// A nested guest turn cannot re-enter a player active in an outer turn;
+/// operations requiring that player's swapped state report them unavailable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
     pub(crate) entity: EntityRef,
@@ -1815,7 +1869,12 @@ pub fn mods() -> &'static [ModEntry] {
     installed().map_or(&[], |installed| &installed.mods)
 }
 
-fn listened(hook: generated::HookId) -> bool {
+/// Whether a mod with this `[mod] id` is installed.
+pub fn is_loaded(id: &str) -> bool {
+    mods().iter().any(|entry| entry.id == id)
+}
+
+pub(crate) fn listened(hook: generated::HookId) -> bool {
     installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
@@ -2350,7 +2409,7 @@ mod tests {
     struct Probe;
 
     impl Hooks for Probe {
-        fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, host: &mut dyn Host, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
             let level = host.level(&player.dimension).expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
@@ -2470,7 +2529,7 @@ mod tests {
     struct Chatty;
 
     impl Hooks for Chatty {
-        fn use_item_on(&self, host: &mut dyn Host, _event: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, host: &mut dyn Host, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
             Flow::Continue
         }
@@ -2578,7 +2637,7 @@ mod tests {
             let mut claimed = false;
             let (pos, face) = ([1, 2, 3], [0, 1, 0]);
             let hit = top_hit();
-            dispatch_use_item_on(
+            dispatch_use_on(
                 &mut host,
                 &stack,
                 pos,
@@ -2729,7 +2788,7 @@ mod tests {
         };
         let mut claimed = false;
         let (pos, face) = ([0; 3], [0, 1, 0]);
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &stick(),
             pos,
@@ -2751,7 +2810,7 @@ mod tests {
     struct OffHandTop;
 
     impl Hooks for OffHandTop {
-        fn use_item_on(&self, _: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, _: &mut dyn Host, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
             assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
             Flow::Continue
@@ -2790,7 +2849,7 @@ mod tests {
             lines: Vec::new(),
         };
         let mut claimed = false;
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &stick(),
             [0; 3],

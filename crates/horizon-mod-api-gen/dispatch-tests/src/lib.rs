@@ -112,6 +112,12 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct MinecartRef;
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativeMinecartKind {
+            Rideable,
+        }
         pub(super) struct EffectTickChange;
         pub(super) struct NativeItemDrop;
         #[derive(Clone, Copy)]
@@ -493,7 +499,7 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn use_item_on(&self, _: &mut dyn Host, _: &mut UseItemOnEvent<'_>) -> Flow {
+        fn use_on(&self, _: &mut dyn Host, _: &mut UseOnEvent<'_>) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
@@ -875,7 +881,7 @@ mod tests {
         install(mods.clone());
         calls.lock().unwrap().clear();
         let mut claimed = false;
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &ItemStack::default(),
             [0; 3],
@@ -889,7 +895,7 @@ mod tests {
         assert!(claimed);
         assert_eq!(*calls.lock().unwrap(), [1]);
         calls.lock().unwrap().clear();
-        dispatch_use_item_on(
+        dispatch_use_on(
             &mut host,
             &ItemStack::default(),
             [0; 3],
