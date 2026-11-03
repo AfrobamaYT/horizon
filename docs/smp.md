@@ -29,7 +29,7 @@ on what the stock client renders, never on a client mod.
 
 | Part | Where | What |
 |---|---|---|
-| Server hook points | this repository, `crates/horizon-client/src/game/native_hooks.rs` ([native-mods.md](native-mods.md)) | stable, versioned (`NATIVE_HOOKS_API`), empty when no mod hooks them |
+| Server hook points | this repository, `crates/horizon-client/src/game/native_hooks.rs` ([native-mods.md](native-mods.md)) | stable, empty when no mod hooks them |
 | The `smp` mod | [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods), `native/smp/` | a horizon-mixins bundle: `smp_store.rs`, `smp_economy.rs`, `smp_market.rs`... hold the rules and data (also the mod's own crate, with its tests, no game types), `glue.rs` and small helpers hook the points |
 | The official server's engine | built from a Horizon release's commit with the bundle applied | `horizon-server`'s `[engine] path` points at it; the rest of the server is unchanged |
 
@@ -43,7 +43,7 @@ claim.
 
 ### Hook points the SMP needs
 
-Each is added in its own pull request, raising `NATIVE_HOOKS_API`, documented in [native-mods.md](native-mods.md),
+Each is added in its own pull request and documented in [native-mods.md](native-mods.md),
 and free when no mod hooks it (an empty function). Where a contributor's pull request already adds one (block
 breaking and placing, item use: #4483, #4302), the SMP uses theirs.
 

@@ -3006,7 +3006,7 @@ A catalog hook's trait method, event and return are part of its `hook_version` c
 points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). Later Horizons only add event fields
 (`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So a mod whose `[api]` package uses only catalog
 hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in its `.hnmod`'s `horizon-native.json` to the
-`NATIVE_HOOKS_API` it was made on.
+per-hook contract versions it was made on.
 A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
 leaves `hooks` out.
 

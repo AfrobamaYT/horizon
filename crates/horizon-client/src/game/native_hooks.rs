@@ -842,10 +842,8 @@
 //! recipe viewer needs.
 //!
 //! Names, parameters and call sites are kept from release to release, and
-//! hook points are only ever added: each addition raises [`NATIVE_HOOKS_API`].
-//! A bundle that hooks only these names the API it needs (`hooks`), and the
-//! launcher builds it on any Horizon whose API is at least that one. A change
-//! that would break such a bundle is not made.
+//! hook points are only ever added. A change that would break such a bundle
+//! is not made.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
@@ -1026,11 +1024,6 @@ impl Game<'_> {
 /// `UPDATE_CLIENTS`, `UPDATE_INVISIBLE` and `UPDATE_IMMEDIATE` change nothing
 /// yet.
 pub(super) use horizon_world::level::flags;
-
-/// The hook points' API version. The launcher reads this line from the
-/// source it builds; keep its form.
-#[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 359;
 
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. 232.
@@ -11299,8 +11292,7 @@ mod tests {
         }
     }
     /// horizon-mixins refuses targets whose body has a `cfg` or a macro:
-    /// the hook points and helpers must stay free of both. The launcher
-    /// reads the API line as it is.
+    /// the hook points and helpers must stay free of both.
     /// A data packet for an old window leaves the open mod screen alone.
     #[test]
     fn mod_screen_data_is_its_windows_only() {
@@ -11326,7 +11318,6 @@ mod tests {
             .trim_end()
             .strip_suffix("#[cfg(test)]")
             .expect("the tests module has its cfg");
-        assert!(code.contains("\npub(crate) const NATIVE_HOOKS_API: u32 = "));
         let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
         for line in lines {
             assert!(!line.contains("cfg"), "a cfg in the hook points: {line}");
