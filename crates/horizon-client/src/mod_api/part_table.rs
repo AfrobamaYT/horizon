@@ -2060,6 +2060,7 @@ pub(crate) mod tests {
     /// Install a redstone connector on glass for real-game tests.
     pub(crate) fn redstone_game_thread() {
         struct RedstoneMod;
+        #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
             fn register(&self, r: &mut Registrar) {
                 r.block_part("minecraft:glass", Connector);

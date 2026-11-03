@@ -7,3 +7,4 @@ publish = false
 # Only crates in Horizon's Cargo.lock, by version requirement.
 [dependencies]
 crc32fast = "1"
+horizon-client = { version = "0.1", default-features = false }

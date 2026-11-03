@@ -470,25 +470,19 @@ mod tests {
         assert!(build_lists_mods(r#"{"mods":[{"id":"worldmap"}]}"#));
     }
 
-    /// A minimal `.hmod` the registry accepts: its manifest and its mixin's.
+    /// A minimal flat native `.hmod`.
     fn hmod(dir: &std::path::Path, id: &str) {
-        let horizon = "a".repeat(40);
-        let manifest = serde_json::json!({
-            "schema": 1, "id": id, "version": "0.3.0", "game": "26.3",
-            "horizon": horizon, "mixins": "b".repeat(40),
-        });
-        let mixin = format!(
-            "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
+        let manifest = format!(
+            "id = '{id}'\nname = '{id}'\nversion = '0.3.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
         );
-        let file = std::fs::File::create(dir.join(format!("{id}.hmod"))).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default();
-        zip.start_file("horizon-native.json", options).unwrap();
-        zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("native/horizon-mixin.toml", options)
-            .unwrap();
-        zip.write_all(mixin.as_bytes()).unwrap();
-        zip.finish().unwrap();
+        let files: &[(&str, &[u8])] = &[
+            ("Cargo.toml", b"[package]\nname='example'\nversion='1'\n"),
+            ("src/lib.rs", b"pub fn hooks() {}"),
+        ];
+        let bytes = horizon_mods::Package::write_files(&manifest, files).unwrap();
+        std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
     }
 
     #[test]
