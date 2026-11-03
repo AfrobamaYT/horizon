@@ -732,6 +732,71 @@ impl MobRef {
     }
 }
 
+/// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
+/// It is also a [`MobRef`] and a [`LivingRef`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DragonRef(EntityRef);
+
+impl DragonRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The same entity as a mob handle.
+    pub fn mob(self) -> MobRef {
+        MobRef::new(self.0)
+    }
+}
+
+/// An ender dragon phase (`EnderDragonPhase`), in vanilla's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeDragonPhase {
+    HoldingPattern,
+    StrafePlayer,
+    LandingApproach,
+    Landing,
+    Takeoff,
+    SittingFlaming,
+    SittingScanning,
+    SittingAttacking,
+    ChargingPlayer,
+    Dying,
+    Hover,
+}
+
+impl NativeDragonPhase {
+    const ALL: [Self; 11] = [
+        Self::HoldingPattern,
+        Self::StrafePlayer,
+        Self::LandingApproach,
+        Self::Landing,
+        Self::Takeoff,
+        Self::SittingFlaming,
+        Self::SittingScanning,
+        Self::SittingAttacking,
+        Self::ChargingPlayer,
+        Self::Dying,
+        Self::Hover,
+    ];
+    /// The phase's vanilla id, as the `DragonPhase` tag and the synced data
+    /// carry it.
+    pub fn id(self) -> i32 {
+        self as i32
+    }
+    /// The phase with a vanilla id (`EnderDragonPhase.getById`).
+    pub fn from_id(id: i32) -> Option<Self> {
+        usize::try_from(id)
+            .ok()
+            .and_then(|i| Self::ALL.get(i))
+            .copied()
+    }
+}
+
 /// A dropped item entity of the open world, narrowed with `host.item_entity`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ItemEntityRef(EntityRef);
