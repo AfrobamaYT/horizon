@@ -91,6 +91,36 @@ class PrReadyTests(unittest.TestCase):
                 self.assertIsNone(step.skip)
                 self.assertEqual(step.command, pr_ready.CONTENT_ROOT_TESTS)
 
+    def test_dispatch_and_registry_suites_run_when_their_inputs_change(self):
+        def suite_steps(path):
+            with mock.patch.object(pr_ready, "affected_here", return_value=[]):
+                steps = pr_ready.plan(args(quick=True), "origin/main", {path}, PACKAGES, LIBRARIES, DEPENDENCIES)
+            return {step.name: step for step in steps}
+        for path in ["crates/horizon-mod-api-gen/src/lib.rs",
+                     "crates/horizon-mod-api-gen/dispatch-tests/src/lib.rs",
+                     "crates/horizon-mod-api-macros/src/lib.rs",
+                     "crates/horizon-client/src/mod_api.rs",
+                     "crates/horizon-client/src/mod_api/part_table.rs",
+                     "native-hooks.json",
+                     "tools/native-hook-fragments/tick.json"]:
+            with self.subTest(path=path):
+                by_name = suite_steps(path)
+                for name in ("dispatch tests clippy", "dispatch tests tests"):
+                    self.assertIsNone(by_name[name].skip)
+                self.assertIn("crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml",
+                              by_name["dispatch tests clippy"].command)
+                self.assertIn("--test-threads=4", by_name["dispatch tests tests"].command)
+                self.assertEqual(by_name["mod registry tests clippy"].skip, "mod registry untouched")
+        for path in ["crates/horizon-mod-registry/src/main.rs", "crates/horizon-mod-registry/Cargo.toml"]:
+            with self.subTest(path=path):
+                by_name = suite_steps(path)
+                for name in ("mod registry tests clippy", "mod registry tests tests"):
+                    self.assertIsNone(by_name[name].skip)
+                self.assertEqual(by_name["dispatch tests clippy"].skip, "dispatch surface untouched")
+        by_name = suite_steps("crates/horizon-core/src/lib.rs")
+        self.assertEqual(by_name["dispatch tests clippy"].skip, "dispatch surface untouched")
+        self.assertEqual(by_name["mod registry tests tests"].skip, "mod registry untouched")
+
     def test_shared_rust_configuration_keeps_workspace_coverage(self):
         for path in sorted(pr_ready.ROOT_RUST | {".cargo/config.toml", "crates/unknown/src/lib.rs"}):
             with self.subTest(path=path), mock.patch.object(pr_ready, "affected_here", return_value=[]):
