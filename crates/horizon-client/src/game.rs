@@ -214,6 +214,7 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
+mod native_item_places;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
@@ -4007,6 +4008,19 @@ impl Game<'_> {
         let player = self.native_acting_id();
         self.native_item_dropped(player, &thrown.item, thrown.count);
         self.throw_from_eyes(thrown, eye, true);
+    }
+    /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
+    /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
+    pub(super) fn drop_plain(&mut self, stack: ItemStack) {
+        if stack.count == 0 {
+            return;
+        }
+        // LivingEntity.drop swings the main hand for every drop (`PREDICTED` only keeps the
+        // swing from being sent back to the player who made it).
+        self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
+        if let Some(eye) = self.eye_position() {
+            self.throw_from_eyes(stack, eye, false);
+        }
     }
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
     /// along the view direction. `thrown_from_hand` (`drop(stack, true)`, the
@@ -12624,36 +12638,6 @@ impl Game<'_> {
     /// `CauldronInteractions` for the held item aimed at a cauldron.
     fn use_on_cauldron(&mut self, pos: [i32; 3]) -> Result<bool> {
         use horizon_client::cauldron::{self, Outcome};
-        struct Hand<'g, 'a>(&'g mut Game<'a>);
-        impl cauldron::Player for Hand<'_, '_> {
-            fn creative(&self) -> bool {
-                self.0.creative
-            }
-            fn hand(&mut self) -> &mut Option<ItemStack> {
-                self.0.held_mut()
-            }
-            fn add(&mut self, stack: &mut ItemStack) -> bool {
-                let before = stack.count;
-                match self.0.give(stack.clone()) {
-                    None => stack.count = 0,
-                    Some(rest) => stack.count = rest.count,
-                }
-                stack.count < before
-            }
-            fn contains(&self, stack: &ItemStack) -> bool {
-                self.0
-                    .inventory
-                    .iter()
-                    .flatten()
-                    .any(|have| have.same_item_same_components(stack))
-            }
-            fn drop_stack(&mut self, stack: ItemStack) {
-                if let Some(eye) = self.0.eye_position() {
-                    // ItemUtils.createFilledResult: `player.drop(stack, false)`.
-                    self.0.throw_from_eyes(stack, eye, false);
-                }
-            }
-        }
         let registry = self.pack.assets.registry;
         let Some((state, under_water)) = self.cauldron_at(pos) else {
             return Ok(false);
@@ -12666,7 +12650,9 @@ impl Game<'_> {
             return Ok(false);
         }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
-        let result = cauldron::interact(&state, under_water, removes_dye, &mut Hand(self));
+        let slot = self.held_slot();
+        let mut hand = powder_snow::HeldSlot { game: self, slot };
+        let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
         if result.outcome == Outcome::Pass {
             return Ok(false);
         }

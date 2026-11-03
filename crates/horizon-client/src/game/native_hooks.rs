@@ -9313,7 +9313,7 @@ impl Game<'_> {
     }
     /// The slot a player's carried stack is in, by `native_inventory_tick`'s
     /// numbers: none for another number.
-    fn native_carried_slot(&mut self, slot: i32) -> Option<&mut Option<ItemStack>> {
+    pub(super) fn native_carried_slot(&mut self, slot: i32) -> Option<&mut Option<ItemStack>> {
         match slot {
             0.. if (slot as usize) < self.inventory.len() => self.inventory.get_mut(slot as usize),
             100..=103 => self.armor.get_mut(103 - slot as usize),
