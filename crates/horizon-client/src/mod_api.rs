@@ -1013,7 +1013,7 @@ macro_rules! level_attachment_host {
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
-pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
@@ -1021,10 +1021,12 @@ mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 pub use transaction::TransactionSeal;
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
-    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
-    place_provider, resolve_parts,
+    Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
+    providers, resolve_parts,
+};
+pub use part_table::{
+    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
 };
 
 mod generated {
@@ -1033,6 +1035,9 @@ mod generated {
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+#[cfg(test)]
+pub(crate) use part_table::tests as part_tests;
 
 #[cfg(test)]
 mod tests {
