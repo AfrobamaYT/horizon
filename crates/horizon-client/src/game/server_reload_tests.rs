@@ -51,6 +51,7 @@ impl ServerReloadListener for CheckListener {
         Ok(ServerReloadApply::new(|| {}))
     }
 }
+#[mod_api::__subscriptions]
 impl Hooks for DataListener {
     fn add_server_reload_listeners(
         &self,
@@ -245,6 +246,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
         }
     }
     struct SkipHooks(Arc<Mutex<Vec<(String, String)>>>);
+    #[mod_api::__subscriptions]
     impl Hooks for SkipHooks {
         fn add_server_reload_listeners(
             &self,
@@ -349,8 +351,10 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
 #[ignore = "needs prepared resources"]
 fn server_reload_registration_failure_stops_world_open_and_quiet_mods_are_pruned() {
     struct Quiet;
+    #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
     struct Broken;
+    #[mod_api::__subscriptions]
     impl Hooks for Broken {
         fn add_server_reload_listeners(
             &self,
