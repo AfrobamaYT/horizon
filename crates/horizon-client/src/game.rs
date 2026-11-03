@@ -205,6 +205,7 @@ pub mod native_block_entity_draw;
 mod native_block_entity_refs;
 mod native_block_sprites;
 mod native_block_states;
+mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 mod native_components;
@@ -229,10 +230,12 @@ mod native_item_entity_refs;
 mod native_item_places;
 mod native_level_effects;
 mod native_level_events;
+mod native_level_items;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
+mod native_living_writes;
 mod native_menu_refs;
 mod native_menus;
 mod native_mob_draw;
@@ -2912,9 +2915,9 @@ struct Game<'a> {
     falling: horizon_client::join_seq::JoinList<FallingBlock>,
     /// Blocks the server shows for a moment (`ClientboundAddTransientBlockPacket`).
     transient_blocks: transient_blocks::TransientBlocks,
-    paintings: Vec<horizon_client::entities::Painting>,
+    paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
     painting_variants: paintings::PaintingVariants,
-    item_frames: Vec<horizon_client::entities::ItemFrame>,
+    item_frames: horizon_client::join_seq::JoinList<horizon_client::entities::ItemFrame>,
     frame_model: frames::FrameModel,
     glow_frame_model: frames::FrameModel,
     /// The `map=true` frame variants.
@@ -2922,7 +2925,7 @@ struct Game<'a> {
     glow_map_frame_model: frames::FrameModel,
     armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
     /// `Cushion` decoration entities (game/cushions.rs).
-    cushions: Vec<horizon_client::entities::Cushion>,
+    cushions: horizon_client::join_seq::JoinList<horizon_client::entities::Cushion>,
     /// Entities of types Horizon does not simulate.
     others: Vec<commands::OtherEntity>,
     armor_stand_assets: armor_stands::ArmorStandAssets,
@@ -2960,7 +2963,7 @@ struct Game<'a> {
     /// The ender dragon fight (game/dragon.rs).
     fight: dragon::Fight,
     dragon: Option<dragon::Dragon>,
-    crystals: Vec<dragon::Crystal>,
+    crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
     breath_clouds: Vec<dragon::Breath>,
     dragon_model: Option<horizon_client::mobs::Part>,
@@ -3221,6 +3224,9 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// The abilities of the server player whose turn it is (`as_guest`): their record's
+    /// copy, which the turn reads and writes and `leave_guest` stores. None outside a turn.
+    acting_abilities: Option<horizon_client::lan::abilities::PlayerAbilities>,
     /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
     /// when their own state is back in their record.
     save_after_guest_turn: bool,
@@ -4047,24 +4053,24 @@ impl Game<'_> {
     /// `Player.dropEquipment` for the player who died: unless keep_inventory
     /// is on, `destroyVanishingCursedItems`, then `Inventory.dropAll` from
     /// `at` (the eyes less 0.3): slots 0..36, armor feet to head (36..39),
-    /// the off hand (40), each thrown in a random direction.
-    fn drop_inventory(&mut self, at: [f64; 3]) {
-        if self.ui.rules.bool("keep_inventory") {
-            return;
+    /// the off hand (40), each thrown in a random direction. The mods hear
+    /// the drops (`native_living_drops`) before they join the level.
+    fn drop_inventory(&mut self, at: [f64; 3], dying: &creatures::DyingDrops<'_>) {
+        let mut stacks: Vec<ItemStack> = Vec::new();
+        if !self.ui.rules.bool("keep_inventory") {
+            stacks.extend(self.inventory.iter_mut().filter_map(Option::take));
+            stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
+            stacks.extend(self.offhand.take());
+            stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
+            self.apply_equipment();
         }
-        let mut stacks: Vec<ItemStack> =
-            self.inventory.iter_mut().filter_map(Option::take).collect();
-        stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
-        stacks.extend(self.offhand.take());
-        stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
-        self.apply_equipment();
-        for stack in stacks {
-            let r = &mut self.world.random;
+        let stacks = stacks.into_iter().map(|stack| (stack, at)).collect();
+        self.drop_death_items(dying, stacks, 40, |game| {
+            let r = &mut game.world.random;
             let strength = f64::from(r.next_float()) * 0.5;
             let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
-            let v = [-angle.sin() * strength, 0.2, angle.cos() * strength];
-            self.spawn_item(stack, at, v, 40);
-        }
+            [-angle.sin() * strength, 0.2, angle.cos() * strength]
+        });
     }
     /// Item entity `i` leaves the level (`Entity.discard`); mods hear it.
     pub(super) fn remove_dropped(&mut self, i: usize) -> ItemEntity {
@@ -4455,12 +4461,12 @@ impl Game<'_> {
         let mut removed = removed.into_iter();
         items.retain(|_| !removed.next().unwrap_or(false));
         let Some(p) = self.player.as_ref() else {
-            self.dropped = items;
+            self.put_back_dropped(items);
             self.spawn_destroyed_contents(destroyed);
             return;
         };
         if p.health.dead_or_dying() || self.spectator() {
-            self.dropped = items;
+            self.put_back_dropped(items);
             self.spawn_destroyed_contents(destroyed);
             return;
         }
@@ -4542,8 +4548,18 @@ impl Game<'_> {
             }
             kept.push(item);
         }
-        self.dropped = kept.into();
+        self.put_back_dropped(kept);
         self.spawn_destroyed_contents(destroyed);
+    }
+    /// The item entities `tick_dropped_items` took out, back in the level,
+    /// before those its hooks spawned meanwhile (`addFreshEntity` appends).
+    /// They keep their join numbers; the spawned ones got theirs on joining.
+    fn put_back_dropped(
+        &mut self,
+        items: impl Into<horizon_client::join_seq::JoinList<ItemEntity>>,
+    ) {
+        let spawned = std::mem::replace(&mut self.dropped, items.into());
+        self.dropped.extend(spawned);
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
     /// becomes an item entity where that item lay (`new ItemEntity(level, x,
@@ -12398,9 +12414,12 @@ impl Game<'_> {
         self.load_server_loot();
         // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
         // its chunks and players are.
+        // MinecraftServer's constructor reads CustomBossEvents before any
+        // server event.
+        self.bosses = Default::default();
+        self.load_bossbars();
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
-        self.bosses = Default::default();
         reset_world_progress(&mut self.adv, &mut self.stats);
         self.prefetch_advancement_tree();
         self.restore_player_state = true;
@@ -13770,12 +13789,17 @@ impl Game<'_> {
     /// adding their counts and keeping the smaller age. Server only.
     fn merge_orbs(&mut self) {
         let mut removed = vec![false; self.orbs.len()];
-        for i in 0..self.orbs.len() {
+        // Only the orbs of the tick's start tick; an orb a merge hook awards
+        // joins the level at once, so each later orb's own entity query sees it.
+        let ticking = removed.len();
+        for i in 0..ticking {
             if removed[i] || self.orbs[i].ticks % 20 != 1 {
                 continue;
             }
             let area = self.orbs[i].bounds().inflate(Vec3::new(0.5, 0.5, 0.5));
-            for j in 0..self.orbs.len() {
+            removed.resize(self.orbs.len(), false);
+            let found = removed.len();
+            for j in 0..found {
                 if j == i || removed[j] || !self.orbs[j].bounds().intersects(area) {
                     continue;
                 }
@@ -14908,6 +14932,7 @@ impl Game<'_> {
             p.velocity = Vec3::ZERO;
             p.pitch = 0.0;
             p.teleported = true;
+            p.teleported_delta = [false; 3];
         }
         self.pitch = 0.0;
         if self.lan_acting.is_none() {
@@ -19330,15 +19355,15 @@ impl<'a> Game<'a> {
             level_events: Vec::new(),
             falling: Default::default(),
             transient_blocks: Default::default(),
-            paintings: Vec::new(),
+            paintings: Default::default(),
             painting_variants: prepared.painting_variants,
-            item_frames: Vec::new(),
+            item_frames: Default::default(),
             frame_model: prepared.frame_model,
             glow_frame_model: prepared.glow_frame_model,
             map_frame_model: prepared.map_frame_model,
             glow_map_frame_model: prepared.glow_map_frame_model,
             armor_stands: Default::default(),
-            cushions: Vec::new(),
+            cushions: Default::default(),
             others: Vec::new(),
             armor_stand_assets: prepared.armor_stand_assets,
             waypoint_styles: prepared.waypoint_styles,
@@ -19361,7 +19386,7 @@ impl<'a> Game<'a> {
             maps: maps::Maps::default(),
             fight: dragon::Fight::default(),
             dragon: None,
-            crystals: Vec::new(),
+            crystals: Default::default(),
             dragon_fireballs: Vec::new(),
             breath_clouds: Vec::new(),
             dragon_model: prepared.dragon_model,
@@ -19505,6 +19530,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            acting_abilities: None,
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
             player_attachments: Default::default(),
@@ -22204,7 +22230,7 @@ mod tests {
         }
         let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
         mod_api::install_parts(&mods).unwrap();
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
             game.reload_world_tables();
@@ -22256,7 +22282,7 @@ mod tests {
                 Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
                     as Box<dyn Hooks>,
             ]);
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world

@@ -310,6 +310,24 @@ impl Game<'_> {
                     slot.previous = slot.position;
                 }
             }
+            Target::Other(id) => {
+                let slot = self
+                    .others
+                    .iter_mut()
+                    .find(|o| o.id == id)
+                    .ok_or_else(stale)?;
+                let new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
+                let is_display = matches!(
+                    slot.kind.as_str(),
+                    "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
+                );
+                *slot = new;
+                // `EntityDataAccessor.setData` keeps the entity's UUID.
+                set_key(&mut tag, "UUID", Tag::IntArray(self.uuid_for(id).to_vec()));
+                if is_display {
+                    self.persist.force_meta(id, 8);
+                }
+            }
             Target::Item(id) => {
                 let new = entity_nbt::item_entity_from_nbt(&tag, id, 0.0).ok_or_else(stale)?;
                 if let Some(slot) = self.dropped.iter_mut().find(|e| e.id == id) {
@@ -346,7 +364,8 @@ impl Game<'_> {
         | Target::Item(id)
         | Target::Stand(id)
         | Target::Frame(id)
-        | Target::Fangs(id) = t
+        | Target::Fangs(id)
+        | Target::Other(id) = t
         {
             self.persist.raw.insert(id, tag);
         }
@@ -494,17 +513,8 @@ impl Game<'_> {
             DataRef::Entity(t) => self.apply_entity_nbt(*t, tag),
             DataRef::Block(p) => {
                 let key = (p[0], p[1], p[2]);
-                if let Some((_, mut new)) = save::decode_block_entity(&tag) {
-                    self.take_loot_table(key, &tag, &mut new);
-                    self.world.block_entities.insert(key, new);
-                    self.world.set_block_lock(key, &tag);
-                    self.update_spawner_display(key);
-                    // BlockDataAccessor.setData: setChanged and sendBlockUpdated(3),
-                    // even when the block state itself stays the same.
-                    self.mark_block_entity_updated(key);
-                    let state = self.world.block(p[0], p[1], p[2]);
-                    // Redraw what shows the block entity (signs, banners).
-                    let _ = self.world.set(p[0], p[1], p[2], state);
+                if self.load_block_entity_data(key, &tag) {
+                    self.block_entity_updated(key);
                 }
                 Ok(())
             }
@@ -513,6 +523,30 @@ impl Game<'_> {
                 Ok(())
             }
         }
+    }
+    /// `BlockEntity.loadWithComponents` for the block entity at `key` from its full saved
+    /// `tag` (id and position included): false when the tag doesn't decode.
+    pub(in crate::game) fn load_block_entity_data(
+        &mut self,
+        key: (i32, i32, i32),
+        tag: &Tag,
+    ) -> bool {
+        let Some((_, mut new)) = save::decode_block_entity(tag) else {
+            return false;
+        };
+        self.take_loot_table(key, tag, &mut new);
+        self.world.block_entities.insert(key, new);
+        self.world.set_block_lock(key, tag);
+        self.update_spawner_display(key);
+        true
+    }
+    /// What `BlockDataAccessor.setData` tells the world after a load: `setChanged` and
+    /// `sendBlockUpdated(3)`, even when the block state stays the same.
+    pub(in crate::game) fn block_entity_updated(&mut self, key: (i32, i32, i32)) {
+        self.mark_block_entity_updated(key);
+        let state = self.world.block(key.0, key.1, key.2);
+        // Redraw what shows the block entity (signs, banners).
+        let _ = self.world.set(key.0, key.1, key.2, state);
     }
     fn data_name(&self, r: &DataRef) -> Text {
         match r {
@@ -960,5 +994,112 @@ impl Game<'_> {
             return Err(err("commands.summon.failed.uuid", &[]));
         }
         Ok(target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_core::geometry::Vec3;
+
+    /// `lan_guest_joined`'s placement-only pass, between a forced write and
+    /// the tracker pass, must not spend the marks in either dimension.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn guest_placement_keeps_forced_metadata_in_each_dimension() {
+        use horizon_client::lan::entity::{EntityState, States};
+        with_game(|game| {
+            for elsewhere in [false, true] {
+                game.persist.force_meta(12, 8);
+                let mut parked = elsewhere.then(|| std::mem::take(&mut game.persist));
+                let mut placement = States::default();
+                placement.push(EntityState {
+                    id: 12,
+                    ..Default::default()
+                });
+                game.lan_entity_uuids(&mut placement);
+                if let Some(ref mut saved) = parked {
+                    std::mem::swap(&mut game.persist, saved);
+                }
+                assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+                let mut snapshot = States::default();
+                snapshot.push(EntityState {
+                    id: 12,
+                    ..Default::default()
+                });
+                game.lan_entity_uuids(&mut snapshot);
+                assert_eq!(snapshot.as_slice()[0].forced_meta, [1 << 8, 0, 0, 0]);
+                game.spend_forced_meta();
+                assert!(game.persist.forced_meta.is_empty());
+            }
+        });
+    }
+
+    /// `EntityDataAccessor.setData` keeps the entity's id and UUID: a
+    /// `/data merge` that carries a different UUID does not take, and a
+    /// display's load marks its start delay forced
+    /// (`Display.setTransformationInterpolationDelay`).
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn merging_display_nbt_keeps_the_uuid_and_forces_the_start_delay() {
+        with_game(|game| {
+            let mut raw = Compound::new();
+            raw.insert(
+                "Pos".into(),
+                Tag::List(
+                    [0.5f64, 64.0, 0.5]
+                        .map(|v| Tag::Double(v.to_bits()))
+                        .to_vec(),
+                ),
+            );
+            game.persist.raw.insert(12, Tag::Compound(raw));
+            game.persist.uuids.insert(12, [1, 2, 3, 4]);
+            game.others.push(super::super::OtherEntity {
+                id: 12,
+                kind: "minecraft:block_display".into(),
+                position: Vec3::new(0.5, 64.0, 0.5),
+                yaw: 0.0,
+                pitch: 0.0,
+            });
+            let mut merge = Compound::new();
+            merge.insert(
+                "Pos".into(),
+                Tag::List(
+                    [0.5f64, 64.0, 0.5]
+                        .map(|v| Tag::Double(v.to_bits()))
+                        .to_vec(),
+                ),
+            );
+            merge.insert("UUID".into(), Tag::IntArray(vec![9, 9, 9, 9]));
+            merge.insert("start_interpolation".into(), Tag::Int(0));
+            game.apply_entity_nbt(Target::Other(12), Tag::Compound(merge))
+                .unwrap();
+            assert_eq!(game.uuid_for(12), [1, 2, 3, 4]);
+            assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+            game.spend_forced_meta();
+            let ctx = horizon_command::Context {
+                root: 0,
+                nodes: vec![],
+                args: vec![horizon_command::ParsedArg {
+                    name: "nbt".into(),
+                    value: horizon_command::Arg::Str("{start_interpolation:0}".into()),
+                    range: (0, 23),
+                }],
+                command: None,
+                range: (0, 23),
+                child: None,
+                literals: vec![],
+            };
+            for _ in 0..2 {
+                assert_eq!(
+                    game.cmd_data_in("data.merge", &ctx, DataRef::Entity(Target::Other(12)))
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+                game.spend_forced_meta();
+            }
+        });
     }
 }

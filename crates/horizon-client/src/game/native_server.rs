@@ -12,7 +12,7 @@ use super::{Dim, Game, commands::execute, lan::LanHost};
 pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     command::{ArgType, Dispatcher},
-    lan::{data::component_nbt, guest::Guest},
+    lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
     motion::PlayerMotion,
     text::Text,
@@ -278,6 +278,8 @@ enum PlayerRead<'a> {
     Acting {
         mode: i32,
         body: Option<&'a PlayerMotion>,
+        /// The player's stored abilities, when it is a server player's turn.
+        abilities: Option<PlayerAbilities>,
     },
     Guest(&'a Guest),
 }
@@ -295,8 +297,13 @@ impl PlayerRead<'_> {
     }
 
     fn may_build(&self) -> bool {
-        let mode = self.mode();
-        mode == 0 || mode == 1
+        match self {
+            Self::Acting {
+                abilities: Some(a), ..
+            } => a.may_build,
+            Self::Guest(guest) => guest.abilities.may_build,
+            Self::Acting { mode, .. } => *mode < 2,
+        }
     }
 
     fn body(&self) -> Option<&PlayerMotion> {
@@ -320,34 +327,32 @@ impl PlayerRead<'_> {
     }
 
     fn abilities(&self) -> Option<NativePlayerAbilities> {
-        let (invulnerable, flying, may_fly, fly_speed) = match self {
-            Self::Acting { body, .. } => {
+        let a = match self {
+            Self::Acting {
+                abilities: Some(a), ..
+            } => *a,
+            Self::Acting { mode, body, .. } => {
+                // No server turn: what the mode gives, with the body's flight.
                 let body = body.as_ref()?;
-                (
-                    body.invulnerable,
-                    body.flying,
-                    body.may_fly,
-                    body.flying_speed,
-                )
+                let mut a = PlayerAbilities {
+                    flying: body.flying,
+                    flying_speed: body.flying_speed,
+                    ..Default::default()
+                };
+                a.update_for_mode(*mode);
+                a.flying = body.flying;
+                a
             }
-            Self::Guest(guest) => {
-                let flags = guest.ability_flags();
-                (
-                    flags & 1 != 0,
-                    flags & 2 != 0,
-                    flags & 4 != 0,
-                    guest.flying_speed,
-                )
-            }
+            Self::Guest(guest) => guest.abilities,
         };
         Some(NativePlayerAbilities {
-            invulnerable,
-            flying,
-            may_fly,
-            instabuild: self.creative(),
-            may_build: self.may_build(),
-            fly_speed,
-            walk_speed: 0.1,
+            invulnerable: a.invulnerable,
+            flying: a.flying,
+            may_fly: a.may_fly,
+            instabuild: a.instabuild,
+            may_build: a.may_build,
+            fly_speed: a.flying_speed,
+            walk_speed: a.walking_speed,
         })
     }
 }
@@ -373,6 +378,7 @@ impl Game<'_> {
                 PlayerRead::Acting {
                     mode: self.mode_id(),
                     body: self.player.as_ref(),
+                    abilities: self.acting_abilities,
                 },
                 self.lan_acting_entity?,
             ));
@@ -397,6 +403,7 @@ impl Game<'_> {
                 PlayerRead::Acting {
                     mode: self.mode_id(),
                     body: Some(body),
+                    abilities: self.acting_abilities,
                 },
                 body.entity_id as u32,
             ));
@@ -446,6 +453,49 @@ impl Game<'_> {
         }) && changed
     }
 
+    /// Stores a server player's `Abilities` and tells their client
+    /// (`ServerPlayer.onUpdateAbilities`). They stay as written until the
+    /// player's game mode changes (`GameType.updatePlayerAbilities`), and are
+    /// saved with the player. A speed that is not finite refuses the write
+    /// (vanilla's setters take any float). Returns false for a
+    /// stale or unavailable player, another player during a swap, and a speed
+    /// that is not finite.
+    pub(super) fn native_player_set_abilities(
+        &mut self,
+        player: PlayerRef,
+        abilities: NativePlayerAbilities,
+    ) -> bool {
+        if !abilities.fly_speed.is_finite() || !abilities.walk_speed.is_finite() {
+            return false;
+        }
+        let stored = PlayerAbilities {
+            invulnerable: abilities.invulnerable,
+            flying: abilities.flying,
+            may_fly: abilities.may_fly,
+            instabuild: abilities.instabuild,
+            may_build: abilities.may_build,
+            flying_speed: abilities.fly_speed,
+            walking_speed: abilities.walk_speed,
+        };
+        if self.native_player_ref(player.uuid()) != Some(player) {
+            return false;
+        }
+        let mut stored_here = false;
+        self.native_as_player(player.uuid(), |game| {
+            let Some(slot) = game.acting_abilities.as_mut() else {
+                return;
+            };
+            *slot = stored;
+            if let Some(body) = game.player.as_mut() {
+                body.invulnerable = stored.invulnerable;
+                body.may_fly = stored.may_fly;
+                body.flying = stored.flying;
+                body.flying_speed = stored.flying_speed;
+            }
+            stored_here = true;
+        }) && stored_here
+    }
+
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_creative(&self, player: PlayerRef) -> Option<bool> {
         Some(self.player_handle_read(player)?.creative())
@@ -478,7 +528,6 @@ impl Game<'_> {
     }
 
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
-    /// Horizon currently keeps no per-player walk speed and sends 0.1.
     pub(super) fn native_player_abilities(
         &self,
         player: PlayerRef,
@@ -798,7 +847,7 @@ impl Game<'_> {
     /// The experience orbs of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: what a mod reads before it
     /// cancels an orb in `native_entity_join_level`, to give its points with
-    /// `native_give_experience`. Empty for a level not in place and on a
+    /// `PlayerRef::give_experience_points`. Empty for a level not in place and on a
     /// client of a server.
     pub(super) fn native_experience_orbs(
         &self,
@@ -850,33 +899,6 @@ impl Game<'_> {
         orb.count = count.unwrap_or(orb.count);
         orb.age = age.unwrap_or(orb.age);
         true
-    }
-    /// Gives `points` of experience to the player `uuid` as an orb they touch
-    /// does (`ExperienceOrb.playerTouch`): Mending repairs their damaged items
-    /// with it first (`repairPlayerItems`), then the rest goes to their
-    /// experience (`Player.giveExperiencePoints`), with the level-up sound
-    /// every fifth level. No orb pickup sound. False, and nothing given, for
-    /// a player who isn't here or is dead, and for another player than the one
-    /// whose state is swapped in (inside that player's hook, only they are
-    /// reached), and while the server's player list is busy elsewhere in the
-    /// tick: give first, and cancel an orb only when this returned true.
-    /// Their bar follows as for any change to their experience.
-    pub(super) fn native_give_experience(&mut self, uuid: u128, points: u32) -> bool {
-        self.native_as_player(uuid, |game| {
-            let rest = if points > 0 { game.mending(points) } else { 0 };
-            if rest > 0 {
-                game.give_experience_points(rest as i32);
-            }
-        })
-    }
-    /// Adds `levels` to the player `uuid`'s level, or takes them off when
-    /// negative (`Player.giveExperienceLevels`): what the anvil and the
-    /// enchanting table charge with, and a mod can charge or reward with.
-    /// Below level 0 the level and the points are 0. The progress toward the
-    /// next level is kept. False, and nothing changed, as for
-    /// `native_give_experience`.
-    pub(super) fn native_give_levels(&mut self, uuid: u128, levels: i32) -> bool {
-        self.native_as_player(uuid, |game| game.give_levels(levels))
     }
     /// Runs `f` with the player `uuid`'s state in place: theirs already when
     /// they are the acting player (the host, or a guest swapped in), else a
@@ -1123,7 +1145,7 @@ mod tests {
     #[test]
     fn player_reads_use_guest_mode_and_abilities() {
         let mut guest = player_guest();
-        guest.flying_speed = 0.08;
+        guest.abilities.flying_speed = 0.08;
         let read = PlayerRead::Guest(&guest);
         assert_eq!(read.mode(), 0);
         assert_eq!(
@@ -1144,7 +1166,8 @@ mod tests {
             })
         );
         guest.game_mode = 1;
-        guest.flying = true;
+        guest.abilities.update_for_mode(1);
+        guest.abilities.flying = true;
         let read = PlayerRead::Guest(&guest);
         assert_eq!(read.mode(), 1);
         assert_eq!(
@@ -1160,6 +1183,7 @@ mod tests {
             })
         );
         guest.game_mode = 3;
+        guest.abilities.update_for_mode(3);
         let abilities = PlayerRead::Guest(&guest).abilities().unwrap();
         assert!(!abilities.may_build && !abilities.instabuild && abilities.may_fly);
     }

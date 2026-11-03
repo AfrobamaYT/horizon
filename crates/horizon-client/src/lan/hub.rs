@@ -1153,6 +1153,7 @@ impl Hub {
         let mut guest = Guest::new(j, entity_id, ctx.spawn, self.config.view_distance);
         guest.last_action_tick = self.ticks;
         guest.game_mode = self.config.default_game_mode;
+        guest.abilities.update_for_mode(guest.game_mode);
         guest.permission = self.default_permission(guest.uuid);
         guest.joined_tick = self.ticks;
         guest.position = ctx.spawn;
@@ -1215,7 +1216,7 @@ impl Hub {
             difficulty: ctx.difficulty,
             locked: ctx.difficulty_locked,
         }));
-        g.send(&g.abilities());
+        g.send(&g.abilities_packet());
         g.send(&C::SetHeldSlot(play::SetHeldSlot {
             slot: g.selected as i32,
         }));
@@ -1569,6 +1570,26 @@ impl Hub {
         self.guests[i].above_ground_ticks = 0;
         use play::relative::{DELTA_X, DELTA_Y, DELTA_Z, ROTATE_DELTA, X_ROT, Y_ROT};
         let relatives = Y_ROT | X_ROT | DELTA_X | DELTA_Y | DELTA_Z | ROTATE_DELTA;
+        self.teleport_relative(i, Some(position), relatives);
+    }
+
+    /// A command's teleport to `position` (`ServerGamePacketListenerImpl.teleport`
+    /// with `TeleportCommand.performTeleport`'s relatives): the motion of a
+    /// relative axis is kept (`Relative.DELTA_*`, from `Relative.direction`),
+    /// an absolute axis is a zero change.
+    pub fn teleport_command(&mut self, i: usize, position: [f64; 3], delta: [bool; 3]) {
+        use play::relative::{DELTA_X, DELTA_Y, DELTA_Z};
+        let mut relatives = 0;
+        if delta[0] {
+            relatives |= DELTA_X;
+        }
+        if delta[1] {
+            relatives |= DELTA_Y;
+        }
+        if delta[2] {
+            relatives |= DELTA_Z;
+        }
+        self.guests[i].above_ground_ticks = 0;
         self.teleport_relative(i, Some(position), relatives);
     }
 
@@ -2647,6 +2668,7 @@ impl Hub {
             velocity: [0.0; 3],
             data: 0,
             meta,
+            forced_meta: [0; 4],
             // The effect swirls go back to none.
             defaults: vec![
                 (10, serializer::PARTICLES, Value::Particles(Vec::new())),
@@ -2984,6 +3006,24 @@ impl Hub {
                 values,
             }));
         }
+        // ServerEntity.sendDirtyEntityData: the arrows and bee stingers stuck
+        // in the player go to the player too, whose own model draws them.
+        let g = &mut self.guests[i];
+        if g.stuck != g.sent_stuck {
+            let values = [
+                (12, g.stuck.0, g.sent_stuck.0),
+                (13, g.stuck.1, g.sent_stuck.1),
+            ]
+            .into_iter()
+            .filter(|(_, now, sent)| now != sent)
+            .map(|(index, now, _)| (index, serializer::INT, Value::Int(now)))
+            .collect();
+            g.sent_stuck = g.stuck;
+            g.send(&C::SetEntityData(play::SetEntityData {
+                id: g.entity_id,
+                values,
+            }));
+        }
         // Sent when the health or the food level changes, or the saturation
         // reaches or leaves zero; a dead player's health of 0 too.
         let g = &mut self.guests[i];
@@ -3292,10 +3332,10 @@ impl Hub {
                 // handlePlayerAbilities: the client flies only if it may.
                 S::PlayerAbilities(p) => {
                     let g = &mut self.guests[i];
-                    let flying = p.flags & 2 != 0 && (g.creative() || g.spectator());
+                    let flying = p.flags & 2 != 0 && g.abilities.may_fly;
                     // The change is the game's to announce (the mods may refuse it).
-                    if flying != g.flying {
-                        g.flying = flying;
+                    if flying != g.abilities.flying {
+                        g.abilities.flying = flying;
                         events.push(HostEvent::Flight { conn, flying });
                     }
                 }
@@ -3849,17 +3889,12 @@ impl Hub {
             return;
         };
         g.game_mode = mode;
-        // GameType.updatePlayerAbilities: a spectator flies, survival and
-        // adventure don't, creative keeps what it had.
-        if g.spectator() {
-            g.flying = true;
-        } else if !g.creative() {
-            g.flying = false;
-        }
+        // GameType.updatePlayerAbilities.
+        g.abilities.update_for_mode(mode);
         // ServerPlayerGameMode.changeGameModeForPlayer: a player left flying
         // by the change lands when the ground is within a block.
         if !g.spectator()
-            && g.flying
+            && g.abilities.flying
             && let Some(binding) = collision
         {
             let mut scene = SceneCollisions {
@@ -3868,7 +3903,7 @@ impl Hub {
                 subject: None,
             };
             if in_range_of_ground(&mut scene, g.bounds()) {
-                g.flying = false;
+                g.abilities.flying = false;
             }
         }
         let uuid = g.uuid;
@@ -3876,7 +3911,7 @@ impl Hub {
             event: game_event::CHANGE_GAME_MODE,
             param: mode as f32,
         }));
-        g.send(&g.abilities());
+        g.send(&g.abilities_packet());
         if !g.participates_online() {
             return;
         }
@@ -3914,21 +3949,6 @@ impl Hub {
                 ..Default::default()
             }],
         }));
-    }
-
-    /// Set a guest's flying speed and tell it (`Abilities.setFlyingSpeed`, then
-    /// `onUpdateAbilities`). The abilities packets after carry it too, so a
-    /// respawn or a game mode change keeps it.
-    pub fn set_flying_speed(&mut self, conn: u32, speed: f32) {
-        let Some(g) = self.guest_mut(conn) else {
-            return;
-        };
-        g.flying_speed = speed;
-        // The server's copy of the body, which the movement replay reads.
-        if let Some(motion) = g.motion.as_mut() {
-            motion.flying_speed = speed;
-        }
-        g.send(&g.abilities());
     }
 
     pub fn disconnect_all(&mut self) {
@@ -4017,7 +4037,7 @@ impl Hub {
         self.respawned(id);
         let g = &mut self.guests[i];
         // ServerPlayer.restoreFrom: the game mode again (onUpdateAbilities).
-        g.send(&g.abilities());
+        g.send(&g.abilities_packet());
         // The new player faces the level's respawn direction (snapTo).
         g.yaw = 0.0;
         g.pitch = 0.0;
@@ -4159,7 +4179,7 @@ impl Hub {
             self.resend_teleport(i, None);
         }
         let g = &mut self.guests[i];
-        g.send(&g.abilities());
+        g.send(&g.abilities_packet());
         self.send_level_info(i, ctx, !portal);
         // PlayerList.sendAllPlayerInfo: the inventory and the held slot.
         self.send_inventory(i);
@@ -4180,6 +4200,7 @@ impl Hub {
         g.sent_air = (300, 0.0);
         g.sent_shared = 0;
         g.sent_shoulders = [None; 2];
+        g.sent_stuck = (0, 0);
         let (cx, cz) = g.chunk();
         g.send(&C::SetChunkCacheCenter(play::SetChunkCacheCenter {
             x: cx,
@@ -4619,6 +4640,36 @@ mod tests {
             }
         }
         sent
+    }
+
+    /// The relatives of the position packets the guest was sent.
+    fn sent_position_relatives(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<i32> {
+        let mut sent = Vec::new();
+        while let Ok(out) = rx.try_recv() {
+            let crate::lan::Out::Packet(body) = out else {
+                continue;
+            };
+            let mut r = horizon_protocol::buf::Reader::new(&body);
+            let id = r.varint().unwrap();
+            if let Ok(C::PlayerPosition(p)) = C::decode(id, r.rest()) {
+                sent.push(p.relatives);
+            }
+        }
+        sent
+    }
+
+    /// A command's teleport carries its relative axes as the position
+    /// packet's DELTA flags (`TeleportCommand.performTeleport` builds them
+    /// with `Relative.direction`, and `ServerPlayer.teleport` passes them to
+    /// `ClientboundPlayerPositionPacket`): a relative axis keeps its motion
+    /// on the client, an absolute axis is a zero change.
+    #[test]
+    fn a_command_teleport_carries_its_relative_axes() {
+        use play::relative::{DELTA_X, DELTA_Z};
+        let (mut hub, rx) = hub_with_a_guest();
+        hub.teleport_command(0, [10.5, 70.0, 10.5], [true, false, true]);
+        hub.teleport_command(0, [12.5, 70.0, 12.5], [false; 3]);
+        assert_eq!(sent_position_relatives(&rx), vec![DELTA_X | DELTA_Z, 0]);
     }
 
     /// `TransferCommand.transfer`: the target's client is sent the play-state

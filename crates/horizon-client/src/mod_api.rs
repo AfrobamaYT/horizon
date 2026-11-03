@@ -167,6 +167,37 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// An item that drops where a living entity died, before it is an item entity
+/// in the level (`living_drops`): what `ItemEntity`'s constructor was given.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct NativeItemDrop {
+    pub stack: ItemStack,
+    /// Where the item entity appears.
+    pub position: [f64; 3],
+    /// Its motion in blocks per tick, as vanilla's constructor drew it.
+    pub velocity: [f64; 3],
+    /// Ticks before a player may pick it up.
+    pub pickup_delay: u32,
+}
+
+impl NativeItemDrop {
+    /// A drop of `stack` at `position` with a `velocity` and `pickup_delay`.
+    pub fn new(
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        pickup_delay: u32,
+    ) -> Self {
+        Self {
+            stack,
+            position,
+            velocity,
+            pickup_delay,
+        }
+    }
+}
+
 /// A statistic type (`BuiltInRegistries.STAT_TYPE`), for a player's
 /// statistics: what the stat's key names (a block, an item, an entity type,
 /// or a `minecraft:custom` stat).
@@ -1055,6 +1086,95 @@ impl GameMode {
     }
 }
 
+/// A custom boss bar (vanilla's `CustomBossEvent`, the `/bossbar` ones) of an
+/// open server world. It holds the world's epoch and the bar's UUID, so a bar
+/// that was removed (even if its id was added again) or a handle from an
+/// earlier open reads as `None` and changes nothing. Mob and raid bars are not
+/// custom boss events and have no handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BossBarRef {
+    pub(crate) epoch: NativeWorldEpoch,
+    pub(crate) uuid: u128,
+}
+
+/// `BossEvent.BossBarColor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarColor {
+    Pink,
+    Blue,
+    Red,
+    Green,
+    Yellow,
+    Purple,
+    White,
+}
+
+impl BossBarColor {
+    /// Every color, in ordinal order.
+    pub const ALL: [Self; 7] = [
+        Self::Pink,
+        Self::Blue,
+        Self::Red,
+        Self::Green,
+        Self::Yellow,
+        Self::Purple,
+        Self::White,
+    ];
+    /// `BossBarColor.getName`: `pink`, `blue`, `red`, `green`, `yellow`,
+    /// `purple` or `white`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pink => "pink",
+            Self::Blue => "blue",
+            Self::Red => "red",
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Purple => "purple",
+            Self::White => "white",
+        }
+    }
+    /// The color with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|color| color.name() == name)
+    }
+}
+
+/// `BossEvent.BossBarOverlay`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarOverlay {
+    Progress,
+    Notched6,
+    Notched10,
+    Notched12,
+    Notched20,
+}
+
+impl BossBarOverlay {
+    /// Every overlay, in ordinal order.
+    pub const ALL: [Self; 5] = [
+        Self::Progress,
+        Self::Notched6,
+        Self::Notched10,
+        Self::Notched12,
+        Self::Notched20,
+    ];
+    /// `BossBarOverlay.getName`: `progress`, `notched_6`, `notched_10`,
+    /// `notched_12` or `notched_20`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Progress => "progress",
+            Self::Notched6 => "notched_6",
+            Self::Notched10 => "notched_10",
+            Self::Notched12 => "notched_12",
+            Self::Notched20 => "notched_20",
+        }
+    }
+    /// The overlay with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|overlay| overlay.name() == name)
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
@@ -1139,7 +1259,7 @@ impl ApplyEffectTickEvent<'_> {
     }
 }
 
-/// A player's server-side abilities.
+/// A player's server-side abilities (`Abilities`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerAbilities {
@@ -1155,7 +1275,7 @@ pub struct NativePlayerAbilities {
     pub may_build: bool,
     /// Flying speed.
     pub fly_speed: f32,
-    /// Walking speed. Horizon currently keeps no per-player value; this is 0.1.
+    /// Walking speed (`Abilities.walkingSpeed`, vanilla's 0.1).
     pub walk_speed: f32,
 }
 
@@ -1272,11 +1392,89 @@ pub struct ToolUse {
 /// The ordered list of mods shared by the client and server.
 pub type Mods = Arc<[Box<dyn Hooks>]>;
 
-pub(crate) static MODS: OnceLock<Mods> = OnceLock::new();
+pub(crate) struct Installed {
+    mods: Mods,
+    subscribers: horizon_client_core::subscribers::Subscribers,
+    types: Box<[std::any::TypeId]>,
+}
+
+impl Installed {
+    fn new(mods: Mods) -> Self {
+        let types = mods
+            .iter()
+            .map(|m| (&**m as &dyn std::any::Any).type_id())
+            .collect();
+        let subscribers =
+            horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
+        Self {
+            mods,
+            subscribers,
+            types,
+        }
+    }
+}
+
+static MODS: OnceLock<Installed> = OnceLock::new();
+
+#[cfg(any(test, feature = "testing"))]
+thread_local! {
+    static TEST_MODS: std::cell::Cell<Option<&'static Installed>> = const { std::cell::Cell::new(None) };
+}
+
+fn installed() -> Option<&'static Installed> {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(installed) = TEST_MODS.get() {
+        return Some(installed);
+    }
+    MODS.get()
+}
+
+/// Scoped trait-mod installation for tests, enabled by the `testing` feature.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
+    use super::{Installed, Mods, TEST_MODS};
+
+    /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
+    ///
+    /// The test allocation is leaked because dispatch exposes a static slice. Nested scopes and
+    /// panic unwinding restore the preceding list; other threads are unaffected.
+    pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
+        struct Restore(Option<&'static Installed>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_MODS.set(self.0);
+            }
+        }
+        let installed = Box::leak(Box::new(Installed::new(mods)));
+        let _restore = Restore(TEST_MODS.replace(Some(installed)));
+        f()
+    }
+}
+
+/// Install the process-wide ordered list of mods.
+pub(crate) fn install(mods: Mods) -> &'static Installed {
+    let installed = Installed::new(mods);
+    #[cfg(test)]
+    {
+        // Tests can replace the list; mods() keeps its static slice lifetime.
+        let installed = Box::leak(Box::new(installed));
+        TEST_MODS.set(Some(installed));
+        installed
+    }
+    #[cfg(not(test))]
+    {
+        assert!(MODS.set(installed).is_ok(), "trait mods are installed once");
+        MODS.get().unwrap()
+    }
+}
 
 /// The process-wide list in dispatch order, or an empty list before installation.
 pub fn mods() -> &'static [Box<dyn Hooks>] {
-    MODS.get().map_or(&[], |mods| mods.as_ref())
+    installed().map_or(&[], |installed| &installed.mods)
+}
+
+fn listened(hook: generated::HookId) -> bool {
+    installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
 /// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
@@ -1292,12 +1490,48 @@ pub fn name_mods(ids: &'static [&'static str]) {
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
-fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
+fn entered_registration<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     Entered {
         mods: mods.iter().enumerate(),
         hook,
         guard: None,
     }
+}
+
+fn entered(
+    hook_id: generated::HookId,
+    hook: &'static str,
+) -> impl Iterator<Item = &'static Box<dyn Hooks>> {
+    installed().into_iter().flat_map(move |installed| {
+        let mut crash_guard = None;
+        let mut subscriber_guard = None;
+        installed
+            .subscribers
+            .indices(hook_id as usize)
+            .map(move |index| {
+                drop(subscriber_guard.take());
+                drop(crash_guard.take());
+                let hooks = &installed.mods[index];
+                subscriber_guard = Some(horizon_client_core::subscribers::enter(
+                    &installed.subscribers,
+                    hook_id as usize,
+                    index,
+                    (&**hooks as *const dyn Hooks).cast(),
+                    installed.types[index],
+                ));
+                crash_guard = Some(mark_mod(index, hook));
+                hooks
+            })
+    })
+}
+
+fn mark_mod(index: usize, hook: &'static str) -> crate::crash::NativeModGuard {
+    crate::crash::enter_native_mod(crate::crash::NativeModCall {
+        id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
+        index,
+        hook,
+        part: None,
+    })
 }
 
 /// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
@@ -1346,14 +1580,7 @@ impl<'a> Iterator for Entered<'a> {
         // The last mod's mark goes first, so the next one's puts back what was there before.
         drop(self.guard.take());
         let (index, hooks) = self.mods.next()?;
-        self.guard = Some(crate::crash::enter_native_mod(
-            crate::crash::NativeModCall {
-                id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
-                index,
-                hook: self.hook,
-                part: None,
-            },
-        ));
+        self.guard = Some(mark_mod(index, self.hook));
         Some(hooks)
     }
 }
@@ -1546,12 +1773,14 @@ pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
 pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
+pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
 mod item_place;
+mod menu_slot;
+pub use menu_slot::MenuSlotBacking;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
-pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
+pub use resource::{ComponentId, ItemResource, Overanswered, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
@@ -1572,6 +1801,9 @@ pub use generated::*;
 
 #[cfg(test)]
 pub(crate) use part_table::tests as part_tests;
+
+#[cfg(test)]
+mod hooks_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1662,6 +1894,7 @@ mod tests {
                 cancel: false,
             }),
         ];
+        install(mods.into());
         let host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
@@ -1681,7 +1914,7 @@ mod tests {
             scale: 1.0,
         };
         let mut canceled = false;
-        dispatch_render_hand(&host, &mods, &mut render, &mut canceled);
+        dispatch_render_hand(&host, &mut render, &mut canceled);
         assert!(canceled);
         assert_eq!(render.translation, [3.0, 0.0, 0.0]);
     }
@@ -1722,13 +1955,13 @@ mod tests {
         }
         let observed = Arc::new(Mutex::new(Vec::new()));
         let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
         };
         dispatch_living_conversion_post(
             &mut host,
-            &mods,
             12,
             "minecraft:pig",
             13,
@@ -1768,8 +2001,9 @@ mod tests {
         };
         for cancelled in [false, true] {
             let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            install(mods.into());
             let (mut amount, mut cancel) = (10, false);
-            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            dispatch_player_xp_change(&mut host, 7, 42, "Probe", &mut amount, &mut cancel);
             assert_eq!((amount, cancel), (-5, cancelled));
         }
     }
@@ -1790,21 +2024,14 @@ mod tests {
     #[test]
     fn phantom_listener_can_increase_the_default_count() {
         let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
         };
         let mut count = Some(3);
         let mut result = None;
-        dispatch_player_spawn_phantoms(
-            &mut host,
-            &mods,
-            7,
-            "Probe",
-            [0; 3],
-            &mut count,
-            &mut result,
-        );
+        dispatch_player_spawn_phantoms(&mut host, 7, "Probe", [0; 3], &mut count, &mut result);
         assert_eq!(count, Some(5));
         assert!(result.is_none());
     }
@@ -1832,6 +2059,7 @@ mod tests {
     fn a_panic_in_a_hook_names_the_mod_and_the_hook() {
         name_mods(&["quiet", "broken"]);
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Quiet), Box::new(Broken)];
+        install(mods.into());
         let caught = Arc::new(Mutex::new(Vec::new()));
         let sink = caught.clone();
         let previous = std::panic::take_hook();
@@ -1842,7 +2070,7 @@ mod tests {
             }
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(&mods, &mut Vec::new())
+            dispatch_component_types(&mut Vec::new())
         }));
         // Once the dispatch has unwound, the thread is in no mod.
         let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
@@ -1878,9 +2106,10 @@ mod tests {
             lines: Vec::new(),
         };
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Turn), Box::new(Turn)];
+        install(mods.into());
         let mut sensitivity = 0.25;
         let mut cinematic = false;
-        dispatch_calculate_player_turn(&host, &mods, 42, 123, &mut sensitivity, &mut cinematic);
+        dispatch_calculate_player_turn(&host, 42, 123, &mut sensitivity, &mut cinematic);
         assert_eq!(sensitivity, 1.0);
         assert!(!cinematic);
     }
@@ -1890,6 +2119,7 @@ mod tests {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
         let mods = [Box::new(Probe) as Box<dyn Hooks>];
+        install(mods.into());
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
             let mut host = Reader {
@@ -1901,7 +2131,6 @@ mod tests {
             let hit = top_hit();
             dispatch_use_item_on(
                 &mut host,
-                &mods,
                 &stack,
                 pos,
                 face,
@@ -1951,6 +2180,7 @@ mod tests {
     #[test]
     fn damage_v2_exposes_weapon_geometry_and_host_without_changing_v1() {
         let mods = [Box::new(Backstab) as Box<dyn Hooks>];
+        install(mods.into());
         let mut weapon = stick();
         weapon.enchant("probe:backstab", 3);
         for (entity, source_z, expected, canceled_expected) in [
@@ -1966,7 +2196,6 @@ mod tests {
             let mut canceled = false;
             dispatch_living_incoming_damage_v2(
                 &mut host,
-                &mods,
                 entity,
                 "minecraft:zombie",
                 "minecraft:player_attack",
@@ -1984,7 +2213,6 @@ mod tests {
         let mut amount = 4.0;
         let mut canceled = false;
         dispatch_living_incoming_damage(
-            &mods,
             1,
             "minecraft:zombie",
             "minecraft:player_attack",
@@ -2020,6 +2248,7 @@ mod tests {
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods = [Box::new(MiningProbe(seen.clone())) as Box<dyn Hooks>];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -2027,17 +2256,8 @@ mod tests {
         let mut harvest = true;
         let mut speed = 1.0;
         let mut canceled = false;
-        dispatch_player_harvest_check(&mut host, &mods, 42, [1, 2, 3], 7, &mut harvest);
-        dispatch_player_break_speed(
-            &mut host,
-            &mods,
-            42,
-            [1, 2, 3],
-            7,
-            1.0,
-            &mut speed,
-            &mut canceled,
-        );
+        dispatch_player_harvest_check(&mut host, 42, [1, 2, 3], 7, &mut harvest);
+        dispatch_player_break_speed(&mut host, 42, [1, 2, 3], 7, 1.0, &mut speed, &mut canceled);
         assert_eq!(*seen.lock().unwrap(), [42, 42]);
         assert!(!harvest);
         assert_eq!(speed, 2.0);
@@ -2050,6 +2270,7 @@ mod tests {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
         let mods = [Box::new(Chatty) as Box<dyn Hooks>];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -2058,7 +2279,6 @@ mod tests {
         let (pos, face) = ([0; 3], [0, 1, 0]);
         dispatch_use_item_on(
             &mut host,
-            &mods,
             &stick(),
             pos,
             face,
@@ -2112,6 +2332,7 @@ mod tests {
     fn a_block_use_hears_the_hand_the_hit_and_the_player() {
         mark_game_thread();
         let mods = [Box::new(OffHandTop) as Box<dyn Hooks>];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -2119,7 +2340,6 @@ mod tests {
         let mut claimed = false;
         dispatch_use_item_on(
             &mut host,
-            &mods,
             &stick(),
             [0; 3],
             [0, 1, 0],
@@ -2172,7 +2392,6 @@ mod tests {
             let (mut result, mut was_canceled) = (NativeInteractionResult::Pass, false);
             dispatch_right_click_block(
                 &mut host,
-                &mods,
                 &click,
                 &mut block,
                 &mut item,
@@ -2262,30 +2481,32 @@ mod tests {
             lines: Vec::new(),
         };
         // What `tick_brewing_stand` does once the brew is due.
-        let brew = |mods: &[Box<dyn Hooks>], host: &mut Reader, stand: &mut BrewingStand| {
+        let brew = |host: &mut Reader, stand: &mut BrewingStand| {
             let mut stacks = stand.items.clone();
             let mut cancel = false;
-            dispatch_potion_brew_pre(host, mods, [1, 2, 3], &mut stacks, &mut cancel);
+            dispatch_potion_brew_pre(host, [1, 2, 3], &mut stacks, &mut cancel);
             let mut out = crate::brewing::BrewTick::default();
             stand.brew_after_pre(Some((stacks, cancel)), &brewing, &items, &mut out);
             if out.brewed || cancel {
-                dispatch_potion_brew_post(host, mods, [1, 2, 3], &mut stand.items);
+                dispatch_potion_brew_post(host, [1, 2, 3], &mut stand.items);
             }
             out.brewed
         };
 
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewSwapper(seen.clone()))];
+        install(mods.into());
         let mut stand = fresh();
-        assert!(!brew(&mods, &mut host, &mut stand));
+        assert!(!brew(&mut host, &mut stand));
         assert_eq!(*seen.lock().unwrap(), ["pre", "post minecraft:diamond"]);
         assert_eq!(&*stand.items[0].as_ref().unwrap().item, "minecraft:diamond");
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(2));
 
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewEditor)];
+        install(mods.into());
         let mut stand = fresh();
-        assert!(brew(&mods, &mut host, &mut stand));
+        assert!(brew(&mut host, &mut stand));
         assert_eq!(stand.items[0], Some(awkward));
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
@@ -2323,6 +2544,7 @@ mod tests {
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
@@ -2334,14 +2556,12 @@ mod tests {
         };
         dispatch_game_rule_changed(
             &mut host,
-            &mods,
             "minecraft:keep_inventory",
             GameRuleValue::Bool(true),
             Some(&actor),
         );
         dispatch_game_rule_changed(
             &mut host,
-            &mods,
             "minecraft:keep_inventory",
             GameRuleValue::Bool(false),
             None,
@@ -2361,6 +2581,7 @@ mod tests {
             Box::new(Recorder(seen.clone())),
             Box::new(Recorder(seen.clone())),
         ];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
@@ -2369,13 +2590,7 @@ mod tests {
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
-                dispatch_game_rule_changed(
-                    &mut host,
-                    &mods,
-                    &["minecraft:", name].concat(),
-                    value,
-                    None,
-                );
+                dispatch_game_rule_changed(&mut host, &["minecraft:", name].concat(), value, None);
             }
         };
         set("keep_inventory", GameRuleValue::Bool(true));
@@ -2404,12 +2619,13 @@ mod tests {
             Box::new(Recorder(seen.clone())),
             Box::new(Recorder(seen.clone())),
         ];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
         };
         for dimension in ["minecraft:the_nether", "minecraft:overworld"] {
-            dispatch_level_save(&mut host, &mods, dimension);
+            dispatch_level_save(&mut host, dimension);
         }
         assert_eq!(
             *seen.lock().unwrap(),
@@ -2456,6 +2672,7 @@ mod tests {
             lines: Vec::new(),
         };
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper), Box::new(Unreached)];
+        install(mods.into());
         let ask = |host: &mut Reader, item: &str| {
             let drops = [ItemStack::new(item, 1)];
             let fished = NativeItemFished {
@@ -2464,11 +2681,12 @@ mod tests {
                 drops: &drops,
             };
             let (mut rod_damage, mut cancel) = (1, false);
-            dispatch_item_fished(host, &mods, 7, 3, &fished, &mut rod_damage, &mut cancel);
+            dispatch_item_fished(host, 7, 3, &fished, &mut rod_damage, &mut cancel);
             (rod_damage, cancel)
         };
         assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper)];
+        install(mods.into());
         let drops = [ItemStack::new("minecraft:salmon", 1)];
         let fished = NativeItemFished {
             hook: 9,
@@ -2476,15 +2694,7 @@ mod tests {
             drops: &drops,
         };
         let (mut rod_damage, mut cancel) = (2, false);
-        dispatch_item_fished(
-            &mut host,
-            &mods,
-            7,
-            3,
-            &fished,
-            &mut rod_damage,
-            &mut cancel,
-        );
+        dispatch_item_fished(&mut host, 7, 3, &fished, &mut rod_damage, &mut cancel);
         assert_eq!((rod_damage, cancel), (4, false));
     }
 
@@ -2534,6 +2744,7 @@ mod tests {
         let potion = ItemStack::new("minecraft:potion", 1);
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(BrewWatcher(seen.clone()))];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
@@ -2556,7 +2767,7 @@ mod tests {
                 "{input:?}"
             );
             for stack in &menu.brewed_potion_takes {
-                dispatch_player_brewed_potion(&mut host, &mods, 7, 41, stack);
+                dispatch_player_brewed_potion(&mut host, 7, 41, stack);
             }
         }
         let told = (7, 41, potion);

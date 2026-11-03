@@ -708,7 +708,7 @@ fn namespaced(id: &str) -> bool {
 /// the error lists every part refused, naming its mods.
 pub(crate) fn install_parts(mods: &[Box<dyn Hooks>]) -> Result<(), Vec<String>> {
     let mut registrar = Registrar::default();
-    for (index, hooks) in super::entered(mods, "register").enumerate() {
+    for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_index = index;
         hooks.register(&mut registrar);
     }
@@ -835,18 +835,13 @@ pub(crate) mod tests {
                 let two = place.amount(host) == 2;
                 two.then(|| Box::new(Marked(3)) as _)
             });
-            r.block_entity_capability_before_game(&FLUIDS, "test:tank", |_, _| {
-                Some(Box::new(Tank))
-            });
-            r.block_entity_capability_before_game(&FLUIDS, "test:fluid_liar", |_, _| {
-                Some(Box::new(FluidLiar))
-            });
-            for (id, overstates) in [
-                ("test:gives_more", Overstates::GivesMore),
-                ("test:refuses_more", Overstates::RefusesMore),
+            for (id, lie) in [
+                ("test:tank", None),
+                ("test:gives_more", Some(Lie::GivesMore)),
+                ("test:takes_more", Some(Lie::TakesMore)),
             ] {
-                r.block_entity_capability_before_game(&FLUIDS, id, move |_, _| {
-                    Some(Box::new(overstates))
+                r.block_entity_capability_before_game(&FLUIDS, id, move |_, at| {
+                    Some(Box::new(ModTank { at, lie }))
                 });
             }
         }
@@ -1697,19 +1692,19 @@ pub(crate) mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub(crate) fn game_thread() -> Vec<Box<dyn Hooks>> {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Doubler)];
+    pub(crate) fn game_thread() -> super::super::Mods {
+        let mods: super::super::Mods = vec![Box::new(Doubler) as Box<dyn Hooks>].into();
+        super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
         mods
     }
 
     /// The comparator reading of state `state`, from 1.
-    fn read(mods: &[Box<dyn Hooks>], state: u32) -> i32 {
+    fn read(state: u32) -> i32 {
         let mut output = 1;
         dispatch_analog_output(
             &Level,
-            mods,
             LevelDimension::Overworld,
             BlockPos::new(0, 64, 0),
             BlockStateId(state),
@@ -1737,11 +1732,11 @@ pub(crate) mod tests {
 
     #[test]
     fn a_block_part_answers_for_its_block_only_after_the_mods() {
-        let mods = game_thread();
+        game_thread();
         // Doubled by the mod, then 5 more from the part: (1 * 2) + 5. No world is open, so the
         // tag part is not attached yet.
-        assert_eq!(read(&mods, 1), 7);
-        assert_eq!(read(&mods, 2), 2);
+        assert_eq!(read(1), 7);
+        assert_eq!(read(2), 2);
     }
 
     #[test]
@@ -1751,19 +1746,21 @@ pub(crate) mod tests {
         let resolved = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
+                super::super::install(mods.clone());
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
                 resolved.wait();
-                (read(&mods, 1), read(&mods, 2))
+                (read(1), read(2))
             });
             let server = scope.spawn(|| {
+                super::super::install(mods.clone());
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
                 resolved.wait();
-                let before = (read(&mods, 1), read(&mods, 2));
+                let before = (read(1), read(2));
                 // `/reload` with the tag emptied.
                 resolve(&[]).unwrap();
-                (before, read(&mods, 1))
+                (before, read(1))
             });
             // The tag part comes after the key part of the same mod: (1 * 2) + 5 + 100.
             assert_eq!(client.join().unwrap(), (7, 102));
@@ -2131,10 +2128,8 @@ pub(crate) mod tests {
             let host: &mut dyn Host = world;
             let from = here().capability(host, &ITEMS, FROM, None).unwrap();
             let to = here().capability(host, &ITEMS, INTO, None).unwrap();
-            host.transaction(|host, tx| {
-                Ok::<_, ()>(move_resources(host, &from, &to, only_sticks, max, tx))
-            })
-            .unwrap()
+            host.transaction(|host, tx| move_resources(host, &from, &to, only_sticks, max, tx))
+                .unwrap()
         };
         // Up to 7 sticks: all of the first slot's, two of the third's; the apples stay.
         assert_eq!(moved(&mut world, 7), 7);
@@ -2168,10 +2163,10 @@ pub(crate) mod tests {
             handler: Box::new(TakesMore),
             owner: Some(0),
         };
-        let moved = host.transaction(|host, tx| {
-            Ok::<_, ()>(move_resources(host, &from, &liar, |_| true, 64, tx))
-        });
-        assert_eq!(moved, Ok(0));
+        let moved =
+            host.transaction(|host, tx| move_resources(host, &from, &liar, |_| true, 64, tx));
+        let owner = mod_name(0);
+        assert_eq!(moved, Err(Overanswered { owner }));
         assert_eq!(world.from[0], Some(stack("minecraft:stick", 5, 0)));
         assert!(super::super::item_place::warned_about(&mod_name(0)));
     }
@@ -2833,174 +2828,78 @@ pub(crate) mod tests {
         }
     }
 
-    /// A mod's tank: the game's tank at its position, reached from every side but its top.
-    struct Tank;
-    impl FluidHandler for Tank {
-        fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
-            if side == Some(Direction::Up) {
+    /// How a mod tank misanswers: an extract takes and answers 100 mB more than asked
+    /// (`GivesMore`), or an insert answers 100 mB more than went in (`TakesMore`).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Lie {
+        GivesMore,
+        TakesMore,
+    }
+    /// A mod's tank: the game's tank at its position, reached from every side but its top, and
+    /// misanswering as `lie` says.
+    struct ModTank {
+        at: BlockSide,
+        lie: Option<Lie>,
+    }
+    impl ResourceHandler<FluidResource> for ModTank {
+        fn size(&self, host: &mut dyn Host) -> usize {
+            if self.at.side == Some(Direction::Up) {
                 return 0;
             }
-            host.fluid_tank_count(on(at, None)).unwrap_or(0)
+            host.fluid_tank_count(self.at).unwrap_or(0)
         }
-        fn fluid(
-            &self,
-            host: &dyn Host,
-            at: [i32; 3],
-            _: Option<Direction>,
-            tank: usize,
-        ) -> Option<FluidStack> {
-            host.fluid_tank(on(at, None), tank)
+        fn resource(&self, host: &mut dyn Host, index: usize) -> Option<FluidResource> {
+            Some(FluidResource::of(&host.fluid_tank(self.at, index)?))
         }
-        fn capacity(
-            &self,
-            host: &dyn Host,
-            at: [i32; 3],
-            _: Option<Direction>,
-            tank: usize,
-            fluid: &FluidStack,
-        ) -> u32 {
-            host.fluid_tank_capacity(on(at, None), tank, fluid)
+        fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+            host.fluid_tank(self.at, index)
+                .map_or(0, |held| held.amount)
+        }
+        fn capacity(&self, host: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+            host.fluid_tank_capacity(self.at, index, &resource.to_stack(1))
         }
         fn insert(
             &self,
             host: &mut dyn Host,
-            at: [i32; 3],
-            _: Option<Direction>,
-            tank: usize,
-            fluid: FluidStack,
-            simulate: bool,
-        ) -> Option<FluidStack> {
-            host.fluid_tank_insert(on(at, None), tank, fluid, simulate)
-        }
-        fn extract(
-            &self,
-            host: &mut dyn Host,
-            at: [i32; 3],
-            _: Option<Direction>,
-            tank: usize,
-            max: u32,
-            simulate: bool,
-        ) -> Option<FluidStack> {
-            host.fluid_tank_extract(on(at, None), tank, max, simulate)
-        }
-    }
-
-    /// A tank whose simulation says it takes everything, and which takes nothing.
-    struct FluidLiar;
-    impl FluidHandler for FluidLiar {
-        fn tanks(&self, _: &dyn Host, _: [i32; 3], _: Option<Direction>) -> usize {
-            1
-        }
-        fn fluid(
-            &self,
-            _: &dyn Host,
-            _: [i32; 3],
-            _: Option<Direction>,
-            _: usize,
-        ) -> Option<FluidStack> {
-            None
-        }
-        fn capacity(
-            &self,
-            _: &dyn Host,
-            _: [i32; 3],
-            _: Option<Direction>,
-            _: usize,
-            _: &FluidStack,
+            tx: &Transaction,
+            index: usize,
+            resource: &FluidResource,
+            amount: u32,
         ) -> u32 {
-            1000
-        }
-        fn insert(
-            &self,
-            _: &mut dyn Host,
-            _: [i32; 3],
-            _: Option<Direction>,
-            _: usize,
-            fluid: FluidStack,
-            simulate: bool,
-        ) -> Option<FluidStack> {
-            (!simulate).then_some(fluid)
-        }
-        fn extract(
-            &self,
-            _: &mut dyn Host,
-            _: [i32; 3],
-            _: Option<Direction>,
-            _: usize,
-            _: u32,
-            _: bool,
-        ) -> Option<FluidStack> {
-            None
-        }
-    }
-
-    /// The game's tank under it, but its real calls misanswer: an extract gives 100 mB more than
-    /// asked (`GivesMore`), or an insert keeps nothing and
-    /// answers 100 mB more than offered (`RefusesMore`).
-    #[derive(Clone, Copy, PartialEq)]
-    enum Overstates {
-        GivesMore,
-        RefusesMore,
-    }
-    impl FluidHandler for Overstates {
-        fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
-            host.fluid_tank_count(on(at, side)).unwrap_or(0)
-        }
-        fn fluid(
-            &self,
-            host: &dyn Host,
-            at: [i32; 3],
-            side: Option<Direction>,
-            tank: usize,
-        ) -> Option<FluidStack> {
-            host.fluid_tank(on(at, side), tank)
-        }
-        fn capacity(
-            &self,
-            host: &dyn Host,
-            at: [i32; 3],
-            side: Option<Direction>,
-            tank: usize,
-            fluid: &FluidStack,
-        ) -> u32 {
-            host.fluid_tank_capacity(on(at, side), tank, fluid)
-        }
-        fn insert(
-            &self,
-            host: &mut dyn Host,
-            at: [i32; 3],
-            side: Option<Direction>,
-            tank: usize,
-            fluid: FluidStack,
-            simulate: bool,
-        ) -> Option<FluidStack> {
-            if *self == Self::RefusesMore && !simulate {
-                return Some(fluid.with_amount(fluid.amount + 100));
+            let rest = host.fluid_tank_insert(self.at, index, resource.to_stack(amount), tx);
+            let went = amount - rest.map_or(0, |rest| rest.amount);
+            match self.lie {
+                Some(Lie::TakesMore) => went + 100,
+                _ => went,
             }
-            host.fluid_tank_insert(on(at, side), tank, fluid, simulate)
         }
         fn extract(
             &self,
             host: &mut dyn Host,
-            at: [i32; 3],
-            side: Option<Direction>,
-            tank: usize,
-            max: u32,
-            simulate: bool,
-        ) -> Option<FluidStack> {
-            if simulate {
-                return host.fluid_tank_extract(on(at, side), tank, max, true);
+            tx: &Transaction,
+            index: usize,
+            resource: &FluidResource,
+            amount: u32,
+        ) -> u32 {
+            let held = host.fluid_tank(self.at, index);
+            if !held.is_some_and(|held| resource.matches(&held)) {
+                return 0;
             }
-            let more = if *self == Self::GivesMore { 100 } else { 0 };
-            host.fluid_tank_extract(on(at, side), tank, max + more, false)
+            let more = if self.lie == Some(Lie::GivesMore) {
+                100
+            } else {
+                0
+            };
+            host.fluid_tank_extract(self.at, index, amount + more, tx)
+                .map_or(0, |out| out.amount)
         }
     }
 
     /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
-    /// drains. Truthfully, their simulations answering as their real calls: a `halving` tank
-    /// takes half of each offer, a `half_room` one at most half its room, a `short` one gives
-    /// one less than asked, and a `quarters` one gives and takes only whole quarter buckets, as
-    /// a cauldron its thirds.
+    /// drains. Truthfully: a `halving` tank takes half of each offer, a `half_room` one at most
+    /// half its room, a `short` one gives one less than asked, and a `quarters` one gives and
+    /// takes only whole quarter buckets, as a cauldron its thirds.
+    #[derive(Clone)]
     struct GameTank {
         held: Option<FluidStack>,
         capacity: u32,
@@ -3012,13 +2911,15 @@ pub(crate) mod tests {
         quarters: bool,
     }
     /// Game tanks by position, and the mod block entity types standing at some.
-    #[derive(Default)]
+    #[derive(Clone, Default)]
     struct TankWorld {
         tanks: HashMap<[i32; 3], GameTank>,
         types: HashMap<[i32; 3], &'static str>,
+        kept: Vec<Self>,
     }
     const SOURCE: [i32; 3] = [0, 64, 0];
     const TANK: [i32; 3] = [1, 64, 0];
+    const OTHER: [i32; 3] = [2, 64, 0];
     impl TankWorld {
         fn tank(&mut self, pos: [i32; 3], held: Option<FluidStack>, fills: bool) -> &mut Self {
             let tank = GameTank {
@@ -3040,10 +2941,34 @@ pub(crate) mod tests {
         fn amount(&self, pos: [i32; 3]) -> u32 {
             self.tanks[&pos].held.as_ref().map_or(0, |held| held.amount)
         }
+        /// Moves up to `max` from `from`'s handler through `from_side` into `to`'s through
+        /// `to_side`, in a transaction of its own.
+        fn moved(
+            &mut self,
+            (from, from_side): ([i32; 3], Option<Direction>),
+            (to, to_side): ([i32; 3], Option<Direction>),
+            max: u32,
+        ) -> Result<u32, Overanswered> {
+            let host: &mut dyn Host = self;
+            let source = here().capability(host, &FLUIDS, from, from_side).unwrap();
+            let target = here().capability(host, &FLUIDS, to, to_side).unwrap();
+            host.transaction(|host, tx| move_resources(host, &source, &target, |_| true, max, tx))
+        }
+    }
+    impl Journal for TankWorld {
+        fn kept(&mut self) -> &mut Vec<Self> {
+            &mut self.kept
+        }
     }
     impl Host for TankWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
+        }
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
         }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
@@ -3076,7 +3001,7 @@ pub(crate) mod tests {
             BlockSide { pos, .. }: BlockSide,
             _: usize,
             fluid: FluidStack,
-            simulate: bool,
+            _: &Transaction,
         ) -> Option<FluidStack> {
             let Some(tank) = self.tanks.get_mut(&pos).filter(|tank| tank.fills) else {
                 return Some(fluid);
@@ -3103,7 +3028,7 @@ pub(crate) mod tests {
             if tank.quarters {
                 add -= add % 250;
             }
-            if !simulate && add > 0 {
+            if add > 0 {
                 tank.held = Some(fluid.with_amount(held + add));
             }
             (add < fluid.amount).then(|| fluid.with_amount(fluid.amount - add))
@@ -3113,7 +3038,7 @@ pub(crate) mod tests {
             BlockSide { pos, .. }: BlockSide,
             _: usize,
             max: u32,
-            simulate: bool,
+            _: &Transaction,
         ) -> Option<FluidStack> {
             let tank = self.tanks.get_mut(&pos).filter(|tank| tank.drains)?;
             let held = tank.held.clone()?;
@@ -3129,9 +3054,7 @@ pub(crate) mod tests {
             if take == 0 {
                 return None;
             }
-            if !simulate {
-                tank.held = (take < held.amount).then(|| held.with_amount(held.amount - take));
-            }
+            tank.held = (take < held.amount).then(|| held.with_amount(held.amount - take));
             Some(held.with_amount(take))
         }
     }
@@ -3148,22 +3071,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_fluid_move_plans_both_ends_and_fills_only_with_the_same_fluid_and_components() {
+    fn a_fluid_move_fills_only_with_the_same_fluid_and_components() {
         game_thread();
         let mut world = TankWorld::default();
         world.tank(SOURCE, Some(potion(1500, "minecraft:healing")), true);
         world.tank(TANK, None, true).types.insert(TANK, "test:tank");
-        let host: &mut dyn Host = &mut world;
         // The mod's tank takes nothing from above.
-        assert!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, Some(Direction::Up), 4000)
-                .is_none()
-        );
-        // The source is asked for no more than the tank takes.
-        let moved = host.transfer_fluids(here(), SOURCE, None, TANK, Some(Direction::West), 4000);
-        assert_eq!(moved, Some(potion(1000, "minecraft:healing")));
-        let moved = host.transfer_fluids(here(), TANK, Some(Direction::West), SOURCE, None, 400);
-        assert_eq!(moved, Some(potion(400, "minecraft:healing")));
+        let up = (TANK, Some(Direction::Up));
+        let west = (TANK, Some(Direction::West));
+        assert_eq!(world.moved((SOURCE, None), up, 4000), Ok(0));
+        // What the tank has room for moves, and nothing more leaves the source.
+        assert_eq!(world.moved((SOURCE, None), west, 4000), Ok(1000));
+        assert_eq!(world.moved(west, (SOURCE, None), 400), Ok(400));
         assert_eq!(world.held(SOURCE), Some(potion(900, "minecraft:healing")));
         assert_eq!(world.held(TANK), Some(potion(600, "minecraft:healing")));
         // The same fluid with other components, or another fluid, doesn't go in.
@@ -3172,11 +3091,7 @@ pub(crate) mod tests {
             FluidStack::new("test:potion", 500),
         ] {
             world.tank(SOURCE, Some(other.clone()), true);
-            let host: &mut dyn Host = &mut world;
-            assert!(
-                host.transfer_fluids(here(), SOURCE, None, TANK, None, 4000)
-                    .is_none()
-            );
+            assert_eq!(world.moved((SOURCE, None), (TANK, None), 4000), Ok(0));
             assert_eq!(world.held(SOURCE), Some(other));
             assert_eq!(world.held(TANK), Some(potion(600, "minecraft:healing")));
         }
@@ -3185,16 +3100,14 @@ pub(crate) mod tests {
         world.tank(SOURCE, Some(water.clone()), true);
         world.tank(TANK, None, false);
         let host: &mut dyn Host = &mut world;
-        assert_eq!(host.fluid_tank_capacity(on(TANK, None), 0, &water), 0);
-        assert!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, None, 1000)
-                .is_none()
-        );
+        let target = here().capability(host, &FLUIDS, TANK, None).unwrap();
+        assert_eq!(target.capacity(host, 0, &FluidResource::of(&water)), 0);
+        assert_eq!(world.moved((SOURCE, None), (TANK, None), 1000), Ok(0));
         assert_eq!(world.held(SOURCE), Some(water));
     }
 
     #[test]
-    fn truthful_tanks_lose_nothing_and_are_not_warned_whatever_they_take_or_give() {
+    fn a_fluid_move_tries_again_with_what_the_target_took_and_loses_nothing() {
         game_thread();
         let water = |amount| FluidStack::new("minecraft:water", amount);
         type Setup = fn(&mut GameTank, &mut GameTank);
@@ -3211,7 +3124,7 @@ pub(crate) mod tests {
                 |s, t| (s.fills, t.halving) = (false, true),
                 0,
             ),
-            // Half its room: rounds of 500, 250, then 125, which quarters can't give.
+            // Half its room: moves of 500, 250, then 125, which quarters can't give.
             (
                 "half its room, from quarters",
                 |s, t| (s.quarters, t.half_room) = (true, true),
@@ -3222,8 +3135,8 @@ pub(crate) mod tests {
                 |s, t| (s.fills, t.half_room) = (false, true),
                 999,
             ),
-            // One less than asked: the real extract is asked what its simulation was.
-            ("a source giving one less", |s, _| s.short = true, 998),
+            // One less than asked: the 999 it gives all go in.
+            ("a source giving one less", |s, _| s.short = true, 999),
         ];
         for (case, setup, moves) in cases {
             let mut world = TankWorld::default();
@@ -3231,83 +3144,45 @@ pub(crate) mod tests {
             world.tank(TANK, None, true);
             let [source, target] = world.tanks.get_disjoint_mut([&SOURCE, &TANK]);
             setup(source.unwrap(), target.unwrap());
-            let host: &mut dyn Host = &mut world;
-            let moved = host.transfer_fluids(here(), SOURCE, None, TANK, None, 1000);
-            assert_eq!(moved, (moves > 0).then(|| water(moves)), "{case}");
+            let moved = world.moved((SOURCE, None), (TANK, None), 1000);
+            assert_eq!(moved, Ok(moves), "{case}");
             assert_eq!(
                 (world.amount(SOURCE), world.amount(TANK)),
                 (1000 - moves, moves),
                 "{case}"
             );
         }
-        assert!(!super::super::fluid_capability::warned_about("the game"));
     }
 
     #[test]
-    fn a_tank_whose_simulation_lies_gets_back_what_it_refused_or_loses_it_and_is_named() {
+    fn a_handler_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_fluid() {
         game_thread();
-        let water = FluidStack::new("minecraft:water", 1000);
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(water.clone()), true);
-        world.types.insert(TANK, "test:fluid_liar");
-        let host: &mut dyn Host = &mut world;
-        // Its simulation took it all and its real call took none: it goes back into the source.
-        assert!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, None, 1000)
-                .is_none()
-        );
-        assert_eq!(world.held(SOURCE), Some(water.clone()));
-        assert!(super::super::fluid_capability::warned_about(
-            "native mod #0"
-        ));
-        // A source that can't take it back: fluid has no item form to drop, so it is lost.
-        world.tanks.get_mut(&SOURCE).unwrap().fills = false;
-        let host: &mut dyn Host = &mut world;
-        assert!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, None, 1000)
-                .is_none()
-        );
-        assert_eq!(world.held(SOURCE), None);
-    }
-
-    #[test]
-    fn a_handler_answering_more_than_it_was_asked_or_offered_moves_no_more_than_agreed() {
-        game_thread();
-        let water = |amount| FluidStack::new("minecraft:water", amount);
-        // A source giving 100 more than asked: the target gets only what both ends agreed on, the
-        // move never passes its max, and the excess goes back into the source.
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(water(1000)), true);
-        world.tank(TANK, None, true);
-        world.types.insert(SOURCE, "test:gives_more");
-        let host: &mut dyn Host = &mut world;
-        assert_eq!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, None, 300),
-            Some(water(300))
-        );
-        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (700, 300));
-        // With no room for the excess in the source, the target's room takes it.
-        world.tanks.get_mut(&SOURCE).unwrap().fills = false;
-        let host: &mut dyn Host = &mut world;
-        assert_eq!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, None, 300),
-            Some(water(300))
-        );
-        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (300, 700));
-        // A target that keeps nothing and answers more than it was offered: it all goes back.
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(water(1000)), true);
-        world.tank(TANK, None, true);
-        world.types.insert(TANK, "test:refuses_more");
-        let host: &mut dyn Host = &mut world;
-        assert_eq!(
-            host.transfer_fluids(here(), SOURCE, None, TANK, None, 300),
-            None
-        );
-        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (1000, 0));
-        assert!(super::super::fluid_capability::warned_about(
-            "native mod #0"
-        ));
+        let water = |amount| Some(FluidStack::new("minecraft:water", amount));
+        for (liar, at) in [("test:gives_more", SOURCE), ("test:takes_more", TANK)] {
+            let mut world = TankWorld::default();
+            world.tank(SOURCE, water(1000), true);
+            world.tank(OTHER, water(1000), true);
+            world.tank(TANK, None, true).types.insert(at, liar);
+            let host: &mut dyn Host = &mut world;
+            let ends = |host: &mut dyn Host, pos| here().capability(host, &FLUIDS, pos, None);
+            let (source, other, tank) = (
+                ends(host, SOURCE).unwrap(),
+                ends(host, OTHER).unwrap(),
+                ends(host, TANK).unwrap(),
+            );
+            // Two moves into the tank in one transaction, the second from the source: the
+            // first move through the liar fails, and its error aborts the transaction, so
+            // every tank holds what it held.
+            let moved = host.transaction(|host, tx| {
+                let first = move_resources(host, &other, &tank, |_| true, 300, tx)?;
+                let second = move_resources(host, &source, &tank, |_| true, 300, tx)?;
+                Ok(first + second)
+            });
+            let owner = mod_name(0);
+            assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
+            let held = [SOURCE, OTHER, TANK].map(|pos| world.held(pos));
+            assert_eq!(held, [water(1000), water(1000), None], "{liar}");
+        }
     }
 
     #[test]
@@ -3329,10 +3204,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_block_entity_part_answers_by_block_and_by_entity_type() {
-        let mods = game_thread();
+        game_thread();
         let ticks = |block| {
             let mut ticks = false;
-            dispatch_block_entity_ticks(&NoHost, &mods, block, &mut ticks);
+            dispatch_block_entity_ticks(&NoHost, block, &mut ticks);
             ticks
         };
         // The ticker is asked by block: the type id is not a block.
@@ -3341,7 +3216,7 @@ pub(crate) mod tests {
         let tick = |kind: &str| {
             let mut entity = ModBlockEntity::default();
             entity.id = kind.into();
-            dispatch_block_entity_tick(&mut NoHost, &mods, [0, 64, 0], &mut entity);
+            dispatch_block_entity_tick(&mut NoHost, [0, 64, 0], &mut entity);
             entity.data.len()
         };
         // The tick is asked by the entity's type, which differs from its block's id.

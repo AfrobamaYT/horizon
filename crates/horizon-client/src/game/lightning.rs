@@ -599,6 +599,7 @@ impl Game<'_> {
                         m.extra.vector[0] = -1.0;
                         m.extra.variant =
                             horizon_client::mobs::copper_golem::weather_previous(m.extra.variant);
+                        self.persist.force_meta(m.id, 16);
                     }
                 }
                 _ => {}
@@ -739,7 +740,7 @@ mod tests {
     fn conversion_post_reads_original_and_lightning_outcome() {
         use horizon_client::mod_api::{
             EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, Host, LivingConversionPostEvent,
-            LivingConversionPreEvent, MODS,
+            LivingConversionPreEvent, install,
         };
         use std::sync::{
             Mutex,
@@ -818,7 +819,7 @@ mod tests {
             pre: pre.clone(),
             cancel_cow: cancel_cow.clone(),
         }) as Box<dyn Hooks>]);
-        assert!(MODS.set(mods).is_ok());
+        install(mods);
         super::super::native_entity_refs::tests::with_game(|game| {
             let piglin_type = game
                 .res
