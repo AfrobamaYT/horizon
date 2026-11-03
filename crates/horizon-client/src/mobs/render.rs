@@ -2692,9 +2692,17 @@ mod tests {
             0.0,
         );
         mob.extra.age = -24000;
-        mob.extra.head = Some("minecraft:iron_helmet".into());
-        mob.extra.legs = Some("minecraft:iron_leggings".into());
-        mob.extra.feet = Some("minecraft:leather_boots".into());
+        use horizon_items::equipment::{FEET, HEAD, LEGS};
+        let armour = |name: &str| Some(horizon_client::items::ItemStack::new(name, 1));
+        mob.extra
+            .equipment
+            .set(HEAD, armour("minecraft:iron_helmet"));
+        mob.extra
+            .equipment
+            .set(LEGS, armour("minecraft:iron_leggings"));
+        mob.extra
+            .equipment
+            .set(FEET, armour("minecraft:leather_boots"));
         let mut layers = Vec::new();
         humanoid_armor(&mob, &mut layers);
         let textures: Vec<&str> = layers.iter().map(|l| &*l.texture).collect();

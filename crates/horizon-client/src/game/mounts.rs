@@ -593,16 +593,18 @@ impl Game<'_> {
         // RunAroundLikeCrazyGoal.tick: tameWithName by the player on its
         // back, unless AnimalTameEvent is cancelled, which fails the roll
         // instead. Inside a guest's turn the acting ids are the guest's.
-        if let Some(index) = self.mobs.iter().position(|m| m.id == mob)
-            && self.animal_tame_cancelled(index, self.native_acting_id(), self.own_entity_id())
-        {
-            let m = &mut self.mobs[index];
-            let mut events = Vec::new();
-            horizon_client::mobs::equine::refuse_rider(m, &mut events);
-            if let Err(e) = self.handle_mob_events(events) {
-                log::warn!("failed horse taming: {e}");
+        let index = self.mobs.iter().position(|m| m.id == mob);
+        if let Some(index) = index {
+            let (tamer, tamer_entity_id) = (self.native_acting_id(), self.own_entity_id());
+            if self.animal_tame_cancelled(index, tamer, tamer_entity_id) {
+                let m = &mut self.mobs[index];
+                let mut events = Vec::new();
+                horizon_client::mobs::equine::refuse_rider(m, &mut events);
+                if let Err(e) = self.handle_mob_events(events) {
+                    log::warn!("failed horse taming: {e}");
+                }
+                return;
             }
-            return;
         }
         let owner = self.acting_player_uuid();
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
@@ -642,11 +644,8 @@ impl Game<'_> {
                         .find(|g| g.vehicle == Some(mob))
                         .map(|g| g.conn)
                 });
-                if let Some(conn) = rider
-                    && let Some(mut host) = self.lan.take()
-                {
-                    self.as_guest(&mut host, conn, |g| g.tame_mount(mob));
-                    self.lan = Some(host);
+                if let Some(conn) = rider {
+                    self.as_guest(conn, |g| g.tame_mount(mob));
                 } else {
                     self.tame_mount(mob);
                 }
