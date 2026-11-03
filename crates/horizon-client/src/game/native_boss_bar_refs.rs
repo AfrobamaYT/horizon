@@ -176,8 +176,8 @@ impl Game<'_> {
         self.boss_bar_state(bar).map(|b| b.value)
     }
 
-    /// `CustomBossEvent.setValue`, kept from 0 to the bar's maximum as
-    /// `execute store result bossbar ... value` does.
+    /// `CustomBossEvent.setValue`: stored as given, as vanilla does; only the
+    /// progress shown is kept between empty and full.
     pub(super) fn native_boss_bar_set_value(&mut self, bar: BossBarRef, value: i32) -> bool {
         let Some(id) = self.native_boss_bar_id(bar) else {
             return false;
@@ -191,8 +191,8 @@ impl Game<'_> {
         self.boss_bar_state(bar).map(|b| b.max)
     }
 
-    /// `CustomBossEvent.setMax`, at least 1 as `/bossbar set max` takes it; the
-    /// value is lowered to fit.
+    /// `CustomBossEvent.setMax`: stored as given, and the value is kept. Only
+    /// `/bossbar set max` limits it to 1 or more.
     pub(super) fn native_boss_bar_set_max(&mut self, bar: BossBarRef, max: i32) -> bool {
         let Some(id) = self.native_boss_bar_id(bar) else {
             return false;
@@ -241,12 +241,16 @@ impl Game<'_> {
         })
     }
 
-    /// `CustomBossEvent.removePlayer`.
+    /// `CustomBossEvent.removePlayer`. False for a stale bar or an offline or
+    /// stale player.
     pub(super) fn native_boss_bar_remove_player(
         &mut self,
         bar: BossBarRef,
         player: PlayerRef,
     ) -> bool {
+        if self.native_player_ref(player.uuid()) != Some(player) {
+            return false;
+        }
         let ints = uuid_ints(player.uuid());
         self.boss_bar_edit(bar, |b| b.players.retain(|p| *p != ints))
     }
@@ -383,14 +387,19 @@ mod tests {
             assert_eq!((bar.value(game), bar.max(game)), (Some(25), Some(50)));
             assert_eq!(seen(game, 123), Some((0.5, 2, 2, true, true, true)));
 
-            // Value stays within 0..=max and max within 1.. as the store path clamps.
+            // Value and max are stored as given; only the progress is clamped.
             assert!(bar.set_value(game, 999));
-            assert_eq!(bar.value(game), Some(50));
+            assert_eq!((bar.value(game), bar.max(game)), (Some(999), Some(50)));
+            assert_eq!(seen(game, 123).unwrap().0, 1.0);
             assert!(bar.set_max(game, 10));
-            assert_eq!(bar.value(game), Some(10));
-            assert!(bar.set_max(game, -4));
-            assert_eq!((bar.value(game), bar.max(game)), (Some(1), Some(1)));
+            assert_eq!((bar.value(game), bar.max(game)), (Some(999), Some(10)));
+            assert!(bar.set_value(game, -4));
+            assert_eq!(bar.value(game), Some(-4));
+            assert_eq!(seen(game, 123).unwrap().0, 0.0);
+            assert!(bar.set_max(game, 0));
+            assert_eq!((bar.value(game), bar.max(game)), (Some(-4), Some(0)));
             assert!(bar.set_max(game, 100) && bar.set_value(game, 7));
+            assert_eq!(seen(game, 123).unwrap().0, 0.07);
 
             // The command sees the mod's bar and the mod sees the command's changes.
             game.ui.registries.permission = 4;
@@ -409,14 +418,38 @@ mod tests {
             assert_eq!(seen(game, 456), None);
             assert!(bar.set_visible(game, true));
             assert!(seen(game, 456).is_some());
+            // A player handle from an earlier session cannot edit membership.
+            let stale = PlayerRef {
+                entity: horizon_client::mod_api::EntityRef::new(
+                    horizon_client::mod_api::NativeWorldEpoch::new(b.entity().epoch().get() + 1),
+                    b.entity().id(),
+                ),
+                uuid: 456,
+            };
+            assert!(!bar.remove_player(game, stale));
+            assert!(!bar.add_player(game, stale));
+            assert_eq!(bar.players(game), Some(vec![b]));
             assert!(bar.remove_player(game, b));
             assert_eq!(bar.players(game), Some(vec![]));
+            let offline = PlayerRef { uuid: 999, ..b };
+            assert!(bar.add_player(game, a));
+            assert!(!bar.remove_player(game, offline));
+            assert_eq!(bar.players(game), Some(vec![a]));
+            assert!(bar.remove_player(game, a));
 
-            // Saved form.
-            let saved = game.bosses.bars.pack();
-            let loaded = horizon_client::bossbar::BossBars::unpack(&saved);
+            // Saved with the level: a real write and read of the .dat file keeps the
+            // fields and the players' UUIDs.
+            assert!(bar.add_player(game, a));
+            let dir = std::env::temp_dir().join(format!("boss-save-{}", std::process::id()));
+            game.world_root = dir.clone();
+            game.save_bossbars();
+            let root = horizon_client::save::read_dat(&game.bossbar_path()).unwrap();
+            let loaded = horizon_client::bossbar::BossBars::unpack(root.get("data").unwrap());
             let kept = loaded.get("mod:bar").unwrap();
             assert_eq!((kept.value, kept.max, kept.color.as_str()), (9, 100, "red"));
+            assert_eq!(kept.players, vec![uuid_ints(123)]);
+            let _ = std::fs::remove_dir_all(dir);
+            assert!(bar.remove_player(game, a));
 
             // Removal: the handle is stale, the id can be added again.
             assert!(bar.remove(game));

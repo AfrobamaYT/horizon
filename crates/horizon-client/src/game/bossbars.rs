@@ -98,7 +98,7 @@ fn num(n: impl std::fmt::Display) -> Text {
 }
 
 impl Game<'_> {
-    fn bossbar_path(&self) -> std::path::PathBuf {
+    pub(super) fn bossbar_path(&self) -> std::path::PathBuf {
         self.world_root
             .join("data/minecraft/custom_boss_events.dat")
     }
@@ -135,14 +135,15 @@ impl Game<'_> {
     pub(in crate::game) fn bossbar_exists(&self, id: &str) -> bool {
         self.bosses.bars.get(id).is_some()
     }
-    /// `execute store ... bossbar <id> value|max`.
+    /// `CustomBossEvent.setValue` / `setMax`, as `execute store ... bossbar
+    /// <id> value|max` calls them: the integer is stored as given and only
+    /// the progress is clamped.
     pub(in crate::game) fn set_bossbar_value(&mut self, id: &str, value: bool, v: i32) {
         if let Some(b) = self.bosses.bars.get_mut(id) {
             if value {
-                b.value = v.clamp(0, b.max);
+                b.value = v;
             } else {
-                b.max = v.max(1);
-                b.value = b.value.min(b.max);
+                b.max = v;
             }
         }
         self.publish_boss_bars();
