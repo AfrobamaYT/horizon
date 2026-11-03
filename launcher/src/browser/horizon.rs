@@ -609,24 +609,32 @@ fn install_version(
     }
     let native = p.kind == index::Kind::NativeMod;
     let relative = match native {
-        true => format!("{}/{}.hnmod", crate::native_mods::INSTALLED, p.id),
+        true => format!("{}/{}.hmod", crate::native_mods::INSTALLED, p.id),
         false => relative(project.kind, &p.id, &v.file.name)?,
     };
     let mut list = installed::Installed::load(home);
     let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == p.id;
     let old = list.entries.iter().find(|e| ours(e)).cloned();
-    if old.as_ref().is_some_and(|o| {
-        o.kind != project.kind
-            || (o
-                .file
-                .starts_with(&format!("{}/", crate::native_mods::INSTALLED))
-                != native
-                && project.kind == Kind::Mod)
-    }) {
-        return Err(format!(
-            "{} has a different installed kind: remove it before installing this version.",
-            p.name
-        ));
+    if let Some(old) = &old {
+        let mut different = old.kind != project.kind;
+        if !different && project.kind == Kind::Mod {
+            let path = home.join(&old.file);
+            let installed_native = index::native::holds(&path);
+            let kind = if installed_native {
+                index::Kind::NativeMod
+            } else {
+                index::Kind::Mod
+            };
+            index::inspect(&kind, &path)
+                .map_err(|e| format!("Cannot inspect installed {}: {e}", p.name))?;
+            different = installed_native != native;
+        }
+        if different {
+            return Err(format!(
+                "{} has a different installed kind: remove it before installing this version.",
+                p.name
+            ));
+        }
     }
     if old.as_ref().is_some_and(|o| o.version == v.version) {
         return Ok(old.expect("checked"));
@@ -701,10 +709,10 @@ fn install_version(
 }
 
 /// The mod id of an installed mod (`horizon-mods/<id>`, `horizon-mods/<id>.hmod` or
-/// `horizon-native-mods/<id>.hnmod`).
+/// `horizon-native-mods/<id>.hmod`).
 pub fn mod_id(entry: &installed::Entry) -> Option<&str> {
     if let Some(rest) = entry.file.strip_prefix(crate::native_mods::INSTALLED) {
-        return rest.strip_prefix('/')?.strip_suffix(".hnmod");
+        return rest.strip_prefix('/')?.strip_suffix(".hmod");
     }
     let rest = entry.file.strip_prefix(java::MODS_DIR)?.strip_prefix('/')?;
     Some(rest.strip_suffix(".hmod").unwrap_or(rest))

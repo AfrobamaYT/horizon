@@ -44,7 +44,7 @@ fn native_registry_entries_are_mods_that_say_they_run_native_code() {
     assert_eq!(kind_of(&index::Kind::NativeMod), Some(Kind::Mod));
     let mut index = sample();
     index.projects[0].kind = index::Kind::NativeMod;
-    index.projects[0].versions[0].file.name = "coords_hud-0.1.0.hnmod".into();
+    index.projects[0].versions[0].file.name = "coords_hud-0.1.0.hmod".into();
     let found = search(&index, &Query::new("", Kind::Mod));
     assert!(found.iter().any(|p| p.id == index.projects[0].id));
     let entry = |file: &str| {
@@ -55,7 +55,7 @@ fn native_registry_entries_are_mods_that_say_they_run_native_code() {
         .unwrap()
     };
     assert_eq!(
-        mod_id(&entry("horizon-native-mods/veinminer.hnmod")),
+        mod_id(&entry("horizon-native-mods/veinminer.hmod")),
         Some("veinminer")
     );
     assert_eq!(mod_id(&entry("horizon-mods/zoom.hmod")), Some("zoom"));
@@ -92,7 +92,7 @@ fn searches_by_kind_and_words() {
     // The index's download counts, most downloaded first (of native mods: the browser lists them).
     let mut counted = index.clone();
     counted.projects[0].kind = index::Kind::NativeMod;
-    counted.projects[0].versions[0].file.name = "coords_hud-0.1.0.hnmod".into();
+    counted.projects[0].versions[0].file.name = "coords_hud-0.1.0.hmod".into();
     counted.projects.push(index::Project {
         id: "zoom".into(),
         name: "Zoom".into(),
@@ -146,11 +146,90 @@ fn update_rejects_a_changed_kind_without_removing_the_installed_file() {
         .find(|p| p.id == "coords_hud")
         .unwrap();
     project.kind = index::Kind::NativeMod;
+    let path = home.join("horizon-mods/coords_hud.hmod");
+    let before = fs::read(&path).unwrap();
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
     let p = index.project("coords_hud").unwrap();
     let error = install_version(&index, true, p, &p.versions[0], &home, &|_, _| {}).unwrap_err();
     assert!(error.contains("different installed kind"), "{error}");
-    assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
     fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn installed_kind_comes_from_the_archive_not_its_folder() {
+    use std::io::Write;
+    for native in [false, true] {
+        let mut index = sample();
+        let home = scratch(if native {
+            "native-in-content"
+        } else {
+            "content-in-native"
+        });
+        put(&index, true, &home).unwrap();
+        let mut list = installed::Installed::load(&home);
+        let old = home.join(&list.entries[0].file);
+        let folder = if native {
+            "horizon-mods"
+        } else {
+            "horizon-native-mods"
+        };
+        fs::create_dir_all(home.join(folder)).unwrap();
+        let file = format!("{folder}/misplaced.hmod");
+        let path = home.join(&file);
+        if native {
+            let mut zip = zip::ZipWriter::new(fs::File::create(&path).unwrap());
+            zip.start_file(
+                index::native::MANIFEST,
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            let revision = "a".repeat(40);
+            let manifest = serde_json::json!({"schema": 1, "id": "coords_hud", "version": "0.1.0", "game": "26.3", "horizon": revision, "mixins": "b".repeat(40)});
+            zip.write_all(manifest.to_string().as_bytes()).unwrap();
+            zip.start_file(
+                "mixins/coords_hud/horizon-mixin.toml",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            write!(zip, "[mod]\nid = \"coords_hud\"\nversion = \"0.1.0\"\n[compatibility]\nhorizon_revision = \"{}\"\n", "a".repeat(40)).unwrap();
+            zip.finish().unwrap();
+            index::native::Bundle::read(&path).unwrap();
+            index
+                .projects
+                .iter_mut()
+                .find(|p| p.id == "coords_hud")
+                .unwrap()
+                .kind = index::Kind::NativeMod;
+        } else {
+            fs::copy(&old, &path).unwrap();
+        }
+        list.entries[0].file = file;
+        list.save(&home).unwrap();
+        let p = index.project("coords_hud").unwrap();
+        let result = install_version(&index, true, p, &p.versions[0], &home, &|_, _| {});
+        assert!(result.is_ok(), "{result:?}");
+        assert!(path.is_file());
+        fs::remove_dir_all(home).unwrap();
+    }
+}
+
+#[test]
+fn corrupt_installed_archive_is_not_treated_as_content() {
+    let index = sample();
+    let home = scratch("corrupt-installed");
+    put(&index, true, &home).unwrap();
+    let path = home.join("horizon-mods/coords_hud.hmod");
+    fs::write(&path, b"not a zip").unwrap();
+    let before = fs::read(&path).unwrap();
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let p = index.project("coords_hud").unwrap();
+    let error = install_version(&index, true, p, &p.versions[0], &home, &|_, _| {}).unwrap_err();
+    assert!(error.contains("Cannot inspect installed"), "{error}");
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -159,13 +238,13 @@ fn removing_native_mod_does_not_remove_a_separate_content_file() {
     let home = scratch("native-remove");
     put(&index, true, &home).unwrap();
     let mut list = installed::Installed::load(&home);
-    list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
+    list.entries[0].file = "horizon-native-mods/coords_hud.hmod".into();
     list.save(&home).unwrap();
     fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
-    fs::write(home.join("horizon-native-mods/coords_hud.hnmod"), "").unwrap();
+    fs::write(home.join("horizon-native-mods/coords_hud.hmod"), "").unwrap();
     installed::remove(&home, "coords_hud").unwrap();
     assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
-    assert!(!home.join("horizon-native-mods/coords_hud.hnmod").exists());
+    assert!(!home.join("horizon-native-mods/coords_hud.hmod").exists());
     fs::remove_dir_all(&home).unwrap();
 }
 
