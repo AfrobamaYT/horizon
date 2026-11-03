@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -124,6 +125,9 @@ mod tests {
             }
             pub mod menu {
                 pub struct AnvilCraft;
+            }
+            pub mod stations {
+                pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
             }
             pub mod fog {
                 #[derive(Clone, Copy)]

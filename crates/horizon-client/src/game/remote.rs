@@ -3076,6 +3076,9 @@ impl Game<'_> {
                 self.selected = 0;
                 self.potions.effects.clear();
                 self.riding = None;
+                if let Some(player) = self.player.as_mut() {
+                    player.entity_id = p.player_id;
+                }
                 if let Some(r) = self.remote.as_mut() {
                     r.carried = Some(0);
                     r.own_invisible = false;
@@ -3649,6 +3652,17 @@ impl Game<'_> {
                             (0, Value::Byte(flags)) => {
                                 if let Some(pl) = self.player.as_mut() {
                                     pl.sprinting = flags & 0x08 != 0;
+                                    // Entity.DATA_SHARED_FLAGS_ID's fall-flying
+                                    // bit (0x80, `Entity.setSharedFlag(7, ...)`):
+                                    // `LivingEntity.updateFallFlying` clears the
+                                    // glide on the server only and `LocalPlayer`
+                                    // never ends one itself, so this packet is
+                                    // the glide's own end. Applied when it is
+                                    // handled — the frame's poll, before its
+                                    // ticks — as ClientPacketListener does, so a
+                                    // clear that arrives mid-tick lets that tick
+                                    // keep its glide travel (#7616).
+                                    pl.fall_flying = flags & -128 != 0;
                                 }
                                 if let Some(r) = self.remote.as_mut() {
                                     r.own_invisible = flags & 0x20 != 0;
@@ -5594,6 +5608,8 @@ impl Game<'_> {
             }
             None => {
                 let mut player = PlayerMotion::new(self.motion, position)?;
+                // The id the server gave, for the hooks the motion fires.
+                player.entity_id = self.own_entity_id();
                 // Player.tick derives noPhysics from the current game mode.
                 player.spectator = self.spectator();
                 player.velocity = delta;
@@ -6675,13 +6691,14 @@ impl Game<'_> {
             Some(self.border.geometry()),
         );
         for d in self.dropped.iter_mut().filter(|_| running) {
-            d.tick(
+            super::entity::tick_item(
+                d,
                 world,
                 registry,
                 facts,
                 collision,
-                false,
                 &self.res.motion().fluids,
+                false,
                 // The server decides what an item rests on; this copy only moves between updates.
                 &[],
                 border,

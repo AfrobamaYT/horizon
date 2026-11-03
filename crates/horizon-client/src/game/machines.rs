@@ -12,7 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, ItemHandler},
+    mod_api::{self, Host, ItemHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -925,7 +925,7 @@ impl Game<'_> {
     fn eject_into_part(
         &mut self,
         hopper: &View,
-        part: &dyn ItemHandler,
+        part: &Arc<dyn ItemHandler>,
         at: [i32; 3],
         face: Direction,
     ) -> bool {
@@ -948,7 +948,8 @@ impl Game<'_> {
             let Some(one) = self.take_one(hopper, slot) else {
                 continue;
             };
-            match part.insert(self, at, Some(face), into, one, false) {
+            let host: &mut dyn Host = self;
+            match host.insert_checked(part, at, Some(face), into, one) {
                 None => return true,
                 Some(rest) => self.put_back(hopper, slot, rest),
             }
@@ -957,7 +958,7 @@ impl Game<'_> {
     }
     /// `suckInItems` from a capability part through its bottom: one item from the first of its
     /// slots that gives one the hopper has room for.
-    fn suck_from_part(&mut self, part: &dyn ItemHandler, at: [i32; 3], hopper: &View) -> bool {
+    fn suck_from_part(&mut self, part: &Arc<dyn ItemHandler>, at: [i32; 3], hopper: &View) -> bool {
         let into = self.container_world_pos(hopper);
         for slot in 0..part.slots(self, at, Some(Direction::Down)) {
             let Some(one) = part.extract(self, at, Some(Direction::Down), slot, 1, true) else {
@@ -969,13 +970,20 @@ impl Game<'_> {
             {
                 continue;
             }
-            let Some(one) = part.extract(self, at, Some(Direction::Down), slot, 1, false) else {
+            let host: &mut dyn Host = self;
+            let Some(one) = host.extract_checked(part, at, Some(Direction::Down), slot, &one)
+            else {
                 continue;
             };
             match self.add_item(None, hopper, one, None) {
                 None => return true,
                 Some(rest) => {
-                    part.insert(self, at, Some(Direction::Down), slot, rest, false);
+                    let host: &mut dyn Host = self;
+                    if let Some(rest) =
+                        host.insert_checked(part, at, Some(Direction::Down), slot, rest)
+                    {
+                        host.drop_at(at, rest);
+                    }
                 }
             }
         }
@@ -995,7 +1003,7 @@ impl Game<'_> {
         if let Some(part) = self.item_part_at(front) {
             let at = [front.0, front.1, front.2];
             self.native_hopper_inventory_search([pos.0, pos.1, pos.2], Some(at), None);
-            return self.eject_into_part(hopper, &*part, at, face);
+            return self.eject_into_part(hopper, &part, at, face);
         }
         if let Some(target) = c.view(front, false) {
             self.native_hopper_inventory_search(
@@ -1132,7 +1140,7 @@ impl Game<'_> {
             let (x, y, z) = hopper.parts[0].0;
             let above = [above.0, above.1, above.2];
             self.native_hopper_inventory_search([x, y, z], Some(above), None);
-            return Some(self.suck_from_part(&*part, above, hopper));
+            return Some(self.suck_from_part(&part, above, hopper));
         }
         let c = self.containers();
         let Some(source) = c.view(above, false) else {
