@@ -1945,7 +1945,7 @@ mod tests {
     fn effect_test_mod() {
         use horizon_client::mod_api::{self, *};
         struct TestMod;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn should_apply_effect_tick_this_tick(
                 &self,

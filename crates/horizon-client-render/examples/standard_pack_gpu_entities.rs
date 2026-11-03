@@ -31,7 +31,7 @@ static OBSERVED: AtomicUsize = AtomicUsize::new(0);
 struct Observer;
 use native_render as mod_api;
 
-#[mod_api::hooks]
+#[mod_api::horizon_mod]
 impl native_render::RenderHooks for Observer {
     fn render_needs(&self, event: &mut native_render::RenderNeedsEvent<'_>) {
         event.needs.entity_spans |= NEEDS_SPANS.load(Ordering::Relaxed);

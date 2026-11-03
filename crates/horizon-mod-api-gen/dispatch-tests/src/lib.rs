@@ -192,7 +192,7 @@ mod tests {
             }
         }
         include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
-        pub use horizon_mod_api_macros::hooks;
+        pub use horizon_mod_api_macros::__subscriptions;
     }
     use generated as mod_api;
     use generated::*;
@@ -211,6 +211,7 @@ mod tests {
                 .hooks
                 .subscribed()
                 .iter()
+                .flatten()
                 .map(move |hook| (index, *hook as usize))
         });
         let subscribers = horizon_client_core::subscribers::Subscribers::new(
@@ -293,10 +294,10 @@ mod tests {
     #[test]
     fn only_overrides_are_dispatched_from_the_first_call_across_words() {
         struct Quiet;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Quiet {}
         struct Listener(Arc<std::sync::atomic::AtomicUsize>);
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Listener {
             fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
                 self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -330,10 +331,10 @@ mod tests {
     #[test]
     fn nested_default_does_not_affect_installed_subscribers() {
         struct Other;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Other {}
         struct Active;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Active {
             fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
                 dispatch_modify_default_components("test", &mut Map::new());
@@ -372,7 +373,7 @@ mod tests {
     #[test]
     fn advancement_progress_reports_grant_and_revoke_identity() {
         struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn player_advancement_progress(
                 &self,
@@ -414,7 +415,7 @@ mod tests {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
     }
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn menu_button(&self, _: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
             assert_eq!(event.context.player, 123);
@@ -650,7 +651,7 @@ mod tests {
         struct Level;
         impl LevelHost for Level {}
         struct Refuse(Arc<Mutex<Vec<u32>>>, u32);
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Refuse {
             fn state_for_placement(
                 &self,
@@ -693,7 +694,7 @@ mod tests {
     #[test]
     fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
         struct Property;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Property {
             fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
                 if event.property == "example:charged" {
@@ -735,7 +736,7 @@ mod tests {
     #[test]
     fn incoming_damage_carries_the_attack_data() {
         struct Backstab;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Backstab {
             fn living_incoming_damage_v2(
                 &self,
@@ -787,7 +788,7 @@ mod tests {
     #[test]
     fn dispatch_contracts() {
         struct Weapon;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Weapon {
             fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
                 assert_eq!(

@@ -942,7 +942,7 @@ mod tests {
         use crate::mod_api::{self, EntityJoinLevelEvent, Flow, Hooks, Host};
         use std::sync::Mutex;
         struct Observer(Arc<Mutex<Vec<u32>>>);
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,

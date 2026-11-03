@@ -180,7 +180,7 @@ pub fn inject(code: &str, injections: &str) -> Result<String, String> {
         .ok_or("generated API missing hook_ids")?;
     for (name, variant) in injected_ids {
         constants
-            .push(syn::parse_quote!(pub const #name: super::HookId = super::HookId::#variant;));
+            .push(syn::parse_quote!(pub const #name: Option<super::HookId> = Some(super::HookId::#variant);));
     }
     let hook_count = file
         .items

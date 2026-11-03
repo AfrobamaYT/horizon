@@ -245,7 +245,7 @@ mod tests {
                 #[derive(PartialEq)] pub enum Flow {{ Continue, Cancel }}
                 {output}
                 pub static SUBSCRIBED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                pub fn subscribed_by(_: usize, _: HookId) -> bool {{ SUBSCRIBED.load(std::sync::atomic::Ordering::Relaxed) }}
+                pub fn subscribed_by(_: usize, _: Option<HookId>) -> bool {{ SUBSCRIBED.load(std::sync::atomic::Ordering::Relaxed) }}
                 struct Owner;
                 impl Hooks for Owner {{
                     fn inject_example_tick(&self, event: &mut InjectExampleTickEvent) -> Flow {{
@@ -297,7 +297,7 @@ mod tests {
                 use std::sync::atomic::{{AtomicBool, Ordering}};
                 use std::sync::OnceLock;
                 {output}
-                pub fn subscribed_by(_: usize, _: HookId) -> bool {{ true }}
+                pub fn subscribed_by(_: usize, _: Option<HookId>) -> bool {{ true }}
                 struct Owner;
                 impl Hooks for Owner {{
                     fn inject_example_total(&self, event: &mut InjectExampleTotalEvent) {{

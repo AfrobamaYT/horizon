@@ -3,13 +3,10 @@
 //! (docs/native-mods.md, "Trait mods").
 use horizon_client::mod_api::{self, Hooks, Host, PlayerLoggedInEvent, Text};
 
-pub fn hooks() -> Box<dyn Hooks> {
-    Box::new(Mod)
-}
-
+#[derive(Default)]
 struct Mod;
 
-#[mod_api::hooks]
+#[mod_api::horizon_mod]
 impl Hooks for Mod {
     /// A player joined the server (NeoForge's `PlayerLoggedInEvent`): greet them.
     fn player_logged_in(&self, host: &mut dyn Host, event: &mut PlayerLoggedInEvent<'_>) {

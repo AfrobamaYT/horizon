@@ -17,7 +17,9 @@ mod generated {
 pub use generated::{
     HandDrawnEvent, RenderHookId, RenderHooks, RenderNeedsEvent, WorldDrawnEvent, render_hook_ids,
 };
-pub use horizon_mod_api_macros::hooks;
+#[doc(hidden)]
+pub use horizon_mod_api_macros::__subscriptions;
+pub use horizon_mod_api_macros::horizon_mod;
 pub use wgpu;
 
 static RENDERERS: OnceLock<RenderInstalled> = OnceLock::new();
@@ -47,6 +49,7 @@ fn new_render_installed(renderers: Box<[&'static dyn RenderHooks]>) -> RenderIns
         renderer
             .subscribed()
             .iter()
+            .flatten()
             .map(move |hook| (index, *hook as usize))
     });
     let subscribers =
@@ -244,24 +247,24 @@ mod tests {
     }
 
     struct Depth;
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl RenderHooks for Depth {
         fn render_needs(&self, event: &mut RenderNeedsEvent<'_>) {
             event.needs.world_depth = true;
         }
     }
     struct Spans;
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl RenderHooks for Spans {
         fn render_needs(&self, event: &mut RenderNeedsEvent<'_>) {
             event.needs.entity_spans = event.needs.world_depth;
         }
     }
     struct Quiet;
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl RenderHooks for Quiet {}
     struct CountingNeeds(Arc<AtomicUsize>);
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl RenderHooks for CountingNeeds {
         fn render_needs(&self, _event: &mut RenderNeedsEvent<'_>) {
             self.0.fetch_add(1, Ordering::Relaxed);

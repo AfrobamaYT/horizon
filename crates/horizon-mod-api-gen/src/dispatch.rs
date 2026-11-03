@@ -205,13 +205,13 @@ pub(super) fn emit(
         if is_render {
             render_hook_ids.push_str(&format!("{hook_id},\n"));
             render_hook_constants.push_str(&format!(
-                "pub const {name}: super::RenderHookId = super::RenderHookId::{hook_id};\n"
+                "pub const {name}: Option<super::RenderHookId> = Some(super::RenderHookId::{hook_id});\n"
             ));
             render_hook_count += 1;
         } else {
             hook_ids.push_str(&format!("{hook_id},\n"));
             hook_constants.push_str(&format!(
-                "pub const {name}: super::HookId = super::HookId::{hook_id};\n"
+                "pub const {name}: Option<super::HookId> = Some(super::HookId::{hook_id});\n"
             ));
             hook_count += 1;
         }

@@ -760,7 +760,7 @@ mod tests {
             pre: Arc<AtomicUsize>,
             cancel_cow: Arc<AtomicBool>,
         }
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn living_conversion_pre(
                 &self,

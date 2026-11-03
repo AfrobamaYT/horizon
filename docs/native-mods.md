@@ -2804,8 +2804,10 @@ A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest canno
 without moving its content into the native directory.
 
 The package may use only crates and versions in Horizon's `Cargo.lock`, like mixin crates.
-The folder contains a Rust package with a `horizon-client` dependency. Its library exports
-`pub fn hooks() -> Box<dyn horizon_client::mod_api::Hooks>`. The launcher links this package
+The folder contains a Rust package with a `horizon-client` dependency. At the crate root, add
+`#[mod_api::horizon_mod]` to the mod's `impl Hooks` and derive `Default` for its type; the attribute
+exports `hooks()` for the launcher. Rustc's "cannot find function `hooks`" at the launcher's generated
+call means the marked implementation is not at the crate root. The launcher links this package
 into a generated game executable and calls `hooks()` in dependency order (a mod after the mods it
 depends on, else in bundle order). The package is not a
 `[[crate]]`: it depends on the game instead of the game depending on it. A bundle with no
@@ -3014,7 +3016,7 @@ A catalog hook's trait method, event and return make up its `hook_version` contr
 versions. Catalog hooks, `Host` calls and raw `target` injections all build against the
 [game's exact source revision](#native-mod-source-revisions). Rebuild the mod when that contract changes.
 
-Every `impl Hooks` and `impl RenderHooks` must have `#[mod_api::hooks]`. The attribute derives
+Every `impl Hooks` and `impl RenderHooks` must have `#[mod_api::horizon_mod]`. The attribute derives
 subscriptions from the methods implemented in that block, so dispatch knows them at installation.
 
 ### Parts
@@ -3034,7 +3036,7 @@ impl BlockPart for Gauge {
     }
 }
 
-#[mod_api::hooks]
+#[mod_api::horizon_mod]
 impl Hooks for MyMod {
     fn register(&self, r: &mut Registrar) {
         r.block_part("minecraft:stone", Gauge);
@@ -3298,8 +3300,9 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
 impl Host for HostDouble {}
+#[derive(Default)]
 struct Counter(Arc<AtomicUsize>);
-#[mod_api::hooks]
+#[mod_api::horizon_mod]
 impl Hooks for Counter {
     fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);

@@ -7973,7 +7973,7 @@ mod breeding_tests {
             joins: Arc<Mutex<Vec<(u32, String)>>>,
             cancel: Arc<AtomicBool>,
         }
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn baby_entity_spawn(
                 &self,
@@ -8160,7 +8160,7 @@ mod breeding_tests {
         use horizon_client::mobs::{BreedExperience, MobEvent, goals::Breed};
         use horizon_core::random::LegacyRandom;
         struct Empty;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         super::super::native_entity_refs::tests::with_game(|game| {
             let kind = game
@@ -8217,7 +8217,7 @@ mod breeding_tests {
     fn empty_mod_never_defers_breeding_xp() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
         mod_api::testing::with_mods(mods, || {
@@ -8608,7 +8608,7 @@ mod living_drops_tests {
             atomic::{AtomicBool, Ordering},
         };
         struct Observer(Arc<Mutex<Vec<String>>>, Arc<AtomicBool>);
-        #[mod_api::hooks]
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn living_drops(&self, _: &mut dyn Host, event: &mut LivingDropsEvent<'_>) -> Flow {
                 let items: Vec<_> = event

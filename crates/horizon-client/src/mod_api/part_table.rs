@@ -839,7 +839,7 @@ pub(crate) mod tests {
     /// Doubles every comparator reading, and attaches `Gauge` to `test:gauge`, `TagGauge` to
     /// tag `test:gauged` and `Press` to `test:press`.
     struct Doubler;
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl Hooks for Doubler {
         fn register(&self, r: &mut Registrar) {
             r.block_part("test:gauge", Gauge);
@@ -1892,7 +1892,7 @@ pub(crate) mod tests {
     /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending
     /// on another's `[api]` crate does: its vats answer the same capability.
     struct Chemist;
-    #[mod_api::hooks]
+    #[mod_api::__subscriptions]
     impl Hooks for Chemist {
         fn register(&self, r: &mut Registrar) {
             r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
