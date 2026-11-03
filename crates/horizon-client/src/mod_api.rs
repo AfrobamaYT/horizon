@@ -167,6 +167,37 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// An item that drops where a living entity died, before it is an item entity
+/// in the level (`living_drops`): what `ItemEntity`'s constructor was given.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct NativeItemDrop {
+    pub stack: ItemStack,
+    /// Where the item entity appears.
+    pub position: [f64; 3],
+    /// Its motion in blocks per tick, as vanilla's constructor drew it.
+    pub velocity: [f64; 3],
+    /// Ticks before a player may pick it up.
+    pub pickup_delay: u32,
+}
+
+impl NativeItemDrop {
+    /// A drop of `stack` at `position` with a `velocity` and `pickup_delay`.
+    pub fn new(
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        pickup_delay: u32,
+    ) -> Self {
+        Self {
+            stack,
+            position,
+            velocity,
+            pickup_delay,
+        }
+    }
+}
+
 /// A statistic type (`BuiltInRegistries.STAT_TYPE`), for a player's
 /// statistics: what the stat's key names (a block, an item, an entity type,
 /// or a `minecraft:custom` stat).
@@ -1090,6 +1121,95 @@ impl GameMode {
     }
 }
 
+/// A custom boss bar (vanilla's `CustomBossEvent`, the `/bossbar` ones) of an
+/// open server world. It holds the world's epoch and the bar's UUID, so a bar
+/// that was removed (even if its id was added again) or a handle from an
+/// earlier open reads as `None` and changes nothing. Mob and raid bars are not
+/// custom boss events and have no handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BossBarRef {
+    pub(crate) epoch: NativeWorldEpoch,
+    pub(crate) uuid: u128,
+}
+
+/// `BossEvent.BossBarColor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarColor {
+    Pink,
+    Blue,
+    Red,
+    Green,
+    Yellow,
+    Purple,
+    White,
+}
+
+impl BossBarColor {
+    /// Every color, in ordinal order.
+    pub const ALL: [Self; 7] = [
+        Self::Pink,
+        Self::Blue,
+        Self::Red,
+        Self::Green,
+        Self::Yellow,
+        Self::Purple,
+        Self::White,
+    ];
+    /// `BossBarColor.getName`: `pink`, `blue`, `red`, `green`, `yellow`,
+    /// `purple` or `white`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pink => "pink",
+            Self::Blue => "blue",
+            Self::Red => "red",
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Purple => "purple",
+            Self::White => "white",
+        }
+    }
+    /// The color with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|color| color.name() == name)
+    }
+}
+
+/// `BossEvent.BossBarOverlay`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarOverlay {
+    Progress,
+    Notched6,
+    Notched10,
+    Notched12,
+    Notched20,
+}
+
+impl BossBarOverlay {
+    /// Every overlay, in ordinal order.
+    pub const ALL: [Self; 5] = [
+        Self::Progress,
+        Self::Notched6,
+        Self::Notched10,
+        Self::Notched12,
+        Self::Notched20,
+    ];
+    /// `BossBarOverlay.getName`: `progress`, `notched_6`, `notched_10`,
+    /// `notched_12` or `notched_20`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Progress => "progress",
+            Self::Notched6 => "notched_6",
+            Self::Notched10 => "notched_10",
+            Self::Notched12 => "notched_12",
+            Self::Notched20 => "notched_20",
+        }
+    }
+    /// The overlay with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|overlay| overlay.name() == name)
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
@@ -1307,58 +1427,89 @@ pub struct ToolUse {
 /// The ordered list of mods shared by the client and server.
 pub type Mods = Arc<[Box<dyn Hooks>]>;
 
-static MODS: OnceLock<Mods> = OnceLock::new();
+pub(crate) struct Installed {
+    mods: Mods,
+    subscribers: horizon_client_core::subscribers::Subscribers,
+    types: Box<[std::any::TypeId]>,
+}
+
+impl Installed {
+    fn new(mods: Mods) -> Self {
+        let types = mods
+            .iter()
+            .map(|m| (&**m as &dyn std::any::Any).type_id())
+            .collect();
+        let subscribers =
+            horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
+        Self {
+            mods,
+            subscribers,
+            types,
+        }
+    }
+}
+
+static MODS: OnceLock<Installed> = OnceLock::new();
 
 #[cfg(any(test, feature = "testing"))]
 thread_local! {
-    static TEST_MODS: std::cell::Cell<Option<&'static Mods>> = const { std::cell::Cell::new(None) };
+    static TEST_MODS: std::cell::Cell<Option<&'static Installed>> = const { std::cell::Cell::new(None) };
+}
+
+fn installed() -> Option<&'static Installed> {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(installed) = TEST_MODS.get() {
+        return Some(installed);
+    }
+    MODS.get()
 }
 
 /// Scoped trait-mod installation for tests, enabled by the `testing` feature.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
-    use super::{Mods, TEST_MODS};
+    use super::{Installed, Mods, TEST_MODS};
 
     /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
     ///
     /// The test allocation is leaked because dispatch exposes a static slice. Nested scopes and
     /// panic unwinding restore the preceding list; other threads are unaffected.
     pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
-        struct Restore(Option<&'static Mods>);
+        struct Restore(Option<&'static Installed>);
         impl Drop for Restore {
             fn drop(&mut self) {
                 TEST_MODS.set(self.0);
             }
         }
-        let mods = Box::leak(Box::new(mods));
-        let _restore = Restore(TEST_MODS.replace(Some(mods)));
+        let installed = Box::leak(Box::new(Installed::new(mods)));
+        let _restore = Restore(TEST_MODS.replace(Some(installed)));
         f()
     }
 }
 
 /// Install the process-wide ordered list of mods.
-pub(crate) fn install(mods: Mods) -> &'static Mods {
+pub(crate) fn install(mods: Mods) -> &'static Installed {
+    let installed = Installed::new(mods);
     #[cfg(test)]
     {
         // Tests can replace the list; mods() keeps its static slice lifetime.
-        let mods = Box::leak(Box::new(mods));
-        TEST_MODS.set(Some(mods));
-        mods
+        let installed = Box::leak(Box::new(installed));
+        TEST_MODS.set(Some(installed));
+        installed
     }
     #[cfg(not(test))]
     {
-        assert!(MODS.set(mods).is_ok(), "trait mods are installed once");
+        assert!(MODS.set(installed).is_ok(), "trait mods are installed once");
         MODS.get().unwrap()
     }
 }
 
 /// The process-wide list in dispatch order, or an empty list before installation.
 pub fn mods() -> &'static [Box<dyn Hooks>] {
-    #[cfg(any(test, feature = "testing"))]
-    if let Some(mods) = TEST_MODS.get() {
-        return mods;
-    }
-    MODS.get().map_or(&[], |mods| mods.as_ref())
+    installed().map_or(&[], |installed| &installed.mods)
+}
+
+fn listened(hook: generated::HookId) -> bool {
+    installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
 /// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
@@ -1374,12 +1525,48 @@ pub fn name_mods(ids: &'static [&'static str]) {
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
 /// panic in it names the mod. The generated dispatch loops over it.
-fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
+fn entered_registration<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
     Entered {
         mods: mods.iter().enumerate(),
         hook,
         guard: None,
     }
+}
+
+fn entered(
+    hook_id: generated::HookId,
+    hook: &'static str,
+) -> impl Iterator<Item = &'static Box<dyn Hooks>> {
+    installed().into_iter().flat_map(move |installed| {
+        let mut crash_guard = None;
+        let mut subscriber_guard = None;
+        installed
+            .subscribers
+            .indices(hook_id as usize)
+            .map(move |index| {
+                drop(subscriber_guard.take());
+                drop(crash_guard.take());
+                let hooks = &installed.mods[index];
+                subscriber_guard = Some(horizon_client_core::subscribers::enter(
+                    &installed.subscribers,
+                    hook_id as usize,
+                    index,
+                    (&**hooks as *const dyn Hooks).cast(),
+                    installed.types[index],
+                ));
+                crash_guard = Some(mark_mod(index, hook));
+                hooks
+            })
+    })
+}
+
+fn mark_mod(index: usize, hook: &'static str) -> crate::crash::NativeModGuard {
+    crate::crash::enter_native_mod(crate::crash::NativeModCall {
+        id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
+        index,
+        hook,
+        part: None,
+    })
 }
 
 /// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
@@ -1428,14 +1615,7 @@ impl<'a> Iterator for Entered<'a> {
         // The last mod's mark goes first, so the next one's puts back what was there before.
         drop(self.guard.take());
         let (index, hooks) = self.mods.next()?;
-        self.guard = Some(crate::crash::enter_native_mod(
-            crate::crash::NativeModCall {
-                id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
-                index,
-                hook: self.hook,
-                part: None,
-            },
-        ));
+        self.guard = Some(mark_mod(index, self.hook));
         Some(hooks)
     }
 }
@@ -1628,14 +1808,14 @@ pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
 pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
+pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
 mod item_place;
 mod menu_slot;
 pub use menu_slot::MenuSlotBacking;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
-pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
+pub use resource::{ComponentId, ItemResource, Overanswered, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{

@@ -298,20 +298,23 @@ changing the player's saved shader selection); other packs are unaffected.
 
 ## A bundle
 
-A bundle is a folder with a `horizon-mixin.toml`. Besides its helpers and modules (horizon-mixins' README) it can
+A mod project keeps its native bundle in `native/`, with the exact filename `horizon-mixin.toml` required by
+horizon-mixins. The launcher stages its contents into the tool's `<mods>/<id>/` folder; the package has no id
+directory level. Besides its helpers and modules (horizon-mixins' README) it can
 have its own crate, data files and a post-build step (horizon-mixins 0.6.0). The test bundle
 [`launcher/tests/fixtures/native-crate-demo`](../launcher/tests/fixtures/native-crate-demo) uses all of them:
 
 ```
 native-crate-demo/
-  horizon-mixin.toml
-  frame.rs                # helper, compiled into the game
-  data/greeting.txt       # the bundle's data: native_data!("crate_demo", "greeting.txt")
-  engine/                 # the mod's own crate
-    Cargo.toml            # [dependencies] crc32fast = "1"
-    data/salt.txt         # the crate's data: include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
-    src/lib.rs
-    src/bin/bake.rs       # the post-build step
+  native/
+    horizon-mixin.toml
+    data/greeting.txt     # native_data!("crate_demo", "greeting.txt")
+    rust/
+      Cargo.toml          # [dependencies] crc32fast = "1"
+      data/salt.txt       # include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
+      src/lib.rs
+      src/frame.rs        # helper, compiled into the game
+      src/bin/bake.rs     # the post-build step
 ```
 
 ```toml
@@ -324,12 +327,12 @@ id = "frame"
 hook = "frame"            # a name from native-hooks.json, instead of `target`
 hook_version = 1
 kind = "HEAD"
-helper = "frame.rs"
+helper = "rust/src/frame.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 
 [[crate]]
 id = "engine"
-path = "engine"           # holds Cargo.toml
+path = "rust"             # holds Cargo.toml; a non-dot path is required
 # dependent = "horizon-client"   (the default: the workspace package that depends on it)
 
 [[post_build]]
@@ -552,22 +555,22 @@ and the recipe fails, as an unknown kind does.
 
 A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
 module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
-`crate::native_data!` inside the lib), since hook points API 41. A mod's crate keeps its own data in its folder and
+`crate::native_data!` inside the lib). A mod's crate keeps its own data in its folder and
 reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
-both (`mixins/<id>/data/…`, `mixins/<id>/<crate>/data/…`).
+both (`native/data/…`, `native/rust/data/…`).
 
 Both are compiled in: neither folder is beside the game when it runs. A file the game reads at run time is one a
 post-build step writes into `HORIZON_NATIVE_DATA_DIR` (below), copying it from `HORIZON_NATIVE_BUNDLE_DATA_DIR` or
 making it; the game finds it with `native_built_data("<mod>")` (None only when the game can't tell its own folder).
 
-**What a native bundle holds.** Under `mixins/<id>/`: `.rs` and `.toml` files, the data folders above, and the
-text files a crate folder carries (`README*`, `LICENSE*`, `COPYING*`, `NOTICE*`, `.gitignore`, in the bundle's
-folder or a crate's), so a crate that compiles its README in builds the same from the registry as from a folder. At
-most 512 files and 64 MiB unpacked; anything else refuses the bundle. A local folder build has no such limits.
+**What a native bundle holds.** `native/horizon-mixin.toml`, `.rs` and `.toml` files under `native/rust/`,
+files under `native/data/` and `native/rust/data/`, and text files (`README*`, `LICENSE*`, `LICENCE*`, `COPYING*`,
+`NOTICE*`, `.gitignore`) in `native/` or `native/rust/`. At most 512 native files and 64 MiB unpacked;
+anything else refuses the archive. Every declared source root is `rust`.
 
 **One `.hmod` for content and code.** A mod's content and its native code ship as one `.hmod`, and what is inside
 decides what happens: only `horizon-mod.toml` with `assets/` and `data/` is a content mod, nothing compiles; with
-`horizon-native.json` and `mixins/<id>/` (a bundle as above) it is a native mod, built into the game. Both may be in
+`horizon-native.json` and `native/` (a bundle as above) it is a native mod, built into the game. Both may be in
 one file: `horizon-mod.toml`, `assets/` and `data/` are its content, checked as a content mod's
 (`horizon_mods::Content`) and left out of the build, and the two manifests name the same mod id. A `.hmod` with
 native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
@@ -1623,7 +1626,7 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hmod`.
   Release packages must contain native code; content-only packages are rejected by this native installer.
 - **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
-  registry file (native source under `mixins/<id>/`, optional content, size limits, nothing run) before it is installed.
+  registry file (native source under `native/`, optional content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
@@ -1726,7 +1729,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
   review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hmod` contains `.rs` and `.toml` files and may contain data files under
-  `mixins/<id>/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
+  `native/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
   The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
   `horizon-native.json`. `revoked.toml` takes a bad release down.
   A project's kind never changes.
@@ -2341,6 +2344,20 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   frame's entity, no table). A dispenser's shears and an explosion's frames aren't told. Leads: untying one or cutting it with
   shears is a use (the leashed mob, no table), and a mob a player killed while leashed drops its lead on its next tick as a call
   of its own, naming the killer (`used` false, no table). A lead that snaps or loses its holder names no player and isn't told.
+- **`native_living_drops(entity, kind, player, source, recently_hit, drops, cancel)`**: NeoForge's
+  `LivingDropsEvent`, the whole of what a dying mob, server player or armor stand drops, after `native_loot_drops` and with the
+  rest of `dropAllDeathLoot` in: an enderman's carried block, a copper golem's preserved equipment, and a player's inventory
+  (unless `keepInventory`). Each `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets;
+  item entity state such as no-gravity, owner and lifetime isn't exposed through it. `source` is a `HurtSource` (the damage type,
+  `causing` and `direct` entity ids); the id of a projectile isn't kept, so `direct` is 0 for it. Edit the list or set `cancel`
+  for no drops; experience orbs are separate (`native_living_experience_drop`). An armor stand fires it from `brokenByAnything`
+  with an empty list, and its stand item and equipment pop outside the list, as in vanilla. `native_loot_drops` stays for loot that
+  is not a death (blocks, shearing, leads); for a mob's death it is heard first (it edits the stacks a table rolled), and this hook
+  then fires once on the whole collected list, with nothing spawned until it returns.
+- **`native_get_equipment_drop_chance(entity, kind, slot, source, recently_hit, stack, original_chance, preserved, chance)`**:
+  NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
+  is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
+  own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
 
 ### A block's items
 
@@ -2758,16 +2775,20 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Trait mods (draft)
 
 `cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
-`horizon-mixin.toml`, pinned to that Horizon commit, and an `[api]` crate whose `hooks()` greets each player who
-joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
+`horizon-native.json`, top-level content manifest, assets and data directories, `native/horizon-mixin.toml`,
+pinned to that Horizon commit, and `native/rust/`, whose `hooks()` greets each player who joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
 as it is (`native-build <path>`) and packs it into a `.hmod`.
 
-A bundle declares its trait mod package by its path inside the bundle:
+A bundle declares its trait mod package by its path inside `native/`:
 
 ```toml
 [api]
-path = "engine"
+path = "rust"
 ```
+
+A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest cannot declare both routes.
+`rust/` is required because the tool rejects a dot crate path. `cargo horizon-mod build` packages this project
+without moving its content into the native directory.
 
 The package may use only crates and versions in Horizon's `Cargo.lock`, like mixin crates.
 The folder contains a Rust package with a `horizon-client` dependency. Its library exports
@@ -3038,7 +3059,8 @@ index holds when it holds that (`capacity`, none where it may not go), and `inse
 `&Transaction` and answer how much moved. There is no `simulate`: a write happens in a transaction
 (`host.transaction(|host, tx| …)`, below), and to try one, abort it. `move_resources(host, &from, &to, filter, max,
 tx)` (NeoForge's `ResourceHandlerUtil.move`) moves what `filter` accepts, up to `max`, index by index out of `from`
-into wherever `to` takes it, each move all or nothing: what `to` won't take stays put. Hoppers use a mod's handler
+into wherever `to` takes it, each move all or nothing: what `to` won't take stays put. It answers how much moved, or
+`Overanswered` (below). Hoppers use a mod's handler
 where one is registered, each move in a transaction of its own. A mod's own capability is a
 `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
@@ -3141,31 +3163,33 @@ host.transaction(|host, tx| {
 
 #### A block's fluids
 
-Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
-millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
-fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
-components. The game's own answer is a mod block's tanks by side (`block_entity_fluids`) and a cauldron, one tank
-of 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity and is answered by
-position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
-discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
-components are dropped. A mod block's saved tanks take no fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a
-handler in a `LevelRef`'s level, as `ITEMS`' are found. `host.transfer_fluids(level, from, from_side, to, to_side, max)` moves
-one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, until a round moves
-nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
-whole, then the source really gives with that request and the target is filled with exactly what came out. A
-handler whose real calls answer as its simulations never loses fluid and is never warned.
+Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered as items are, by a
+`ResourceHandler<FluidResource>` in millibuckets. A `FluidResource` is a fluid id and its data components, without
+an amount, kept as an item stack's are (a potion fluid's contents; water and lava have none), and a tank fills only
+from empty or with the same fluid and the same components. A `FluidStack` is one with an amount, as tanks keep it
+(`resource.to_stack(amount)`, `FluidResource::of(&stack)`). The game's own answer is a mod block's tanks by side
+(`block_entity_fluids`) and a cauldron, one tank of 1000 mB that holds water in thirds and lava only whole; a
+cauldron has no block entity and is answered by position, and a powder snow cauldron holds no fluid. A cauldron
+takes water and lava whatever their components and discards them, as NeoForge's `CauldronFluidContent` does, so
+what comes out of it is plain: the one place a fluid's components are dropped. A mod block's saved tanks take no
+fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a handler in a `LevelRef`'s level, as
+`ITEMS`' are found, and `move_resources` moves fluids as it moves items. A move the target takes only part of is
+undone and tried again with that part, so a cauldron, which gives whole thirds and never more than asked, gives
+what fits: asked for a bucket with room for 500 mB, it gives one level, 334 mB.
 
-A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
-mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
-to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
-broken handler can void.
+Fluid held by an item is `ITEM_FLUIDS` (NeoForge's `Capabilities.Fluid.ITEM`), found where its stack lives, as
+`ITEM_ITEMS` is: `place.capability(host, &ITEM_FLUIDS)` gives a `ResourceHandler<FluidResource>` for the item at
+that `ItemPlace`, and a write rewrites the item there by an exchange of one, so from a stack of more than one the
+changed item splits off (`r.item_capability(&ITEM_FLUIDS, "mymod:canister", …)` answers it for a mod's item). The
+game answers it for vanilla's buckets, as NeoForge's `BucketResourceHandler` does: one tank of 1000 mB, filled and
+drained whole, an empty bucket taking plain water or lava and becoming its full bucket, a full one becoming an empty
+bucket. `move_resources` moves between an item and a block as between two blocks: a full cauldron fills a bucket in a
+player's slot, and two thirds of one fill none.
 
-The game never trusts an answer past what it asked, offered or simulated. An item handler answering more than it
-was asked has its move undone, in its transaction. A fluid handler's real extract must give the fluid, with the
-components, that its simulation showed: another is given back and nothing comes out. A leftover larger than the
-offer counts as the offer, and what an extract gives beyond the request goes back into its tank or, as above, is
-lost with a warning. Either is a mod bug, warned once naming the mod; a broken handler can't make a move overflow,
-duplicate items or panic the game.
+The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
+move undone, in its transaction, and is warned once naming the mod, and `move_resources` returns `Overanswered`
+naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so neither end keeps
+any of it: a broken handler can't make a move overflow, duplicate or lose items or fluid, or panic the game.
 
 `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is

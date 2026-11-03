@@ -119,6 +119,9 @@ mod tests {
             Rideable,
         }
         pub(super) struct EffectTickChange;
+        pub(super) struct NativeItemDrop;
+        #[derive(Clone, Copy)]
+        pub(super) struct EquipmentSlot;
         #[derive(Clone, Copy)]
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
@@ -191,25 +194,56 @@ mod tests {
         include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
     }
     use generated::*;
+    struct Installed {
+        mods: Arc<[Box<dyn Hooks>]>,
+        subscribers: horizon_client_core::subscribers::Subscribers,
+        types: Box<[std::any::TypeId]>,
+    }
     thread_local! {
         /// The hooks each dispatch entered, a mod at a time.
         static ENTERED: std::cell::RefCell<Vec<(usize, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
-        static MODS: std::cell::Cell<Option<&'static Arc<[Box<dyn Hooks>]>>> = const { std::cell::Cell::new(None) };
+        static MODS: std::cell::Cell<Option<&'static Installed>> = const { std::cell::Cell::new(None) };
     }
     fn install(mods: Arc<[Box<dyn Hooks>]>) {
+        let types = mods
+            .iter()
+            .map(|m| (&**m as &dyn std::any::Any).type_id())
+            .collect();
+        let subscribers =
+            horizon_client_core::subscribers::Subscribers::new(HOOK_COUNT, mods.len());
         // Test dispatch needs the same static lifetime as the real installation.
-        MODS.set(Some(Box::leak(Box::new(mods))));
+        MODS.set(Some(Box::leak(Box::new(Installed {
+            mods,
+            subscribers,
+            types,
+        }))));
     }
-    fn mods() -> &'static [Box<dyn Hooks>] {
-        MODS.get().map_or(&[], |mods| mods)
+    fn listened(hook: HookId) -> bool {
+        MODS.get()
+            .is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
     }
-    fn entered<'a>(
-        mods: &'a [Box<dyn Hooks>],
+    fn entered(
+        hook_id: HookId,
         hook: &'static str,
-    ) -> impl Iterator<Item = &'a Box<dyn Hooks>> {
-        mods.iter().enumerate().map(move |(index, hooks)| {
-            ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
-            hooks
+    ) -> impl Iterator<Item = &'static Box<dyn Hooks>> {
+        MODS.get().into_iter().flat_map(move |installed| {
+            let mut guard = None;
+            installed
+                .subscribers
+                .indices(hook_id as usize)
+                .map(move |index| {
+                    drop(guard.take());
+                    let hooks = &installed.mods[index];
+                    guard = Some(horizon_client_core::subscribers::enter(
+                        &installed.subscribers,
+                        hook_id as usize,
+                        index,
+                        (&**hooks as *const dyn Hooks).cast(),
+                        installed.types[index],
+                    ));
+                    ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
+                    hooks
+                })
         })
     }
     struct Registrar;
@@ -256,6 +290,79 @@ mod tests {
     ) -> impl Iterator<Item = &'a P> {
         parts.iter().copied()
     }
+    #[test]
+    fn only_overrides_remain_after_first_dispatch_across_words() {
+        struct Quiet;
+        impl Hooks for Quiet {}
+        struct Listener(Arc<std::sync::atomic::AtomicUsize>);
+        impl Hooks for Listener {
+            fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mods: Vec<Box<dyn Hooks>> = (0..70)
+            .map(|i| {
+                if i == 66 {
+                    Box::new(Listener(calls.clone())) as Box<dyn Hooks>
+                } else {
+                    Box::new(Quiet)
+                }
+            })
+            .collect();
+        install(mods.into());
+        ENTERED.with(|entered| entered.borrow_mut().clear());
+        let mut table = serde_json::json!([]);
+        dispatch_loot_table_load("test", &mut table);
+        dispatch_loot_table_load("test", &mut table);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
+        ENTERED.with(|entered| {
+            let entered = entered.borrow();
+            assert_eq!(entered.len(), 71);
+            assert_eq!(entered[70], (66, "loot_table_load"));
+        });
+    }
+
+    #[test]
+    fn nested_default_on_another_zero_sized_type_does_not_prune_override() {
+        struct Other;
+        impl Hooks for Other {}
+        struct Active;
+        impl Hooks for Active {
+            fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
+                dispatch_modify_default_components("test", &mut Map::new());
+                Other.loot_table_load(event);
+            }
+        }
+        install(vec![Box::new(Active) as Box<dyn Hooks>].into());
+        ENTERED.with(|entered| entered.borrow_mut().clear());
+        let mut table = serde_json::json!([]);
+        dispatch_loot_table_load("test", &mut table);
+        dispatch_loot_table_load("test", &mut table);
+        ENTERED.with(|entered| {
+            assert_eq!(
+                entered
+                    .borrow()
+                    .iter()
+                    .filter(|(_, hook)| *hook == "loot_table_load")
+                    .count(),
+                2
+            );
+        });
+    }
+
+    #[test]
+    fn empty_dispatch_checks_before_event_construction() {
+        let generated = include_str!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
+        let function = generated
+            .split("pub fn dispatch_loot_table_load(")
+            .nth(1)
+            .unwrap();
+        let guard = function.find("super::listened").unwrap();
+        let event = function.find("let mut event").unwrap();
+        assert!(guard < event);
+    }
+
     #[test]
     fn advancement_progress_reports_grant_and_revoke_identity() {
         struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
