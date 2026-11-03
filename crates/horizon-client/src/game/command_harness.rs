@@ -70,7 +70,7 @@ impl Game<'_> {
             return Err("command harness: owner is not connected".into());
         };
         let (conn, dim, back) = (guest.conn, super::Dim::from_id(&guest.dimension), self.dim);
-        self.enter_level(None, dim)?;
+        self.enter_level(dim)?;
         let swap = self
             .enter_guest(conn)
             .ok_or("command harness: owner is already acting")?;
@@ -80,7 +80,7 @@ impl Game<'_> {
             host.hub.sync_all_effects();
         }
         self.run_level_teleports();
-        let restored = self.enter_level(None, back);
+        let restored = self.enter_level(back);
         restored?;
         result
     }
@@ -260,7 +260,7 @@ impl Game<'_> {
                     let block = op["block"].as_str().unwrap_or("minecraft:sand");
                     let no_gravity = op["no_gravity"].as_bool().unwrap_or(false);
                     let back = self.dim;
-                    self.enter_level(None, super::Dim::from_id(dimension))?;
+                    self.enter_level(super::Dim::from_id(dimension))?;
                     let facts = self.res.facts();
                     let matches = |f: &super::FallingBlock| {
                         &*facts.get(f.state).name == block && f.no_gravity == no_gravity
@@ -269,7 +269,7 @@ impl Game<'_> {
                     if op["discard"].as_bool() == Some(true) {
                         self.falling.retain(|f| !matches(f));
                     }
-                    self.enter_level(None, back)?;
+                    self.enter_level(back)?;
                     let record = json!({
                         "cmd": format!("#falling {dimension} {block} {no_gravity}"),
                         "messages": [],

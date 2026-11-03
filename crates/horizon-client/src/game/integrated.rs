@@ -902,7 +902,7 @@ impl Game<'_> {
             let conn = g.conn;
             // Commands.performCommand runs in the player's level.
             let (back, theirs) = (self.dim, super::Dim::from_id(&g.dimension));
-            let entered = theirs == back || self.enter_level(None, theirs).is_ok();
+            let entered = theirs == back || self.enter_level(theirs).is_ok();
             if entered && let Some(swap) = self.enter_guest(conn) {
                 let command = command.trim_start_matches('/').to_owned();
                 let lines = self.as_console(|g| {
@@ -942,7 +942,7 @@ impl Game<'_> {
                 self.send_admin_feedback(Some(conn));
             }
             if theirs != back
-                && let Err(e) = self.enter_level(None, back)
+                && let Err(e) = self.enter_level(back)
             {
                 log::error!("could not reopen {}: {e}", back.id());
             }
