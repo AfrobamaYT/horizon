@@ -1583,13 +1583,10 @@ impl Game<'_> {
                 if super::chat_filter::MUTE_COMMANDS.contains(&command)
                     && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
             {
-                if let Some(mut host) = self.lan.take() {
-                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
-                    let replies = self.mute_command(&mut host, &words, "Server");
-                    self.lan = Some(host);
-                    for reply in replies {
-                        self.console_reply(lit(&reply));
-                    }
+                let words: Vec<&str> = [command].into_iter().chain(rest).collect();
+                let replies = self.mute_command(&words, "Server");
+                for reply in replies {
+                    self.console_reply(lit(&reply));
                 }
             }
             "ban" if !rest.is_empty() => {
@@ -2114,13 +2111,10 @@ impl Game<'_> {
         log("INFO", "Stopping server");
         self.native_players_leaving();
         log("INFO", "Saving players");
-        if let Some(mut host) = self.lan.take() {
-            self.flush_native_net(&mut host);
-            // PlayerList.removeAll: each player's file, with the vehicle it
-            // alone rides, then its records.
-            self.save_leaving_guests(&mut host);
-            self.lan = Some(host);
-        }
+        self.flush_native_net();
+        // PlayerList.removeAll: each player's file, with the vehicle it
+        // alone rides, then its records.
+        self.save_leaving_guests();
         if let Some(h) = self.lan.as_mut() {
             let conns: Vec<u32> = h.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {

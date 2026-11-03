@@ -3,7 +3,7 @@
 //! player vanilla's `Level.getNearestPlayer` would give it, and keeps the
 //! guest it targets until it lets go. What it then does to `Who::Player`
 //! (hits, pushes, fire, its projectiles) runs with that guest swapped in.
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_client::{
     mobs::{Mob, MobEvent, PlayerView, Species, Who},
     projectiles::{Hit, Projectile},
@@ -359,7 +359,10 @@ impl Game<'_> {
 
     /// ClientboundSetEntityMotionPacket to a guest about themselves.
     pub(super) fn send_guest_motion(&self, conn: u32, velocity: Option<Vec3>) {
-        if let (Some(v), Some(g)) = (velocity, self.lan.as_ref().and_then(|host| host.hub.guest(conn))) {
+        if let (Some(v), Some(g)) = (
+            velocity,
+            self.lan.as_ref().and_then(|host| host.hub.guest(conn)),
+        ) {
             g.send(&C::SetEntityMotion(play::SetEntityMotion {
                 id: g.entity_id,
                 velocity: [v.x, v.y, v.z],
