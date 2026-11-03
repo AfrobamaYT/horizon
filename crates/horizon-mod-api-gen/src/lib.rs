@@ -634,6 +634,9 @@ fn catalog_hooks(
         if !seen.insert(name.to_owned()) {
             return Err(format!("duplicate hook {name}"));
         }
+        HelperSide::parse(hook)
+            .map_err(|e| format!("hook {name}: {e}"))?
+            .ok_or_else(|| format!("hook {name}: side missing"))?;
         for key in ["neoforge", "fabric", "paper"] {
             if let Some(value) = hook.get(key) {
                 let valid = value.is_string()
@@ -1085,6 +1088,10 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             &mut dispatch
         };
         let mut method_source = doc_comments(&method.attrs, name, false)?;
+        method_source.push_str(&format!(
+            "/// Side: {}.\n",
+            hook["side"].as_str().expect("validated hook side")
+        ));
         match (contract, out) {
             ("cancel", Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped.\n"
@@ -1223,7 +1230,8 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
-        let side = HelperSide::parse(helper)?;
+        let side =
+            HelperSide::parse(helper)?.ok_or_else(|| format!("helper {name}: side missing"))?;
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
@@ -1239,10 +1247,9 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             matching_helper_signatures(&implementation, &client_implementation, name)?;
         }
         let side_doc = match side {
-            Some(HelperSide::Server) => "/// Side: server.\n",
-            Some(HelperSide::Client) => "/// Side: client.\n",
-            Some(HelperSide::Both) => "/// Side: both.\n",
-            None => "",
+            HelperSide::Server => "/// Side: server.\n",
+            HelperSide::Client => "/// Side: client.\n",
+            HelperSide::Both => "/// Side: both.\n",
         };
         host_traits.push_str(side_doc);
         host_traits.push_str(&declaration);
@@ -1453,10 +1460,10 @@ mod tests {
         std::fs::write(fragments.join("empty.json"), r#"{"hooks":[]}"#).unwrap();
         std::fs::write(
             fragments.join("duplicate.json"),
-            r#"{"hooks":[{"name":"same"}]}"#,
+            r#"{"hooks":[{"name":"same","side":"server"}]}"#,
         )
         .unwrap();
-        let catalog = serde_json::json!({"hooks":[{"name":"same"}]});
+        let catalog = serde_json::json!({"hooks":[{"name":"same","side":"server"}]});
         assert_eq!(
             super::catalog_hooks(&dir, &catalog).unwrap_err(),
             "duplicate hook same"
@@ -1473,13 +1480,24 @@ mod tests {
             .join(format!("mod-api-counterparts-{}", std::process::id()));
         std::fs::create_dir_all(root.join("tools/native-hook-fragments")).unwrap();
         let catalog = serde_json::json!({"hooks": [
-            {"name": "one", "fabric": "Event.ONE", "neoforge": "OneEvent"},
-            {"name": "two", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
-            {"name": "none"}
+            {"name": "one", "side": "server", "fabric": "Event.ONE", "neoforge": "OneEvent"},
+            {"name": "two", "side": "both", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
+            {"name": "none", "side": "client"}
         ]});
         assert_eq!(super::catalog_hooks(&root, &catalog).unwrap().len(), 3);
+        for side in [serde_json::json!(null), serde_json::json!("invalid")] {
+            let invalid = serde_json::json!({"hooks": [{"name": "bad", "side": side}]});
+            assert!(super::catalog_hooks(&root, &invalid).is_err());
+        }
+        let missing = serde_json::json!({"hooks": [{"name": "bad"}]});
+        assert!(
+            super::catalog_hooks(&root, &missing)
+                .unwrap_err()
+                .contains("side missing")
+        );
         for key in ["fabric", "neoforge", "paper"] {
-            let invalid = serde_json::json!({"hooks": [{"name": "bad", key: ["ok", 4]}]});
+            let invalid =
+                serde_json::json!({"hooks": [{"name": "bad", "side": "server", key: ["ok", 4]}]});
             assert!(
                 super::catalog_hooks(&root, &invalid)
                     .unwrap_err()
