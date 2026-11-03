@@ -110,6 +110,14 @@ pub fn needed<'a>(imports: impl IntoIterator<Item = &'a str>) -> (u32, Option<&'
     needed
 }
 
+/// Why this Horizon can't run a mod that needs `level`, or None when it can.
+pub fn too_new(level: u32, function: Option<&str>) -> Option<String> {
+    (level > LEVEL).then(|| {
+        let uses = function.map_or(String::new(), |f| format!(" (it uses {f})"));
+        format!("made for a newer Horizon{uses}: update Horizon to run it")
+    })
+}
+
 /// The functions a mod's component imports from Horizon (`horizon:mods/*`),
 /// as `interface.function`, in the component's order.
 #[cfg(feature = "index")]
@@ -185,6 +193,11 @@ mod tests {
         assert_eq!(
             needed(["render.set-minimap", "render.set-sky"]),
             (LEVEL + 1, Some("render.set-sky"))
+        );
+        assert_eq!(too_new(LEVEL, None), None);
+        assert_eq!(
+            too_new(LEVEL + 1, Some("render.set-sky")).as_deref(),
+            Some("made for a newer Horizon (it uses render.set-sky): update Horizon to run it")
         );
     }
 }
