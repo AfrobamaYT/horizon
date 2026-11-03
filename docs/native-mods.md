@@ -2382,6 +2382,12 @@ client, so a call a tick looks smooth.
 several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
 a dimension.
 
+The client also owns a world epoch, separate from the server's. It begins when a play login creates the
+client level, changes when a dimension change or later login replaces that level, and retires after the
+client logout hook or when reconfiguration clears the level. A same-level respawn keeps the epoch.
+Client epochs do not fire server world lifecycle or server tick hooks. This bookkeeping does not make
+the server entity and level reads available on a client.
+
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
 - `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name

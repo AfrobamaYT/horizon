@@ -1132,6 +1132,8 @@ impl Game<'_> {
             .as_ref()
             .map(|_| (remote.entity_id, remote.profile));
         self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
+        self.native_lifecycle.begin_close();
+        self.native_lifecycle_world_closed();
     }
 
     /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
@@ -1908,6 +1910,8 @@ impl Game<'_> {
                     if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
                         self.native_client_level_unload(&old);
                     }
+                    self.native_lifecycle.begin_close();
+                    self.native_lifecycle_world_closed();
                     let ticks = self.ticks;
                     if let Some(r) = self.remote.as_mut() {
                         r.reconfiguring = Some(ticks);
@@ -2179,6 +2183,10 @@ impl Game<'_> {
                 self.world.weather,
             );
             self.world = World::new(self.res.facts().air, spawn.seed);
+            // Entity IDs belong to this ClientLevel, not the connection. A
+            // same-level respawn keeps it; a replacement invalidates handles.
+            self.native_lifecycle_open_started();
+            self.native_lifecycle_world_ready();
             self.world.shape = shape;
             self.world.game_time = time;
             self.world.day_time = day;
@@ -10605,6 +10613,75 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_epochs_follow_level_replacement_and_logout() {
+        use super::super::{
+            execution_role::ExecutionRole, native_entity_refs::tests::with_game,
+            native_lifecycle::NativeLifecycle,
+        };
+        use horizon_client::{level_loading::Reason, mobs::Mob, mod_api::EntityRef};
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.native_lifecycle = NativeLifecycle::default();
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EpochTest").unwrap();
+            // A transport alone has no ClientLevel yet.
+            assert!(game.native_lifecycle.epoch().is_none());
+            let mut spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let joined = game.native_lifecycle.epoch().unwrap();
+            let old = EntityRef::new(joined, 12);
+            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            assert_eq!(game.native_lifecycle.epoch(), Some(joined));
+
+            // A different level key replaces the world even with the same
+            // dimension type; IDs can be reused but old handles cannot.
+            spawn.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&spawn, true, Reason::Other);
+            let replaced = game.native_lifecycle.epoch().unwrap();
+            assert_ne!(replaced, joined);
+            let current = EntityRef::new(replaced, 12);
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            assert!(
+                game.native_entity_target(current).is_none(),
+                "still server-only"
+            );
+            // Isolate the existing epoch check from the logical-server guard.
+            game.options.execution_role = ExecutionRole::IntegratedServer;
+            assert!(game.native_entity_target(current).is_some());
+            assert!(game.native_entity_target(old).is_none());
+            game.options.execution_role = ExecutionRole::Client;
+
+            game.client_logging_out();
+            assert!(game.native_lifecycle.epoch().is_none());
+            game.client_logging_out();
+            assert!(game.native_lifecycle.epoch().is_none());
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "EpochTest").unwrap();
+            assert!(game.native_lifecycle.epoch().is_none());
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            assert_ne!(game.native_lifecycle.epoch(), Some(replaced));
+            game.client_logging_out();
+            assert!(game.native_lifecycle.epoch().is_none());
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forgetting_and_closing_remote_columns_clear_their_data() {
