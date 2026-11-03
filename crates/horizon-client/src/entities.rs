@@ -2012,7 +2012,12 @@ mod fire_environment_tests {
         assert_eq!(stand.health, 20.0, "lava does not hurt armor stands");
         // A stand the flames run out of health names the damage that did it.
         world
-            .set(20, 4, 20, assets.registry.default_state("minecraft:air").unwrap())
+            .set(
+                20,
+                4,
+                20,
+                assets.registry.default_state("minecraft:air").unwrap(),
+            )
             .unwrap();
         stand.health = 4.0;
         stand.fire_ticks = 20;
