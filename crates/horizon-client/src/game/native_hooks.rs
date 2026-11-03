@@ -255,8 +255,6 @@
 //!
 //! API 232 adds A hopper is about to pick up a dropped item (`native_hopper_pickup_item`).
 //!
-//! API 231 adds A vanilla world game event fired (`native_game_event`).
-//!
 //! API 230 adds A furnace begins cooking an item (`native_furnace_start_smelt`).
 //!
 //! API 229 adds A furnace finishes smelting an item (`native_furnace_smelt`).
@@ -4244,8 +4242,8 @@ impl Game<'_> {
     /// happened and `cause` the network id of the entity that caused it
     /// (None for none). The context's affected block state is not tracked
     /// here. Canceling keeps the sculk sensors, wardens and allays from
-    /// hearing it. The listen-only `native_game_event` also hears events on
-    /// a client. Server-side. @API:vanilla_game_event@.
+    /// hearing it. The affected block state in NeoForge's context is not
+    /// currently exposed. Server-side. @API:vanilla_game_event@.
     pub(super) fn native_vanilla_game_event(
         &mut self,
         dimension: &str,
@@ -6316,11 +6314,6 @@ impl Game<'_> {
         count: usize,
     ) {
         mod_api::dispatch_entities_unload(self, mod_api::mods(), dimension, chunk, count);
-    }
-
-    /// A generic world game event was fired at `pos`. 231.
-    pub(super) fn native_game_event(&mut self, event: &str, pos: [f64; 3]) {
-        mod_api::dispatch_game_event(self, mod_api::mods(), event, pos);
     }
 
     /// A guest asked to complete `command`; `suggestions` may be added to or
