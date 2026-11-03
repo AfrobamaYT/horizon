@@ -31,6 +31,19 @@ impl Game<'_> {
             prototype.get(component)?,
         ))
     }
+    /// Whether an enchantment on `stack` has effect component `effect`, by the world's
+    /// enchantment definitions (`EnchantmentHelper.has`), behind
+    /// `ItemResource::has_enchantment_effect`, through the opaque backend. API
+    /// @API:item_components@.
+    pub(super) fn native_item_has_enchantment_effect(
+        &self,
+        stack: &ItemStack,
+        effect: &str,
+    ) -> bool {
+        world_stations!(self)
+            .enchantments
+            .has_component(stack, effect)
+    }
 }
 
 // Native mods use these helpers.
