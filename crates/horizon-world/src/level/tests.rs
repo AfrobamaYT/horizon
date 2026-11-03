@@ -59,7 +59,7 @@ pub(crate) struct TestLevel {
     /// `analog_states` (`adjust_has_analog_output`).
     pub analog: HashMap<BlockPos, i32>,
     pub analog_states: HashSet<BlockStateId>,
-    /// What `adjust_can_connect_redstone` answers at a position: whether
+    /// What `adjust_should_redstone_wire_connect_to` answers at a position: whether
     /// redstone wire connects there.
     pub wire_connect: HashMap<BlockPos, bool>,
     /// What `before_fire_odds` answers for a state.
@@ -113,7 +113,7 @@ impl LevelAccess for TestLevel {
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
     }
-    fn adjust_can_connect_redstone(
+    fn adjust_should_redstone_wire_connect_to(
         &self,
         pos: BlockPos,
         _state: BlockStateId,
@@ -1175,7 +1175,7 @@ fn redstone_lever_wire_and_lamp() {
 }
 
 #[test]
-fn wire_connects_only_to_the_block_that_answers_can_connect_redstone() {
+fn wire_connects_only_to_the_block_that_answers_should_redstone_wire_connect_to() {
     let mut w = world!();
     w.floor(0, 20, "stone");
     let wire = w.id("redstone_wire", &[]);

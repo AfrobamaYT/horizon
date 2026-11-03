@@ -832,7 +832,11 @@ pub(crate) mod tests {
     /// Connects redstone wire to its block from any side.
     struct Connector;
     impl BlockPart for Connector {
-        fn can_connect_redstone(&self, _: &dyn LevelHost, event: &mut CanConnectRedstoneEvent) {
+        fn should_redstone_wire_connect_to(
+            &self,
+            _: &dyn LevelHost,
+            event: &mut ShouldRedstoneWireConnectToEvent,
+        ) {
             event.connected = true;
         }
     }
@@ -2017,7 +2021,7 @@ pub(crate) mod tests {
         resolve(&[]).unwrap();
         for (state, expected) in [(1, true), (2, false)] {
             let mut connected = false;
-            dispatch_can_connect_redstone(
+            dispatch_should_redstone_wire_connect_to(
                 &Level,
                 LevelDimension::Overworld,
                 BlockPos::new(0, 64, 0),

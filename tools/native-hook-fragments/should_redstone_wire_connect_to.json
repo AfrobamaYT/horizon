@@ -1,9 +1,8 @@
 {
   "hooks": [
     {
-      "name": "can_connect_redstone",
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_can_connect_redstone",
-      "neoforge": "IBlockExtension.canConnectRedstone",
+      "name": "should_redstone_wire_connect_to",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_should_redstone_wire_connect_to",
       "side": "server",
       "mod_api": {
         "contract": "collect",

@@ -693,10 +693,10 @@ pub trait LevelAccess {
         vanilla
     }
     /// `BlockBehaviour.shouldRedstoneWireConnectTo` once the library answered
-    /// `vanilla` for the block `state` at `pos`, `direction` the side the wire
-    /// reaches it by (None when it asks about the block above or below):
+    /// `vanilla` for the block `state` at `pos`, `direction` pointing from the
+    /// wire toward its neighbour (None for a block above or below):
     /// whether redstone wire connects. The default keeps it.
-    fn adjust_can_connect_redstone(
+    fn adjust_should_redstone_wire_connect_to(
         &self,
         _pos: BlockPos,
         _state: BlockStateId,

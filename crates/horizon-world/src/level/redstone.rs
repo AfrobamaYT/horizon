@@ -230,7 +230,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             _ => self.is_signal_source(state) && direction.is_some(),
         };
         self.level
-            .adjust_can_connect_redstone(pos, state, direction, vanilla)
+            .adjust_should_redstone_wire_connect_to(pos, state, direction, vanilla)
     }
     /// `RedstoneWireBlock.canSurvive` and `updateShape`'s down face: the block
     /// below is read through `support_state`, since a retracting piston's
