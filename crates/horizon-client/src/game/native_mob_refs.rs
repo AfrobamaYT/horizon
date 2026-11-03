@@ -149,7 +149,7 @@ impl Game<'_> {
     /// The entity as a vanilla Mob. Players, armor stands, stale handles and
     /// clients are rejected. The dragon is a vanilla Mob, but is not yet
     /// supported (a #29 follow-up). Mobs taken out for ticking are unavailable
-    /// (also a #29 follow-up). API @API:mob_refs@.
+    /// (also a #29 follow-up).
     pub(super) fn native_mob_ref(&self, entity: EntityRef) -> Option<MobRef> {
         match self.native_entity_target(entity)? {
             Target::Mob(_) => Some(MobRef::new(entity)),
@@ -161,7 +161,6 @@ impl Game<'_> {
     /// and hoglins use Horizon's `ai.target` stand-in. Invalid targets, an
     /// unavailable mob or player binding, or a target without a living handle
     /// read as None.
-    /// API @API:mob_refs@.
     pub(super) fn native_mob_target(&self, mob: MobRef) -> Option<LivingRef> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
             return None;
@@ -189,7 +188,6 @@ impl Game<'_> {
     /// Invalid targets are refused (false, mob unchanged); vanilla instead
     /// stores `asValidTarget(target)`, clearing the target when it is invalid.
     /// False also means a stale handle, client, or an unavailable mob/player.
-    /// API @API:mob_refs@.
     pub(super) fn native_mob_set_target(&mut self, mob: MobRef, target: Option<LivingRef>) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
@@ -249,7 +247,7 @@ impl Game<'_> {
         true
     }
 
-    /// `Mob.isAggressive`, the synced mob flag. API @API:mob_refs@.
+    /// `Mob.isAggressive`, the synced mob flag.
     pub(super) fn native_mob_is_aggressive(&self, mob: MobRef) -> Option<bool> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
             return None;
@@ -257,7 +255,7 @@ impl Game<'_> {
         Some(self.mobs.iter().find(|m| m.id == id)?.ai.aggressive)
     }
 
-    /// `Mob.setAggressive`. False for an unavailable mob. API @API:mob_refs@.
+    /// `Mob.setAggressive`. False for an unavailable mob.
     pub(super) fn native_mob_set_aggressive(&mut self, mob: MobRef, value: bool) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
@@ -271,7 +269,7 @@ impl Game<'_> {
         true
     }
 
-    /// `Mob.isPersistenceRequired`. API @API:mob_refs@.
+    /// `Mob.isPersistenceRequired`.
     pub(super) fn native_mob_persistence_required(&self, mob: MobRef) -> Option<bool> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
             return None;
@@ -280,7 +278,7 @@ impl Game<'_> {
     }
 
     /// `Mob.setPersistenceRequired`, which sets the flag and cannot clear it.
-    /// False for an unavailable mob. API @API:mob_refs@.
+    /// False for an unavailable mob.
     pub(super) fn native_mob_set_persistence_required(&mut self, mob: MobRef) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;

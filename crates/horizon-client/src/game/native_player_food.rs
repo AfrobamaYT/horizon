@@ -24,25 +24,24 @@ impl Game<'_> {
         self.player.as_mut().map(|p| &mut p.health.food)
     }
 
-    /// `FoodData.needsFood`: the food level is below 20. API @API:player_food@.
+    /// `FoodData.needsFood`: the food level is below 20.
     pub(super) fn native_player_needs_food(&self, player: PlayerRef) -> Option<bool> {
         Some(self.native_player_food(player)?.level < 20)
     }
     /// `FoodData.hasEnoughFood`: the food level is above 6, enough to
-    /// sprint. API @API:player_food@.
+    /// sprint.
     pub(super) fn native_player_has_enough_food(&self, player: PlayerRef) -> Option<bool> {
         Some(self.native_player_food(player)?.level as f32 > 6.0)
     }
     /// `Player.canEat(always)`: an invulnerable player (creative), `always`
-    /// (food that can always be eaten) or a food level below 20. API
-    /// @API:player_food@.
+    /// (food that can always be eaten) or a food level below 20.
     pub(super) fn native_player_can_eat(&self, player: PlayerRef, always: bool) -> Option<bool> {
         let invulnerable = self.native_player_abilities(player)?.invulnerable;
         Some(invulnerable || always || self.native_player_needs_food(player)?)
     }
     /// `FoodData.eat(nutrition, saturationModifier)`: adds `nutrition` to
     /// the food level (0 to 20) and `nutrition * modifier * 2` to the
-    /// saturation, which stays at most the food level. API @API:player_food@.
+    /// saturation, which stays at most the food level.
     pub(super) fn native_player_feed(
         &mut self,
         player: PlayerRef,
@@ -57,8 +56,7 @@ impl Game<'_> {
     }
     /// `Player.causeFoodExhaustion`: adds exhaustion (at most 40), as
     /// sprinting or jumping does. An invulnerable player (creative) or a
-    /// spectator gets none, and the call still returns true. API
-    /// @API:player_food@.
+    /// spectator gets none, and the call still returns true.
     pub(super) fn native_player_add_exhaustion(&mut self, player: PlayerRef, amount: f32) -> bool {
         self.native_player_write(player, |game| {
             if let Some(p) = game.player.as_mut() {
@@ -67,7 +65,7 @@ impl Game<'_> {
         })
     }
     /// `FoodData.setFoodLevel`: sets the food level as it is, unclamped,
-    /// as vanilla does. API @API:player_food@.
+    /// as vanilla does.
     pub(super) fn native_player_set_food_level(&mut self, player: PlayerRef, level: i32) -> bool {
         self.native_player_write(player, |game| {
             if let Some(food) = game.native_food_mut() {
@@ -76,7 +74,6 @@ impl Game<'_> {
         })
     }
     /// `FoodData.setSaturation`: sets the saturation as it is, unclamped.
-    /// API @API:player_food@.
     pub(super) fn native_player_set_saturation(
         &mut self,
         player: PlayerRef,
@@ -89,7 +86,7 @@ impl Game<'_> {
         })
     }
     /// Sets the exhaustion as it is (Paper's `HumanEntity#setExhaustion`;
-    /// vanilla's `FoodData` only adds to it). API @API:player_food@.
+    /// vanilla's `FoodData` only adds to it).
     pub(super) fn native_player_set_exhaustion(
         &mut self,
         player: PlayerRef,
@@ -103,7 +100,6 @@ impl Game<'_> {
     }
 
     /// `Player.experienceLevel`, `experienceProgress` and `totalExperience`.
-    /// API @API:player_food@.
     pub(super) fn native_player_experience(
         &self,
         player: PlayerRef,
@@ -136,7 +132,7 @@ impl Game<'_> {
         })
     }
     /// `Player.getXpNeededForNextLevel`: the points the current level needs
-    /// to fill. API @API:player_food@.
+    /// to fill.
     pub(super) fn native_player_xp_needed_for_next_level(&self, player: PlayerRef) -> Option<i32> {
         Some(Experience::needed(
             self.native_player_experience(player)?.level,
@@ -144,7 +140,7 @@ impl Game<'_> {
     }
     /// `ServerPlayer.setExperiencePoints`: sets the progress toward the next
     /// level to `points` of the points it needs, kept below a full bar. The
-    /// level and the total are kept. API @API:player_food@.
+    /// level and the total are kept.
     pub(super) fn native_player_set_experience_points(
         &mut self,
         player: PlayerRef,
@@ -163,7 +159,7 @@ impl Game<'_> {
         })
     }
     /// `ServerPlayer.setExperienceLevels`: sets the level, keeping the
-    /// progress and the total. API @API:player_food@.
+    /// progress and the total.
     pub(super) fn native_player_set_experience_levels(
         &mut self,
         player: PlayerRef,

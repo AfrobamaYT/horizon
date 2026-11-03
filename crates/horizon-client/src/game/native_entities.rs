@@ -136,8 +136,7 @@ impl Game<'_> {
     /// <kind> <pos> <nbt>` takes it; passengers included): its id. None on a
     /// client's copy of the world, for another dimension, a position outside
     /// `/summon`'s bounds, a chunk that isn't loaded, a kind Horizon can't
-    /// load, or one a mod kept out (`native_entity_join_level`). API
-    /// 59.
+    /// load, or one a mod kept out (`native_entity_join_level`).
     pub(super) fn native_summon(
         &mut self,
         dimension: &str,
@@ -188,7 +187,7 @@ impl Game<'_> {
     /// `block_display`, `item_display` or `text_display`): players see it
     /// ease from what it showed over `interpolation` ticks. False for no such
     /// display, another dimension, or a value that isn't finite, a zero
-    /// quaternion, or a duration out of range. API 59.
+    /// quaternion, or a duration out of range.
     pub(super) fn native_set_display(
         &mut self,
         dimension: &str,

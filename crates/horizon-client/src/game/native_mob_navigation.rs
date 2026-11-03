@@ -7,7 +7,6 @@ impl Game<'_> {
     /// Refuses a stale or unavailable mob, a client, non-finite arguments,
     /// and coordinates too large for safe block arithmetic. As in vanilla,
     /// the mob's own goals may replace the path next tick.
-    /// API @API:mob_navigation@.
     pub(super) fn native_mob_move_to(&mut self, mob: MobRef, at: [f64; 3], speed: f64) -> bool {
         if !speed.is_finite()
             || at
@@ -32,7 +31,7 @@ impl Game<'_> {
     }
 
     /// `PathNavigation.stop`. False for a stale or unavailable mob, or on a
-    /// client. API @API:mob_navigation@.
+    /// client.
     pub(super) fn native_mob_stop(&mut self, mob: MobRef) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
             return false;
@@ -45,7 +44,7 @@ impl Game<'_> {
     }
 
     /// `PathNavigation.isDone`; None for a stale or unavailable mob, or on a
-    /// client. API @API:mob_navigation@.
+    /// client.
     pub(super) fn native_mob_is_done(&self, mob: MobRef) -> Option<bool> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
             return None;
