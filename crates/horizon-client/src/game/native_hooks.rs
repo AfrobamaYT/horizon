@@ -539,7 +539,7 @@
 //!
 //! API 99 adds a mod's command typed on the dedicated server's console (`native_perform_console_command`).
 //!
-//! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
+//! API 98 adds giving a whole stack to any player from a server hook (`ENTITY_ITEMS`).
 //!
 //! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (`native_light`, `native_weather`, `native_day_time`, `native_world_height`, `native_max_stack_size`).
 //!
@@ -815,11 +815,9 @@
 //! API 11 adds server particle emission (`native_send_particles`).
 //!
 //! API 10 adds server menus (`native_menu_clicked`, `native_menu_closed`,
-//! and `native_open_menu`, `native_exchange_items`... in `native_server.rs`).
+//! and `native_open_menu`... in `native_menus.rs`).
 //!
-//! API 9 adds the acting player's plain items (`native_held`,
-//! `native_count_items`, `native_take_items`, `native_give_items`... in
-//! `native_server.rs`).
+//! API 9 adds a player's items (`ENTITY_ITEMS`).
 //!
 //! API 8 adds server commands and players (`native_register_commands`,
 //! `native_perform_command`, and the helpers in `native_server.rs`).
@@ -893,6 +891,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
+    mod_api::NativePermissionLevel,
     mod_list::{self, Installed, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
@@ -3811,6 +3810,63 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_chorus_fruit_teleport(self, player, name, from, target, cancel);
     }
+    /// Armor is about to take durability damage from a hit (NeoForge's
+    /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
+    /// hit, for the pieces that would wear. `entity` is the wearer's entity id,
+    /// `player` its UUID (None for a mob), `kind` its type and `source` the hit's
+    /// damage type (`causing` and `direct` are 0: the hit does not carry them here). Each entry has
+    /// its `slot`, the `stack`, the `damage` vanilla worked out and a
+    /// `new_damage` a mod may change (0 for none; Unbreaking is applied
+    /// after). Canceling means no armor damage. A server player's `feet`,
+    /// `legs`, `chest` and `head`; a mob's `body` (a horse's armor).
+    /// Falling-block helmet hits (`hurtHelmet`) are not ported yet.
+    /// Server-side.
+    pub(super) fn native_armor_hurt(
+        &mut self,
+        player: Option<u128>,
+        entity: u32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        entries: &mut Vec<horizon_client::mod_api::NativeArmorHurt>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_armor_hurt(
+            self,
+            mod_api::mods(),
+            player,
+            entity,
+            kind,
+            source,
+            entries,
+            cancel,
+        );
+    }
+    /// A mob is about to destroy a block (NeoForge's `LivingDestroyBlockEvent`):
+    /// a wither breaking blocks around it, a ravager breaking leaves, the ender
+    /// dragon's wall check, an enderman picking a block up, a silverfish waking
+    /// its friends (the infested blocks break), a zombie breaking a door or a
+    /// turtle egg. `entity` is its entity id, `kind` its type (`minecraft:wither`),
+    /// `pos` the block and `state` its state. Canceling keeps the block (an
+    /// enderman then holds nothing). Asked once per block, only while a mod is
+    /// loaded. Server-side.
+    pub(super) fn native_living_destroy_block(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        pos: [i32; 3],
+        state: BlockStateId,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_destroy_block(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            pos,
+            state,
+            cancel,
+        );
+    }
     /// A server entity is about to be placed by `/spreadplayers` (NeoForge's
     /// `EntityTeleportEvent.SpreadPlayersCommand`, vanilla's
     /// `SpreadPlayersCommand.setPlayerPositions`): once per entity, after the
@@ -4327,6 +4383,57 @@ impl Game<'_> {
             pos,
             forced,
             cancel,
+        );
+    }
+    /// NeoForge's `PermissionsChangedEvent`: the operator list is about to give player
+    /// `player` (`name`) the permission level `new` in place of `old`, through `PlayerList.op`
+    /// (`/op`, the console's `op`, the management API's `operators/add` and `operators/set`)
+    /// or `PlayerList.deop` (`/deop` and the same on the console and the management API;
+    /// `new` is then `All`). Set `cancel` and the list keeps the old level. The player need
+    /// not be online: `player_entity_id` is their server entity id when they are. Clearing
+    /// the list (`operators/clear`) is not a call to either, as in vanilla. Dedicated
+    /// servers only; a single-player world has no operator list. Server-side.
+    pub(super) fn native_permissions_changed(
+        &mut self,
+        player: u128,
+        player_entity_id: Option<i32>,
+        name: &str,
+        old: NativePermissionLevel,
+        new: NativePermissionLevel,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_permissions_changed(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            old,
+            new,
+            cancel,
+        );
+    }
+    /// NeoForge's `PlayerFlyableFallEvent`: server player `player` (`name`) landed after
+    /// falling `distance` blocks at damage multiplier `multiplier` while allowed to fly (a
+    /// creative or spectator player walking), so `Player.causeFallDamage` returned early
+    /// and nothing was hurt. Listen only. Once for each landing, after the fall's
+    /// block reaction. The player's state is swapped in. Server-side.
+    pub(super) fn native_player_flyable_fall(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        distance: f64,
+        multiplier: f32,
+    ) {
+        mod_api::dispatch_player_flyable_fall(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            distance,
+            multiplier,
         );
     }
     /// A server player is about to travel through a Nether portal, End portal
@@ -7138,8 +7245,8 @@ impl Game<'_> {
     /// `/tick freeze` included (it stops the world, not the player). `slot` is
     /// as `Inventory` saves it (0 to 35; the armour 100 feet to 103 head; -106
     /// the off hand), and `selected` says it is the held slot.
-    /// `native_carried_stack` reads and changes the stack, which stays in its
-    /// slot, so the item helpers see it: a count of 0 empties the slot, and the
+    /// `ItemPlace::PlayerSlot { player, slot }` reads and changes the stack,
+    /// which stays in its slot: an emptied one empties the slot, and the
     /// player's client gets the change. This runs often, so check the item
     /// first. Server-side, for every living player of the world (the helpers
     /// read the acting one). API 39.
@@ -8067,14 +8174,6 @@ impl Game<'_> {
         };
         self.particles
             .add(&ParticleOptions::simple(kind), at, [0.0, 0.01, 0.0]);
-    }
-    /// The stack the acting player carries in `slot`, by
-    /// `native_inventory_tick`'s numbers: none for an empty slot or another
-    /// number. Change it as you like: a count of 0 empties the slot at the end
-    /// of `native_inventory_tick`, and the player's client gets the change.
-    /// API 39.
-    pub(super) fn native_carried_stack(&mut self, slot: i32) -> Option<&mut ItemStack> {
-        self.native_carried_slot(slot)?.as_mut()
     }
     /// Whether the player left mod `mod_id` on in Options > Mods. A mod
     /// turned off does nothing (check this first in each hook) until the

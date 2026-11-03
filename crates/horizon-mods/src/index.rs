@@ -43,8 +43,7 @@ pub struct Index {
 pub enum Kind {
     /// A `.hmod` of content only.
     Mod,
-    /// A source-only native mixin bundle, compiled into an isolated game build. Published as an
-    /// `.hnmod` until launchers and the game read native `.hmod`s (#5865, docs/api/mod-files.md).
+    /// A native source bundle, compiled into an isolated game build and published as a `.hmod`.
     NativeMod,
     /// A `.hpack`: registry mods played together as a profile.
     Modpack,
@@ -72,7 +71,7 @@ impl Kind {
     pub fn extension(&self) -> Option<&'static str> {
         match self {
             Kind::Mod => Some("hmod"),
-            Kind::NativeMod => Some("hnmod"),
+            Kind::NativeMod => Some("hmod"),
             Kind::Modpack => Some("hpack"),
             Kind::ResourcePack => Some("zip"),
             Kind::Shader => Some(horizon_shader_api::EXTENSION),
