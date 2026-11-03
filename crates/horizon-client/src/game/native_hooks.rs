@@ -5655,6 +5655,32 @@ impl Game<'_> {
         mod_api::dispatch_entity_tame(self, mod_api::mods(), entity, kind, owner);
     }
 
+    /// The player `tamer` (UUID) and `tamer_entity_id` is about to tame the
+    /// mob `entity` of `kind` (`AnimalTameEvent`): its taming roll succeeded
+    /// (a wolf's bone, a cat's fish, a parrot's seeds or a nautilus's food;
+    /// a horse, donkey, mule or llama the player rides). Set `cancel` for the
+    /// attempt to fail instead, as a failed roll does: smoke for a pet, and
+    /// a horse bucks its rider off. Before `entity_tame`. Server-side.
+    /// @API:animal_tame@.
+    pub(super) fn native_animal_tame(
+        &mut self,
+        tamer: u128,
+        tamer_entity_id: i32,
+        entity: u32,
+        kind: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_animal_tame(
+            self,
+            mod_api::mods(),
+            tamer,
+            tamer_entity_id,
+            entity,
+            kind,
+            cancel,
+        );
+    }
+
     /// Two mobs completed a breeding action. `child` is absent when vanilla
     /// lays an egg instead of creating a baby. 213.
     pub(super) fn native_entity_breed(&mut self, parent: u32, partner: u32, child: Option<u32>) {
@@ -9352,6 +9378,34 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
 
 /// Where the game calls the hook points.
 impl Game<'_> {
+    /// `AnimalTameEvent` for the mob at `index`, whose taming roll by the
+    /// player `tamer` (`tamer_entity_id`) succeeded: true when a mod cancels
+    /// it, and the taming fails.
+    pub(super) fn animal_tame_cancelled(
+        &mut self,
+        index: usize,
+        tamer: u128,
+        tamer_entity_id: i32,
+    ) -> bool {
+        if mod_api::mods().is_empty() {
+            return false;
+        }
+        let m = &self.mobs[index];
+        let (entity, kind) = (m.id, mob_kind(m));
+        let mut cancel = false;
+        self.native_animal_tame(tamer, tamer_entity_id, entity, &kind, &mut cancel);
+        cancel
+    }
+    /// `entity_tame` for the pet at `index`, just tamed by its owner.
+    pub(super) fn pet_tamed(&mut self, index: usize) {
+        let m = &self.mobs[index];
+        let (entity, kind) = (m.id, mob_kind(m));
+        let owner = m
+            .extra
+            .owner
+            .map(horizon_client::lan::playerdata::ints_uuid);
+        self.native_entity_tame(entity, &kind, owner);
+    }
     /// The acting player as the hook points name one: the guest whose turn
     /// it is, else the host.
     pub(super) fn native_acting_id(&mut self) -> u128 {
