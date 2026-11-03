@@ -989,9 +989,10 @@ listeners run after vanilla by default, in registration order; an explicit depen
 objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
 context here.
 
-`event.listeners.add_retained_listener(id, converter, listener)` also keeps the listener object
-for other hooks, the counterpart of NeoForge's `addRetainedListener`: it returns a typed
-`ListenerKey<T>` that reads the object back from any server hook through
+`event.listeners.add_retained_listener(&key, converter, listener)` also keeps the listener
+object for other hooks, the counterpart of NeoForge's `addRetainedListener(key, listener)`: the
+caller builds the typed key — `let key: ListenerKey<MyListener> = ListenerKey::new(id)` — and
+reads the object back from any server hook through
 `host.reload_resources().listener(&key)` — an `Arc<T>` of the live object the last successful
 reload installed, as NeoForge's `ReloadableServerResources.getListener`. Registration rules and
 prepare/apply semantics are `add_listener`'s. Retention follows the reload: a new reload

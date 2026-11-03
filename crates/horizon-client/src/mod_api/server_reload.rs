@@ -9,7 +9,7 @@ use super::{
     reload_order::ReloadOrderError,
 };
 use std::{
-    any::{Any, TypeId},
+    any::Any,
     collections::BTreeMap,
     marker::PhantomData,
     sync::{Arc, LazyLock},
@@ -113,21 +113,21 @@ impl ServerReloadListeners {
         self.core.add_listener(id, converter, listener)
     }
     /// Register a listener whose object is also kept in the reload resources, as
-    /// NeoForge's `addRetainedListener`: the returned `ListenerKey` reads it
-    /// back through `ReloadResources` after the reload, from any server hook.
+    /// NeoForge's `addRetainedListener(key, listener)`: the caller builds the
+    /// typed `ListenerKey` (`ListenerKey::new(id)`), and reads the object back
+    /// through `ReloadResources` after the reload, from any server hook.
     pub fn add_retained_listener<T: ServerReloadListener>(
         &mut self,
-        id: Identifier,
+        key: &ListenerKey<T>,
         converter: FileToIdConverter,
         listener: Arc<T>,
-    ) -> Result<ListenerKey<T>, ReloadOrderError> {
-        self.add_listener(id.clone(), converter, listener.clone())?;
+    ) -> Result<(), ReloadOrderError> {
+        self.add_listener(key.id().clone(), converter, listener.clone())?;
         self.retained.push(RetainedEntry {
-            id: id.clone(),
-            type_id: TypeId::of::<T>(),
+            id: key.id().clone(),
             any: listener,
         });
-        Ok(ListenerKey::new(id))
+        Ok(())
     }
     /// Require `first` before `second`; both names must already be registered.
     pub fn add_dependency(
@@ -176,14 +176,13 @@ pub(crate) struct OrderedServerReload {
 /// `ReloadableServerResources` keeps a manager.
 pub(crate) struct RetainedEntry {
     pub(crate) id: Identifier,
-    pub(crate) type_id: TypeId,
     pub(crate) any: Arc<dyn Any + Send + Sync>,
 }
 
-/// A typed key to a retained reload listener, handed out by
-/// `add_retained_listener` and read back through `ReloadResources`.
-/// `ListenerKey::new` accepts any id; a key whose type or id does not match a
-/// registration reads back as `None`.
+/// A typed key to a retained reload listener, built by the registering mod
+/// and read back through `ReloadResources`. `ListenerKey::new` accepts any
+/// id; a key whose id does not match a registration, or whose type differs
+/// from the registered object, reads back as `None`.
 pub struct ListenerKey<T: ?Sized> {
     id: Identifier,
     marker: PhantomData<fn() -> T>,
@@ -225,23 +224,19 @@ impl<T: ?Sized> Eq for ListenerKey<T> {}
 /// `ServerHost::reload_resources`. A new reload replaces the whole store.
 #[derive(Default)]
 pub struct ServerReloadResources {
-    entries: BTreeMap<Identifier, (TypeId, Arc<dyn Any + Send + Sync>)>,
+    entries: BTreeMap<Identifier, Arc<dyn Any + Send + Sync>>,
 }
 impl ServerReloadResources {
     pub(crate) fn install(&mut self, retained: Vec<RetainedEntry>) {
         self.entries = retained
             .into_iter()
-            .map(|entry| (entry.id, (entry.type_id, entry.any)))
+            .map(|entry| (entry.id, entry.any))
             .collect();
     }
     /// The retained listener registered under `key` in the last successful
     /// reload; `None` when nothing is registered under it, its type differs, or
-    /// no reload has succeeded yet.
+    /// no reload has succeeded yet. The downcast itself checks the type.
     pub fn listener<T: ServerReloadListener>(&self, key: &ListenerKey<T>) -> Option<Arc<T>> {
-        let (type_id, any) = self.entries.get(key.id())?;
-        if *type_id != TypeId::of::<T>() {
-            return None;
-        }
-        any.clone().downcast::<T>().ok()
+        self.entries.get(key.id())?.clone().downcast::<T>().ok()
     }
 }

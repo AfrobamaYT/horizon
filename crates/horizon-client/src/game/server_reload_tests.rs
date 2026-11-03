@@ -438,10 +438,11 @@ impl Hooks for RetainedData {
         _host: &dyn Host,
         event: &mut AddServerReloadListenersEvent<'_>,
     ) {
+        let key = ListenerKey::<Self>::new(Identifier::parse("reload_test:kept").unwrap());
         event
             .listeners
             .add_retained_listener(
-                Identifier::parse("reload_test:kept").unwrap(),
+                &key,
                 FileToIdConverter::json("machines").unwrap(),
                 Arc::new(Self {
                     live: self.live.clone(),
