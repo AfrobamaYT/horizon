@@ -95,6 +95,7 @@ impl Hooks for Observer {
         }
     }
 }
+#[mod_api::horizon_part]
 impl BlockPart for Observer {
     fn use_item_on(&self, _: &mut dyn ServerHost, _: &mut UseItemOnEvent<'_>) -> Option<Answer> {
         let mut state = self.0.lock().unwrap();
@@ -102,6 +103,7 @@ impl BlockPart for Observer {
         None
     }
 }
+#[mod_api::horizon_part]
 impl ItemPart for Observer {
     fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
         self.0.lock().unwrap().steps.push(Step::UseOnPart);
