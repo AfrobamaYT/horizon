@@ -2235,6 +2235,10 @@ impl Game<'_> {
                 lines.push((random.with_color(horizon_client::text::GRAY), u32::MAX));
             }
         }
+        // A mod item's own `Item.appendHoverText`, its parts' lines, before the components.
+        let mut own = Vec::new();
+        self.native_tooltip(stack, &mut own);
+        lines.extend(own);
         // TropicalFish.Pattern.addToTooltip.
         for text in horizon_client::item_tooltip::tropical_fish_lines(stack, &display) {
             lines.push((text, gray));
@@ -2590,10 +2594,10 @@ impl Game<'_> {
                 ));
             }
         }
-        // Native mods last, once getTooltipLines has built every line; a
+        // ItemTooltipEvent, last, once getTooltipLines has built every line; a
         // tooltip the stack hides stays hidden.
         if !nested && !lines.is_empty() {
-            self.native_tooltip(stack, &mut lines);
+            self.native_item_tooltip(stack, advanced, creative, &mut lines);
         }
         lines
     }
@@ -3123,6 +3127,64 @@ mod tests {
                 game.update_anvil_answer(&mut station, "second".into());
                 assert_eq!(calls.load(Ordering::Relaxed), 2);
                 assert!(mod_api::listened(HookId::AnvilUpdate));
+            });
+        });
+    }
+    /// A stick's part adds its line where `Item.appendHoverText` does, after the name and before
+    /// the advanced id line; `ItemTooltipEvent` comes last and sees every line.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn tooltip_part_lines_come_before_the_event_which_sees_them_all() {
+        use crate::mod_api::{
+            self, ClientHost, Hooks, ItemPart, ItemTooltipEvent, ModEntry, Mods, Registrar,
+            TooltipEvent,
+        };
+        use horizon_client::text::Text;
+
+        #[derive(Clone)]
+        struct Lore;
+        impl ItemPart for Lore {
+            fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
+                assert!(event.lines.is_empty());
+                event.lines.push((Text::literal("part"), u32::MAX));
+            }
+        }
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut Registrar) {
+                r.item_part("minecraft:stick", Lore);
+            }
+            fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
+                assert!(event.advanced && !event.creative);
+                let seen = event.lines.len();
+                event
+                    .lines
+                    .push((Text::literal(format!("event saw {seen}")), u32::MAX));
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("lore", Box::new(Mod))].into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.settings.file.set(
+                    "advancedItemTooltips",
+                    horizon_client::options_file::V::Bool(true),
+                );
+                let stick = super::ItemStack::new("minecraft:stick", 1);
+                let lines: Vec<String> = game
+                    .stack_tooltip_lines(&stick, false, false)
+                    .iter()
+                    .map(|(text, _)| text.plain())
+                    .collect();
+                let id_and_components = ["minecraft:stick", "14 component(s)"];
+                assert_eq!(lines[..2], ["Stick", "part"]);
+                assert_eq!(lines[2..4], id_and_components);
+                assert_eq!(lines[4..], ["event saw 4"]);
+                // An item without the part: no part line, and the event still comes last.
+                let apple = super::ItemStack::new("minecraft:apple", 1);
+                let lines = game.stack_tooltip_lines(&apple, false, false);
+                assert_eq!(lines.last().unwrap().0.plain(), "event saw 3");
             });
         });
     }

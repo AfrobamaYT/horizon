@@ -103,8 +103,9 @@ the catalog, not a global API number, source comments or documentation histories
   (`native_menu_clicked`, `native_menu_closed`), and trades on them between the players'
   [`ENTITY_ITEMS`](#an-entitys-items) handlers in one transaction ([Server menus](#server-menus)).
 
-- Item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
-  lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip.
+- Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
+  the name and before the components' lines; `native_item_tooltip` (NeoForge's `ItemTooltipEvent`) is given every
+  line once the tooltip is built, and a mod can add to, change or take out of them, for any item.
 
 - Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
