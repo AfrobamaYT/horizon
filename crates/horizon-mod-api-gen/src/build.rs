@@ -190,7 +190,7 @@ pub fn inject(code: &str, injections: &str) -> Result<String, String> {
             _ => None,
         })
         .ok_or("generated API missing HOOK_COUNT")?;
-    hook_count.expr = Box::new(syn::parse_quote!(#count));
+    *hook_count.expr = syn::parse_quote!(#count);
     file.items.extend(structs);
     Ok(file.into_token_stream().to_string())
 }
