@@ -1063,9 +1063,6 @@ impl Game<'_> {
             f(self);
             return true;
         };
-        if self.lan_acting.is_some() {
-            return false;
-        }
         self.as_guest(conn, f).is_some()
     }
 
