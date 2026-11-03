@@ -3112,6 +3112,17 @@ leftover of another item counts as the offered one. A leftover larger than the o
 dropped at the block (items) or, as above, lost with a warning (fluids). Either is a mod bug, warned once naming
 the mod; a broken handler can't make a move overflow, duplicate items or panic the game.
 
+`host.transaction(|host| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose `Err`
+aborts, nested in the open transaction if any. Inside, a capability write applies at once, so later steps see it,
+and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
+compound and attachments, a hopper's cooldown, and a cauldron's block state. A nested commit hands its changes to
+the transaction around it, and only the outermost commit makes them final. Then the world is told of each change
+once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox starting or stopping, a cauldron's
+block update and an item dropped at a block. An abort puts every storage back quietly, so nothing outside saw the
+change. A panic inside aborts every open transaction before the next tick. A handler keeps no journal of its own:
+its state is the game's, so the game's journal covers it. A player's or an entity's inventory isn't covered yet:
+what changes there inside a transaction is final at once.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements

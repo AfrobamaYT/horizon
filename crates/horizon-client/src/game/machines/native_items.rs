@@ -4,6 +4,7 @@
 //! copy, and only on the level in place, which those that read or take name by
 //! its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 use super::{BlockEntity, Game, Kind, View};
+use crate::game::transactions::After;
 use horizon_client::{items::ItemStack, mod_api::Host};
 use horizon_core::geometry::Direction;
 
@@ -296,6 +297,16 @@ impl Game<'_> {
     /// Puts as much of `stack` as slot `slot` of those `side` reaches at `pos` takes, as a
     /// hopper would (`canPlaceItem`, the slot's limit, the same item and components); what
     /// didn't fit. `simulate` changes nothing.
+    /// `view_changed` of a capability write: at once, or at the root commit of the open
+    /// transaction.
+    fn view_told(&mut self, view: &View) {
+        if let Kind::Composter(_) = view.kind {
+            return;
+        }
+        for &(pos, _) in &view.parts {
+            self.after_commit(After::Changed(pos));
+        }
+    }
     pub(in crate::game) fn native_container_insert(
         &mut self,
         pos: [i32; 3],
@@ -316,7 +327,16 @@ impl Game<'_> {
                 count: fits,
                 ..stack.clone()
             };
-            self.try_move_in_item(None, &view, some, slot);
+            for &(part, _) in &view.parts {
+                self.journal_block_entity(part);
+            }
+            if self.move_in_item(None, &view, some, slot).1 {
+                self.view_told(&view);
+                // JukeboxBlockEntity.setTheItem through a transfer: the disc starts.
+                if view.kind == Kind::Jukebox {
+                    self.after_commit(After::JukeboxInserted(pos));
+                }
+            }
         }
         (fits < stack.count).then(|| ItemStack {
             count: stack.count - fits,
@@ -364,11 +384,14 @@ impl Game<'_> {
                 ..stack.clone()
             });
         }
+        for &(part, _) in &view.parts {
+            self.journal_block_entity(part);
+        }
         let out = self.take_up_to(&view, slot, max)?;
-        self.view_changed(&view);
+        self.view_told(&view);
         // JukeboxBlockEntity.removeItem: a disc taken out stops the song.
         if view.kind == Kind::Jukebox {
-            self.jukebox_taken(pos);
+            self.after_commit(After::JukeboxTaken(pos));
         }
         Some(out)
     }

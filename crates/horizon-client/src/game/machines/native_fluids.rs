@@ -248,7 +248,7 @@ impl Game<'_> {
             properties: properties.into(),
         };
         match self.pack.assets.registry.resolve(&state) {
-            Ok(id) => self.level_set(pos, id).is_ok(),
+            Ok(id) => self.journal_set_block(pos, id),
             Err(_) => false,
         }
     }
@@ -272,6 +272,7 @@ impl Game<'_> {
     /// `tank_state`'s writer.
     fn set_tank_state(&mut self, pos: [i32; 3], state: &[Tank]) {
         let key = (pos[0], pos[1], pos[2]);
+        self.journal_block_entity(key);
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
             write_tanks(&mut m.nbt, state);
             self.world.modified.insert((key.0 >> 4, key.2 >> 4));

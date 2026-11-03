@@ -243,6 +243,10 @@ impl BlockEntities {
         }
         Some(self.attachments.entry(pos).or_default())
     }
+    /// The attachment map of the block entity at `pos`, if it has one.
+    pub fn attachments(&self, pos: Pos) -> Option<&horizon_world::attachments::Attachments> {
+        self.attachments.get(&pos)
+    }
     /// Attachment maps in a loaded chunk, for a save snapshot.
     pub fn chunk_attachments(
         &self,
