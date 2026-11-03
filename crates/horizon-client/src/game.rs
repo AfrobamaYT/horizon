@@ -241,6 +241,7 @@ mod native_living_writes;
 mod native_menu_refs;
 mod native_menus;
 mod native_merchant_refs;
+mod native_minecart_refs;
 mod native_mob_draw;
 mod native_mob_navigation;
 mod native_mob_refs;
@@ -6238,7 +6239,7 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck)
         {
             self.native_player_harvest_check(
                 self.own_entity_id() as u32,
@@ -6263,7 +6264,7 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if !crate::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck) {
                 self.native_player_harvest_check(
                     self.own_entity_id() as u32,
                     pos,
