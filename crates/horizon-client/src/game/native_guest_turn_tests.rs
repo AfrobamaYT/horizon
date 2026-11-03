@@ -82,6 +82,51 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
     });
 }
 
+/// A merchant's live session belongs to B even while A is acting.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn another_guests_live_merchant_session_is_visible_during_a_turn() {
+    use super::{
+        native_merchant_refs::tests::{offer, spawn},
+        trading::MerchantState,
+    };
+    use horizon_client::merchant::{Session, Trader};
+
+    with_guests(|game| {
+        let villager = spawn(game, 40, "minecraft:villager");
+        let old = offer("minecraft:wheat", "minecraft:emerald");
+        let mut live = offer("minecraft:coal", "minecraft:diamond");
+        // Opening the screen recomputes the special price for this guest.
+        live.special_price_diff = 0;
+        game.mobs[0].extra.trade = Some(Box::new(Trader {
+            offers: vec![old],
+            ..Trader::default()
+        }));
+        game.mobs[0].extra.flag2 = true;
+        let mut session = Session::new(vec![live.clone()], true);
+        session.xp = 17;
+        session.level = 2;
+        game.lan_open_merchant(
+            13,
+            MerchantState {
+                session: Box::new(session),
+                scroll: 0,
+                dragging: false,
+                focused: None,
+                mob: Some(40),
+                name: None,
+            },
+        );
+        game.as_guest(12, |game| {
+            assert_eq!(villager.offers(game), Some(vec![live]));
+            assert_eq!(villager.xp(game), Some(17));
+            assert_eq!(villager.level(game), Some(2));
+            assert_eq!(villager.trading_player(game).map(|p| p.uuid()), Some(13));
+        })
+        .unwrap();
+    });
+}
+
 /// Requires #235's passenger walk as well as #228's host visibility.
 #[test]
 #[ignore = "needs #235's passenger walk"]

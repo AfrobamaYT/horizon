@@ -638,7 +638,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn acting_guest_handles_resolve_while_hub_is_out() {
+    fn acting_guest_handles_resolve_during_guest_turns() {
         use super::super::lan::LanSettings;
         use horizon_client::{
             items::ItemStack,
