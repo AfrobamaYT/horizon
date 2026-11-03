@@ -14,19 +14,26 @@ use std::{
 
 pub fn client(mut command: Command, launch: Launch, run: Option<String>, tx: Sender<Msg>) {
     std::thread::spawn(move || {
-        let ask = |missing: &[&JarRef]| {
-            let (reply, answer) = mpsc::channel();
-            let jars = missing.iter().map(|jar| (*jar).clone()).collect();
-            tx.send(Msg::JarConsent { jars, reply }).is_ok() && answer.recv().unwrap_or(false)
-        };
-        let prepared = jars::prepare_launch(&mut command, &launch, Permission::Ask(&ask))
-            .map(|()| launch::wrap(command, &launch))
-            .map_err(|error| error.to_string());
+        let prepared = with_consent(&tx, |permission| {
+            jars::prepare_launch(&mut command, &launch, permission)
+        })
+        .map(|()| launch::wrap(command, &launch))
+        .map_err(|error| error.to_string());
         let _ = tx.send(Msg::JarClient {
             run,
             prepared: Box::new(prepared),
         });
     });
+}
+
+/// Used only from background jobs: the UI owns the one complete-set prompt.
+pub fn with_consent<T>(tx: &Sender<Msg>, prepare: impl FnOnce(Permission<'_>) -> T) -> T {
+    let ask = |missing: &[&JarRef]| {
+        let (reply, answer) = mpsc::channel();
+        let jars = missing.iter().map(|jar| (*jar).clone()).collect();
+        tx.send(Msg::JarConsent { jars, reply }).is_ok() && answer.recv().unwrap_or(false)
+    };
+    prepare(Permission::Ask(&ask))
 }
 
 pub fn consent(
