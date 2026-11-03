@@ -2170,7 +2170,10 @@ impl Game<'_> {
                 self.release_vehicle_container(id);
                 self.carts.retain(|c| c.id != id);
             }
-            Target::Other(id) => self.others.retain(|o| o.id != id),
+            Target::Other(id) => {
+                self.others.retain(|o| o.id != id);
+                self.forget_entity(id);
+            }
             Target::Fangs(id) => self.fangs.list.retain(|f| f.id != id),
             Target::Crystal(id) => self.kill_crystal(id),
             Target::Dragon(id) => self.kill_dragon(id),
