@@ -193,7 +193,6 @@ fn new_native(
         game: "26.3".into(),
         horizon: horizon.into(),
         mixins: horizon_mods::index::native::MIXINS_REV.into(),
-        hooks: None,
     };
     std::fs::write(
         dir.join(horizon_mods::index::native::MANIFEST),

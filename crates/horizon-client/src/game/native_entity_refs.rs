@@ -705,6 +705,35 @@ pub(super) mod tests {
             }
             game.lan = Some(host);
             let player = game.native_player_ref(12).unwrap();
+            // Body and saddle are stored on a guest like on a mob.
+            let living = game.native_living(player.entity).unwrap();
+            let saddle = ItemStack::new("minecraft:saddle", 1);
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Saddle,
+                Some(saddle.clone())
+            ));
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Body,
+                Some(ItemStack::new("minecraft:iron_horse_armor", 1))
+            ));
+            assert_eq!(
+                game.native_living_equipment(living, EquipmentSlot::Saddle),
+                Some(saddle.clone())
+            );
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0]
+                    .equipment
+                    .get(horizon_items::equipment::BODY)
+                    .map(|s| &*s.item),
+                Some("minecraft:iron_horse_armor")
+            );
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Saddle, None));
+            assert_eq!(
+                game.native_living_equipment(living, EquipmentSlot::Saddle),
+                None
+            );
             assert!(!game.native_player_set_game_mode(player, GameMode::Survival));
             assert!(game.native_player_set_game_mode(player, GameMode::Creative));
             assert_eq!(

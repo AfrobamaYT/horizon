@@ -189,11 +189,6 @@ impl Game<'_> {
 /// yet.
 pub(super) use horizon_world::level::flags;
 
-/// The hook points' API version. The launcher reads this line from the
-/// source it builds; keep its form.
-#[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 359;
-
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
@@ -5563,6 +5558,23 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_release_using(self, stack, entity, time_left, used);
     }
+    /// `BlockBehaviour.getCloneItemStack`, asked by
+    /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
+    /// is true for a creative player picking with Ctrl. Leave `stack` unset to
+    /// keep the game's item. Creative breaking, such as a beehive's
+    /// `playerWillDestroy`, does not ask this query. Server-side.
+    #[inline(always)]
+    pub(super) fn native_clone_item_stack(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        block: &str,
+        state: BlockStateId,
+        include_data: bool,
+        stack: &mut Option<ItemStack>,
+    ) {
+        mod_api::dispatch_clone_item_stack(self, dimension, pos, block, state, include_data, stack);
+    }
     /// A player breaks the block `state` at `pos`, once the game allowed it
     /// (the held item can break blocks, the debug stick didn't take the
     /// click): where `ServerPlayerGameMode.destroyBlock` starts. Set
@@ -6729,7 +6741,7 @@ impl Game<'_> {
 /// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
-    if mod_api::mods().is_empty() {
+    if !mod_api::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -8162,6 +8174,30 @@ impl Game<'_> {
     pub(super) fn native_place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String> {
         self.recipe_place(book_id, all)
     }
+    /// Presses button `button` of the open menu, as a click on one of its
+    /// buttons does (`MultiPlayerGameMode.handleInventoryButtonClick`,
+    /// `ServerboundContainerButtonClickPacket`): the server's menu decides
+    /// what it does (`AbstractContainerMenu.clickMenuButton`, and
+    /// `native_menu_button` there for a mod's menu). For a client mod's own
+    /// input on a menu's screen where `native_screen_click` doesn't come — a
+    /// key, the wheel. No sound: that is the screen's. Err while no menu the
+    /// server opened is open.
+    pub(super) fn native_click_menu_button(&self, button: i32) -> Result<(), String> {
+        let Some(container) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.menu.as_ref())
+            .map(|(w, _)| *w)
+        else {
+            return Err("no menu is open".to_owned());
+        };
+        self.send(
+            horizon_protocol::packets::play::Serverbound::ContainerButtonClick(
+                horizon_protocol::packets::play::ContainerButtonClick { container, button },
+            ),
+        );
+        Ok(())
+    }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
@@ -8210,7 +8246,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
     ) -> BlockClickAnswer {
         let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::RightClickBlock) {
             return BlockClickAnswer::Go {
                 use_block,
                 use_item,
@@ -8257,14 +8293,14 @@ impl Game<'_> {
         value: GameRuleValue,
         actor: Option<&GameRuleActor<'_>>,
     ) {
-        if !mod_api::mods().is_empty() {
+        if mod_api::listened(mod_api::HookId::GameRuleChanged) {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
     /// children: how many to spawn.
     pub(super) fn mob_split_count(&mut self, m: &horizon_client::mobs::Mob, count: u32) -> u32 {
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::MobSplit) {
             return count;
         }
         let (size, kind) = (m.extra.size, mob_kind(m));
@@ -8281,7 +8317,7 @@ impl Game<'_> {
         tamer: u128,
         tamer_entity_id: i32,
     ) -> bool {
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::AnimalTame) {
             return false;
         }
         let m = &self.mobs[index];
@@ -8960,26 +8996,18 @@ impl Game<'_> {
         let Some(button) = button else {
             return false;
         };
-        let window = self
-            .remote
-            .as_ref()
-            .and_then(|r| r.menu.as_ref())
-            .map(|(w, _)| *w);
-        if let Some(container) = window {
-            self.send(
-                horizon_protocol::packets::play::Serverbound::ContainerButtonClick(
-                    horizon_protocol::packets::play::ContainerButtonClick { container, button },
-                ),
-            );
-        }
+        // No menu open: the click still sounds.
+        let _ = self.native_click_menu_button(button);
         self.audio.play_button_click();
         true
     }
     /// The open mod screen's tooltip under the cursor (`native_screen_tooltip`).
     pub(super) fn draw_native_screen_tooltip(&mut self, batch: &mut HudBatch) {
         // Over no item: an empty slot still gets the mod's hint (which fuel it takes).
+        // A carried stack hides only slot tooltips, as AbstractContainerScreen's;
+        // the screen's other parts keep theirs, as a vanilla widget's tooltip does.
         let slot = self.slot_at(batch, self.cursor.0, self.cursor.1);
-        if self.carried.is_some() || slot.is_some_and(|i| self.slot_view(i).is_some()) {
+        if slot.is_some_and(|i| self.slot_view(i).is_some()) {
             return;
         }
         let Some((block, data, at)) = self.native_screen_at() else {
@@ -9652,8 +9680,7 @@ mod tests {
         }
     }
     /// horizon-mixins refuses targets whose body has a `cfg` or a macro:
-    /// the hook points and helpers must stay free of both. The launcher
-    /// reads the API line as it is.
+    /// the hook points and helpers must stay free of both.
     /// A data packet for an old window leaves the open mod screen alone.
     #[test]
     fn mod_screen_data_is_its_windows_only() {
@@ -9679,7 +9706,6 @@ mod tests {
             .trim_end()
             .strip_suffix("#[cfg(test)]")
             .expect("the tests module has its cfg");
-        assert!(code.contains("\npub(crate) const NATIVE_HOOKS_API: u32 = "));
         let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
         for line in lines {
             assert!(!line.contains("cfg"), "a cfg in the hook points: {line}");

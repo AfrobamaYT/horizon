@@ -335,11 +335,6 @@ mod tests {
         let bundle = super::super::bundle(&dir, None).unwrap();
         let stage_dir = dir.join("workspace");
         fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
-        fs::write(
-            stage_dir.join(MAIN_TEMPLATE),
-            include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
-        )
-        .unwrap();
         fs::write(stage_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         fs::write(
             stage_dir.join("crates/horizon-client/Cargo.toml"),
@@ -347,6 +342,20 @@ mod tests {
         )
         .unwrap();
         let resolution = super::super::dependencies::Resolution { order: vec![0] };
+        let err = stage(
+            &stage_dir,
+            std::slice::from_ref(&bundle),
+            &[vec![]],
+            &resolution,
+        )
+        .unwrap_err();
+        assert!(err.contains("no readable native entry template"), "{err}");
+        fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
+        fs::write(
+            stage_dir.join(MAIN_TEMPLATE),
+            include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
+        )
+        .unwrap();
         assert!(stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap());
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         let members = root["workspace"]["members"].as_array().unwrap();

@@ -497,6 +497,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.inventory, &mut g.inventory);
         std::mem::swap(&mut self.armor, &mut g.armor);
         std::mem::swap(&mut self.offhand, &mut g.offhand);
+        std::mem::swap(&mut self.equipment, &mut g.equipment);
         std::mem::swap(&mut self.carried, &mut g.carried);
         let selected = std::mem::replace(&mut self.selected, g.selected);
         let (mode, creative) = (self.mode, self.creative);
@@ -810,7 +811,7 @@ impl Game<'_> {
             }
         }
         let guest = &host.hub.guests[i];
-        let listening = !horizon_client::mod_api::mods().is_empty();
+        let listening = crate::mod_api::listened(crate::mod_api::HookId::PlayerLaunchProjectile);
         for projectile in projectiles..self.creatures.projectiles.len() {
             if !listening {
                 break;
@@ -1021,6 +1022,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.inventory, &mut g.inventory);
         std::mem::swap(&mut self.armor, &mut g.armor);
         std::mem::swap(&mut self.offhand, &mut g.offhand);
+        std::mem::swap(&mut self.equipment, &mut g.equipment);
         std::mem::swap(&mut self.carried, &mut g.carried);
         // A teleport with a rotation (commands) turns the guest.
         let turned = [self.yaw, self.pitch] != [g.yaw, g.pitch];
@@ -2742,7 +2744,25 @@ impl Game<'_> {
                     if d2 >= range * range {
                         return None;
                     }
-                    g.picked_stack(p.pos, g.creative && p.include_data)
+                    // The block's item, a part's in its place, then the block
+                    // entity's data on whichever won (addBlockDataToItem).
+                    let include_data = g.creative && p.include_data;
+                    let stack = g.clone_stack(p.pos, include_data);
+                    let state = g.world.block(p.pos[0], p.pos[1], p.pos[2]);
+                    let mut replacement = None;
+                    g.native_clone_item_stack(
+                        g.dim.level(),
+                        horizon_core::position::BlockPos::new(p.pos[0], p.pos[1], p.pos[2]),
+                        &g.res.facts().get(state).name,
+                        state,
+                        include_data,
+                        &mut replacement,
+                    );
+                    let mut stack = replacement.or(stack)?;
+                    if include_data {
+                        g.add_block_data(p.pos, &mut stack);
+                    }
+                    Some(stack)
                 });
             }
             // handlePickItemFromEntity.
@@ -4695,7 +4715,7 @@ impl Game<'_> {
             return;
         };
         if jumps > 0
-            && !horizon_client::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::PlayerJump)
             && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
         {
             self.as_guest(host, conn, |game| {
@@ -5598,6 +5618,202 @@ fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Opt
 mod tests {
     use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn block_part_picks_on_the_server_and_for_a_guest() {
+        use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
+        use crate::mod_api::{
+            self, BlockPart, CloneItemStackEvent, Hooks, Host, ItemStack, Registrar,
+        };
+        use horizon_client::{
+            chunk::Chunk,
+            lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
+        };
+        use horizon_protocol::packets::{configuration::ClientInformation, play};
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+
+        struct Picker(Arc<Mutex<Vec<bool>>>);
+        impl BlockPart for Picker {
+            fn clone_item_stack(
+                &self,
+                _: &dyn Host,
+                event: &mut CloneItemStackEvent<'_>,
+            ) -> Option<ItemStack> {
+                self.0.lock().unwrap().push(event.include_data);
+                event
+                    .include_data
+                    .then(|| ItemStack::new("minecraft:diamond", 1))
+            }
+        }
+        struct Mod(Arc<Mutex<Vec<bool>>>);
+        impl Hooks for Mod {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:stone", Picker(self.0.clone()));
+                r.block_part("minecraft:beehive", Picker(self.0.clone()));
+                r.block_part("minecraft:chest", Picker(self.0.clone()));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "picker",
+            Box::new(Mod(seen.clone())),
+        )]
+        .into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let state = |name| game.pack.assets.registry.default_state(name).unwrap();
+                let stone = state("minecraft:stone");
+                let crop = state("minecraft:wheat");
+                let chest = state("minecraft:chest");
+                game.world.set(0, 64, 0, stone).unwrap();
+                game.world.set(1, 64, 0, crop).unwrap();
+                let settings = LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                };
+                let net = NetConfig {
+                    listen: false,
+                    announce: false,
+                    lod_distance: 0,
+                    ..NetConfig::lan(0, String::new(), 2)
+                };
+                let config = HubConfig {
+                    default_game_mode: 1,
+                    guest_commands: false,
+                    force_game_mode: false,
+                    hardcore: false,
+                    view_distance: 2,
+                    simulation_distance: 2,
+                    dimension: game.dim.id().to_owned(),
+                    allow_flight: true,
+                    seed: 0,
+                    max_players: 2,
+                    integrated: true,
+                    levels: game.level_shapes,
+                };
+                game.lan_host(settings, net, config).unwrap();
+                let mut host = game.lan.take().unwrap();
+                let (tx, _rx) = std::sync::mpsc::channel();
+                let mut guest = Guest::new(
+                    Joined {
+                        conn: 12,
+                        uuid: 12,
+                        name: "guest12".into(),
+                        properties: Vec::new(),
+                        info: ClientInformation::new(8),
+                        brand: String::new(),
+                        sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                        latency: Arc::new(AtomicI32::new(0)),
+                        address: "127.0.0.1:1".parse().unwrap(),
+                    },
+                    12,
+                    [0.5, 64.0, 2.0],
+                    10,
+                );
+                guest.placed = true;
+                guest.game_mode = 1;
+                host.hub.guests.push(guest);
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [0, 64, 0],
+                        include_data: true,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                assert_eq!(
+                    &*guest.inventory[guest.selected].as_ref().unwrap().item,
+                    "minecraft:diamond"
+                );
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [0, 64, 0],
+                        include_data: false,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                assert_eq!(
+                    &*guest.inventory[guest.selected].as_ref().unwrap().item,
+                    "minecraft:stone"
+                );
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [1, 64, 0],
+                        include_data: true,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                assert_eq!(
+                    &*guest.inventory[guest.selected].as_ref().unwrap().item,
+                    "minecraft:wheat_seeds"
+                );
+                assert_eq!(*seen.lock().unwrap(), [true, false]);
+
+                // addBlockDataToItem runs on the part's item: a chest picked with
+                // its data gives the part's diamond carrying the chest's contents.
+                game.world.set(3, 64, 0, chest).unwrap();
+                let mut slots = vec![None; 27];
+                slots[0] = Some(horizon_client::items::ItemStack::new("minecraft:apple", 2));
+                game.world.block_entities.insert(
+                    (3, 64, 0),
+                    horizon_client::containers::BlockEntity::Chest(slots),
+                );
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [3, 64, 0],
+                        include_data: true,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                let picked = guest.inventory[guest.selected].as_ref().unwrap();
+                assert_eq!(&*picked.item, "minecraft:diamond");
+                let Some(horizon_world::nbt::Tag::Compound(components)) =
+                    horizon_client::item_data::encode_components(picked)
+                else {
+                    panic!("the chest's data is on the diamond");
+                };
+                assert!(components.contains_key(&"minecraft:container".into()));
+                assert_eq!(*seen.lock().unwrap(), [true, false, true]);
+
+                let hive = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:beehive")
+                    .unwrap();
+                let hive = game.with_props(hive, &[("honey_level", "1")]).unwrap();
+                game.world.set(2, 64, 0, hive).unwrap();
+                game.world.block_entities.insert(
+                    (2, 64, 0),
+                    horizon_client::containers::BlockEntity::Beehive(Box::default()),
+                );
+                game.creative = true;
+                game.break_block([2, 64, 0]).unwrap();
+                assert!(
+                    game.dropped
+                        .iter()
+                        .any(|item| &*item.stack.item == "minecraft:beehive")
+                );
+                assert_eq!(*seen.lock().unwrap(), [true, false, true]);
+            })
+        });
+    }
 
     #[test]
     #[ignore = "requires prepared game resources"]

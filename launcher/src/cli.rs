@@ -780,9 +780,9 @@ enum Cmd {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Native mods (docs/native-mods.md): compile mixin bundles on the Horizon revision they
-    /// pin, else the one the instance plays, with the launcher's own Rust, as the version the
-    /// instance then plays. Not sandboxed: the mods' code runs with your rights
+    /// Native mods (docs/native-mods.md): compile mixin bundles against the instance's exact
+    /// Horizon source revision with the launcher's own Rust, as the version the instance then
+    /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
         /// A mod folder (horizon-mixin.toml, or an unpacked .hmod), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
@@ -813,9 +813,6 @@ enum Cmd {
         /// You read the mods' source and trust it with full access to this computer
         #[arg(long)]
         trust_native_code: bool,
-        /// Build mods made for different Horizon versions together anyway, on the newest of them
-        #[arg(long)]
-        allow_version_mismatch: bool,
         /// The build profile: performance (the default: incremental, quick to rebuild), dev (quickest
         /// to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster
         /// game). Default: the native-profile setting
@@ -1259,7 +1256,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             version,
             update,
             trust_native_code,
-            allow_version_mismatch,
             profile,
         } => {
             if !trust_native_code {
@@ -1285,21 +1281,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     None => native_mods::base_for(None, &backend::installed(), update)
                         .ok_or_else(|| tr("No version is installed yet."))?,
                 };
-                let built = native_mods::build_server(
-                    &base,
-                    &folder,
-                    &output,
-                    allow_version_mismatch,
-                    profile,
-                    steps,
-                )
-                .map_err(|e| match e.starts_with(native_mods::MISMATCH) {
-                    true => trf(
-                        "{error} They often still build: pass --allow-version-mismatch to try.",
-                        &[("error", e.as_str())],
-                    ),
-                    false => e,
-                })?;
+                let built = native_mods::build_server(&base, &folder, &output, profile, steps)?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
                 println!(
@@ -1331,20 +1313,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
-            let built = native_mods::build(
-                &base,
-                &folder,
-                &target,
-                allow_version_mismatch,
-                profile,
-                steps,
-            )
-            .map_err(|e| match e.starts_with(native_mods::MISMATCH) {
-                true => {
-                    format!("{e} They often still build: pass --allow-version-mismatch to try.")
-                }
-                false => e,
-            })?;
+            let built = native_mods::build(&base, &folder, &target, profile, steps)?;
             println!(
                 "{built} built and selected for its instance ({:.0} s).",
                 started.elapsed().as_secs_f64()
@@ -3825,7 +3794,7 @@ mod tests {
         assert!(parse(&["--server-output", "engine-out"]).is_err());
         // Export mode never touches an instance.
         assert!(parse(&["mods", "--server-output", "engine-out", "--instance", "A"]).is_err());
-        // The options export mode keeps: an explicit version, the profile, mismatch; a version
+        // Export mode accepts an explicit version and profile; a version
         // and --update refuse each other, as in the game mode.
         match parse(&[
             "mods",
@@ -3833,7 +3802,6 @@ mod tests {
             "engine-out",
             "--version",
             "v2026.10.13",
-            "--allow-version-mismatch",
             "--profile",
             "release",
         ])
@@ -3843,13 +3811,11 @@ mod tests {
             Some(Cmd::NativeBuild {
                 version,
                 update,
-                allow_version_mismatch,
                 profile,
                 ..
             }) => {
                 assert_eq!(version.as_deref(), Some("v2026.10.13"));
                 assert!(!update);
-                assert!(allow_version_mismatch);
                 assert_eq!(profile.as_deref(), Some("release"));
             }
             _ => panic!("expected native-build"),
@@ -3872,6 +3838,7 @@ mod tests {
             "--update"
         ])
         .is_err());
+        assert!(parse(&["mods", "--allow-version-mismatch"]).is_err());
         // The game mode is unchanged: an instance build without --server-output.
         assert!(matches!(
             parse(&["--instance", "A"]).unwrap().command,

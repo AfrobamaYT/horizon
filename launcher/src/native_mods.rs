@@ -4,12 +4,8 @@
 //! ([`rust_toolchain`]). Unlike `.hmod` mods they are not sandboxed: their code runs with the
 //! player's rights.
 //!
-//! A native mod pins the Horizon revision it was made for (a Nightly's or a release's commit).
-//! Mods pinning different ones build on the newest of them, once the player agreed to try (they
-//! often still apply and compile). A mod that hooks only Horizon's native hook points
-//! (`game/native_hooks.rs`) names the version it needs instead (`hooks`): it builds on any Horizon
-//! whose hook points have that version or a later one (they are only ever added to), the player's own
-//! by default, so such mods always build together. The build compiles that revision's source, from
+//! A native mod builds against the installed game's exact source revision. Bundles pinned to a
+//! different revision must be rebuilt against this game. The build compiles that revision's source, from
 //! GitHub, never a checkout on this computer, and installs as its own version,
 //! `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit and
 //! the profile, so the same set builds once). The instance the mods are installed in plays it, and
@@ -449,9 +445,6 @@ pub struct Bundle {
     pub horizon: Option<String>,
     /// The horizon-mixins commit it was tested with (its `.hmod`'s).
     pub mixins: Option<String>,
-    /// The native hook points' version it needs (its `.hmod`'s `hooks`): then `horizon` is the
-    /// revision it was tested on, and it builds on any with these hook points or later ones.
-    pub hooks: Option<u32>,
     /// The bundle-relative trait package folder (`[api] path`).
     pub api: Option<String>,
     /// True when the manifest has content for horizon-mixins.
@@ -574,7 +567,9 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let native: horizon_mods::index::native::Manifest =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    native.check()?;
+    native
+        .check()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     let found = bundle(&source, Some(native.mixins))?;
     if found.id != native.id || found.version != native.version {
         return Err("native manifest and mixin identity/revision differ".into());
@@ -589,7 +584,6 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
     }
     Ok(Some(Bundle {
         horizon: Some(native.horizon),
-        hooks: native.hooks,
         ..found
     }))
 }
@@ -664,7 +658,6 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
         dir: dir.to_owned(),
         horizon: field("compatibility", "horizon_revision"),
         mixins,
-        hooks: None,
         injections,
         api,
         mixins_content,
@@ -906,15 +899,13 @@ fn ask_github(repo: &str, revision: &str) -> Result<String, String> {
         .ok_or_else(|| format!("GitHub doesn't know {repo} commit {revision}."))
 }
 
-/// How [`build`] starts its error when mods pin other Horizon revisions than the one it would
-/// use and the player hasn't agreed to try (`anyway`); the rest lists them.
+/// How [`build`] starts its error when mods pin another Horizon revision.
 pub const MISMATCH: &str = "Made for other Horizon versions: ";
 
 /// Each pinned mod whose Horizon revision isn't `revision`, as `id → pin`, and the build's.
 fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     let list: Vec<String> = mods
         .iter()
-        .filter(|b| b.hooks.is_none())
         .filter_map(|b| b.horizon.as_ref().map(|r| (b, r)))
         .filter(|(_, r)| *r != revision)
         .map(|(b, r)| format!("{} → {}", b.id, &r[..r.len().min(7)]))
@@ -926,91 +917,6 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
             &revision[..revision.len().min(7)]
         )
     })
-}
-
-/// Where Horizon declares its native hook points' version, and the line that does.
-const HOOKS_FILE: &str = "crates/horizon-client/src/game/native_hooks.rs";
-const HOOKS_LINE: &str = "pub(crate) const NATIVE_HOOKS_API: u32 = ";
-
-/// The native hook points' version in `HOOKS_FILE`'s text.
-fn hooks_in(source: &str) -> Option<u32> {
-    let line = source.lines().find_map(|l| l.strip_prefix(HOOKS_LINE))?;
-    line.trim_end().strip_suffix(';')?.parse().ok()
-}
-
-/// The native hook points' version of Horizon at `revision`, from GitHub (None: it has none).
-fn hooks_at(revision: &str) -> Option<u32> {
-    let url = format!(
-        "https://raw.githubusercontent.com/{}/{revision}/{HOOKS_FILE}",
-        backend::REPO
-    );
-    let text = backend::get(&url).ok()?.into_string().ok()?;
-    hooks_in(&text)
-}
-
-/// The revision to build `mods` on: `pinned` (the pins' agreement, else the installed version's)
-/// when every mod naming a hook points' version finds it or a later one there (`at` reads a
-/// revision's). Else, when nothing pins it, the revision those mods were tested on. Else the
-/// revision of the release or Nightly the build starts from (`game`), when they find theirs
-/// there: a rebuild that stayed on an older Horizon, or mods pinning one, then move to the game
-/// the player installed, and pinned mods wait for the player's Build anyway ([`mismatch`]).
-fn with_hooks(
-    mods: &[Bundle],
-    pinned: String,
-    free: bool,
-    game: impl FnOnce() -> Option<String>,
-    at: impl Fn(&str) -> Option<u32>,
-) -> Result<String, String> {
-    let hooked: Vec<&Bundle> = mods.iter().filter(|b| b.hooks.is_some()).collect();
-    let fits = |revision: &str| {
-        let found = at(revision);
-        hooked.iter().all(|b| found.is_some() && b.hooks <= found)
-    };
-    if hooked.is_empty() || fits(&pinned) {
-        return Ok(pinned);
-    }
-    let tested: Vec<Bundle> = hooked.iter().map(|b| (*b).clone()).collect();
-    let fallback = agreed(
-        &tested,
-        "Horizon",
-        |b| b.horizon.as_ref(),
-        || Err(String::new()),
-    );
-    if let (true, Ok(revision)) = (free, fallback) {
-        if fits(&revision) {
-            return Ok(revision);
-        }
-    }
-    if let Some(revision) = game().filter(|r| *r != pinned && fits(r)) {
-        return Ok(revision);
-    }
-    // Only the mods that need more than `pinned` has: the others would build there.
-    let found = at(&pinned);
-    let list: Vec<String> = hooked
-        .iter()
-        .filter(|b| found.is_none() || b.hooks > found)
-        .map(|b| format!("{} (hook points v{})", b.id, b.hooks.unwrap_or_default()))
-        .collect();
-    Err(format!(
-        "Horizon {} doesn't have the native hook points these mods use: {}. Update Horizon or the mods.",
-        &pinned[..pinned.len().min(7)],
-        list.join(", ")
-    ))
-}
-
-/// A bundle that names a hook points' version builds on another revision than the one it was
-/// tested on: its `horizon_revision` (which horizon-mixins checks) becomes the build's.
-fn repin(bundle: &Bundle, revision: &str) -> Result<(), String> {
-    let path = bundle.dir.join(MANIFEST);
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut value: toml::Table = text
-        .parse()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    if let Some(toml::Value::Table(compat)) = value.get_mut("compatibility") {
-        compat.insert("horizon_revision".into(), revision.into());
-    }
-    let text = toml::to_string(&value).map_err(|e| e.to_string())?;
-    fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
@@ -1688,20 +1594,13 @@ struct Built {
     secs: u64,
 }
 
-/// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
-/// Horizon revision they pin (else `base`'s, the installed version whose game files the build
-/// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
-/// (the game, or the headless engine) and installed as its own version,
-/// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
-/// the profile and the target). A build already made is used again. Mods pinning different
-/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
-/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
+/// Both targets build mods against the installed game's source revision and cache the result
+/// by revision, mod files, tool, profile and target. Mismatched source pins are refused.
 /// Nothing of the player's outside the launcher's data is touched: no instance is edited and
 /// no version selected here.
 fn pipeline(
     base: &str,
     folder: &Path,
-    anyway: bool,
     profile: Profile,
     target: Target,
     progress: &impl Fn(Step),
@@ -1735,7 +1634,6 @@ fn pipeline(
         }
         copy_bundle(b, &incoming.join(&b.id))?;
     }
-    // Read before `repin` rewrites a copy's manifest.
     let digests: std::collections::HashMap<String, Option<String>> = found
         .iter()
         .map(|b| (b.id.clone(), source_digest(b)))
@@ -1770,31 +1668,13 @@ fn pipeline(
         .collect();
     let resolution = dependencies::resolve(&inputs).map_err(|e| e.to_string())?;
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
-    // A mod naming a hook points' version doesn't pin: it follows the others, else the game.
-    let pins: Vec<Bundle> = mods.iter().filter(|b| b.hooks.is_none()).cloned().collect();
-    let free = pins.iter().all(|b| b.horizon.is_none());
-    let pinned = newest(
-        &pins,
-        "Horizon",
-        |b| b.horizon.as_ref(),
-        || match &built_on {
-            Some(about) => Ok(about.horizon.clone()),
-            None => revision_of(base),
-        },
-        None,
-        |r| committed(backend::REPO, r),
-    )?;
-    let game = || revision_of(origin).ok();
-    let revision = with_hooks(&mods, pinned, free, game, hooks_at)?;
+    let revision = match &built_on {
+        Some(about) => about.horizon.clone(),
+        None => revision_of(base)?,
+    };
     let other = mismatch(&mods, &revision);
-    if let (Some(list), false) = (&other, anyway) {
-        return Err(format!("{MISMATCH}{list}."));
-    }
-    for b in mods
-        .iter()
-        .filter(|b| b.hooks.is_some() || b.horizon.as_ref().is_some_and(|r| *r != revision))
-    {
-        repin(b, &revision)?;
+    if let Some(list) = &other {
+        return Err(format!("{MISMATCH}{list}; rebuild against this game."));
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
     let blame = |e: String| {
@@ -1961,7 +1841,6 @@ fn pipeline(
             "base": origin,
             "horizon": revision,
             "horizon_mixins": mixins,
-            "hooks": mods.iter().find_map(|m| m.hooks),
             "rust": rust_toolchain::VERSION,
             "profile": compiled.name(),
             "target": target.name(),
@@ -1989,22 +1868,17 @@ fn pipeline(
     Ok(built)
 }
 
-/// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
-/// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
-/// and points `instance` at the build, the default one included. Returns the build's version; a
-/// build already made is used again. Mods pinning different revisions build on the newest one,
-/// with the newest horizon-mixins they name, only when the player agreed to try (`anyway`): else
-/// the error starts with [`MISMATCH`] and says which.
+/// Builds `folder`'s mods on the installed game revision and points `instance` at the build.
+/// A build already made is used again; mismatched source pins are refused.
 pub fn build(
     base: &str,
     folder: &Path,
     instance: &Instance,
-    anyway: bool,
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<String, String> {
     logged(|| {
-        let built = pipeline(base, folder, anyway, profile, Target::Client, &progress)?;
+        let built = pipeline(base, folder, profile, Target::Client, &progress)?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
         })?;
@@ -2034,7 +1908,6 @@ pub fn build_server(
     base: &str,
     folder: &Path,
     output: &Path,
-    anyway: bool,
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<PathBuf, String> {
@@ -2063,7 +1936,7 @@ pub fn build_server(
                 return Err(tr("Export the server outside the launcher's managed folders.").into());
             }
         }
-        let built = pipeline(base, folder, anyway, profile, Target::Server, &progress)?;
+        let built = pipeline(base, folder, profile, Target::Server, &progress)?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
         let cached = root().join("server-builds");
@@ -2793,12 +2666,6 @@ mod tests {
                 source_digest(&found[0])
             )]
         );
-        repin(&found[0], "f".repeat(40).as_str()).unwrap();
-        assert_ne!(
-            crate::native_status::enabled(&home)[0].2,
-            source_digest(&found[0]),
-            "a build reads the digest before repinning its copy"
-        );
         pack("veinminer.hmod", Some(("native/data/table.bin", "data")));
         let out = installed_mods(&home).unwrap();
         let path = out.join("veinminer/native/data/table.bin");
@@ -2835,7 +2702,6 @@ mod tests {
             dir: PathBuf::new(),
             horizon: horizon.map(str::to_owned),
             mixins: None,
-            hooks: None,
             injections: Vec::new(),
             api: None,
             mixins_content: false,
@@ -2870,7 +2736,6 @@ mod tests {
             dir: PathBuf::new(),
             horizon: horizon.map(str::to_owned),
             mixins: mixins.map(str::to_owned),
-            hooks: None,
             injections: Vec::new(),
             api: None,
             mixins_content: false,
@@ -2927,11 +2792,6 @@ mod tests {
             "lookat → aaaaaaa; the build uses bbbbbbb"
         );
         assert_eq!(mismatch(&same, A), None);
-        let hooked = [Bundle {
-            hooks: Some(1),
-            ..pinned("minimap", Some(A), None)
-        }];
-        assert_eq!(mismatch(&hooked, B), None, "hook mods follow the build");
     }
 
     #[test]
@@ -2964,133 +2824,20 @@ mod tests {
     }
 
     #[test]
-    fn mods_on_the_hook_points_follow_the_game_or_the_pins() {
-        assert_eq!(
-            hooks_in("x\npub(crate) const NATIVE_HOOKS_API: u32 = 3;\n"),
-            Some(3)
-        );
-        assert_eq!(hooks_in("const NATIVE_HOOKS_API: u32 = 3;"), None);
-        let mod_ = |id: &str, horizon: &str, hooks: Option<u32>| Bundle {
-            id: id.into(),
-            version: "1".into(),
-            dir: PathBuf::new(),
-            horizon: Some(horizon.into()),
-            mixins: None,
-            hooks,
-            injections: Vec::new(),
-            api: None,
-            mixins_content: false,
-        };
-        let c = "c".repeat(40);
-        // A (the game) has hook points v1, B v2, C none.
-        let at = |r: &str| match r.as_bytes()[0] {
-            b'a' => Some(1),
-            b'b' => Some(2),
-            _ => None,
-        };
-        let none = || None;
-        let zoom = [mod_("zoom", B, Some(1)), mod_("minimap", &c, Some(1))];
-        assert_eq!(
-            with_hooks(&zoom, A.into(), true, none, at).unwrap(),
-            A,
-            "the game's own"
-        );
-        let tested = [mod_("zoom", A, Some(1))];
-        assert_eq!(
-            with_hooks(&tested, c.clone(), true, none, at).unwrap(),
-            A,
-            "an older game"
-        );
-        assert_eq!(
-            with_hooks(&tested, B.into(), false, none, at).unwrap(),
-            B,
-            "v1 mods on v2"
-        );
-        let newer = [mod_("recipes", B, Some(2))];
-        let err = with_hooks(&newer, A.into(), false, none, at).unwrap_err();
-        assert!(
-            err.contains("aaaaaaa") && err.contains("recipes (hook points v2)"),
-            "{err}"
-        );
-        assert_eq!(
-            with_hooks(&newer, A.into(), true, none, at).unwrap(),
-            B,
-            "its tested commit"
-        );
-        let pinned_only = [mod_("veinminer", B, None)];
-        assert_eq!(
-            with_hooks(&pinned_only, B.into(), false, none, at).unwrap(),
-            B
-        );
-    }
-
-    /// Players on launcher 0.2.31 (#5352): a rebuild that stayed on an older Horizon (A, hook
-    /// points v1), or a mod pinning it, met mods needing newer hook points, tested on different
-    /// commits, and the build was refused although the installed game (B) has them all.
-    #[test]
-    fn mods_needing_newer_hook_points_move_the_build_to_the_installed_game() {
-        let mod_ = |id: &str, horizon: &str, hooks: Option<u32>| Bundle {
-            id: id.into(),
-            version: "1".into(),
-            dir: PathBuf::new(),
-            horizon: Some(horizon.into()),
-            mixins: None,
-            hooks,
-            injections: Vec::new(),
-            api: None,
-            mixins_content: false,
-        };
-        let (c, d) = ("c".repeat(40), "d".repeat(40));
-        // A (the old build's revision) has hook points v1, B (the installed game) v7.
-        let at = |r: &str| match r.as_bytes()[0] {
-            b'a' => Some(1),
-            b'b' => Some(7),
-            _ => None,
-        };
-        let game = || Some(B.to_owned());
-        let hooked = [
-            mod_("zoom", &c, Some(1)),
-            mod_("recipes", &d, Some(2)),
-            mod_("xtoxray", B, Some(7)),
-        ];
-        assert_eq!(
-            with_hooks(&hooked, A.into(), true, game, at).unwrap(),
-            B,
-            "a rebuild that stayed on an older Horizon moves to the game"
-        );
-        let with_pin = [mod_("carryblock", A, None), mod_("recipes", &d, Some(2))];
-        let revision = with_hooks(&with_pin, A.into(), false, game, at).unwrap();
-        assert_eq!(revision, B, "a pinned mod no longer blocks the build");
-        let asked = mismatch(&with_pin, &revision).expect("the pinned mod waits for Build anyway");
-        assert!(
-            asked.contains("carryblock") && !asked.contains("recipes"),
-            "{asked}"
-        );
-        // A game without them still refuses, naming only the mods that don't fit.
-        let err = with_hooks(&hooked, A.into(), true, || Some(c.clone()), at).unwrap_err();
-        assert!(err.contains("recipes (hook points v2)"), "{err}");
-        assert!(err.contains("xtoxray (hook points v7)"), "{err}");
-        assert!(!err.contains("zoom"), "zoom builds on A: {err}");
-    }
-
-    #[test]
-    fn a_hooks_bundle_is_read_and_repinned_to_the_build() {
-        let d = dir("hooks");
+    fn unknown_manifest_fields_are_refused_by_the_typed_reader() {
+        let d = dir("unknown-field");
         write_native(&d, "zoom", A, B);
         let json = fs::read_to_string(d.join(NATIVE_MANIFEST)).unwrap();
-        let json = json.replacen('}', ",\"hooks\":1}", 1);
-        fs::write(d.join(NATIVE_MANIFEST), json).unwrap();
-        let found = bundles(&d).unwrap();
-        assert_eq!(
-            (found[0].hooks, found[0].horizon.as_deref()),
-            (Some(1), Some(A))
-        );
-        repin(&found[0], B).unwrap();
-        let again = bundle(&found[0].dir, None).unwrap();
-        assert_eq!(
-            (again.id.as_str(), again.horizon.as_deref()),
-            ("zoom", Some(B))
-        );
+        for (name, value) in [("hooks", "1"), ("banana", "\"x\"")] {
+            fs::write(
+                d.join(NATIVE_MANIFEST),
+                json.replacen('}', &format!(",\"{name}\":{value}}}"), 1),
+            )
+            .unwrap();
+            let error = bundles(&d).unwrap_err();
+            assert!(error.contains("unknown field"), "{error}");
+            assert!(error.contains(name), "{error}");
+        }
     }
 
     #[test]
@@ -3313,7 +3060,6 @@ mod tests {
         let Err(error) = pipeline(
             "native-missing-record-test",
             Path::new("missing-mod-folder"),
-            false,
             Profile::Dev,
             Target::Client,
             &|_| panic!("invalid records must not start a build"),
@@ -3463,7 +3209,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &output,
-            true,
             Profile::Performance,
             |_| {},
         )
@@ -3475,7 +3220,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &managed,
-            true,
             Profile::Performance,
             |_| {},
         )
@@ -3528,7 +3272,6 @@ mod tests {
             "v0.0.0-not-installed",
             &folder,
             &out.join("server"),
-            true,
             Profile::Performance,
             |_| {},
         )

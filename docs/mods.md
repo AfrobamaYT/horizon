@@ -100,6 +100,8 @@ A block names its template and what differs from it:
   "item": true }
 ```
 
+`push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
+
 `random_ticks` makes a block tick randomly whatever its template does, as vanilla's
 `isRandomlyTicking(state)` does for its own blocks, so a crop, sapling or soil on a template that never
 ticks still grows: `"random_ticks": true` for every state (or `false`, to stop a template that ticks), or
