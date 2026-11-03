@@ -218,6 +218,7 @@ mod native_entity_moves;
 mod native_entity_refs;
 mod native_entity_remove;
 mod native_entity_riding;
+mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
