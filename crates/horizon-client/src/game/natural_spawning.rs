@@ -844,10 +844,10 @@ mod tests {
         }
     }
 
-    /// A chunk in a player's spawning area but past 128 blocks spawns only
-    /// while a ticket forces it; a chunk outside the area never does.
+    /// A chunk in a player's spawning area but past 128 blocks is a spawning
+    /// chunk only while a ticket forces it; a chunk outside the area never is.
     #[test]
-    fn a_forcing_ticket_makes_a_far_chunk_in_the_area_eligible() {
+    fn a_forcing_ticket_makes_a_far_chunk_in_the_area_a_spawning_chunk() {
         let players = [player(8.0, 64.0, 8.0, false)];
         let mut scratch = SpawnScratch::default();
         let corner = (8, 8);
