@@ -220,11 +220,9 @@ impl Game<'_> {
 
     /// `ServerLevel.sendParticles` of a mob's particles: a packet to each
     /// player within 32 blocks. The window draws its own copy. `state` is the
-    /// block of a block particle. `host` is the hub of a guest's turn, which
-    /// is out of `self.lan` meanwhile.
+    /// block of a block particle.
     pub(super) fn lan_level_particles(
         &self,
-        host: Option<&LanHost>,
         options: &ParticleOptions,
         at: [f64; 3],
         spread: [f64; 3],
@@ -232,7 +230,7 @@ impl Game<'_> {
         count: u32,
         state: Option<BlockStateId>,
     ) {
-        let Some(hub) = host.or(self.lan.as_ref()).map(|h| &h.hub) else {
+        let Some(hub) = self.lan.as_ref().map(|h| &h.hub) else {
             return;
         };
         send_hub_level_particles(hub, options, at, spread, speed, count, state);

@@ -500,14 +500,7 @@ impl Game<'_> {
         self.end_portal_travel = end;
         // Leaving the End: the player's own respawn point.
         let own = if end {
-            let Some(mut host) = self.lan.take() else {
-                return;
-            };
-            let own = self
-                .as_guest(&mut host, conn, |g| g.end_destination(target))
-                .flatten();
-            self.lan = Some(host);
-            own
+            self.as_guest(conn, |g| g.end_destination(target)).flatten()
         } else {
             None
         };
@@ -532,12 +525,9 @@ impl Game<'_> {
             host.hub
                 .change_level(i, at, yaw, None, true, PLAYER_DELAY, &ctx);
         }
-        if let Some(mut host) = self.lan.take() {
-            self.as_guest(&mut host, conn, |g| {
-                g.trigger_dimension(source, target, [from.x, from.y, from.z])
-            });
-            self.lan = Some(host);
-        }
+        self.as_guest(conn, |g| {
+            g.trigger_dimension(source, target, [from.x, from.y, from.z])
+        });
         self.server_trips.push(Trip {
             conn,
             dim: target,
@@ -737,12 +727,7 @@ impl Game<'_> {
             };
             let yaw = host.hub.guests[i].yaw;
             let (position, yaw) = if let Some(config) = trip.respawn {
-                let Some(mut host) = self.lan.take() else {
-                    return;
-                };
-                let found =
-                    self.as_guest(&mut host, trip.conn, |g| g.resolve_server_respawn(config));
-                self.lan = Some(host);
+                let found = self.as_guest(trip.conn, |g| g.resolve_server_respawn(config));
                 match found {
                     Some(Some(found)) => found,
                     _ => {
@@ -792,13 +777,9 @@ impl Game<'_> {
                     }
                 }
             } else if trip.end {
-                let Some(mut host) = self.lan.take() else {
-                    return;
-                };
-                let guest_arrival = self.as_guest(&mut host, trip.conn, |g| {
+                let guest_arrival = self.as_guest(trip.conn, |g| {
                     g.end_arrival(trip.target, &mut trip.finder)
                 });
-                self.lan = Some(host);
                 let arrival = match guest_arrival {
                     Some(arrival) => arrival,
                     None => self.end_arrival(trip.target, &mut trip.finder),
@@ -903,11 +884,10 @@ impl Game<'_> {
             // In place when it is their turn already (as_guest finds them swapped in).
             if self.lan_acting == Some(conn) {
                 self.native_player_teleported(uuid, &name, from, to, &dimension);
-            } else if let Some(mut host) = self.lan.take() {
-                self.as_guest(&mut host, conn, |g| {
+            } else {
+                self.as_guest(conn, |g| {
                     g.native_player_teleported(uuid, &name, from, to, &dimension);
                 });
-                self.lan = Some(host);
             }
         }
     }
@@ -951,16 +931,12 @@ impl Game<'_> {
                 host.hub
                     .change_level(i, t.at, yaw, Some(pitch), false, cooldown, &ctx);
             }
-            let Some(mut host) = self.lan.take() else {
-                return;
-            };
-            self.as_guest(&mut host, t.conn, |g| {
+            self.as_guest(t.conn, |g| {
                 g.trigger_dimension(source, t.dim, origin);
                 // The mods hear the teleport into another level, with the
                 // player's state swapped in.
                 g.native_player_teleported(uuid, &name, origin, t.at, t.dim.id());
             });
-            self.lan = Some(host);
             self.server_trips.retain(|trip| !trip.is(t.conn));
             self.server_trips.push(Trip {
                 conn: t.conn,
@@ -1001,13 +977,9 @@ impl Game<'_> {
         else {
             return;
         };
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
-        self.as_guest(&mut host, conn, |g| {
+        self.as_guest(conn, |g| {
             g.native_player_changed_dimension(uuid, &name, from.id(), to.id());
         });
-        self.lan = Some(host);
     }
 }
 
