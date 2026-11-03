@@ -1854,7 +1854,24 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 
 /// The write backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn Host) -> Option<&mut dyn BackendMut> {
+/// The logical side on which a hook is executing.
+pub enum HostSide<'a> {
+    /// The logical server.
+    Server(&'a mut dyn ServerHost),
+    /// The logical client.
+    Client(&'a mut dyn ClientHost),
+}
+
+impl HostSide<'_> {
+    fn reborrow(&mut self) -> HostSide<'_> {
+        match self {
+            Self::Server(host) => HostSide::Server(&mut **host),
+            Self::Client(host) => HostSide::Client(&mut **host),
+        }
+    }
+}
+
+pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
@@ -1929,7 +1946,7 @@ impl NativeTriState {
 mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
-pub use generated_host::Host;
+pub use generated_host::{ClientHost, Host, ServerHost};
 #[doc(hidden)]
 pub use generated_host::{Backend, BackendMut};
 

@@ -1,4 +1,4 @@
-use super::CatalogHook;
+use super::{CatalogHook, HelperSide};
 
 /// The hook's host parameter type and the expression passed by its native method.
 #[derive(Debug, PartialEq, Eq)]
@@ -17,6 +17,20 @@ pub(super) fn host_param(
         .as_str()
         .is_some_and(|target| target.contains("::GameLevel<"));
     mutable.map(|mutable| {
+        if !is_level {
+            let (ty, call) = match hook.side {
+                HelperSide::Server if hook["host"].as_str() == Some("read") => {
+                    ("&dyn Host", "&*self")
+                }
+                HelperSide::Server => ("&mut dyn ServerHost", "self"),
+                HelperSide::Client => ("&dyn ClientHost", "&*self"),
+                HelperSide::Both => ("HostSide", "HostSide::of(self)"),
+            };
+            return HostParam {
+                ty: ty.into(),
+                call,
+            };
+        }
         let kind = if is_level {
             match (mutable, ticks) {
                 (true, true) => "LevelWriteHost",

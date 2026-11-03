@@ -421,7 +421,7 @@ fn handle_method<'a>(
     let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
-            syn::parse_quote!(host: &mut dyn Host)
+            syn::parse_quote!(host: &mut dyn ServerHost)
         }
         Some(FnArg::Receiver(r)) if r.reference.is_some() => syn::parse_quote!(host: &dyn Host),
         _ => return Err(format!("{name}: a {receiver} helper borrows Game")),
@@ -1118,7 +1118,7 @@ mod tests {
         let (handle, code) =
             super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
         assert_eq!(handle, "LevelRef");
-        assert!(code.contains("host : & mut dyn Host"));
+        assert!(code.contains("host : & mut dyn ServerHost"));
         assert!(code.contains(
             "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
         ));
@@ -1304,7 +1304,7 @@ mod tests {
         assert_eq!(host_param(&level, None, false), None);
         assert_eq!(
             host_param(&game, Some(true), false),
-            param("&mut dyn Host", "self")
+            param("HostSide", "HostSide::of(self)")
         );
     }
 

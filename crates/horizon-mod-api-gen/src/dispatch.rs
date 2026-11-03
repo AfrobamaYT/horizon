@@ -215,8 +215,15 @@ pub(super) fn emit(
         let mut call_args = Vec::new();
         if let Some((name, param)) = &host {
             trait_params.push(format!("{name}: {}", param.ty));
-            dispatch_params.push(format!("{name}: {}", param.ty));
-            call_args.push(name.clone());
+            let by_side = param.ty == "HostSide";
+            dispatch_params.push(format!("{}{name}: {}", if by_side { "mut " } else { "" }, param.ty));
+            call_args.push(if by_side {
+                format!("{name}.reborrow()")
+            } else if param.ty.starts_with("&mut ") {
+                format!("&mut *{name}")
+            } else {
+                format!("&*{name}")
+            });
         }
 
         let mut lifetimes = EventLifetimes::default();

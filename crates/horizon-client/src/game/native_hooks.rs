@@ -2001,7 +2001,10 @@ impl Game<'_> {
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
     /// Invalid declarations are logged and skipped; the first valid category
     /// owns its id and type. This does not yet add tabs or book displays.
-    pub(super) fn native_recipe_book_categories(&self, categories: &mut Vec<RecipeBookCategory>) {
+    pub(super) fn native_recipe_book_categories(
+        &mut self,
+        categories: &mut Vec<RecipeBookCategory>,
+    ) {
         mod_api::dispatch_recipe_book_categories(self, categories);
     }
     /// Once a frame, in a world or not, after Horizon's extras.
