@@ -6616,12 +6616,10 @@ impl Game<'_> {
         {
             let held = self.held().cloned();
             let mut block_answer = None;
-            if horizon_client::mod_api::has_part_hook(horizon_client::mod_api::HookId::UseItemOn) {
+            if horizon_client::mod_api::has_scoped_hook(horizon_client::mod_api::HookId::UseItemOn)
+            {
                 let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-                if horizon_client::mod_api::parts("use_item_on")
-                    .for_hook(horizon_client::mod_api::HookId::UseItemOn)
-                    .is_some_and(|parts| !parts.block_state(state).is_empty())
-                {
+                if horizon_client::mod_api::parts("use_item_on").has_block_part(state) {
                     let click = self.block_click(hit, self.hand, held.as_ref());
                     self.native_use_item_on(state, &click, &mut block_answer);
                 }

@@ -6214,6 +6214,7 @@ mod tests {
         struct Mod {
             picks: Arc<Mutex<Vec<bool>>>,
             user: User,
+            global_uses: Arc<AtomicUsize>,
         }
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
@@ -6224,6 +6225,15 @@ mod tests {
                 r.block_part("minecraft:lever", self.user.clone());
                 r.block_part("minecraft:cauldron", self.user.clone());
                 r.block_part("minecraft:jukebox", self.user.clone());
+            }
+            fn use_item_on(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut UseItemOnEvent<'_>,
+            ) -> Option<Answer> {
+                self.global_uses
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                None
             }
             fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
                 self.user
@@ -6238,11 +6248,13 @@ mod tests {
             clicks: Arc::new(Mutex::new(Vec::new())),
             item_uses: Arc::new(AtomicUsize::new(0)),
         };
+        let global_uses = Arc::new(AtomicUsize::new(0));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "picker",
             Box::new(Mod {
                 picks: seen.clone(),
                 user: user.clone(),
+                global_uses: global_uses.clone(),
             }),
         )]
         .into();
@@ -6342,8 +6354,10 @@ mod tests {
                     assert_eq!(game.world.block(0, 64, 4) != lever, powered);
                 }
                 let calls = user.clicks.lock().unwrap().len();
+                let global_before = global_uses.load(SeqCst);
                 game.world.set(0, 64, 4, stone).unwrap();
                 assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(global_uses.load(SeqCst), global_before + 1);
                 assert_eq!(user.item_uses.load(SeqCst), 3);
                 assert_eq!(user.clicks.lock().unwrap().len(), calls);
 

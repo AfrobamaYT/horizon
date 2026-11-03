@@ -56,6 +56,8 @@ impl<P: ?Sized> Clone for Attached<P> {
 pub struct Parts {
     /// Block parts, and block entity parts as the block parts they also are.
     blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
+    /// Whether each state has any attached block part, for the use-item-on caller.
+    block_states: Vec<bool>,
     /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
     block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     /// Block entity parts by block entity type, for the hooks asked by the entity
@@ -262,8 +264,14 @@ pub(crate) fn resolve_parts(
         "block",
     );
     add_tagged(&mut parts.items, &installed.tags.items, item_tags, "item");
+    parts.block_states = (0..known.state_count)
+        .map(|state| parts.blocks.contains_key((known.state_block)(state)))
+        .collect();
     parts.index_hooks();
     for table in parts.hooks.iter_mut().flatten() {
+        if table.blocks.is_empty() {
+            continue;
+        }
         let mut names = HashMap::with_capacity(table.blocks.len());
         for (name, attached) in &table.blocks {
             names.insert(
@@ -379,6 +387,12 @@ impl HookParts {
 }
 
 impl Parts {
+    pub(crate) fn has_block_part(&self, state: BlockStateId) -> bool {
+        self.block_states
+            .get(state.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
     pub(crate) fn for_hook(&self, hook: HookId) -> Option<&HookParts> {
         self.hooks.get(hook as usize).and_then(Option::as_ref)
     }
