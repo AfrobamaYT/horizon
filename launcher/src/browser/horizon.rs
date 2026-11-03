@@ -615,18 +615,26 @@ fn install_version(
     let mut list = installed::Installed::load(home);
     let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == p.id;
     let old = list.entries.iter().find(|e| ours(e)).cloned();
-    if old.as_ref().is_some_and(|o| {
-        o.kind != project.kind
-            || (o
-                .file
-                .starts_with(&format!("{}/", crate::native_mods::INSTALLED))
-                != native
-                && project.kind == Kind::Mod)
-    }) {
-        return Err(format!(
-            "{} has a different installed kind: remove it before installing this version.",
-            p.name
-        ));
+    if let Some(old) = &old {
+        let mut different = old.kind != project.kind;
+        if !different && project.kind == Kind::Mod {
+            let path = home.join(&old.file);
+            let installed_native = index::native::holds(&path);
+            let kind = if installed_native {
+                index::Kind::NativeMod
+            } else {
+                index::Kind::Mod
+            };
+            index::inspect(&kind, &path)
+                .map_err(|e| format!("Cannot inspect installed {}: {e}", p.name))?;
+            different = installed_native != native;
+        }
+        if different {
+            return Err(format!(
+                "{} has a different installed kind: remove it before installing this version.",
+                p.name
+            ));
+        }
     }
     if old.as_ref().is_some_and(|o| o.version == v.version) {
         return Ok(old.expect("checked"));
