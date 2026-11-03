@@ -352,16 +352,17 @@ impl Game<'_> {
                     if let Some(d) = self.motion.health.damage.definition(*source) {
                         let attacker = match recorded.take() {
                             Some((t, id)) if t == d.name => Some(id),
-                            _ => self
-                                .combat
-                                .pending
-                                .iter()
-                                .find(|(t, _, _)| *t == d.name)
-                                .map(|(_, attacker, _)| {
+                            _ => {
+                                if let Some((_, attacker, _)) =
+                                    self.combat.pending.iter().find(|(t, _, _)| *t == d.name)
+                                {
                                     self.combat.last_hurt_by =
                                         Some((attacker.clone(), self.world.game_time));
-                                    attacker.0
-                                }),
+                                    Some(attacker.0)
+                                } else {
+                                    None
+                                }
+                            }
                         };
                         if let Some(id) = attacker
                             && !horizon_client::mod_api::mods().is_empty()

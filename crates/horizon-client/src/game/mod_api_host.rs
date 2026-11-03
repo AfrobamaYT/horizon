@@ -231,6 +231,15 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
         self.world.is_loaded_at(pos[0], pos[1], pos[2])
     }
+    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+        self.world.is_loaded_at(pos[0], pos[1], pos[2])
+            && self
+                .behaviours
+                .is_raining_at(self, BlockPos::new(pos[0], pos[1], pos[2]))
+    }
+    fn enabled_features(&self) -> horizon_client::mod_api::FeatureFlags<'_> {
+        horizon_client::mod_api::FeatureFlags::new(self.enabled_features)
+    }
 }
 
 impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
@@ -255,8 +264,8 @@ pub(super) struct LevelTicks<'a, L> {
     pub ticks: &'a mut Ticks,
 }
 
-impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_api::LevelHost
-    for LevelTicks<'_, L>
+impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
+    horizon_client::mod_api::LevelHost for LevelTicks<'b, L>
 {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         horizon_client::mod_api::LevelHost::block_state(&*self.level, pos)
@@ -303,9 +312,17 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
         horizon_client::mod_api::LevelHost::is_loaded(&*self.level, pos)
     }
+    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+        horizon_client::mod_api::LevelHost::is_raining_at(&*self.level, pos)
+    }
+    fn enabled_features(&self) -> horizon_client::mod_api::FeatureFlags<'_> {
+        horizon_client::mod_api::LevelHost::enabled_features(&*self.level)
+    }
 }
 
-impl horizon_client::mod_api::LevelRandomHost for LevelTicks<'_, &mut super::GameLevel<'_>> {
+impl<'a: 'b, 'b> horizon_client::mod_api::LevelRandomHost
+    for LevelTicks<'b, &mut super::GameLevel<'a>>
+{
     fn attachments(
         &mut self,
         holder: horizon_client::mod_api::Holder,
@@ -318,8 +335,8 @@ impl horizon_client::mod_api::LevelRandomHost for LevelTicks<'_, &mut super::Gam
     }
 }
 
-impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_api::LevelTicksHost
-    for LevelTicks<'_, L>
+impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
+    horizon_client::mod_api::LevelTicksHost for LevelTicks<'b, L>
 {
     fn schedule_block_tick(&mut self, pos: [i32; 3], block: &str, delay: i32) -> bool {
         self.level
@@ -331,7 +348,9 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     }
 }
 
-impl horizon_client::mod_api::LevelWriteHost for LevelTicks<'_, &mut super::GameLevel<'_>> {
+impl<'a: 'b, 'b> horizon_client::mod_api::LevelWriteHost
+    for LevelTicks<'b, &mut super::GameLevel<'a>>
+{
     fn set_block(
         &mut self,
         pos: [i32; 3],

@@ -203,9 +203,13 @@ impl Game<'_> {
     /// Heals the entity by `amount` (`LivingEntity.heal`), through the
     /// `living_heal` hook, which may change or cancel it. A dead or dying
     /// entity isn't healed, and health stops at the maximum. False for a stale
-    /// handle, a non-finite amount, an armor stand or the dragon.
+    /// handle, a non-finite amount, a zero-health entity, an armor stand or the dragon.
     pub(super) fn native_living_heal(&mut self, living: LivingRef, amount: f32) -> bool {
-        if !amount.is_finite() {
+        if !amount.is_finite()
+            || !self
+                .native_living_health(living)
+                .is_some_and(|health| health > 0.0)
+        {
             return false;
         }
         match self.native_living_target(living) {
@@ -777,7 +781,7 @@ mod tests {
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
             let mob_living = game.native_living(game.native_entity(12).unwrap()).unwrap();
-            assert!(mob_living.heal(game, 10.0));
+            assert!(!mob_living.heal(game, 10.0));
             assert_eq!(mob_living.health(game), Some(0.0));
             assert!(mob_living.set_health(game, 10.0));
             assert_eq!(mob_living.health(game), Some(10.0));
@@ -788,7 +792,7 @@ mod tests {
                 .set_health(0.0, false)
                 .unwrap();
             let player_living = game.native_living(game.native_entity(20).unwrap()).unwrap();
-            assert!(player_living.heal(game, 10.0));
+            assert!(!player_living.heal(game, 10.0));
             assert_eq!(player_living.health(game), Some(0.0));
             assert!(player_living.set_health(game, 10.0));
             assert_eq!(player_living.health(game), Some(10.0));

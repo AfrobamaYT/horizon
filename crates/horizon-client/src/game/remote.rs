@@ -7618,10 +7618,8 @@ impl Game<'_> {
                 self.with_hand(hand, Game::start_using_item);
                 return true;
             } else if item_used
-                && held
-                    .as_ref()
-                    .is_some_and(|s| &*s.item == "minecraft:bone_meal")
-                && self.remote_bone_meal_succeeds(&hit)
+                && let Some(stack) = held.as_ref().filter(|s| &*s.item == "minecraft:bone_meal")
+                && self.with_hand(hand, |g| g.remote_bone_meal_succeeds(&hit, stack))
             {
                 // BoneMealItem.useOn succeeded on this client's level (SUCCESS;
                 // the server grows the plant): this hand swings and the click
@@ -7801,13 +7799,14 @@ impl Game<'_> {
             && self.block_in_tag("minecraft:banners", &self.block_name(hit.pos))
     }
 
-    /// `BoneMealItem.useOn` on this client's level (a copy: nothing grows
-    /// here): whether it succeeds.
-    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit) -> bool {
+    /// `BoneMealItem.useOn` with the acting hand's `stack` on this client's
+    /// level (a copy: nothing grows here): whether it succeeds.
+    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
         let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let face = horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize];
+        let (crop, _) = self.held_bonemeal(pos, stack);
         self.with_level(|b, level, _| {
-            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face)
+            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face, crop)
         })
     }
 
