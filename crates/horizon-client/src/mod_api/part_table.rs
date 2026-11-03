@@ -642,12 +642,16 @@ pub(crate) fn install_parts(mods: &[Box<dyn Hooks>]) -> Result<(), Vec<String>> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::*;
     use super::{Attached, KnownIds, mark_game_thread, resolve_parts};
     use std::any::{TypeId, type_name};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// How often `test:counted`'s fluid provider, which never answers, was asked.
+    pub(crate) static FLUIDS_ASKED: AtomicUsize = AtomicUsize::new(0);
 
     /// A comparator reading of 5 more than it was.
     struct Gauge;
@@ -723,6 +727,10 @@ mod tests {
             r.item_capability_before_game(&ITEM_ITEMS, "test:ordered_item", |host, place| {
                 let two = host.place_stack(place).is_some_and(|held| held.count == 2);
                 two.then(|| Box::new(MarkedItems(3)) as _)
+            });
+            r.block_entity_capability(&FLUIDS, "test:counted", |_, _| {
+                FLUIDS_ASKED.fetch_add(1, Ordering::Relaxed);
+                None
             });
             r.block_entity_capability_before_game(&FLUIDS, "test:tank", |_, _| {
                 Some(Box::new(Tank))
@@ -1380,7 +1388,7 @@ mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    fn game_thread() -> Vec<Box<dyn Hooks>> {
+    pub(crate) fn game_thread() -> Vec<Box<dyn Hooks>> {
         let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Doubler)];
         install_parts(&mods).unwrap();
         mark_game_thread();

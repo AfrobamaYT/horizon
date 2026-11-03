@@ -532,10 +532,12 @@ impl Game<'_> {
         pos: [i32; 3],
         face: Direction,
     ) -> Option<Vec<NativeFluidTank>> {
+        // Before any provider is asked: a request for another level isn't about this one's
+        // block at `pos`.
+        if !self.native_simulates() || dimension != self.dim.id() {
+            return None;
+        }
         if let Some(part) = self.fluid_part_at(pos, face) {
-            if !self.native_simulates() || dimension != self.dim.id() {
-                return None;
-            }
             let host: &mut dyn Host = self;
             let side = Some(face);
             let tanks = (0..part.tanks(host, pos, side)).map(|tank| {
@@ -616,10 +618,10 @@ impl Game<'_> {
         face: Direction,
         amount: i32,
     ) -> Option<(String, i32)> {
+        if !self.native_simulates() || dimension != self.dim.id() || amount <= 0 {
+            return None;
+        }
         if let Some(part) = self.fluid_part_at(pos, face) {
-            if !self.native_simulates() || dimension != self.dim.id() || amount <= 0 {
-                return None;
-            }
             let host: &mut dyn Host = self;
             let out = host.drain_one_named_fluid(&part, pos, Some(face), amount.unsigned_abs());
             return out.map(|out| (out.fluid.to_string(), mb(out.amount)));
@@ -714,15 +716,12 @@ impl Game<'_> {
         to_face: Direction,
         max: i32,
     ) -> Option<(String, i32)> {
-        if from == to {
+        if from == to || !self.native_simulates() || dimension != self.dim.id() || max <= 0 {
             return None;
         }
         if self.fluid_part_at(from, from_face).is_some()
             || self.fluid_part_at(to, to_face).is_some()
         {
-            if !self.native_simulates() || dimension != self.dim.id() || max <= 0 {
-                return None;
-            }
             let host: &mut dyn Host = self;
             // These helpers name a fluid by its id, so fluids with components stay put.
             let plain = |fluid: &FluidStack| !fluid.has_components();
@@ -821,6 +820,73 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fluid_request_for_another_level_asks_no_provider() {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        use horizon_client::chunk::Chunk;
+        use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+        use horizon_client::mod_api::part_tests::{FLUIDS_ASKED, game_thread};
+        use std::sync::atomic::Ordering;
+        let _mods = game_thread();
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        options.dedicated = Some(Vec::new());
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        // A mod block entity whose type has a fluid provider, which counts each time it's asked.
+        let counted = ModBlockEntity::new(ModBlockEntityFields {
+            id: "test:counted".into(),
+            ..Default::default()
+        });
+        game.world
+            .block_entities
+            .insert((1, 64, 1), BlockEntity::Mod(Box::new(counted)));
+        let (pos, face) = ([1, 64, 1], Direction::North);
+        let nether = "minecraft:the_nether";
+        let before = FLUIDS_ASKED.load(Ordering::Relaxed);
+        assert!(game.native_fluid_tanks(nether, pos, face).is_none());
+        assert!(game.native_fluid_extract(nether, pos, face, 1000).is_none());
+        let to = [2, 64, 1];
+        assert!(
+            game.native_move_fluids(nether, pos, face, to, face, 1000)
+                .is_none()
+        );
+        assert_eq!(FLUIDS_ASKED.load(Ordering::Relaxed), before);
+        // Asked about the level in place, the provider is reached.
+        assert!(
+            game.native_fluid_tanks("minecraft:overworld", pos, face)
+                .is_none()
+        );
+        assert_eq!(FLUIDS_ASKED.load(Ordering::Relaxed), before + 1);
+    }
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {

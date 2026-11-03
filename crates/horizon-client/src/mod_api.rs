@@ -1017,6 +1017,9 @@ pub use generated::Hooks;
 pub use generated::*;
 
 #[cfg(test)]
+pub(crate) use part_table::tests as part_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex;
