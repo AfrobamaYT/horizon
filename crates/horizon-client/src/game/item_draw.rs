@@ -24,7 +24,7 @@ pub(super) struct Env<'a, 'g> {
 }
 impl ItemEnv for Env<'_, '_> {
     fn item_model_property(&self, property: &str, stack: &StackView) -> bool {
-        if horizon_client::mod_api::mods().is_empty() {
+        if !horizon_client::mod_api::listened(horizon_client::mod_api::HookId::ItemModelProperty) {
             return false;
         }
         let mut value = false;
