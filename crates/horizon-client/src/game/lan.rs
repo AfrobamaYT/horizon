@@ -426,7 +426,7 @@ fn mob_meta(
     let shared = i8::from(m.is_on_fire())
         | i8::from(m.extra.sprinting) << 3
         | i8::from(m.species() == Species::Drowned && m.extra.flag) << 4
-        | i8::from(m.invisible || horizon_client::mobs::trader::is_invisible(m)) << 5
+        | i8::from(m.is_invisible()) << 5
         | i8::from(m.is_currently_glowing()) << 6;
     if shared != 0 {
         meta.push((0, serializer::BYTE, Value::Byte(shared)));

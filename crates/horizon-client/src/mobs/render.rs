@@ -1502,7 +1502,7 @@ pub fn render_with(
 ) {
     // The invisibility effect hides the model (a drinking wandering trader);
     // an illusioner shows its four mirror images instead.
-    if super::trader::is_invisible(m) {
+    if m.is_invisible() {
         if m.species() == Species::Illusioner {
             let age = m.age as f32 + alpha;
             for (i, off) in super::illusioner::offsets(m, alpha).iter().enumerate() {
@@ -1541,7 +1541,7 @@ pub fn render_skinned(
     out: &mut Vec<Vertex>,
     skin: &mut super::skin::Skin,
 ) {
-    if super::trader::is_invisible(m) {
+    if m.is_invisible() {
         render_with(m, alpha, camera, atlas, light, data, &[], out);
         return;
     }
@@ -1614,7 +1614,7 @@ pub fn ears(
     data: &MobData,
     out: &mut Vec<Vertex>,
 ) {
-    if super::trader::is_invisible(m) {
+    if m.is_invisible() {
         return;
     }
     let Some(model) = m.kind.layer("player#ears") else {
