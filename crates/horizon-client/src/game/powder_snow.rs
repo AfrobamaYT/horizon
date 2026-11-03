@@ -83,6 +83,18 @@ impl Game<'_> {
     }
 }
 
+/// `Inventory.add`'s answer once `give`, its passes until one adds nothing, left `rest` of
+/// `stack`: true when all of it went in. Otherwise the last pass added nothing, so it is false
+/// with the rest left in `stack` for the caller to drop, except in creative, where the rest is
+/// cleared and it is true.
+fn added(stack: &mut ItemStack, rest: Option<ItemStack>, creative: bool) -> bool {
+    stack.count = rest.map_or(0, |rest| rest.count);
+    if stack.count > 0 && creative {
+        stack.count = 0;
+    }
+    stack.count == 0
+}
+
 /// The player acting, holding the stack in `slot` (`stack_in_mut`'s numbers), as
 /// `ItemUtils.createFilledResult` and the cauldron see them.
 pub(super) struct HeldSlot<'g, 'a> {
@@ -96,15 +108,12 @@ impl cauldron::Player for HeldSlot<'_, '_> {
     fn hand(&mut self) -> &mut Option<ItemStack> {
         self.game.stack_in_mut(self.slot)
     }
-    /// `Inventory.add`: in creative, what finds no slot is cleared.
     fn add(&mut self, stack: &mut ItemStack) -> bool {
-        let before = stack.count;
-        stack.count = self.game.give(stack.clone()).map_or(0, |rest| rest.count);
-        if stack.count == before && self.game.creative {
-            stack.count = 0;
-            return true;
+        if stack.count == 0 {
+            return false;
         }
-        stack.count < before
+        let rest = self.game.give(stack.clone());
+        added(stack, rest, self.game.creative)
     }
     fn contains(&self, stack: &ItemStack) -> bool {
         self.game
@@ -115,5 +124,39 @@ impl cauldron::Player for HeldSlot<'_, '_> {
     }
     fn drop_stack(&mut self, stack: ItemStack) {
         self.game.drop_plain(stack);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use horizon_client::items::ItemStack;
+
+    /// An inventory with room for 3 more arrows: one stack of 61 and stone everywhere else.
+    fn room_for_three() -> Vec<Option<ItemStack>> {
+        let mut inventory = vec![Some(ItemStack::new("minecraft:stone", 64)); 36];
+        inventory[0] = Some(ItemStack::new("minecraft:arrow", 61));
+        inventory
+    }
+
+    #[test]
+    fn a_partial_add_leaves_the_rest_to_drop_in_survival_and_clears_it_in_creative() {
+        for creative in [false, true] {
+            let (mut inventory, mut offhand) = (room_for_three(), None);
+            let mut arrows = ItemStack::new("minecraft:arrow", 5);
+            let left =
+                super::super::inventory_add(&mut inventory, &mut offhand, 0, 64, &mut arrows);
+            let rest = left.then(|| arrows.clone());
+            assert_eq!(inventory[0].as_ref().map(|s| s.count), Some(64));
+            let added = super::added(&mut arrows, rest, creative);
+            // Survival: false, with the 2 that found no slot left for `createFilledResult` to
+            // drop. Creative: they are cleared, and it is true.
+            assert_eq!(
+                (added, arrows.count),
+                if creative { (true, 0) } else { (false, 2) }
+            );
+        }
+        let mut arrows = ItemStack::new("minecraft:arrow", 2);
+        assert!(super::added(&mut arrows, None, false));
+        assert_eq!(arrows.count, 0);
     }
 }
