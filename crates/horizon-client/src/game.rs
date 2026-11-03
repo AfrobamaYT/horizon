@@ -22222,6 +22222,7 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
+    use crate::mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn reload_resolves_parts_against_reloaded_tags() {
@@ -22233,11 +22234,7 @@ mod tests {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
-            fn data_pack_files(
-                &self,
-                _: &mut dyn crate::mod_api::ServerHost,
-                event: &mut DataPackFilesEvent<'_>,
-            ) {
+            fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
                 event.files.push((
                     "tags/test:block/reload".into(),
                     br#"{"values":["minecraft:stone"]}"#.to_vec(),

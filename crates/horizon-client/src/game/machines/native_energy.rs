@@ -134,6 +134,7 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
 
     fn buffer(capacity: i32, max_insert: i32, max_extract: i32) -> ModEnergyBuffer {
         ModEnergyBuffer {
@@ -234,7 +235,7 @@ mod tests {
                     .insert((pos[0], pos[1], pos[2]), entity);
             }
             let moved = |game: &mut Game<'_>, side, max, commit: bool| {
-                let host: &mut dyn crate::mod_api::ServerHost = game;
+                let host: &mut dyn ServerHost = game;
                 let source = level.capability(host, &ENERGY, from, None).unwrap();
                 let target = level.capability(host, &ENERGY, to, side).unwrap();
                 host.transaction(|host, tx| {
@@ -243,7 +244,7 @@ mod tests {
                 })
             };
             let held = |game: &mut Game<'_>| {
-                let host: &mut dyn crate::mod_api::ServerHost = game;
+                let host: &mut dyn ServerHost = game;
                 [from, to].map(|pos| {
                     let buffer = level.capability(host, &ENERGY, pos, None).unwrap();
                     buffer.amount(host)

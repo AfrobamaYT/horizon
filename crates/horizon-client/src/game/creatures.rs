@@ -7959,6 +7959,7 @@ fn breeding_credit(
 #[cfg(test)]
 mod breeding_tests {
     use super::*;
+    use crate::mod_api::ServerHost;
 
     #[test]
     #[ignore = "needs prepared resources"]
@@ -7976,7 +7977,7 @@ mod breeding_tests {
         impl Hooks for Observer {
             fn baby_entity_spawn(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 _: &mut BabyEntitySpawnEvent<'_>,
             ) -> Flow {
                 if self.cancel.load(Ordering::SeqCst) {
@@ -7987,7 +7988,7 @@ mod breeding_tests {
             }
             fn entity_join_level(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.joins
@@ -8524,6 +8525,7 @@ mod dye_mix_tests {
 #[cfg(test)]
 mod living_drops_tests {
     use super::*;
+    use crate::mod_api::ServerHost;
 
     #[test]
     fn a_projectile_blow_has_no_known_direct_entity_and_a_melee_one_is_its_causer() {
@@ -8550,7 +8552,7 @@ mod living_drops_tests {
         impl Hooks for Observer {
             fn living_drops(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut LivingDropsEvent<'_>,
             ) -> Flow {
                 let items: Vec<_> = event

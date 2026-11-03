@@ -656,6 +656,7 @@ fn item_hdr_light(state: &ItemRenderState, light: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ClientHost;
     use serde_json::json;
 
     /// A mod that leaves `item_model_property` at its default is asked once, then the
@@ -675,7 +676,7 @@ mod tests {
         impl Hooks for Charged {
             fn item_model_property(
                 &self,
-                _: &dyn crate::mod_api::ClientHost,
+                _: &dyn ClientHost,
                 event: &mut ItemModelPropertyEvent<'_>,
             ) {
                 self.0.fetch_add(1, Ordering::Relaxed);

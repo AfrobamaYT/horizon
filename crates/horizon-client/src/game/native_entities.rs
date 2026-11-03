@@ -367,6 +367,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ServerHost;
 
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
@@ -384,7 +385,7 @@ mod tests {
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.joins.lock().unwrap().push((
@@ -400,7 +401,7 @@ mod tests {
             }
             fn entity_leave_level(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut EntityLeaveLevelEvent<'_>,
             ) {
                 self.leaves.lock().unwrap().push(event.entity);

@@ -2492,11 +2492,7 @@ mod tests {
     struct Probe;
 
     impl Hooks for Probe {
-        fn use_item_on(
-            &self,
-            host: &mut dyn crate::mod_api::ServerHost,
-            event: &mut UseItemOnEvent<'_>,
-        ) -> Flow {
+        fn use_item_on(&self, host: &mut dyn ServerHost, event: &mut UseItemOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
             let level = host.level(&player.dimension).expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
@@ -2515,7 +2511,7 @@ mod tests {
         impl Hooks for Observer {
             fn living_conversion_post(
                 &self,
-                _host: &mut dyn crate::mod_api::ServerHost,
+                _host: &mut dyn ServerHost,
                 event: &mut LivingConversionPostEvent<'_>,
             ) {
                 self.0.lock().unwrap().push((
@@ -2560,7 +2556,7 @@ mod tests {
         impl Hooks for XpHook {
             fn player_xp_change(
                 &self,
-                _host: &mut dyn crate::mod_api::ServerHost,
+                _host: &mut dyn ServerHost,
                 event: &mut PlayerXpChangeEvent<'_>,
             ) -> Flow {
                 assert_eq!(
@@ -2589,7 +2585,7 @@ mod tests {
     impl Hooks for MorePhantoms {
         fn player_spawn_phantoms(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut PlayerSpawnPhantomsEvent<'_>,
         ) -> Option<PhantomSpawnResult> {
             *event.phantoms = event.phantoms.map(|count| count + 2);
@@ -2616,11 +2612,7 @@ mod tests {
     struct Chatty;
 
     impl Hooks for Chatty {
-        fn use_item_on(
-            &self,
-            host: &mut dyn crate::mod_api::ServerHost,
-            _event: &mut UseItemOnEvent<'_>,
-        ) -> Flow {
+        fn use_item_on(&self, host: &mut dyn ServerHost, _event: &mut UseItemOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
             Flow::Continue
         }
@@ -2689,7 +2681,7 @@ mod tests {
         impl Hooks for Turn {
             fn calculate_player_turn(
                 &self,
-                _host: &dyn crate::mod_api::ClientHost,
+                _host: &dyn ClientHost,
                 event: &mut CalculatePlayerTurnEvent,
             ) {
                 assert_eq!((event.player_entity_id, event.player_uuid), (42, 123));
@@ -2750,7 +2742,7 @@ mod tests {
     impl Hooks for Backstab {
         fn living_incoming_damage_v2(
             &self,
-            host: &mut dyn crate::mod_api::ServerHost,
+            host: &mut dyn ServerHost,
             event: &mut LivingIncomingDamageV2Event<'_>,
         ) -> Flow {
             assert_eq!(event.causing, 7);
@@ -2909,11 +2901,7 @@ mod tests {
     struct OffHandTop;
 
     impl Hooks for OffHandTop {
-        fn use_item_on(
-            &self,
-            _: &mut dyn crate::mod_api::ServerHost,
-            event: &mut UseItemOnEvent<'_>,
-        ) -> Flow {
+        fn use_item_on(&self, _: &mut dyn ServerHost, event: &mut UseItemOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
             assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
             Flow::Continue
@@ -3030,7 +3018,7 @@ mod tests {
     impl Hooks for BrewSwapper {
         fn potion_brew_pre(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut PotionBrewPreEvent<'_>,
         ) -> Flow {
             self.0.lock().unwrap().push("pre".into());
@@ -3039,7 +3027,7 @@ mod tests {
         }
         fn potion_brew_post(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut PotionBrewPostEvent<'_>,
         ) {
             let first = event.stacks[0].as_ref().map_or("", |s| &s.item);
@@ -3054,7 +3042,7 @@ mod tests {
     impl Hooks for BrewEditor {
         fn potion_brew_pre(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut PotionBrewPreEvent<'_>,
         ) -> Flow {
             event.stacks[0] = Some(ItemStack::new("minecraft:diamond", 1));
@@ -3062,7 +3050,7 @@ mod tests {
         }
         fn potion_brew_post(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut PotionBrewPostEvent<'_>,
         ) {
             event.stacks[1] = Some(ItemStack::new("minecraft:emerald", 1));
@@ -3147,7 +3135,7 @@ mod tests {
     impl Hooks for Recorder {
         fn game_rule_changed(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut GameRuleChangedEvent<'_>,
         ) {
             self.0
@@ -3155,11 +3143,7 @@ mod tests {
                 .unwrap()
                 .push(format!("{} {}", event.rule, event.value));
         }
-        fn level_save(
-            &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
-            event: &mut LevelSaveEvent<'_>,
-        ) {
+        fn level_save(&self, _host: &mut dyn ServerHost, event: &mut LevelSaveEvent<'_>) {
             self.0
                 .lock()
                 .unwrap()
@@ -3173,7 +3157,7 @@ mod tests {
         impl Hooks for ActorRecorder {
             fn game_rule_changed(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut GameRuleChangedEvent<'_>,
             ) {
                 self.0.lock().unwrap().push(
@@ -3287,11 +3271,7 @@ mod tests {
     struct CodKeeper;
 
     impl Hooks for CodKeeper {
-        fn item_fished(
-            &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
-            event: &mut ItemFishedEvent<'_>,
-        ) -> Flow {
+        fn item_fished(&self, _host: &mut dyn ServerHost, event: &mut ItemFishedEvent<'_>) -> Flow {
             event.rod_damage = 4;
             let cod = event
                 .fished
@@ -3308,7 +3288,7 @@ mod tests {
     impl Hooks for Unreached {
         fn item_fished(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             _event: &mut ItemFishedEvent<'_>,
         ) -> Flow {
             panic!("asked after a cancel");
@@ -3359,7 +3339,7 @@ mod tests {
     impl Hooks for BrewWatcher {
         fn player_brewed_potion(
             &self,
-            _host: &mut dyn crate::mod_api::ServerHost,
+            _host: &mut dyn ServerHost,
             event: &mut PlayerBrewedPotionEvent<'_>,
         ) {
             let seen = (event.player, event.player_entity_id, event.stack.clone());

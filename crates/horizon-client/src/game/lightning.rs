@@ -721,6 +721,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ServerHost;
     use horizon_client::mobs::{Anim, Brain, Mob, MobType, Part, Species};
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
@@ -762,7 +763,7 @@ mod tests {
         impl Hooks for Observer {
             fn living_conversion_pre(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 _: &mut LivingConversionPreEvent<'_>,
             ) -> Flow {
                 self.pre.fetch_add(1, Ordering::SeqCst);
@@ -770,7 +771,7 @@ mod tests {
             }
             fn entity_join_level(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 if event.kind == "minecraft:cow" && self.cancel_cow.load(Ordering::SeqCst) {
@@ -781,7 +782,7 @@ mod tests {
             }
             fn living_conversion_post(
                 &self,
-                host: &mut dyn crate::mod_api::ServerHost,
+                host: &mut dyn ServerHost,
                 event: &mut LivingConversionPostEvent<'_>,
             ) {
                 let old = host

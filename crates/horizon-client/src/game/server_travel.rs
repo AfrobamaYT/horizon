@@ -934,6 +934,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::ServerHost;
     use std::sync::Arc;
 
     #[test]
@@ -945,7 +946,7 @@ mod tests {
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,
-                _: &mut dyn crate::mod_api::ServerHost,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.0.lock().unwrap().push(event.entity);

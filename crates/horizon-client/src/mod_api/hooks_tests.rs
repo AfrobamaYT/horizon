@@ -156,11 +156,7 @@ fn movement_input_writes_back_all_fields() {
     impl ClientHost for TestHost {}
     struct Movement;
     impl Hooks for Movement {
-        fn movement_input(
-            &self,
-            _host: &dyn crate::mod_api::ClientHost,
-            event: &mut MovementInputEvent,
-        ) {
+        fn movement_input(&self, _host: &dyn ClientHost, event: &mut MovementInputEvent) {
             event.forward = -0.5;
             event.strafe = 0.25;
             event.jump = true;

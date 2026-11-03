@@ -2,30 +2,22 @@
 //! `Capabilities.Energy.BLOCK`, an [`EnergyHandler`]: an amount and a capacity, with no resource,
 //! written only inside a transaction.
 use super::resource::{Ends, move_once};
-use super::{BlockSide, Capability, CapabilityKey, ItemCapabilityKey, Overanswered, Transaction};
+use super::{
+    BlockSide, Capability, CapabilityKey, ItemCapabilityKey, Overanswered, ServerHost, Transaction,
+};
 use std::marker::PhantomData;
 
 /// A block's energy (NeoForge's `EnergyHandler`): stateless, given the host, and written only in
 /// a transaction, as a [`ResourceHandler`](super::ResourceHandler) is.
 pub trait EnergyHandler: Send + Sync {
     /// How much it holds.
-    fn amount(&self, host: &mut dyn crate::mod_api::ServerHost) -> u32;
+    fn amount(&self, host: &mut dyn ServerHost) -> u32;
     /// How much it holds when full.
-    fn capacity(&self, host: &mut dyn crate::mod_api::ServerHost) -> u32;
+    fn capacity(&self, host: &mut dyn ServerHost) -> u32;
     /// Puts up to `amount` in, in transaction `tx`: how much went. Never more than `amount`.
-    fn insert(
-        &self,
-        host: &mut dyn crate::mod_api::ServerHost,
-        tx: &Transaction,
-        amount: u32,
-    ) -> u32;
+    fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32;
     /// Takes up to `amount` out, in transaction `tx`: how much came. Never more than `amount`.
-    fn extract(
-        &self,
-        host: &mut dyn crate::mod_api::ServerHost,
-        tx: &Transaction,
-        amount: u32,
-    ) -> u32;
+    fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32;
 }
 
 /// Energy, as NeoForge 26.3's `Capabilities.Energy.BLOCK`: a block entity's energy as one side
@@ -53,30 +45,20 @@ pub const ITEM_ENERGY: ItemCapabilityKey<dyn EnergyHandler> =
 /// The game's own [`ENERGY`]: a mod block entity's buffer, as `.side` reaches it.
 struct GameEnergy(BlockSide);
 impl EnergyHandler for GameEnergy {
-    fn amount(&self, host: &mut dyn crate::mod_api::ServerHost) -> u32 {
+    fn amount(&self, host: &mut dyn ServerHost) -> u32 {
         crate::mod_api::backend_of(host)
             .and_then(|backend| backend.energy_amount(self.0))
             .unwrap_or(0)
     }
-    fn capacity(&self, host: &mut dyn crate::mod_api::ServerHost) -> u32 {
+    fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
         crate::mod_api::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.0))
     }
-    fn insert(
-        &self,
-        host: &mut dyn crate::mod_api::ServerHost,
-        tx: &Transaction,
-        amount: u32,
-    ) -> u32 {
+    fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
         crate::mod_api::backend_mut_of(host)
             .map_or(0, |backend| backend.energy_insert(self.0, amount, tx))
             .min(amount)
     }
-    fn extract(
-        &self,
-        host: &mut dyn crate::mod_api::ServerHost,
-        tx: &Transaction,
-        amount: u32,
-    ) -> u32 {
+    fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
         crate::mod_api::backend_mut_of(host)
             .map_or(0, |backend| backend.energy_extract(self.0, amount, tx))
             .min(amount)
@@ -88,7 +70,7 @@ impl EnergyHandler for GameEnergy {
 /// transaction of its own, a move `to` takes only part of tried again with that part, and a
 /// handler answering more than it was asked ending it with [`Overanswered`].
 pub fn move_energy(
-    host: &mut dyn crate::mod_api::ServerHost,
+    host: &mut dyn ServerHost,
     from: &Capability<dyn EnergyHandler>,
     to: &Capability<dyn EnergyHandler>,
     max: u32,
