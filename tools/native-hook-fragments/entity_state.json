@@ -72,6 +72,31 @@
       "receiver": "entity"
     },
     {
+      "name": "entity_glowing", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_glowing",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_no_gravity", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_no_gravity",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_ticks_frozen", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_ticks_frozen",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_set_glowing", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_set_glowing",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_set_no_gravity", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_set_no_gravity",
+      "receiver": "entity"
+    },
+    {
       "name": "entity_set_ticks_frozen", "side": "server",
       "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_set_ticks_frozen",
       "receiver": "entity"

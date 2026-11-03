@@ -302,6 +302,54 @@ impl Game<'_> {
             _ => false,
         }
     }
+    /// Returns the mob's persistent glowing tag (`Entity.hasGlowingTag`).
+    pub(super) fn native_entity_glowing(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_entity_body(entity)? {
+            Body::Mob(m) => Some(m.glowing),
+            _ => None,
+        }
+    }
+    /// Returns the mob's no-gravity flag (`Entity.isNoGravity`).
+    pub(super) fn native_entity_no_gravity(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_entity_body(entity)? {
+            Body::Mob(m) => Some(m.no_gravity),
+            _ => None,
+        }
+    }
+    /// Returns the entity's frozen ticks (`Entity.getTicksFrozen`).
+    pub(super) fn native_entity_ticks_frozen(&self, entity: EntityRef) -> Option<i32> {
+        match self.native_entity_body(entity)? {
+            Body::Player(p) => Some(p.ticks_frozen),
+            Body::Mob(m) => Some(m.ticks_frozen),
+            _ => None,
+        }
+    }
+    /// Sets the mob's persistent glowing tag (`Entity.setGlowingTag`).
+    pub(super) fn native_entity_set_glowing(&mut self, entity: EntityRef, glowing: bool) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
+            return false;
+        };
+        self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+            m.glowing = glowing;
+            m.needs_sync = true;
+            true
+        })
+    }
+    /// Sets the mob's no-gravity flag (`Entity.setNoGravity`).
+    pub(super) fn native_entity_set_no_gravity(
+        &mut self,
+        entity: EntityRef,
+        no_gravity: bool,
+    ) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
+            return false;
+        };
+        self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+            m.no_gravity = no_gravity;
+            m.needs_sync = true;
+            true
+        })
+    }
     /// Sets the entity's shared invisibility flag (`Entity.setInvisible`).
     pub(super) fn native_entity_set_invisible(
         &mut self,
@@ -356,6 +404,42 @@ mod tests {
             let id = POSES.iter().position(|p| *p == player_pose(pose));
             assert_eq!(id.map(|i| Pose::from_id(i as i32)), Some(pose));
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_setters_update_stored_state() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(42, kind, Vec3::ZERO, 0.0));
+            let entity = game.native_entity(42).unwrap();
+            assert!(game.native_entity_set_air_supply(entity, -7));
+            assert_eq!(game.mobs[0].air, -7);
+            assert!(game.native_entity_set_remaining_fire_ticks(entity, 37));
+            assert_eq!(game.mobs[0].fire_ticks, 37);
+            assert!(game.native_entity_clear_fire(entity));
+            assert_eq!(game.mobs[0].fire_ticks, 0);
+            assert!(game.native_entity_set_remaining_fire_ticks(entity, -12));
+            assert!(game.native_entity_clear_fire(entity));
+            assert_eq!(game.mobs[0].fire_ticks, -12);
+            assert!(game.native_entity_set_ticks_frozen(entity, 31));
+            assert_eq!(game.mobs[0].ticks_frozen, 31);
+            assert!(game.native_entity_set_invisible(entity, true));
+            assert!(game.mobs[0].invisible);
+            assert!(game.native_entity_set_glowing(entity, true));
+            assert!(game.mobs[0].glowing);
+            assert!(game.native_entity_set_no_gravity(entity, true));
+            assert!(game.mobs[0].no_gravity);
+            assert!(game.mobs[0].needs_sync);
+        });
     }
 
     #[test]
