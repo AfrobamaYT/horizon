@@ -66,7 +66,7 @@ impl Game<'_> {
         !self.native_net.from_players.is_empty()
     }
 
-    /// The waiting messages reach the mods, with the hub back in the game.
+    /// The waiting messages reach the mods with the hub in the game.
     pub(super) fn run_native_net(&mut self) {
         for (player, m) in std::mem::take(&mut self.native_net.from_players) {
             self.native_net_from_client(player, &m.channel, &m.data);

@@ -96,7 +96,7 @@ fn stand_poses(a: &horizon_client::entities::ArmorStand) -> Vec<(u8, i32, Value)
 
 impl Game<'_> {
     /// The entities players started and stopped tracking since the last
-    /// tick, told to the mods in order with the hub back in `self.lan` and
+    /// tick, told to the mods in order with the hub in `self.lan` and
     /// no player's state swapped in (`ServerEntity.addPairing` and
     /// `removePairing`).
     pub(super) fn run_native_tracking(&mut self) {

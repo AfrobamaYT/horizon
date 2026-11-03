@@ -81,8 +81,6 @@ impl Game<'_> {
     /// handle lookup, so cost grows with the box's contents. Tridents cannot
     /// yet resolve; frames, paintings, other special entities and the dragon
     /// are not on the entity-list walk.
-    /// During a player's action with the hub taken out, players including the
-    /// acting player are not listed: their handles cannot resolve there yet.
     /// During `hears_projectile_impacts`, the projectile list is taken out of
     /// the game and is not visible; it is restored for `projectile_impact`.
     /// API @API:level_entities_in@.

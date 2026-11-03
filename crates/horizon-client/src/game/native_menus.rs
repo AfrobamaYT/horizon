@@ -287,7 +287,7 @@ impl Game<'_> {
     }
 
     /// The clicks on and closings of native menus the hub collected, each
-    /// told to the mods with the hub back in `self.lan`, no player's state
+    /// told to the mods with the hub in `self.lan`, no player's state
     /// swapped in.
     pub(super) fn run_native_menu_events(&mut self) {
         loop {

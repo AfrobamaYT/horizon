@@ -2136,8 +2136,8 @@ impl Game<'_> {
 }
 
 /// `tools/test_dedicated_crash_save.py`'s fixture: with `HORIZON_CRASH_FIXTURE` naming `point`
-/// (`guest`: during a placed guest's turn, `hub`: while a console line has the hub out and a
-/// player is in), the tick panics there, to see what `stop_after_crash` keeps.
+/// (`guest`: during a placed guest's turn, `hub`: after a console line while a player is in),
+/// the tick panics there, to see what `stop_after_crash` keeps.
 /// `armed` is asked only when the variable names `point`, so the tick pays one
 /// load of a `OnceLock` without it.
 pub(super) fn crash_fixture(point: &str, armed: impl FnOnce() -> bool) {
