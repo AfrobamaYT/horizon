@@ -1366,6 +1366,32 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::item_container_extract")
     }
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    fn level_set_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        let _ = level;
+        let _ = pos;
+        let _ = state;
+        let _ = flags;
+        unimplemented!("Host::level_set_block")
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    fn level_destroy_block(&mut self, level: LevelRef, pos: [i32; 3], drop: bool) -> bool {
+        let _ = level;
+        let _ = pos;
+        let _ = drop;
+        unimplemented!("Host::level_destroy_block")
+    }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -1526,6 +1552,25 @@ impl EntityRef {
     }
 }
 impl LevelRef {
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    pub fn set_block(
+        self,
+        host: &mut dyn Host,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        host.level_set_block(self, pos, state, flags)
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    pub fn destroy_block(self, host: &mut dyn Host, pos: [i32; 3], drop: bool) -> bool {
+        host.level_destroy_block(self, pos, drop)
+    }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
