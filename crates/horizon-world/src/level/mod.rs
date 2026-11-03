@@ -692,6 +692,10 @@ pub trait LevelAccess {
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// Whether redstone wire connection queries need the level hook.
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        false
+    }
     /// `BlockBehaviour.shouldRedstoneWireConnectTo` once the library answered
     /// `vanilla` for the block `state` at `pos`, `direction` pointing from the
     /// wire toward its neighbour (None for a block above or below):

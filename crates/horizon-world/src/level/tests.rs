@@ -113,6 +113,9 @@ impl LevelAccess for TestLevel {
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
     }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        !self.wire_connect.is_empty()
+    }
     fn adjust_should_redstone_wire_connect_to(
         &self,
         pos: BlockPos,
