@@ -31,6 +31,17 @@ pub struct SelectedPackage {
     pub package: Package,
 }
 
+/// Selected content-only packages, including explicit development paths.
+/// Native packages are not content candidates, even through a development path:
+/// their canonical source and compiled identity are owned by the engine.
+pub fn content_packages<'a>(
+    game_dir: &Path,
+    enabled: &'a BTreeSet<String>,
+    dev: &'a [PathBuf],
+) -> impl Iterator<Item = SelectedPackage> + 'a {
+    selected_packages(game_dir, enabled, None, dev)
+}
+
 /// Native content follows the compiled build, not the next build's toggles.
 /// Content-only packages follow the player's toggles. Explicit development
 /// paths take precedence over discovery and are enabled independently of both.
@@ -41,15 +52,27 @@ pub fn packages<'a>(
     built: &'a BTreeSet<String>,
     dev: &'a [PathBuf],
 ) -> impl Iterator<Item = SelectedPackage> + 'a {
+    selected_packages(game_dir, enabled, Some(built), dev)
+}
+
+fn selected_packages<'a>(
+    game_dir: &Path,
+    enabled: &'a BTreeSet<String>,
+    native: Option<&'a BTreeSet<String>>,
+    dev: &'a [PathBuf],
+) -> impl Iterator<Item = SelectedPackage> + 'a {
     let mut paths = find(&game_dir.join(DIR));
     paths.extend(find(&game_dir.join(NATIVE_DIR)));
     paths.retain(|path| !dev.contains(path));
     paths.extend(dev.iter().cloned());
     paths.into_iter().filter_map(move |path| {
         let package = Package::read(&path).ok()?;
-        let selected = if package.is_native() { built } else { enabled };
-        (selected.contains(&package.manifest.id) || dev.contains(&path))
-            .then_some(SelectedPackage { path, package })
+        let selected = if package.is_native() {
+            native.is_some_and(|ids| ids.contains(&package.manifest.id) || dev.contains(&path))
+        } else {
+            enabled.contains(&package.manifest.id) || dev.contains(&path)
+        };
+        selected.then_some(SelectedPackage { path, package })
     })
 }
 
@@ -129,6 +152,20 @@ mod tests {
             .map(|p| p.path)
             .collect();
         assert_eq!(rebuilt, [content]);
+    }
+
+    #[test]
+    fn content_candidates_do_not_load_native_inputs_even_when_enabled_or_developed() {
+        let home = Scratch::new();
+        let native = home.package("horizon-mods", "native", true);
+        home.package("horizon-native-mods", "other_native", true);
+        let plain = home.package("horizon-native-mods", "plain", false);
+        let external = home.package("workspace", "external", false);
+        let enabled = BTreeSet::from(["native".into(), "other_native".into(), "plain".into()]);
+        let selected: Vec<_> = content_packages(&home.0, &enabled, &[native, external.clone()])
+            .map(|p| p.path)
+            .collect();
+        assert_eq!(selected, [plain, external]);
     }
 
     #[test]
