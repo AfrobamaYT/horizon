@@ -1582,7 +1582,10 @@ impl Game<'_> {
         host: &LanHost,
         guest: &horizon_client::lan::guest::Guest,
     ) {
-        if !guest.participates_in_player_simulation() || !guest.placed || self.adv.tree.list.is_empty() {
+        if !guest.participates_in_player_simulation()
+            || !guest.placed
+            || self.adv.tree.list.is_empty()
+        {
             return;
         }
         let Some(uuid) = self.records_uuid(host, guest.uuid) else {
