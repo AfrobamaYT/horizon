@@ -64,7 +64,26 @@ pub struct SentEffect {
 /// ServerGamePacketListenerImpl.CLIENT_LOADED_TIMEOUT_TIME.
 pub const CLIENT_LOADED_TIMEOUT: u8 = 60;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuestKind {
+    Network,
+    Fake,
+}
+
+struct GuestInit {
+    conn: u32,
+    uuid: u128,
+    name: String,
+    properties: Vec<horizon_protocol::packets::login::Property>,
+    info: ClientInformation,
+    brand: String,
+    sender: PlayerSender,
+    latency: Arc<AtomicI32>,
+    address: std::net::SocketAddr,
+}
+
 pub struct Guest {
+    pub kind: GuestKind,
     pub conn: u32,
     /// The client's address (IP bans, `list`).
     pub address: std::net::SocketAddr,
@@ -306,7 +325,9 @@ pub struct Guest {
     pub dead: bool,
     /// `LivingEntity.deathTime`: ticks since the guest died.
     pub death_time: u32,
-    /// The join packets were sent (PlayerList.placeNewPlayer ran).
+    /// The player record is materialized for gameplay and handle lookup.
+    /// Network guests reach this state after placeNewPlayer; fake actors do not
+    /// log in. Online iterators must also check `participates_online`.
     pub placed: bool,
     /// Root command names the mods took out of this player's command tree
     /// (`native_player_commands_sent`); their tree is sent without them.
@@ -350,7 +371,77 @@ pub struct Guest {
 
 impl Guest {
     pub fn new(j: Joined, entity_id: i32, position: [f64; 3], view_distance: i32) -> Self {
+        let Joined {
+            conn,
+            uuid,
+            name,
+            properties,
+            info,
+            brand,
+            sender,
+            latency,
+            address,
+        } = j;
+        Self::with_defaults(
+            GuestKind::Network,
+            GuestInit {
+                conn,
+                uuid,
+                name,
+                properties,
+                info,
+                brand,
+                sender,
+                latency,
+                address,
+            },
+            entity_id,
+            position,
+            view_distance,
+        )
+    }
+
+    pub fn connectionless(
+        conn: u32,
+        uuid: u128,
+        name: String,
+        entity_id: i32,
+        position: [f64; 3],
+        motion: PlayerMotion,
+    ) -> Self {
+        let init = GuestInit {
+            conn,
+            uuid,
+            name,
+            properties: Vec::new(),
+            info: ClientInformation::new(2),
+            brand: String::new(),
+            sender: PlayerSender::disabled(),
+            latency: Arc::default(),
+            address: ([0, 0, 0, 0], 0).into(),
+        };
+        let mut guest = Self::with_defaults(GuestKind::Fake, init, entity_id, position, 2);
+        guest.placed = true;
+        guest.motion = Some(Box::new(motion));
+        guest
+    }
+
+    pub fn participates_online(&self) -> bool {
+        self.kind == GuestKind::Network
+    }
+    pub fn participates_in_player_simulation(&self) -> bool {
+        self.kind == GuestKind::Network
+    }
+
+    fn with_defaults(
+        kind: GuestKind,
+        j: GuestInit,
+        entity_id: i32,
+        position: [f64; 3],
+        view_distance: i32,
+    ) -> Self {
         Self {
+            kind,
             conn: j.conn,
             address: j.address,
             last_action_tick: 0,
@@ -503,6 +594,9 @@ impl Guest {
         })
     }
     pub fn send(&self, packet: &play::Clientbound) {
+        if !self.participates_online() {
+            return;
+        }
         if self.anticheat.record.is_some() {
             self.note_change(packet);
         }
