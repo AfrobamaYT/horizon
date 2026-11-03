@@ -4781,6 +4781,14 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn zero_duration_effect_expires_instead_of_becoming_infinite() {
+        let mut m = witch();
+        m.add_effect("speed", 0, 0);
+        ai::tick_effects(&mut m, None);
+        assert!(m.extra.effects.is_empty());
+    }
+
+    #[test]
     fn weaker_longer_effect_returns_with_its_flags_and_removal_clears_the_chain() {
         let mut m = witch();
         assert!(m.add_effect_with("speed", 2, 1, false, false));

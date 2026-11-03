@@ -2670,6 +2670,10 @@ pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>
         // MobEffectInstance.tickServer: an infinite (-1) effect times its
         // ticks by the mob's tickCount and never counts down.
         let infinite = m.extra.effects[i].1 == -1;
+        if !infinite && m.extra.effects[i].1 <= 0 {
+            i += 1;
+            continue;
+        }
         let count = if infinite {
             m.age as i32
         } else {
@@ -2705,11 +2709,6 @@ pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>
                 m.heal(1.0);
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
-                // tickServer: one with no ticks left goes unasked.
-                if !infinite && m.extra.effects[i].1 <= 0 {
-                    i += 1;
-                    continue;
-                }
                 if let Some(mods) = mods
                     && !mods.tick_mod_effect(id, m, count, amp)
                 {
