@@ -6478,7 +6478,14 @@ impl Game<'_> {
             }
         }
         // A fence click reaches the hook before attaching a lead.
-        if on_block && use_item.or(true) && self.interact_knot() {
+        if on_block
+            && (use_block.or(!(sneaking && hands_full))
+                || use_item.or(true)
+                    && self
+                        .held()
+                        .is_some_and(|stack| &*stack.item == "minecraft:lead"))
+            && self.interact_knot()
+        {
             return Ok(true);
         }
         // MultiPlayerGameMode.useItemOn: blocks react first.
@@ -21974,15 +21981,19 @@ mod tests {
         };
         use std::sync::{
             Arc,
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         };
-        struct Observer(Arc<AtomicBool>);
+        struct Observer(Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicUsize>);
         impl Hooks for Observer {
             fn right_click_block(
                 &self,
                 _: &mut dyn Host,
                 event: &mut RightClickBlockEvent<'_>,
             ) -> Flow {
+                self.2.fetch_add(1, Ordering::SeqCst);
+                if self.1.load(Ordering::SeqCst) {
+                    return Flow::Cancel;
+                }
                 *event.use_block = if self.0.load(Ordering::SeqCst) {
                     NativeTriState::True
                 } else {
@@ -21993,8 +22004,13 @@ mod tests {
             }
         }
         let allowed = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
         let mods: mod_api::Mods =
-            Arc::from(vec![Box::new(Observer(allowed.clone())) as Box<dyn Hooks>]);
+            Arc::from(vec![
+                Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
+                    as Box<dyn Hooks>,
+            ]);
         assert!(mod_api::MODS.set(mods).is_ok());
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -22026,6 +22042,82 @@ mod tests {
             allowed.store(true, Ordering::SeqCst);
             game.use_hand(Some(&hit)).unwrap();
             assert_ne!(game.world.block(0, 64, 0), empty);
+            assert!(game.native_level_set_block(
+                level,
+                hit.pos,
+                empty,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
+            game.keys.insert(KeyCode::ShiftLeft);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_ne!(game.world.block(0, 64, 0), empty);
+            game.keys.remove(&KeyCode::ShiftLeft);
+
+            let campfire = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:campfire")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                hit.pos,
+                campfire,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let entity = game.new_block_entity("minecraft:campfire").unwrap();
+            game.world.block_entities.insert((0, 64, 0), entity);
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:beef", 2));
+            allowed.store(false, Ordering::SeqCst);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 2);
+            allowed.store(true, Ordering::SeqCst);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
+
+            // A canceled click on a fence must not tie the player's mob.
+            let fence = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:oak_fence")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                hit.pos,
+                fence,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            let mut mob = horizon_client::mobs::Mob::new(
+                12,
+                kind,
+                horizon_core::geometry::Vec3::new(1.0, 64.0, 1.0),
+                0.0,
+            );
+            mob.extra.leash = Some(horizon_client::mobs::leash::Holder::Player);
+            game.mobs.push(mob);
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:lead", 1));
+            game.guest_use = Some(GuestUse::OnBlock(Hand::Main));
+            game.forced_hit = Some(hit);
+            cancel.store(true, Ordering::SeqCst);
+            let before = calls.load(Ordering::SeqCst);
+            game.use_item_as_player().unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+            assert_eq!(
+                game.mobs.last().unwrap().extra.leash,
+                Some(horizon_client::mobs::leash::Holder::Player)
+            );
+
+            // A spectator's packet reaches the event, even when canceled.
+            game.set_mode_id(3);
+            game.guest_use = Some(GuestUse::OnBlock(Hand::Main));
+            game.forced_hit = Some(hit);
+            cancel.store(true, Ordering::SeqCst);
+            let before = calls.load(Ordering::SeqCst);
+            game.use_item_as_player().unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), before + 1);
         });
     }
 
