@@ -1623,7 +1623,10 @@ impl Game<'_> {
     /// `PlayerAdvancements.load` and `ServerStatsCounter.parseLocal` of a
     /// network player who joined; every statistic goes out on the first
     /// request (`PlayerList.placeNewPlayer`'s `markAllDirty`).
-    fn load_guest_records(&mut self, host: &mut LanHost, conn: u32) {
+    fn load_guest_records(&mut self, conn: u32) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let Some(uuid) = host
             .hub
             .guest(conn)
@@ -1636,6 +1639,9 @@ impl Game<'_> {
         let saved = std::fs::read_to_string(path)
             .ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         if let Some(g) = host.hub.guest_mut(conn)
             && let Some(json) = saved
         {
