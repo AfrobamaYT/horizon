@@ -6191,15 +6191,26 @@ mod tests {
         #[derive(Clone)]
         struct User {
             answer: Arc<Mutex<Option<Answer>>>,
+            replace_with: Arc<Mutex<Option<horizon_world::registry::BlockStateId>>>,
             clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
         impl BlockPart for User {
             fn use_item_on(
                 &self,
-                _: &mut dyn ServerHost,
+                host: &mut dyn ServerHost,
                 event: &mut UseItemOnEvent<'_>,
             ) -> Option<Answer> {
+                let replacement = self.replace_with.lock().unwrap().take();
+                if let Some(state) = replacement {
+                    let level = host.level("minecraft:overworld").unwrap();
+                    assert!(level.set_block(
+                        host,
+                        event.click.pos,
+                        state,
+                        mod_api::NativeBlockUpdateFlags::KNOWN_SHAPE,
+                    ));
+                }
                 self.clicks
                     .lock()
                     .unwrap()
@@ -6231,6 +6242,7 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let user = User {
             answer: Arc::new(Mutex::new(Some(Answer::Success))),
+            replace_with: Arc::new(Mutex::new(None)),
             clicks: Arc::new(Mutex::new(Vec::new())),
             item_uses: Arc::new(AtomicUsize::new(0)),
         };
@@ -6423,6 +6435,31 @@ mod tests {
                         .iter()
                         .any(|item| &*item.stack.item == "minecraft:music_disc_13")
                 );
+                assert_eq!(user.item_uses.load(SeqCst), 4);
+
+                // ServerPlayerGameMode uses the state it read before useItemOn,
+                // even when that method replaces the block before asking for empty use.
+                let floor_lever = game.with_props(lever, &[("face", "floor")]).unwrap();
+                let powered = game
+                    .with_props(floor_lever, &[("powered", "true")])
+                    .unwrap();
+                let cobblestone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:cobblestone")
+                    .unwrap();
+                let replaced_hit = super::super::Hit {
+                    pos: [8, 64, 4],
+                    point: [8.5, 65.0, 4.5],
+                    ..hit
+                };
+                game.world.set(8, 63, 4, stone).unwrap();
+                game.world.set(8, 64, 4, floor_lever).unwrap();
+                *user.replace_with.lock().unwrap() = Some(cobblestone);
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                assert!(game.use_hand(Some(&replaced_hit)).unwrap());
+                assert_eq!(game.world.block(8, 64, 4), powered);
                 assert_eq!(user.item_uses.load(SeqCst), 4);
 
                 // The real guest packet follows the same path, with the guest's UUID.

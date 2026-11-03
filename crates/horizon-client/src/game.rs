@@ -6581,16 +6581,15 @@ impl Game<'_> {
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
+            let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
             let mut block_answer = None;
-            if !horizon_client::mod_api::mods().is_empty() {
-                let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-                if !horizon_client::mod_api::parts("use_item_on")
+            if !horizon_client::mod_api::mods().is_empty()
+                && !horizon_client::mod_api::parts("use_item_on")
                     .block_state(state)
                     .is_empty()
-                {
-                    let click = self.block_click(hit, self.hand, held.as_ref());
-                    self.native_use_item_on(state, &click, &mut block_answer);
-                }
+            {
+                let click = self.block_click(hit, self.hand, held.as_ref());
+                self.native_use_item_on(state, &click, &mut block_answer);
             }
             let mut chains_sign = false;
             if block_answer.is_none() {
@@ -6730,26 +6729,23 @@ impl Game<'_> {
                     _ => Direction::East,
                 };
                 let player = self.use_context();
-                let at = Vec3::new(hit.point[0], hit.point[1], hit.point[2]);
+                let block_hit = horizon_core::geometry::BlockHit {
+                    block: BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+                    direction: face,
+                    location: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+                    inside: hit.inside,
+                };
                 let item = held.as_ref().map(|s| s.item.to_string());
-                let cake = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-                let adds_candle =
-                    self.with_level(|b, _, _| b.cake_candle_state(cake, item.as_deref()).is_some());
+                let adds_candle = self
+                    .with_level(|b, _, _| b.cake_candle_state(state, item.as_deref()).is_some());
                 let pots_flower = self
-                    .with_level(|b, _, _| b.potted_flower_state(cake, item.as_deref()).is_some());
+                    .with_level(|b, _, _| b.potted_flower_state(state, item.as_deref()).is_some());
                 let (result, branch) = match block_answer {
                     Some(answer) => match native_hooks::block_use_result(answer) {
                         Some(result) => (result, horizon_world::level::UseBranch::ItemOn),
                         None if self.hand == Hand::Main => (
                             self.with_level(|b, level, ticks| {
-                                b.use_without_item(
-                                    level,
-                                    ticks,
-                                    BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                                    face,
-                                    at,
-                                    player,
-                                )
+                                b.use_without_item(level, ticks, state, block_hit, player)
                             }),
                             horizon_world::level::UseBranch::WithoutItem,
                         ),
@@ -6762,9 +6758,8 @@ impl Game<'_> {
                         b.use_item_on_branch(
                             level,
                             ticks,
-                            BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                            face,
-                            at,
+                            state,
+                            block_hit,
                             player,
                             item.as_deref(),
                         )
