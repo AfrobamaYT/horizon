@@ -3,6 +3,7 @@
 //! unpacked as `RandomizableContainer.unpackLootTable` would on first open.
 use crate::{containers::BlockEntity, items::ItemStack};
 use horizon_world::{
+    item_defaults::ItemDefaults,
     loot::LootData,
     nbt::{Compound, JavaString, Tag},
     worldgen::generator::ProtoChunk,
@@ -122,7 +123,11 @@ pub fn has_pending_map(item: &ItemStack) -> bool {
 
 /// The loot data and the [`loot_key`] it was loaded for; None until
 /// `loot_data` runs. `Some((_, None))` when the tables failed to load.
-type LoadedLoot = (u64, Option<Arc<LootData>>);
+struct LoadedLoot {
+    key: u64,
+    defaults_generation: u64,
+    data: Option<Arc<LootData>>,
+}
 static LOOT: Mutex<Option<LoadedLoot>> = Mutex::new(None);
 
 /// A world's atomically replaceable loot snapshot, shared by its chunk workers.
@@ -150,25 +155,41 @@ fn loot_key(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> u64 {
     hasher.finish()
 }
 
-fn load_loot(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> LoadedLoot {
-    let data = match LootData::load(root, overlay) {
+fn load_loot(
+    root: &Path,
+    overlay: &horizon_world::loot::PackOverlay,
+    defaults: &ItemDefaults,
+) -> LoadedLoot {
+    let data = match LootData::load(root, overlay, defaults) {
         Ok(data) => Some(Arc::new(data)),
         Err(e) => {
             log::warn!("Horizon: loot tables unavailable, structure containers stay empty: {e}");
             None
         }
     };
-    (loot_key(root, overlay), data)
+    LoadedLoot {
+        key: loot_key(root, overlay),
+        defaults_generation: defaults.generation(),
+        data,
+    }
 }
 
 /// Loot data of the resource root with the world's packs over it, loaded
 /// once per process (a world open with other packs, or `/reload`, loads it
 /// again).
-pub fn loot_data(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Option<Arc<LootData>> {
+pub fn loot_data(
+    root: &Path,
+    overlay: &horizon_world::loot::PackOverlay,
+    defaults: &ItemDefaults,
+) -> Option<Arc<LootData>> {
     let mut loot = LOOT.lock().unwrap_or_else(|e| e.into_inner());
-    loot.get_or_insert_with(|| load_loot(root, overlay))
-        .1
-        .clone()
+    if loot
+        .as_ref()
+        .is_none_or(|loaded| loaded.defaults_generation != defaults.generation())
+    {
+        *loot = Some(load_loot(root, overlay, defaults));
+    }
+    loot.as_ref().and_then(|loaded| loaded.data.clone())
 }
 
 /// [`loot_data`] for a world being opened: the copy already loaded when it
@@ -177,11 +198,13 @@ pub fn loot_data(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Opt
 pub fn world_loot_data(
     root: &Path,
     overlay: &horizon_world::loot::PackOverlay,
+    defaults: &ItemDefaults,
 ) -> Option<Arc<LootData>> {
     reuse_or_load(
         &mut LOOT.lock().unwrap_or_else(|e| e.into_inner()),
         root,
         overlay,
+        defaults,
     )
 }
 
@@ -189,20 +212,24 @@ fn reuse_or_load(
     loot: &mut Option<LoadedLoot>,
     root: &Path,
     overlay: &horizon_world::loot::PackOverlay,
+    defaults: &ItemDefaults,
 ) -> Option<Arc<LootData>> {
     let key = loot_key(root, overlay);
-    if loot.as_ref().is_none_or(|(loaded, _)| *loaded != key) {
-        *loot = Some(load_loot(root, overlay));
+    if loot.as_ref().is_none_or(|loaded| {
+        loaded.key != key || loaded.defaults_generation != defaults.generation()
+    }) {
+        *loot = Some(load_loot(root, overlay, defaults));
     }
-    loot.as_ref().and_then(|(_, data)| data.clone())
+    loot.as_ref().and_then(|loaded| loaded.data.clone())
 }
 
 /// The loot data `loot_data` loaded, if it ran.
-pub fn loaded_loot_data() -> Option<Arc<LootData>> {
+pub fn loaded_loot_data(defaults: &ItemDefaults) -> Option<Arc<LootData>> {
     LOOT.lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
-        .and_then(|(_, data)| data.clone())
+        .filter(|loaded| loaded.defaults_generation == defaults.generation())
+        .and_then(|loaded| loaded.data.clone())
 }
 
 /// Let go of the loot data: for a preload no world used
@@ -429,17 +456,22 @@ mod tests {
         let root = std::env::temp_dir().join(format!("horizon-loot-reuse-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let mut slot = None;
-        let first = reuse_or_load(&mut slot, &root, &PackOverlay::NONE).expect("loot data");
-        let again = reuse_or_load(&mut slot, &root, &PackOverlay::NONE).unwrap();
+        let first = reuse_or_load(&mut slot, &root, &PackOverlay::NONE, &defaults)
+            .expect("loot data");
+        let again = reuse_or_load(&mut slot, &root, &PackOverlay::NONE, &defaults).unwrap();
         assert!(Arc::ptr_eq(&first, &again));
         let files = [(
             "loot_table/chests/x".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
         let packs = PackOverlay { files: &files };
-        let other = reuse_or_load(&mut slot, &root, &packs).unwrap();
+        let other = reuse_or_load(&mut slot, &root, &packs, &defaults).unwrap();
         assert!(!Arc::ptr_eq(&first, &other));
+        let next_defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let next = reuse_or_load(&mut slot, &root, &packs, &next_defaults).unwrap();
+        assert!(!Arc::ptr_eq(&other, &next));
 
         let snapshot = LootSnapshot::default();
         let worker = snapshot.clone();

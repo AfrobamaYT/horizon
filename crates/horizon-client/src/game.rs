@@ -19983,6 +19983,7 @@ impl Game<'_> {
             on_world_screens,
             &self.options.resources,
             self.pack.assets.registry,
+            &self.res.core.item_data,
         );
         if std::mem::take(&mut self.pending_pack_reload) {
             self.reload_packs();

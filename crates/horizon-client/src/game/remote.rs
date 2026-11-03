@@ -791,7 +791,10 @@ impl Game<'_> {
         cookies: Option<horizon_client::net::Cookies>,
         lan: bool,
     ) -> Result<()> {
-        super::world_loading::preload_server_loot(&self.options.resources);
+        super::world_loading::preload_server_loot(
+            &self.options.resources,
+            &self.res.core.item_data,
+        );
         if self.defer_world_entry(super::PendingWorldEntry::Server {
             address: address.to_owned(),
             name: name.to_owned(),

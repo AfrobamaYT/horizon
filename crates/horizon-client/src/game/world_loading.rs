@@ -1,5 +1,6 @@
 //! Prepare local worlds without blocking the window's event loop.
 use super::*;
+use horizon_world::item_defaults::ItemData;
 
 pub(super) struct WorldRequest {
     pub save_root: PathBuf,
@@ -58,6 +59,7 @@ impl WorldRequest {
             horizon_client::structure_blocks::loot_data(
                 &options.resources,
                 &horizon_world::loot::PackOverlay::NONE,
+                res.item_defaults(),
             );
         };
         // Bone meal's and saplings' features, over the plain worldgen bundle.
@@ -348,12 +350,14 @@ pub(super) fn preload_world_data(
     on_world_screens: bool,
     resources: &std::path::Path,
     registry: &'static horizon_world::registry::BlockRegistry,
+    item_data: &Arc<ItemData>,
 ) {
     let mut preload = PRELOAD.lock().unwrap_or_else(|e| e.into_inner());
     match &mut *preload {
         Preload::Used => {}
         Preload::Idle if on_world_screens => {
             let resources = resources.to_owned();
+            let item_data = Arc::clone(item_data);
             let spawned = std::thread::Builder::new()
                 .name("World data preload".into())
                 .spawn(move || {
@@ -377,6 +381,7 @@ pub(super) fn preload_world_data(
                     let _ = horizon_client::structure_blocks::loot_data(
                         &resources,
                         &horizon_world::loot::PackOverlay::NONE,
+                        item_data.defaults(),
                     );
                     join_sync_preload(sync, &resources);
                 });
@@ -412,6 +417,7 @@ pub(super) fn preload_launch_world(
     resources: &std::path::Path,
     registry: &'static horizon_world::registry::BlockRegistry,
     biomes: Arc<horizon_client::biome::Biomes>,
+    item_data: Arc<ItemData>,
 ) {
     let mut preload = PRELOAD.lock().unwrap_or_else(|e| e.into_inner());
     if !matches!(*preload, Preload::Idle) {
@@ -450,6 +456,7 @@ pub(super) fn preload_launch_world(
             let _ = horizon_client::structure_blocks::loot_data(
                 &resources,
                 &horizon_world::loot::PackOverlay::NONE,
+                item_data.defaults(),
             );
             join_sync_preload(sync, &resources);
             log::info!(
@@ -505,12 +512,13 @@ pub(super) fn world_data_used() {
 /// container needs (`loot_data`) are read on a helper thread while the
 /// connection is made, so the game thread never waits on them (~0.6 s on a
 /// phone). Kept from then on, as a local world keeps them.
-pub(super) fn preload_server_loot(resources: &std::path::Path) {
+pub(super) fn preload_server_loot(resources: &std::path::Path, item_data: &Arc<ItemData>) {
     world_data_used();
-    if horizon_client::structure_blocks::loaded_loot_data().is_some() {
+    if horizon_client::structure_blocks::loaded_loot_data(item_data.defaults()).is_some() {
         return;
     }
     let resources = resources.to_owned();
+    let item_data = Arc::clone(item_data);
     let spawned = std::thread::Builder::new()
         .name("Loot preload".into())
         .spawn(move || {
@@ -518,6 +526,7 @@ pub(super) fn preload_server_loot(resources: &std::path::Path) {
             let _ = horizon_client::structure_blocks::loot_data(
                 &resources,
                 &horizon_world::loot::PackOverlay::NONE,
+                item_data.defaults(),
             );
         });
     if let Err(e) = spawned {
