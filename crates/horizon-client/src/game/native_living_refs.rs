@@ -729,12 +729,15 @@ mod tests {
                 player.set_health(absorption, true).unwrap();
                 game.player = Some(player);
                 game.note_attacker("minecraft:mob_attack", 15);
+                let rules = game.world.health_rules;
+                let level = super::super::entity::damage_level_of!(game);
                 let player = game.player.as_mut().unwrap();
                 assert!(
                     player
                         .hurt_caused_by(
+                            level,
                             &game.motion.health,
-                            game.world.health_rules,
+                            rules,
                             source,
                             4.0,
                             None,

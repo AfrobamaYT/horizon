@@ -3233,12 +3233,12 @@ mod remove_all_tests {
                 };
                 goals.add(0, Float);
                 goals.add(1, Walk);
-                let mut lr = LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 {
                     let mut cx = Cx {
                         w,
-                        lr: &mut lr,
+                        level: &mut test_level.level(),
                         events: &mut events,
                     };
                     goals.tick(&mut m, &mut cx);

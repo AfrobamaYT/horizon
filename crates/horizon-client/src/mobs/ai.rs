@@ -3374,10 +3374,10 @@ mod attack_sound_tests {
                 0.0,
             );
             m.silent = silent;
-            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut test_level.level(),
                 events: &mut events,
             };
             do_hurt_target(&mut m, Who::Mob(2), &mut cx);
