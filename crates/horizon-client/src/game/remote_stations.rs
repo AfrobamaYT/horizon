@@ -22,7 +22,7 @@ impl Game<'_> {
         pos: [i32; 3],
     ) {
         if let Some(r) = self.remote.as_mut() {
-            r.menu = Some((container, menu));
+            r.menu.set(Some((container, menu)));
             r.menu_title = Some(title);
         }
         self.craft_size = 2;

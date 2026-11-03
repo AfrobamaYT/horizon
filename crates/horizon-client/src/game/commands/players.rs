@@ -39,7 +39,13 @@ impl Game<'_> {
         self.lan
             .iter()
             .flat_map(|h| h.hub.online_players())
-            .filter(move |g| Some(g.conn) != acting)
+            .filter(move |g| Some(g.conn) != acting && self.native_command_player_available(g))
+    }
+
+    /// Native console calls cannot reach an outer turn's displaced player.
+    /// Ordinary command resolution is unchanged, including nested turns.
+    fn native_command_player_available(&self, guest: &Guest) -> bool {
+        !self.native_command_filter || self.native_entity(guest.entity_id as u32).is_some()
     }
 
     /// The entity the command runs as (`CommandSourceStack.getEntity`): a
@@ -128,6 +134,7 @@ impl Game<'_> {
         self.lan
             .iter()
             .flat_map(|h| h.hub.online_players())
+            .filter(|g| self.native_command_player_available(g))
             .filter(|g| !limited || g.dimension == here || Some(g.conn) == in_place)
             .filter(|g| !alive || (!g.dead && g.health > 0.0))
             .map(|g| {

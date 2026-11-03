@@ -14,6 +14,7 @@ autotests = false
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dependencies]
+horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }

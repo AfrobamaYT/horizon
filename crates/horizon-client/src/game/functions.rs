@@ -30,7 +30,7 @@ pub(super) struct FnState {
     pub store: DataStore,
     packs: Vec<Arc<DataPack>>,
     /// Enabled pack ids, in load order (later overrides earlier).
-    enabled: Vec<String>,
+    pub(super) enabled: Vec<String>,
     loaded: bool,
     /// Run the `minecraft:load` tag on the next tick.
     load_pending: bool,

@@ -976,27 +976,6 @@ fn login_and_configure(
             _ => {}
         }
     };
-    // Custom component IDs need Horizon's registry check. The server may also
-    // require Horizon clients even when it has no custom components.
-    if brand != "horizon"
-        && (shared.config.horizon_clients_only
-            || horizon_protocol::item::custom::entries().next().is_some())
-    {
-        let text = if shared.config.horizon_clients_only {
-            super::HORIZON_CLIENTS_ONLY_REASON
-        } else {
-            crate::content_identity::MISMATCH
-        };
-        let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text));
-        let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
-        if let Some(log) = &shared.config.log {
-            let line =
-                format!("Disconnecting {name}: its client is \"{brand}\", not Horizon ({text})");
-            (log.write)("Server thread", "INFO", &line);
-        }
-        lost(shared, &format!("{name} ({})", uuid_string(uuid)), text);
-        return Ok(None);
-    }
     // A Horizon client hears that this server runs its mods' quiet commands
     // (horizon_protocol::quiet); a vanilla one is told nothing.
     if brand == "horizon" {
@@ -1026,45 +1005,65 @@ fn login_and_configure(
             }),
         )?;
     }
-    // The mods that must be the same on both sides, named when they are not
-    // (horizon_protocol::mod_list); the registry hash below only sees ids.
+    // Even an empty server asks: a client may have extra both-side mods.
     let server_mods = horizon_protocol::mod_list::local();
-    if brand == "horizon" && !server_mods.is_empty() {
+    let mut client_mods = Vec::new();
+    if brand == "horizon" {
         send(
             c,
             cfg::Clientbound::CustomPayload(cfg::CustomPayload {
                 channel: horizon_protocol::mod_list::CHANNEL.into(),
-                data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::shared(
-                    &server_mods,
-                )),
+                data: horizon_protocol::mod_list::encode(&server_mods),
             }),
         )?;
         send(c, cfg::Clientbound::Ping(cfg::Ping { id: 1 }))?;
         // A client that does not answer has no mods to offer.
-        let mut client_mods = Vec::new();
         loop {
             let (id, payload) = c.recv().map_err(e)?;
             match decode_config(id, &payload).map_err(e)? {
                 cfg::Serverbound::CustomPayload(p)
                     if p.channel == horizon_protocol::mod_list::CHANNEL =>
                 {
-                    client_mods = horizon_protocol::mod_list::decode(&p.data).unwrap_or_default();
+                    client_mods = horizon_protocol::mod_list::decode(&p.data).map_err(e)?;
                 }
                 cfg::Serverbound::Pong(p) if p.id == 1 => break,
                 cfg::Serverbound::ClientInformation(i) => info = i,
                 _ => {}
             }
         }
-        let difference = horizon_protocol::mod_list::compare(&server_mods, &client_mods);
-        if !difference.is_empty() {
-            let text = difference.reason();
-            let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(
-                text.as_str(),
-            ));
-            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
-            lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
-            return Ok(None);
+    }
+    let difference = horizon_protocol::mod_list::compare(&server_mods, &client_mods);
+    if !difference.is_empty() {
+        let text = mod_mismatch(&difference);
+        let reason = super::data::component_nbt(&text.component());
+        let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+        lost(
+            shared,
+            &format!("{name} ({})", uuid_string(uuid)),
+            &text.plain(),
+        );
+        return Ok(None);
+    }
+    // Custom component IDs need Horizon's registry check. The server may also
+    // require Horizon clients even when it has no custom components.
+    if brand != "horizon"
+        && (shared.config.horizon_clients_only
+            || horizon_protocol::item::custom::entries().next().is_some())
+    {
+        let text = if shared.config.horizon_clients_only {
+            super::HORIZON_CLIENTS_ONLY_REASON
+        } else {
+            crate::content_identity::MISMATCH
+        };
+        let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text));
+        let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+        if let Some(log) = &shared.config.log {
+            let line =
+                format!("Disconnecting {name}: its client is \"{brand}\", not Horizon ({text})");
+            (log.write)("Server thread", "INFO", &line);
         }
+        lost(shared, &format!("{name} ({})", uuid_string(uuid)), text);
+        return Ok(None);
     }
     if brand == "horizon"
         && let Some(hash) = sync.content_identity
@@ -1142,6 +1141,38 @@ fn login_and_configure(
 
 /// ServerboundResourcePackPacket.Action.DECLINED.
 const PACK_DECLINED: i32 = 1;
+
+fn mod_mismatch(difference: &horizon_protocol::mod_list::Difference) -> crate::text::Text {
+    use crate::{lang::Language, text::Text};
+    // Vanilla has no Horizon keys. Keep English fallbacks on the wire, while a
+    // Horizon client resolves each component in its own selected language.
+    let english = Language::load(&[], crate::lang::DEFAULT);
+    let translated = |key: &str, args: &[Text]| {
+        Text::translate_with_fallback(key, english.get(key).unwrap(), args)
+    };
+    let mut text = translated("horizon.mods.mismatch", &[]);
+    for (key, names) in [
+        ("horizon.mods.missing", &difference.missing),
+        ("horizon.mods.extra", &difference.extra),
+    ] {
+        if !names.is_empty() {
+            text = text
+                .append("\n")
+                .append(translated(key, &[Text::literal(names.join("\n"))]));
+        }
+    }
+    for changed in &difference.changed {
+        text = text.append("\n").append(translated(
+            "horizon.mods.version",
+            &[
+                Text::literal(&changed.id),
+                Text::literal(&changed.server),
+                Text::literal(&changed.client),
+            ],
+        ));
+    }
+    text
+}
 
 /// ServerCommonPacketListenerImpl.handleResourcePackResponse: a player who
 /// declined the required pack is disconnected. The reason and its text.
@@ -1654,8 +1685,34 @@ fn write_loop(
 mod tests {
     use super::*;
 
+    #[test]
+    fn mod_refusal_translates_on_the_client_and_names_every_difference() {
+        use horizon_protocol::mod_list::{Difference, VersionDifference};
+        let difference = Difference {
+            missing: (0..9).map(|i| format!("missing_{i} 1.0")).collect(),
+            extra: vec!["extra 2.0".into()],
+            changed: vec![VersionDifference {
+                id: "changed".into(),
+                server: "3.0".into(),
+                client: "2.9".into(),
+            }],
+        };
+        let reason = crate::lan::data::component_nbt(&mod_mismatch(&difference).component());
+        let french = crate::lang::Language::load(&[], "fr_fr");
+        let text = horizon_protocol::text::plain(&reason, french.map());
+        assert!(text.starts_with("Vos mods ne correspondent"));
+        assert!(text.contains("changed (serveur 3.0, votre version 2.9)"));
+        assert!(text.contains("extra 2.0"));
+        let vanilla = horizon_protocol::text::plain(&reason, &Default::default());
+        assert!(vanilla.starts_with("Your mods don't match"));
+        for name in &difference.missing {
+            assert!(text.contains(name));
+            assert!(vanilla.contains(name));
+        }
+    }
+
     /// Logs in through `c` and answers the `LoginFinished` profile.
-    fn login_profile(mut c: Connection, name: &str) -> login::GameProfile {
+    fn login_profile(c: &mut Connection, name: &str) -> login::GameProfile {
         c.send(
             &handshake::Serverbound::Intention(handshake::Intention {
                 protocol: horizon_protocol::PROTOCOL_VERSION,
@@ -1680,6 +1737,68 @@ mod tests {
                 login::Clientbound::Compression(p) => c.set_compression(p.threshold),
                 login::Clientbound::LoginFinished(p) => return p.profile,
                 other => panic!("unexpected login packet {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_server_checks_a_horizon_clients_extra_mods() {
+        use horizon_protocol::mod_list::{self, Entry, Side};
+        let config = crate::lan::NetConfig {
+            announce: false,
+            listen: false,
+            ..crate::lan::NetConfig::lan(0, "Owner - World".into(), 8)
+        };
+        let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
+        let mut c = Connection::local(lan.connect_local().unwrap());
+        c.reader
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        login_profile(&mut c, "Owner");
+        c.send(&login::Serverbound::LoginAcknowledged(horizon_protocol::packets::Empty).encode())
+            .unwrap();
+        let mut brand = horizon_protocol::buf::Writer::new();
+        brand.string("horizon");
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "minecraft:brand".into(),
+                data: brand.data,
+            })
+            .encode(),
+        )
+        .unwrap();
+        loop {
+            let (id, payload) = c.recv().unwrap();
+            match cfg::Clientbound::decode(id, &payload).unwrap() {
+                cfg::Clientbound::SelectKnownPacks(p) => c
+                    .send(&cfg::Serverbound::SelectKnownPacks(p).encode())
+                    .unwrap(),
+                cfg::Clientbound::CustomPayload(p) if p.channel == mod_list::CHANNEL => {
+                    assert!(mod_list::decode(&p.data).unwrap().is_empty());
+                    let data = mod_list::encode(&[Entry {
+                        id: "shared_extra".into(),
+                        version: "2.0".into(),
+                        side: Side::Both,
+                    }]);
+                    c.send(
+                        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                            channel: mod_list::CHANNEL.into(),
+                            data,
+                        })
+                        .encode(),
+                    )
+                    .unwrap();
+                }
+                cfg::Clientbound::Ping(p) => c.send(&cfg::Serverbound::Pong(p).encode()).unwrap(),
+                cfg::Clientbound::Disconnect(d) => {
+                    assert!(
+                        horizon_protocol::text::plain(&d.reason, &Default::default())
+                            .contains("shared_extra 2.0")
+                    );
+                    break;
+                }
+                cfg::Clientbound::FinishConfiguration(_) => panic!("extra mod was accepted"),
+                _ => {}
             }
         }
     }
@@ -1751,7 +1870,10 @@ mod tests {
             crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), config)
                 .unwrap();
         let start = Instant::now();
-        let owner = login_profile(Connection::local(lan.connect_local().unwrap()), "Owner");
+        let owner = login_profile(
+            &mut Connection::local(lan.connect_local().unwrap()),
+            "Owner",
+        );
         assert!(
             start.elapsed() < Duration::from_secs(1),
             "{:?}",

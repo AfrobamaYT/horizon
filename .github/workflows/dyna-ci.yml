@@ -76,6 +76,41 @@ jobs:
   # playhorizon's checks runners (label playhorizon-ci); a fork's pull request never does (and the runners refuse it
   # themselves). There the build folder persists (CARGO_TARGET_DIR, outside the checkout), so the apt packages,
   # Python and the Rust cache steps are GitHub's only.
+  # Formatting and clippy on GitHub's own runners, in parallel with verify's tests on Dyna's: the fork's account has
+  # its own hosted pool, so both pools work on every run and a run's wall time is the longer of the two, not the sum.
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this pull request need Rust checks?
+        if: github.event_name == 'pull_request'
+        id: rust
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Install Rust toolchain and the ALSA and udev headers the client links against
+        if: steps.rust.outputs.required != 'false'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.rust.outputs.required != 'false'
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check formatting and lint
+        if: steps.rust.outputs.required != 'false'
+        run: |
+          cargo +stable fmt --all -- --check
+          cargo +stable clippy --workspace --all-targets -- -D warnings
+          # The server build (released as horizon-engine): the game without sound or controllers.
+          cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
+
   verify:
     needs: changes
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
@@ -135,17 +170,9 @@ jobs:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # A dyna-medium runner has a hard 8 GiB limit and 4 CPUs; four horizon-client rustc processes at about 2.6 GB
-      # each go past it, so Dyna runs build two crates at a time. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
+      # each go past it, so Dyna runs build two crates at a time. Formatting and lint run in parallel on GitHub's
+      # runners (the lint job), so this job only tests. A cargo flag, not CARGO_BUILD_JOBS: sccache hashes
       # CARGO_* variables, and that would split the runners' cache from the boxes'.
-      - name: Check formatting and lint
-        if: steps.rust.outputs.required != 'false'
-        env:
-          JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j2' || '' }}
-        run: |
-          cargo +stable fmt --all -- --check
-          cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
-          # The server build (released as horizon-engine): the game without sound or controllers.
-          cargo +stable clippy $JOBS -p horizon-client --all-targets --no-default-features -- -D warnings
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which clippy above already
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on

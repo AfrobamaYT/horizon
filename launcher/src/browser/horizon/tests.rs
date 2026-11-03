@@ -159,7 +159,6 @@ fn update_rejects_a_changed_kind_without_removing_the_installed_file() {
 
 #[test]
 fn installed_kind_comes_from_the_archive_not_its_folder() {
-    use std::io::Write;
     for native in [false, true] {
         let mut index = sample();
         let home = scratch(if native {
@@ -179,22 +178,20 @@ fn installed_kind_comes_from_the_archive_not_its_folder() {
         let file = format!("{folder}/misplaced.hmod");
         let path = home.join(&file);
         if native {
-            let mut zip = zip::ZipWriter::new(fs::File::create(&path).unwrap());
-            zip.start_file(
-                index::native::MANIFEST,
-                zip::write::SimpleFileOptions::default(),
+            let manifest = format!(
+                "id='coords_hud'\nname='HUD'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                "a".repeat(40),
+                "b".repeat(40)
+            );
+            let files: &[(&str, &[u8])] = &[
+                ("Cargo.toml", b"[package]\nname='hud'\nversion='1'\n"),
+                ("src/lib.rs", b"pub fn hooks() {}"),
+            ];
+            fs::write(
+                &path,
+                horizon_mods::Package::write_files(&manifest, files).unwrap(),
             )
             .unwrap();
-            let revision = "a".repeat(40);
-            let manifest = serde_json::json!({"schema": 1, "id": "coords_hud", "version": "0.1.0", "game": "26.3", "horizon": revision, "mixins": "b".repeat(40)});
-            zip.write_all(manifest.to_string().as_bytes()).unwrap();
-            zip.start_file(
-                "native/horizon-mixin.toml",
-                zip::write::SimpleFileOptions::default(),
-            )
-            .unwrap();
-            write!(zip, "[mod]\nid = \"coords_hud\"\nversion = \"0.1.0\"\n[compatibility]\nhorizon_revision = \"{}\"\n", "a".repeat(40)).unwrap();
-            zip.finish().unwrap();
             index::native::Bundle::read(&path).unwrap();
             index
                 .projects

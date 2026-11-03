@@ -107,8 +107,8 @@ it (edited on every push, never repeated): talk to its author in the thread befo
 
 ## Pull requests
 
-- **Small.** One change per pull request, under about 500 lines of code where you can; split bigger work into
-  pieces that each make sense alone. Small pull requests get reviewed and merged the same day.
+- **One change.** One concern per pull request (a hook, a handle, a feature or a fix), at whatever size it
+  needs. There's no line limit; split by concern, never by size, and don't bundle unrelated changes.
 - **Fill in the template**: what and why, the vanilla reference, the pr_ready block, screenshots for anything you
   can see.
 - **Tick "Allow edits by maintainers".** When something small is left (a lint, a rebase, a nit) we push the fixup
