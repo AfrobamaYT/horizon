@@ -293,8 +293,8 @@ the catalog, not a global API number, source comments or documentation histories
   (`ServerStoppingEvent`). Each start is followed by `native_world_lifecycle`'s `WorldOpenReady` or `WorldOpenFailed`,
   and each stop by `WorldCloseFinal`; a server whose loop fails reports `WorldCloseFailed` instead of stopping.
 
-- Mod block entities are sent to clients. Each mod block has a block entity type of its own, named after it, after
-  vanilla's; a client makes its copy of the block entity with `native_block_entity`, as the server does.
+- Mod block entities are sent to clients. Only declared types receive wire IDs after vanilla's, and several valid
+  blocks can share a type. Server and client use its declared identity; `native_block_entity` supplies only initial data.
   `native_block_entity_update_tag` gives what clients get of one (`BlockEntity.getUpdateTag`, read from the block entity
   alone): it is asked when a chunk holding it is sent and when its block changes, and the client merges it into the
   copy's `nbt`. A saved chunk sent past the view distance asks it on its own thread, so read only `entity`. Keep it to what clients show (a machine running, its facing, a tank's level), not a menu's progress:
