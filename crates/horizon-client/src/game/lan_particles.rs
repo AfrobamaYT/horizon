@@ -306,8 +306,7 @@ impl Game<'_> {
         Self::hub_particle(&self.lan.as_ref()?.hub, options, state)
     }
 
-    /// `network_particle` for a hub that is out of `self.lan` meanwhile (a
-    /// guest's turn).
+    /// Convert a particle using the hub's registry.
     pub(super) fn hub_particle(
         hub: &Hub,
         options: &ParticleOptions,

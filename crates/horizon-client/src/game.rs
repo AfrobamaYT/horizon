@@ -3230,9 +3230,8 @@ struct Game<'a> {
     lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
-    /// records, so a hook in one guest's turn (when the hub is out of
-    /// `self.lan`) still reaches the others'. The acting guest's are in
-    /// `player_attachments` for the turn.
+    /// records, so a hook in one guest's turn still reaches the others'.
+    /// The acting guest's are in `player_attachments` for the turn.
     guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
@@ -3247,8 +3246,7 @@ struct Game<'a> {
     tnt_refused: Option<BlockPos>,
     /// Their permission level: an op's above 0 (`PlayerList.isOp`).
     lan_acting_permission: Option<u8>,
-    /// Their entity id, which the hub (often taken out of `lan` while they
-    /// act) would otherwise have to be asked for.
+    /// Their entity id while their player state is in place.
     lan_acting_entity: Option<u32>,
     /// Whether the player currently swapped into the game is connectionless.
     lan_acting_fake: bool,
