@@ -235,12 +235,7 @@ impl ServerReloadListeners {
         converter: FileToIdConverter,
         listener: Arc<T>,
     ) -> Result<ListenerKey<T>, ReloadOrderError> {
-        let owner = crate::crash::current_native_mod();
-        let result = self.insert(id.clone(), converter, listener.clone(), owner);
-        if let Err(error) = &result {
-            self.failure.get_or_insert_with(|| error.clone());
-            return Err(error.clone());
-        }
+        self.add_listener(id.clone(), converter, listener.clone())?;
         self.retained.push(RetainedEntry {
             id: id.clone(),
             type_id: TypeId::of::<T>(),
