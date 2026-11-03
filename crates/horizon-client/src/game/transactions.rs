@@ -9,7 +9,7 @@
 //! work to the transaction around it; an abort puts every storage back quietly and drops the
 //! waiting work, which nothing outside had seen.
 //!
-//! Covered here: block entities (slots, saved compound, attachments), a hopper's cooldown and
+//! Covered here: block entities (slots, saved compound, custom name, lock, loot roll, attachments), a hopper's cooldown and
 //! cauldron block states. A block's tentative state is stored only (`World::set_stored`): the
 //! one real write, with its remesh, relight and logs, is at the root commit. A jukebox is
 //! told at the root commit from its record before and after, so a disc swapped in one
@@ -21,8 +21,8 @@
 //! a mod's chest menu) is kept whole on its first write through a menu slot; a crafting grid
 //! changed by the transaction has its result made again at the root commit.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
-use horizon_client::items::ItemStack;
 use horizon_client::mod_api::TransactionSeal;
+use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_world::attachments::Attachments;
 use std::collections::HashMap;
 
@@ -55,6 +55,10 @@ struct Kept {
     /// None where it had no map: an abort removes one a write made.
     attachments: Option<Attachments>,
     hopper: Option<HopperState>,
+    /// The custom name Horizon keeps beside the model (`World::block_names`).
+    name: Option<String>,
+    /// The container lock and loot table roll kept beside the model.
+    extras: BlockEntityExtras,
 }
 
 #[derive(Clone)]
@@ -76,6 +80,8 @@ struct KeptMenus {
 pub(super) enum After {
     /// `BlockEntity.setChanged`.
     Changed(Pos),
+    /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
+    Updated(Pos),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// `Block.popResource`.
@@ -169,6 +175,8 @@ impl Game<'_> {
             entity: self.world.block_entities.get(&pos).cloned(),
             attachments: self.world.block_entities.attachments(pos).cloned(),
             hopper: self.hoppers.get(&pos).copied(),
+            name: self.world.block_names.get(&pos).cloned(),
+            extras: self.world.block_entity_extras(pos),
         });
     }
     /// Keeps the inventory of the player whose state is in `Game` now, `uuid`, as it is, if a
@@ -264,6 +272,7 @@ impl Game<'_> {
     fn run_after(&mut self, after: After) {
         match after {
             After::Changed(pos) => self.container_changed(pos),
+            After::Updated(pos) => self.block_entity_updated(pos),
             // Only reached through a root commit, which sets the block itself.
             After::Block(_) => {}
             After::Drop(pos, stack) => {
@@ -346,6 +355,11 @@ impl Game<'_> {
             self.world
                 .block_entities
                 .set_attachments(pos, kept.attachments);
+            match kept.name {
+                Some(name) => self.world.block_names.insert(pos, name),
+                None => self.world.block_names.remove(&pos),
+            };
+            self.world.set_block_entity_extras(pos, kept.extras);
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
