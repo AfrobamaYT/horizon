@@ -1645,7 +1645,10 @@ mod tests {
             }
         }
         let observed = Arc::new(Mutex::new(Vec::new()));
-        let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        let mods = [ModEntry::new(
+            "conversion-observer",
+            Box::new(Observer(observed.clone())),
+        )];
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),

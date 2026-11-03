@@ -1993,14 +1993,14 @@ pub(crate) mod tests {
         let from = here().capability(host, &ITEMS, FROM, None).unwrap();
         let liar: Capability<dyn ResourceHandler<ItemResource>> = Capability {
             handler: Box::new(TakesMore),
-            owner: Some(0),
+            owner: Some("doubler"),
         };
         let moved = host.transaction(|host, tx| {
             Ok::<_, ()>(move_resources(host, &from, &liar, |_| true, 64, tx))
         });
         assert_eq!(moved, Ok(0));
         assert_eq!(world.from[0], Some(stack("minecraft:stick", 5, 0)));
-        assert!(super::super::item_place::warned_about(&mod_name(0)));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -2503,9 +2503,7 @@ pub(crate) mod tests {
             })
             .unwrap();
             assert!(p.given.is_empty());
-            assert!(super::super::super::item_place::warned_about(
-                &super::super::super::mod_name(0)
-            ));
+            assert!(super::super::super::item_place::warned_about("doubler"));
         }
     }
 

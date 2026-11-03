@@ -22131,7 +22131,8 @@ mod tests {
                 ));
             }
         }
-        let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
         mod_api::install_parts(&mods).unwrap();
         assert!(mod_api::MODS.set(mods).is_ok());
         super::native_entity_refs::tests::with_game(|game| {
