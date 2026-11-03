@@ -92,7 +92,6 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
         Some(s)
     };
     let neo = text(&mut zip, "META-INF/neoforge.mods.toml");
-    let forge = text(&mut zip, "META-INF/mods.toml");
     let (mut info, loader) = if strict {
         if let Some(t) = neo {
             (mods_toml(&t)?, Some(JarLoader::NeoForge))
@@ -105,7 +104,10 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
             ));
         }
     } else {
-        let tomls: Vec<String> = neo.into_iter().chain(forge).collect();
+        let tomls: Vec<String> = neo
+            .into_iter()
+            .chain(text(&mut zip, "META-INF/mods.toml"))
+            .collect();
         let info = if !tomls.is_empty() {
             metadata(&tomls)?
         } else if let Some(t) = text(&mut zip, "fabric.mod.json") {
@@ -118,7 +120,7 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
         (info, None)
     };
     // `version = "${file.jarVersion}"` is filled in from the manifest at load.
-    if info.version.starts_with("${") {
+    if info.version == "${file.jarVersion}" || (!strict && info.version.starts_with("${")) {
         info.version = text(&mut zip, "META-INF/MANIFEST.MF")
             .and_then(|m| manifest_value(&m, "Implementation-Version"))
             .unwrap_or_default();
@@ -462,6 +464,31 @@ mod tests {
             let jar = synthetic_jar(stem, &entries);
             assert!(read_identity(&jar.0).is_err(), "{stem}");
         }
+    }
+
+    #[test]
+    fn strict_metadata_does_not_apply_inventory_tolerance() {
+        let malformed = synthetic_jar(
+            "duplicate-key",
+            &[(
+                "META-INF/neoforge.mods.toml",
+                "[[mods]]\nmodId = 'ruby'\nmodId = 'ruby'\nversion = '1'\n",
+            )],
+        );
+        assert_eq!(read(&malformed.0).unwrap().mod_id, "ruby");
+        assert!(read_identity(&malformed.0).is_err());
+        let unresolved = synthetic_jar(
+            "unresolved-version",
+            &[
+                (
+                    "META-INF/neoforge.mods.toml",
+                    "[[mods]]\nmodId = 'ruby'\nversion = '${unknown}'\n",
+                ),
+                ("META-INF/MANIFEST.MF", "Implementation-Version: 1.0\n\n"),
+            ],
+        );
+        assert_eq!(read(&unresolved.0).unwrap().version, "1.0");
+        assert!(read_identity(&unresolved.0).is_err());
     }
 
     #[test]
