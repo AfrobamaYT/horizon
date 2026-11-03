@@ -6058,13 +6058,18 @@ impl Game<'_> {
         mod_api::dispatch_sleep_finished_time(self, mod_api::mods(), dimension, current, new_time);
     }
 
-    /// A slime or magma cube is dying and about to split into smaller ones
-    /// (NeoForge's `MobSplitEvent`, vanilla's `Slime.remove`): `parent` is
-    /// its entity id, `kind` its type, `size` its size, `child_size` the
-    /// size of the children (half of it) and `count` how many vanilla drew
-    /// (2 to 4). A mod may change `count` (0 spawns none, at most 64) or set
-    /// `cancel` to spawn no children. Only for a parent above size 1; the
-    /// split's random draw is made first. On the server. API @API:mob_split@.
+    /// A slime, magma cube or sulfur cube is dying and about to split into
+    /// smaller ones (NeoForge's `MobSplitEvent`, vanilla's
+    /// `AbstractCubeMob.remove`): `parent` is its entity id, `kind` its type,
+    /// `size` its size, `child_size` the size of the children (half of it)
+    /// and `count` how many vanilla made (2 to 4 for a slime or magma cube,
+    /// 2 for a sulfur cube; a primed one makes none and isn't asked). A mod
+    /// may change `count` (0 spawns none, at most 64) or set `cancel` to
+    /// spawn no children. Only for a parent above size 1, once the child
+    /// count is drawn. NeoForge's list of child mobs is this count:
+    /// changing a child or adding one of another kind needs a handle to a
+    /// mob not yet in the world, which Horizon doesn't have yet. On the
+    /// server. API @API:mob_split@.
     pub(super) fn native_mob_split(
         &mut self,
         parent: u32,
@@ -6088,9 +6093,12 @@ impl Game<'_> {
 
     /// Two animals bred and a baby is about to be made (NeoForge's
     /// `BabyEntitySpawnEvent`, vanilla's `Animal.spawnChildFromBreeding`):
-    /// `parent` and `partner` are entity ids, `player` the UUID of the
-    /// player who fed them into love (0 when none), `kind` the baby's type
-    /// (a horse and a donkey have a mule). Set `cancel` for no baby: the
+    /// `parent` and `partner` are entity ids, `player` and `player_entity_id`
+    /// the UUID and entity id of the player who fed them into love
+    /// (`getCausedByPlayer`, None when none), `kind` the baby's type (a horse
+    /// and a donkey have a mule). NeoForge's `setChild` (another baby)
+    /// needs a handle to a mob not yet in the world, which Horizon doesn't
+    /// have yet. Set `cancel` for no baby: the
     /// parents still rest and lose their love (their ages were already set
     /// to 6000), but there is no baby, no experience, no `animals_bred`
     /// statistic, no advancement and no heart particles, as NeoForge
@@ -6101,7 +6109,8 @@ impl Game<'_> {
         &mut self,
         parent: u32,
         partner: u32,
-        player: u128,
+        player: Option<u128>,
+        player_entity_id: Option<i32>,
         kind: &str,
         cancel: &mut bool,
     ) {
@@ -6111,6 +6120,7 @@ impl Game<'_> {
             parent,
             partner,
             player,
+            player_entity_id,
             kind,
             cancel,
         );
@@ -9896,6 +9906,17 @@ impl Game<'_> {
         if !mod_api::mods().is_empty() {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value);
         }
+    }
+    /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
+    /// children: how many to spawn.
+    pub(super) fn mob_split_count(&mut self, m: &horizon_client::mobs::Mob, count: u32) -> u32 {
+        if mod_api::mods().is_empty() {
+            return count;
+        }
+        let (size, kind) = (m.extra.size, mob_kind(m));
+        let (mut count, mut cancel) = (count, false);
+        self.native_mob_split(m.id, &kind, size, size / 2, &mut count, &mut cancel);
+        if cancel { 0 } else { count.min(64) }
     }
     /// `AnimalTameEvent` for the mob at `index`, whose taming roll by the
     /// player `tamer` (`tamer_entity_id`) succeeded: true when a mod cancels
