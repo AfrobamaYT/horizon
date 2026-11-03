@@ -6149,6 +6149,26 @@ impl Game<'_> {
     pub(super) fn native_item_bar(&self, stack: &ItemStack, bar: &mut Option<(i32, u32)>) {
         mod_api::dispatch_item_bar(self, mod_api::mods(), stack, bar);
     }
+    /// The mouse sensitivity and cinematic camera option a grabbed player's
+    /// mouse turn reads this frame (`MouseHandler.turnPlayer`). Change either
+    /// for this turn only; the options are unchanged. Client-side.
+    /// @API:calculate_player_turn@.
+    pub(super) fn native_calculate_player_turn(
+        &self,
+        player_entity_id: i32,
+        player_uuid: u128,
+        mouse_sensitivity: &mut f64,
+        cinematic_camera_enabled: &mut bool,
+    ) {
+        mod_api::dispatch_calculate_player_turn(
+            self,
+            mod_api::mods(),
+            player_entity_id,
+            player_uuid,
+            mouse_sensitivity,
+            cinematic_camera_enabled,
+        );
+    }
     /// Append an item's custom decorations after its default bar, cooldown and count.
     /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
     /// no item translation is active.

@@ -7695,11 +7695,23 @@ impl Game<'_> {
     /// An agent moving the mouse (`mouse-move`) counts as a grabbed pointer in
     /// an active window, as it cannot grab the real one.
     fn apply_mouse_look(&mut self) {
-        let look = self.look_options();
+        let mut look = self.look_options();
         let time = self.started.elapsed().as_secs_f64();
         let pointer = self.captured || self.agent_pointer;
         let grabbed = pointer && self.screen == Screen::Playing && self.player.is_some();
         let active = self.focused || self.agent_pointer;
+        if active
+            && grabbed
+            && !crate::mod_api::mods().is_empty()
+            && let Some(remote) = &self.remote
+        {
+            self.native_calculate_player_turn(
+                self.own_entity_id(),
+                remote.profile,
+                &mut look.sensitivity,
+                &mut look.smooth_camera,
+            );
+        }
         if let Some((xo, yo)) = self
             .mouse
             .handle_accumulated_movement(time, active, grabbed, look)
