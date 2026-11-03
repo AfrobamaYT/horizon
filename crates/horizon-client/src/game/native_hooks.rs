@@ -253,8 +253,6 @@
 //!
 //! API 232 adds A hopper is about to pick up a dropped item (`native_hopper_pickup_item`).
 //!
-//! API 231 adds A vanilla world game event fired (`native_game_event`).
-//!
 //! API 230 adds A furnace begins cooking an item (`native_furnace_start_smelt`).
 //!
 //! API 229 adds A furnace finishes smelting an item (`native_furnace_smelt`).
@@ -4160,6 +4158,61 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// A server entity is about to be placed by `/spreadplayers` (NeoForge's
+    /// `EntityTeleportEvent.SpreadPlayersCommand`, vanilla's
+    /// `SpreadPlayersCommand.setPlayerPositions`): once per entity, after the
+    /// spread worked out its spot. `entity` is its network id, `player` its UUID (None for a
+    /// non-player), `from` where
+    /// it stands and `target` the spot. A mod may move `target` (a value that
+    /// is not a number is ignored). Canceling leaves the entity where it is;
+    /// the spread's other entities, its random draws and its feedback are
+    /// unchanged. @API:spread_players_teleport@.
+    pub(super) fn native_spread_players_teleport(
+        &mut self,
+        dimension: &str,
+        entity: u32,
+        player: Option<u128>,
+        from: [f64; 3],
+        target: &mut [f64; 3],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_spread_players_teleport(
+            self,
+            mod_api::mods(),
+            dimension,
+            entity,
+            player,
+            from,
+            target,
+            cancel,
+        );
+    }
+    /// A vanilla game event is about to reach its listeners (NeoForge's
+    /// `VanillaGameEvent`, vanilla's `Level.gameEvent`): every event, in
+    /// `dimension`. `event` is its id (`minecraft:step`), `pos` where it
+    /// happened and `cause` the network id of the entity that caused it
+    /// (None for none). The context's affected block state is not tracked
+    /// here. Canceling keeps the sculk sensors, wardens and allays from
+    /// hearing it. The affected block state in NeoForge's context is not
+    /// currently exposed. Server-side. @API:vanilla_game_event@.
+    pub(super) fn native_vanilla_game_event(
+        &mut self,
+        dimension: &str,
+        event: &str,
+        pos: [f64; 3],
+        cause: Option<u32>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_vanilla_game_event(
+            self,
+            mod_api::mods(),
+            dimension,
+            event,
+            pos,
+            cause,
+            cancel,
+        );
+    }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
     /// their level or into another one. `from` and `to` are their feet before
@@ -6211,11 +6264,6 @@ impl Game<'_> {
         count: usize,
     ) {
         mod_api::dispatch_entities_unload(self, mod_api::mods(), dimension, chunk, count);
-    }
-
-    /// A generic world game event was fired at `pos`. 231.
-    pub(super) fn native_game_event(&mut self, event: &str, pos: [f64; 3]) {
-        mod_api::dispatch_game_event(self, mod_api::mods(), event, pos);
     }
 
     /// A guest asked to complete `command`; `suggestions` may be added to or
@@ -11428,6 +11476,7 @@ mod tests {
         let landing_hooks = free_hooks(include_str!("../landing.rs"));
         let motion_hooks = free_hooks(include_str!("../motion.rs"));
         let hub_hooks = free_hooks(include_str!("../lan/hub.rs"));
+        let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
             .chain(level_section.lines())
@@ -11447,6 +11496,7 @@ mod tests {
             .chain(landing_hooks.iter().copied())
             .chain(motion_hooks.iter().copied())
             .chain(hub_hooks.iter().copied())
+            .chain(ender_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
@@ -11480,6 +11530,8 @@ mod tests {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
                 format!("horizon_client_lib::menu::native_{name}")
+            } else if ender_hooks.contains(name) {
+                format!("horizon_client_lib::mobs::enderman::native_{name}")
             } else if breath_hooks.contains(name) {
                 // breathing.rs compiles into horizon-client-lib too.
                 format!("horizon_client_lib::breathing::native_{name}")

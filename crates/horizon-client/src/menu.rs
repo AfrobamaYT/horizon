@@ -4198,6 +4198,7 @@ pub(crate) mod tests {
                 living_drown: |_, _, _, _, _, _| {},
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
+                ender_entity_teleport: |_, _, _, _, _| {},
                 ingredient: |_, _, _| {},
                 ingredient_test: |_, _, _, _| {},
             });

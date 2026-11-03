@@ -2927,16 +2927,6 @@
       }
     },
     {
-      "name": "game_event",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_game_event",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "hopper_inventory_search",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_hopper_inventory_search",

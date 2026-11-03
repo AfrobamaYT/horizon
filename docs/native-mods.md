@@ -1279,8 +1279,6 @@ API 229 adds A furnace finishes smelting `item` into `result` at `pos` (`native_
 
 API 230 adds A furnace begins cooking `item` at `pos` when its cooking timer first advances (`native_furnace_start_smelt`). Bundles need "hooks": 230.
 
-API 231 adds A generic world game event fired at `pos`: `native_game_event(event, pos)` reports its registered event id and position, whether or not vibration listeners are nearby. Bundles need "hooks": 231.
-
 API 232 adds A hopper is about to pick up a dropped stack: `native_hopper_pickup_item(dimension, pos, item, count, cancel)` names its position and stack. Set `cancel` to leave the item in the world. Bundles need "hooks": 232.
 
 API 233 adds `native_inventory_block_start(player, name, pos, cancel)` runs before a guest opens an inventory supplied by a block at `pos`. Set `cancel` to leave it closed; the guest's state is not swapped in. Bundles need "hooks": 233.
@@ -2225,7 +2223,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_world_saved(wait)`**: the server completed its world save cycle; `wait` is true when chunk writes were flushed before returning.
 - **`native_entities_load(dimension, chunk, count)`**: saved entity records for `chunk` finished loading into `dimension`.
 - **`native_entities_unload(dimension, chunk, count)`**: entities in `chunk` left the active world and were queued for saving.
-- **`native_game_event(event, pos)`**: a generic world game event was fired at `pos`, including events with no nearby vibration listeners.
 - **`native_tab_complete(player, name, command, range, suggestions)`**: a guest's server completion request was evaluated; mods may add or filter suggestions. `range` is the replaced byte range. Guest state is not swapped in, and helpers that look through `self.lan` may find nothing while the guest packet is handled.
 - **`native_broadcast_message(line, cancel)`**: a system broadcast line is about to be logged and sent to every player. A mod may change `line` or set `cancel` to drop the broadcast.
 - **`native_whitelist_state_update(enabled)`**: the dedicated server's player whitelist was enabled or disabled.
