@@ -1088,7 +1088,7 @@
       }
     },
     {
-      "name": "component_types", "side": "both",
+      "name": "component_types", "side": "both", "context": "registration",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_component_types",
       "mod_api": {
@@ -1961,7 +1961,7 @@
       }
     },
     {
-      "name": "blocks", "side": "both",
+      "name": "blocks", "side": "both", "context": "registration",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_blocks",
       "neoforge": "RegisterEvent",
@@ -1971,7 +1971,7 @@
       }
     },
     {
-      "name": "items", "side": "both",
+      "name": "items", "side": "both", "context": "registration",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_items",
       "neoforge": "RegisterEvent",
@@ -2084,6 +2084,7 @@
     },
     {
       "name": "standalone_models",
+      "context": "registration",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_standalone_models",
       "neoforge": "ModelEvent.RegisterStandalone",

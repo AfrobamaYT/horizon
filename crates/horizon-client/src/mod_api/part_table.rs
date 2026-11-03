@@ -2499,7 +2499,7 @@ pub(crate) mod tests {
                     .build();
             }
         }
-        fn blocks(&self, event: &mut BlocksEvent<'_>) {
+        fn blocks(&self, _context: &mod_api::RegistrationContext<'_>, event: &mut BlocksEvent<'_>) {
             event.blocks.extend(
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()

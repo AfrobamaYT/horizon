@@ -807,6 +807,21 @@ fn sense_golem(m: &mut Mob, w: &MobWorld) {
     }
 }
 
+/// `UseBonemeal.tick` after `BoneMealItem.growCrop` grew the crop the
+/// villager worked on: the next crop is picked on the next tick, and the next
+/// work cycle is 40 ticks away.
+pub fn bonemeal_grown(m: &mut Mob, now: i64) {
+    for entry in &mut brain_mut(m).list {
+        if let B::UseBonemeal {
+            next_work, repick, ..
+        } = &mut entry.b
+        {
+            *repick = true;
+            *next_work = now + 40;
+        }
+    }
+}
+
 /// `GolemSensor.golemDetected`: a golem was summoned near this villager;
 /// for 599 ticks it wants no other.
 pub fn golem_detected(m: &mut Mob, now: i64) {
@@ -3212,21 +3227,12 @@ impl B {
                 }
                 let Some(p) = *crop else { return };
                 if now >= *next_work && closer_to_center(p, m.position, 1.0) {
-                    let e = super::villager::ext_mut(m);
-                    // BoneMealItem.growCrop: a CropBlock below max age takes the meal.
-                    if let Some(slot) = e
-                        .inventory
-                        .iter()
-                        .position(|s| s.count > 0 && &*s.item == "minecraft:bone_meal")
-                        && bonemeal_valid(cx.w, p)
+                    // BoneMealItem.growCrop with the villager's bone meal; the
+                    // game grows it and, when it did, calls `bonemeal_grown`.
+                    if super::villager::ext(m)
+                        .is_some_and(|e| e.count_item("minecraft:bone_meal") > 0)
                     {
-                        e.inventory[slot].count -= 1;
-                        if e.inventory[slot].count == 0 {
-                            e.inventory.remove(slot);
-                        }
-                        cx.events.push(MobEvent::Bonemeal { pos: p });
-                        *repick = true;
-                        *next_work = now + 40;
+                        cx.events.push(MobEvent::Bonemeal { mob: m.id, pos: p });
                     }
                     *worked += 1;
                 }

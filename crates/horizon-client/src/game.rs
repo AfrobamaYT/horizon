@@ -243,6 +243,7 @@ mod native_level_items;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
+mod native_living_effects;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -993,6 +994,8 @@ struct GameLevel<'w> {
     environment: &'w Environment,
     raining: bool,
     thundering: bool,
+    /// The world's enabled feature flags as this side knows them (`LevelReader.enabledFeatures`).
+    enabled_features: &'w [String],
     player_box: Option<([f64; 3], [f64; 3])>,
     /// The LAN guests in this level who trigger blocks (not spectators).
     guest_boxes: Vec<([f64; 3], [f64; 3])>,
@@ -4803,6 +4806,10 @@ impl Game<'_> {
             },
             raining: rain > 0.2,
             thundering: thunder > 0.9,
+            enabled_features: self
+                .remote
+                .as_ref()
+                .map_or(&self.level.enabled_features, |remote| &remote.features),
             player_box,
             guest_boxes,
             player_collision,
@@ -22063,7 +22070,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         }
     }
     mods::register_components(&vanilla_root)?;
-    mods::register_standalone_models();
+    mods::register_standalone_models(options.execution_role);
     let mut early_settings = Settings::load(&Game::options_path());
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.

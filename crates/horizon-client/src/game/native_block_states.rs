@@ -40,8 +40,11 @@ impl Game<'_> {
     /// unknown tag is false. None on a server's client or before the world
     /// has loaded its tags.
     pub(super) fn native_item_stack_in_tag(&self, stack: &ItemStack, tag: &str) -> Option<bool> {
-        let tag = horizon_client::command::args::normalize(tag);
-        self.native_server_item_in_tag(stack, &tag).ok()
+        Some(super::native_world_read::stack_in_tag(
+            self.native_tag_items()?,
+            stack,
+            tag,
+        ))
     }
 }
 
