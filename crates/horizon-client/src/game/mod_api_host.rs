@@ -351,6 +351,16 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>>
 impl<'a: 'b, 'b> horizon_client::mod_api::LevelWriteHost
     for LevelTicks<'b, &mut super::GameLevel<'a>>
 {
+    fn set_block(
+        &mut self,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: horizon_client::mod_api::NativeBlockUpdateFlags,
+    ) -> bool {
+        self.level
+            .native_set_block(self.ticks, pos, state, flags.bits())
+    }
+
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {
         self.level
             .native_set_block_property(self.ticks, pos, key, value, flags)

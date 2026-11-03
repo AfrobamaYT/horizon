@@ -434,4 +434,88 @@ mod tests {
             assert_ne!(game.world.block_entity_extras(key), before);
         });
     }
+
+    /// `LevelWriteHost::set_block` in a level hook: the block entity goes with
+    /// its block and comes with the new one, as the Host's write does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_hook_set_block_replaces_whole_states_and_their_block_entities() {
+        use super::super::mod_api_host::LevelTicks;
+        use super::super::native_entity_refs::tests::with_game;
+        use crate::mod_api::{LevelWriteHost, NativeBlockUpdateFlags};
+        use horizon_world::chunk::BlockState;
+
+        fn write(
+            game: &mut Game<'_>,
+            pos: [i32; 3],
+            state: BlockStateId,
+            flags: NativeBlockUpdateFlags,
+        ) -> bool {
+            game.with_level(|_, level, ticks| {
+                LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
+            })
+        }
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let state = |name: &str, age: Option<&str>| {
+                registry
+                    .resolve(&BlockState {
+                        name: name.into(),
+                        properties: age
+                            .map(|age| ("age".into(), age.into()))
+                            .into_iter()
+                            .collect(),
+                    })
+                    .unwrap()
+            };
+            let stone = state("minecraft:stone", None);
+            let chest = state("minecraft:chest", None);
+            let young = state("minecraft:wheat", Some("0"));
+            let grown = state("minecraft:wheat", Some("7"));
+            let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::KNOWN_SHAPE;
+            let key = (0, 64, 0);
+
+            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(game.world.block_entities.get(&key).is_none());
+            assert!(write(game, [0, 64, 0], chest, flags));
+            assert!(matches!(
+                game.world.block_entities.get(&key),
+                Some(BlockEntity::Chest(_))
+            ));
+            assert!(write(game, [0, 64, 0], stone, flags));
+            assert_eq!(game.world.block(0, 64, 0), stone);
+            assert!(game.world.block_entities.get(&key).is_none());
+
+            // A crop's whole-state growth: no block entity, and a repeat changes nothing.
+            assert!(write(game, [0, 64, 0], young, flags));
+            assert!(write(game, [0, 64, 0], grown, flags));
+            assert_eq!(game.world.block(0, 64, 0), grown);
+            assert!(game.world.block_entities.get(&key).is_none());
+            assert!(!write(game, [0, 64, 0], grown, flags));
+
+            // Unloaded, outside the build height and invalid: refused, nothing loaded.
+            let chunks = game.world.chunks.len();
+            assert!(!write(game, [16, 64, 0], stone, flags));
+            assert!(!write(game, [0, 10000, 0], stone, flags));
+            assert!(!write(game, [0, 64, 0], BlockStateId(u32::MAX), flags));
+            assert_eq!(game.world.chunks.len(), chunks);
+            assert_eq!(game.world.block(0, 64, 0), grown);
+
+            // The same Host write still creates the block entity.
+            assert!(game.native_set_block("minecraft:overworld", [1, 64, 0], chest, flags.bits()));
+            assert!(matches!(
+                game.world.block_entities.get(&(1, 64, 0)),
+                Some(BlockEntity::Chest(_))
+            ));
+
+            // A client's copy of the level is not the server's.
+            game.options.dedicated = None;
+            assert!(!write(game, [0, 64, 0], stone, flags));
+            assert_eq!(game.world.block(0, 64, 0), grown);
+        });
+    }
 }
