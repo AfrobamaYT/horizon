@@ -235,6 +235,7 @@ mod native_lifecycle;
 mod native_living_refs;
 mod native_menu_refs;
 mod native_menus;
+mod native_merchant_refs;
 mod native_mob_draw;
 mod native_mob_navigation;
 mod native_mob_refs;

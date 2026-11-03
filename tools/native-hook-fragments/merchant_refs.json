@@ -1,0 +1,90 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "merchant",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_merchant"
+    },
+    {
+      "name": "merchant_offers",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_merchant_offers",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_set_offer",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_merchant_set_offer",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_add_offer",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_merchant_add_offer",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_remove_offer",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_merchant_remove_offer",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_trading_player",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_merchant_trading_player",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_profession",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_profession",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_set_profession",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_set_profession",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_level",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_level",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_set_level",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_set_level",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_villager_type",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_type",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_set_villager_type",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_set_type",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_xp",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_xp",
+      "receiver": "merchant"
+    },
+    {
+      "name": "merchant_set_xp",
+      "side": "server",
+      "target": "horizon_client::game::native_merchant_refs::Game<'_>::native_villager_set_xp",
+      "receiver": "merchant"
+    }
+  ],
+  "rust_summary": "merchant handles (`MerchantRef`): villager and wandering trader offers, trading player, and a villager's profession, level, type and experience.",
+  "doc_summary": "`MerchantRef`, made with `host.merchant(entity)` for a villager or wandering trader, reads and changes its trades: `offers` (the `MerchantOffer` list, uses, max uses, experience, price multiplier, demand and special price included), `set_offer`, `add_offer`, `remove_offer`, and `trading_player` (the guest whose trade screen is open). A player with the screen open is sent the changed offers as `sendMerchantOffers` does. Offers not rolled yet read as empty, and `add_offer` rolls them first as `getOffers` does. For a villager: `profession`/`set_profession` (a new profession forgets the offers, as `setVillagerData` does), `level`/`set_level` (1 to 5), `villager_type`/`set_villager_type` and `xp`/`set_xp`, all registry ids as `minecraft:farmer`. Villager data reaches clients through entity data and offers are saved with the entity. A stale handle, a client, a wrong kind or a bad value reads as None or false and changes nothing."
+}

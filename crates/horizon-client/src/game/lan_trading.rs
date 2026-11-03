@@ -23,6 +23,7 @@ pub(super) struct GuestMerchant {
     /// The offers the client was last sent.
     sent: Vec<merchant::MerchantOffer>,
     sent_level: i32,
+    sent_xp: i32,
 }
 
 /// A guest's UUID as gossip targets it.
@@ -74,6 +75,7 @@ impl Game<'_> {
             merchant: Box::new(state),
             sent: Vec::new(),
             sent_level: 0,
+            sent_xp: 0,
         };
         self.lan_send_offers(host, conn, &mut gm, true);
         self.lan_send_merchant_content(host, conn, &mut gm);
@@ -143,7 +145,7 @@ impl Game<'_> {
         force: bool,
     ) {
         let s = &gm.merchant.session;
-        if !force && s.offers == gm.sent && s.level == gm.sent_level {
+        if !force && s.offers == gm.sent && s.level == gm.sent_level && s.xp == gm.sent_xp {
             return;
         }
         let offers: Vec<play::NetOffer> = s
@@ -183,6 +185,7 @@ impl Game<'_> {
         );
         gm.sent = s.offers.clone();
         gm.sent_level = s.level;
+        gm.sent_xp = s.xp;
     }
     fn lan_send_merchant_content(&mut self, host: &mut LanHost, conn: u32, gm: &mut GuestMerchant) {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
@@ -464,5 +467,221 @@ impl Game<'_> {
             return;
         }
         self.lan_open_station(host, conn, &station);
+    }
+}
+
+impl Game<'_> {
+    /// The guest whose trading screen is open on mob `mob`.
+    pub(super) fn lan_trade_conn(&self, mob: u32) -> Option<u32> {
+        let host = self.lan.as_ref()?;
+        host.play
+            .iter()
+            .find(|(_, p)| {
+                p.merchant
+                    .as_ref()
+                    .is_some_and(|m| m.merchant.mob == Some(mob))
+            })
+            .map(|(conn, _)| *conn)
+    }
+    /// The live session of a guest's open trading screen, whose offers,
+    /// experience and level are newer than the mob's until the screen closes.
+    pub(super) fn lan_trade_session(&self, conn: u32) -> Option<&merchant::Session> {
+        let gm = self.lan.as_ref()?.play.get(&conn)?.merchant.as_ref()?;
+        Some(&gm.merchant.session)
+    }
+    /// The guest's player UUID.
+    pub(super) fn lan_trade_player(&self, conn: u32) -> Option<u128> {
+        Some(self.lan.as_ref()?.hub.guest(conn)?.uuid)
+    }
+    /// Changes the session of a guest's open trading screen and sends the
+    /// client its offers and result slot again. The merchant's own random is
+    /// not drawn: the update sound is held back.
+    pub(super) fn lan_trade_edit(
+        &mut self,
+        conn: u32,
+        edit: impl FnOnce(&mut merchant::Session),
+    ) -> bool {
+        let Some(mut host) = self.lan.take() else {
+            return false;
+        };
+        let done = self.lan_merchant_op(&mut host, conn, None, |menu, env| {
+            let Some(session) = menu.merchant.as_mut() else {
+                return;
+            };
+            edit(session);
+            session.selection_hint = session
+                .selection_hint
+                .min(session.offers.len().saturating_sub(1));
+            let sound_time = std::mem::replace(&mut session.ambient_sound_time, -80);
+            menu.merchant_update(env);
+            if let Some(session) = menu.merchant.as_mut() {
+                session.ambient_sound_time = sound_time;
+            }
+        });
+        self.lan = Some(host);
+        done
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use super::super::native_merchant_refs::tests::{offer, spawn};
+    use super::*;
+    use crate::game::lan::LanSettings;
+    use horizon_client::{
+        lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
+        merchant::Trader,
+    };
+    use horizon_protocol::packets::configuration::ClientInformation;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicI32, AtomicUsize},
+    };
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_merchant_edit_reaches_the_guest_trading_with_it() {
+        with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let mut host = game.lan.take().unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 12,
+                    uuid: 12,
+                    name: "guest12".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:1".parse().unwrap(),
+                },
+                12,
+                [3.0, 64.0, 5.0],
+                10,
+            );
+            guest.placed = true;
+            host.hub.guests.push(guest);
+
+            let villager = spawn(game, 40, "minecraft:villager");
+            game.mobs[0].extra.variant2 = 5;
+            let first = offer("minecraft:wheat", "minecraft:emerald");
+            game.mobs[0].extra.trade = Some(Box::new(Trader {
+                offers: vec![first.clone()],
+                ..Trader::default()
+            }));
+            game.mobs[0].extra.flag2 = true;
+            let mut session = merchant::Session::new(vec![first.clone()], true);
+            session.level = 1;
+            let gm = GuestMerchant {
+                window: 3,
+                state: 0,
+                slots: [None, None, None],
+                merchant: Box::new(MerchantState {
+                    session: Box::new(session),
+                    scroll: 0,
+                    dragging: false,
+                    focused: None,
+                    mob: Some(40),
+                    name: None,
+                }),
+                sent: vec![first.clone()],
+                sent_level: 1,
+                sent_xp: 0,
+            };
+            host.play.entry(12).or_default().merchant = Some(gm);
+            game.lan = Some(host);
+
+            // MerchantOffers packets (id 53) the guest was sent since last asked.
+            let sent_offers = || {
+                let mut n = 0;
+                while let Ok(out) = rx.try_recv() {
+                    let bodies = match out {
+                        horizon_client::lan::Out::Packet(body) => vec![body],
+                        horizon_client::lan::Out::Packets(bodies) => bodies,
+                        _ => Vec::new(),
+                    };
+                    n += bodies.iter().filter(|b| b.first() == Some(&53)).count();
+                }
+                n
+            };
+            sent_offers();
+            let player = villager.trading_player(game).unwrap();
+            assert_eq!(player.uuid(), 12);
+            let second = offer("minecraft:coal", "minecraft:diamond");
+            assert!(villager.add_offer(game, second.clone()));
+            assert_eq!(sent_offers(), 1);
+            let mut changed = first.clone();
+            changed.uses = 9;
+            assert!(villager.set_offer(game, 0, changed.clone()));
+            assert!(villager.set_xp(game, 40));
+            assert!(villager.set_level(game, 3));
+            // The profession cannot change under an open screen.
+            assert!(!villager.set_profession(game, "minecraft:cleric"));
+            assert!(!villager.set_offer(game, 7, changed.clone()));
+            assert_eq!(sent_offers(), 3);
+            // The mob still has the old offers; the screen has the new ones.
+            assert_eq!(
+                game.mobs[0].extra.trade.as_ref().unwrap().offers,
+                vec![first]
+            );
+            let live = vec![changed.clone(), second.clone()];
+            assert_eq!(villager.offers(game), Some(live.clone()));
+            assert_eq!(villager.xp(game), Some(40));
+            assert_eq!(villager.level(game), Some(3));
+            {
+                let gm = game.lan.as_ref().unwrap().play[&12]
+                    .merchant
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(gm.sent, live);
+                assert_eq!(gm.sent_level, 3);
+                assert_eq!(gm.merchant.session.offers, live);
+            }
+            assert!(villager.remove_offer(game, 1));
+            let gm = game.lan.as_ref().unwrap().play[&12]
+                .merchant
+                .as_ref()
+                .unwrap();
+            assert_eq!(gm.sent, vec![changed.clone()]);
+            assert_eq!(sent_offers(), 1);
+
+            // Closing the screen gives the mob the edited trades.
+            let mut host = game.lan.take().unwrap();
+            let mut gm = host.play.get_mut(&12).unwrap().merchant.take().unwrap();
+            game.merchant_closed(&mut gm.merchant);
+            game.lan = Some(host);
+            let trade = game.mobs[0].extra.trade.as_ref().unwrap();
+            assert_eq!((trade.offers.clone(), trade.xp), (vec![changed], 40));
+            assert_eq!(game.mobs[0].extra.variant3, 3);
+            assert_eq!(villager.trading_player(game), None);
+        });
     }
 }
