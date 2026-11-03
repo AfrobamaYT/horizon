@@ -1760,7 +1760,10 @@ impl Game<'_> {
         if host.hub.guests[gi].dead
             && !matches!(
                 packet,
-                S::ClientCommand(_) | S::ChatCommand(_) | S::ChatCommandSigned(_)
+                S::ClientCommand(_)
+                    | S::ChatCommand(_)
+                    | S::ChatCommandSigned(_)
+                    | S::CustomClickAction(_)
             )
         {
             return;
@@ -2471,6 +2474,28 @@ impl Game<'_> {
                 self.guest_far_terrain(host, conn, &p.data)
             }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
+            // ServerCommonPacketListenerImpl.handleCustomClickAction: the server only logs
+            // the click, so a mod's cancel leaves nothing else to skip.
+            S::CustomClickAction(p) => {
+                let g = &host.hub.guests[gi];
+                let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
+                let mut cancel = false;
+                self.native_custom_click_action(
+                    uuid,
+                    entity_id,
+                    &name,
+                    &p.id,
+                    p.payload.as_ref(),
+                    &mut cancel,
+                );
+                if !cancel {
+                    log::debug!(
+                        "Received custom click action {} with payload {:?}",
+                        p.id,
+                        p.payload
+                    );
+                }
+            }
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {
                     self.ui.difficulty = if self.level.hardcore {

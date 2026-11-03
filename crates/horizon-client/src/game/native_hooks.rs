@@ -197,7 +197,6 @@
 //!
 //! API 265 adds A server player selected a loom pattern (`native_player_loom_pattern_select`).
 //!
-//! API 264 adds Server player changed client language (`native_player_locale_change`).
 //!
 //! API 263 adds A server player's selected hotbar slot, cancellable (`native_player_item_held`).
 //!
@@ -215,7 +214,6 @@
 //!
 //! API 256 adds A server player reaches deep sleep (`native_player_deep_sleep`).
 //!
-//! API 255 adds A server player's client option for their dominant hand changed (`native_player_change_main_hand`).
 //!
 //! API 254 adds A server player changed a beacon's selected effects (`native_player_change_beacon_effect`).
 //!
@@ -929,7 +927,7 @@ use horizon_world::{
     consumable::UseAnimation,
     fluid::{FluidKind, FluidState},
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
-    nbt::Compound,
+    nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
 };
 use std::{
@@ -5246,13 +5244,6 @@ impl Game<'_> {
     pub(super) fn native_player_deep_sleep(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_deep_sleep(self, mod_api::mods(), player, name);
     }
-    /// A server player changed their client option for the dominant hand. `left` is true for
-    /// left-handed. Their state is not swapped in, and helpers looking them up through `self.lan`
-    /// may find nothing during guest packet handling. Server-side.
-    /// 255.
-    pub(super) fn native_player_change_main_hand(&mut self, player: u128, name: &str, left: bool) {
-        mod_api::dispatch_player_change_main_hand(self, mod_api::mods(), player, name, left);
-    }
     /// A server player threw an egg, after its projectile was launched and
     /// the use was applied. Helpers looking up the guest through `self.lan`
     /// may find nothing during its packet. Server-side. 258.
@@ -5621,11 +5612,56 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_exp_cooldown_change(self, mod_api::mods(), player, name, ticks);
     }
-    /// A server player changed their client language option to `locale`.
-    /// The player's state may not be found through `self.lan` during a guest
-    /// packet. Server-side. 264.
-    pub(super) fn native_player_locale_change(&mut self, player: u128, name: &str, locale: &str) {
-        mod_api::dispatch_player_locale_change(self, mod_api::mods(), player, name, locale);
+    /// NeoForge's `ClientInformationUpdatedEvent`: a server player's client sent new
+    /// client information (language, view distance, chat, skin parts, main hand,
+    /// filtering, listing, particles) in play. `old` and `new` are the values before and
+    /// after this packet, one call per packet; they can be equal. The join's own
+    /// information (the configuration phase, `ServerPlayer`'s constructor) is not
+    /// reported. The player is not swapped in. Server-side.
+    /// @API:client_information_updated@.
+    pub(super) fn native_client_information_updated(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        old: &horizon_client::mod_api::NativeClientInfo,
+        new: &horizon_client::mod_api::NativeClientInfo,
+    ) {
+        mod_api::dispatch_client_information_updated(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            old,
+            new,
+        );
+    }
+    /// NeoForge's `CustomClickActionEvent`: a server player's client sent a `custom`
+    /// click action (a dialog button or a text component's click event): its id and
+    /// optional payload. Vanilla only logs it; set `cancel` to skip that. Only play-phase
+    /// clicks are reported: one sent during configuration (no player yet) is not. The
+    /// player is not swapped in. Server-side.
+    /// @API:custom_click_action@.
+    pub(super) fn native_custom_click_action(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        id: &str,
+        payload: Option<&Tag>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_custom_click_action(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            id,
+            payload,
+            cancel,
+        );
     }
     /// A server entity was moved by a same-level teleport command, after its
     /// position changed. `entity` is its network id; `from` and `to` are
