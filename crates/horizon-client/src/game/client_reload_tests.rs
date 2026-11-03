@@ -123,16 +123,15 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-/// The initial load runs the client reload listeners: `spawn_loader`
-/// registers and stages them against the real merged root on its loader
-/// thread, and the applies it delivers run once the game exists — before any
-/// F3+T reload.
+/// The initial load runs the client reload listeners: the load itself
+/// registers and stages them against the real merged root (here the direct
+/// `--world` path; the title screen's loader thread runs the same code), and
+/// the applies it delivers run once the game exists — before any F3+T
+/// reload.
 #[test]
 #[ignore = "needs prepared resources"]
 fn initial_load_stages_and_applies_client_reload_listeners() {
-    use crate::game::{
-        LoaderMsg, Progress, native_entity_refs::tests::with_game, startup_menu::spawn_loader,
-    };
+    use crate::game::{Progress, load_resources, native_entity_refs::tests::with_game};
     use crate::mod_api::testing::with_mods;
     use crate::mod_api::{self, ModEntry};
     use horizon_client::mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
@@ -194,27 +193,37 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
     .into();
     with_mods(mods, || {
         with_game(|game| {
-            let progress = Progress::new();
-            let (receiver, handle) = spawn_loader(
-                &game.options,
-                &game.settings,
+            let root = crate::game::packs::startup_root(
                 &game.options.resources,
-                std::time::Instant::now(),
-                &progress,
+                &game.settings.resource_packs,
+                &[],
+                &game.settings.mods.enabled,
+                &game.options.dev_mods,
             )
+            .or_else(|error| {
+                log::warn!("Horizon: resource packs not applied: {error}");
+                crate::game::mods::content_root(
+                    &game.options.resources,
+                    &game.settings.mods.enabled,
+                    &game.options.dev_mods,
+                )
+            })
             .unwrap();
-            let mut loaded = None;
-            for message in receiver {
-                match message {
-                    LoaderMsg::Ui(..) => {}
-                    LoaderMsg::Done(result) => loaded = Some(result),
-                }
-            }
-            handle.join().unwrap();
-            let mut loaded = loaded.expect("loader finished").expect("initial load");
+            let mut loaded = load_resources(
+                root,
+                None,
+                &game.options.resources,
+                &game.settings,
+                std::time::Instant::now(),
+                false,
+                false,
+                &Progress::new(),
+                &mut |_, _| {},
+            )
+            .expect("initial load");
             assert!(
                 !loaded.client_applies.is_empty(),
-                "the loader thread registered and staged the listener"
+                "the load itself registered and staged the listener"
             );
             assert!(
                 !applied.load(Ordering::SeqCst),

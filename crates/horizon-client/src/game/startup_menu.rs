@@ -355,10 +355,6 @@ pub(super) fn spawn_loader(
     let dev_mods = options.dev_mods.clone();
     let world = launch_world(options).map(str::to_owned);
     let progress = progress.clone();
-    // The client reload listeners register before any load runs, as
-    // NeoForge's construction-time event does; the loader thread stages
-    // them against the merged root, and the game applies them at handoff.
-    let client_listeners = super::client_reload::register_startup_client_reload_listeners();
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
         .spawn(move || {
@@ -392,17 +388,6 @@ pub(super) fn spawn_loader(
                 })
                 .map(|mut loaded| {
                     loaded.pack_error = loaded.pack_error.or(pack_error);
-                    // The listeners' prepare runs beside the rest of the load,
-                    // against the same merged root; a failure keeps the game
-                    // running without mod reload listeners, like the reload
-                    // path's rollback.
-                    match super::client_reload::stage_client_reload(&loaded.root, client_listeners)
-                    {
-                        Ok(steps) => loaded.client_applies = steps,
-                        Err(error) => {
-                            log::warn!("Horizon: resource reload failed: {error}")
-                        }
-                    }
                     loaded
                 })
                 .map_err(|error| error.to_string());

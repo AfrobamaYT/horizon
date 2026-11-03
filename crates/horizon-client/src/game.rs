@@ -20849,6 +20849,26 @@ fn load_resources(
     } else {
         (None, None)
     };
+    // The client reload listeners register once before any prepare runs (no
+    // game exists yet, as NeoForge's construction-time event fires before
+    // resources load) and prepare here beside the rest of the load, against
+    // the same merged root; the game applies them at handoff. A dedicated
+    // server never fires the client event. A failed prepare keeps the game
+    // running without mod reload listeners, like the reload path's rollback.
+    let client_applies = if headless {
+        Vec::new()
+    } else {
+        match client_reload::stage_client_reload(
+            &root,
+            client_reload::register_startup_client_reload_listeners(),
+        ) {
+            Ok(steps) => steps,
+            Err(error) => {
+                log::warn!("Horizon: resource reload failed: {error}");
+                Vec::new()
+            }
+        }
+    };
     Ok(Loaded {
         game_cpu,
         renderer_cpu,
@@ -20856,7 +20876,7 @@ fn load_resources(
         pack_error,
         resources,
         rest_loader,
-        client_applies: Vec::new(),
+        client_applies,
         pack,
         gui: loaded_gui,
     })
