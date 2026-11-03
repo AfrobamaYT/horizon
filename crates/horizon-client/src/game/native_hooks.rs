@@ -4318,7 +4318,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_living_drops(
             self,
-            mod_api::mods(),
             entity,
             kind,
             player,
@@ -4356,7 +4355,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_get_equipment_drop_chance(
             self,
-            mod_api::mods(),
             entity,
             kind,
             slot,

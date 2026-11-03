@@ -8252,7 +8252,7 @@ mod living_drops_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
-        use horizon_client::mod_api::{Flow, Hooks, Host, LivingDropsEvent, MODS};
+        use horizon_client::mod_api::{Flow, Hooks, Host, LivingDropsEvent};
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, Ordering},
@@ -8282,59 +8282,60 @@ mod living_drops_tests {
             Arc::from(vec![
                 Box::new(Observer(seen.clone(), cancel.clone())) as Box<dyn Hooks>
             ]);
-        assert!(MODS.set(mods).is_ok());
-        super::super::native_entity_refs::tests::with_game(|game| {
-            game.load_server_loot();
-            let golem_type = game
-                .res
-                .mob_types()
-                .get("minecraft:copper_golem")
-                .unwrap()
-                .clone();
-            let spawn_golem = |game: &mut Game<'_>| {
-                game.next_entity += 1;
-                let mut golem = Mob::new(
-                    game.next_entity,
-                    golem_type.clone(),
-                    Vec3::new(0.5, 64.0, 0.5),
-                    0.0,
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.load_server_loot();
+                let golem_type = game
+                    .res
+                    .mob_types()
+                    .get("minecraft:copper_golem")
+                    .unwrap()
+                    .clone();
+                let spawn_golem = |game: &mut Game<'_>| {
+                    game.next_entity += 1;
+                    let mut golem = Mob::new(
+                        game.next_entity,
+                        golem_type.clone(),
+                        Vec3::new(0.5, 64.0, 0.5),
+                        0.0,
+                    );
+                    horizon_client::mobs::transport_items::set_held(
+                        &mut golem,
+                        Some(ItemStack::new("minecraft:diamond", 1)),
+                    );
+                    golem.health = 0.0;
+                    golem
+                };
+                let golem = spawn_golem(game);
+                game.mobs.push(golem.clone());
+                game.mob_died(&golem);
+                // The preserved stack comes last in the list the mods hear.
+                assert!(
+                    seen.lock().unwrap()[0].starts_with("minecraft:copper_golem [")
+                        && seen.lock().unwrap()[0]
+                            .ends_with("\"minecraft:diamond\"] minecraft:generic false")
                 );
-                horizon_client::mobs::transport_items::set_held(
-                    &mut golem,
-                    Some(ItemStack::new("minecraft:diamond", 1)),
+                let dropped = game.dropped.len();
+                assert!(dropped >= 1);
+                // A canceled list drops nothing, the preserved stack included.
+                cancel.store(true, Ordering::SeqCst);
+                let golem = spawn_golem(game);
+                game.mob_died(&golem);
+                assert_eq!(game.dropped.len(), dropped);
+                // An armor stand that breaks fires it with nothing in the list.
+                game.armor_stands
+                    .push(horizon_client::entities::ArmorStand::new(
+                        9000,
+                        Vec3::new(4.5, 64.0, 4.5),
+                        0.0,
+                    ));
+                game.break_armor_stand_by_anything(0, "minecraft:player_explosion", 12);
+                let seen = seen.lock().unwrap();
+                assert_eq!(
+                    seen.last().unwrap(),
+                    "minecraft:armor_stand [] minecraft:player_explosion false"
                 );
-                golem.health = 0.0;
-                golem
-            };
-            let golem = spawn_golem(game);
-            game.mobs.push(golem.clone());
-            game.mob_died(&golem);
-            // The preserved stack comes last in the list the mods hear.
-            assert!(
-                seen.lock().unwrap()[0].starts_with("minecraft:copper_golem [")
-                    && seen.lock().unwrap()[0]
-                        .ends_with("\"minecraft:diamond\"] minecraft:generic false")
-            );
-            let dropped = game.dropped.len();
-            assert!(dropped >= 1);
-            // A canceled list drops nothing, the preserved stack included.
-            cancel.store(true, Ordering::SeqCst);
-            let golem = spawn_golem(game);
-            game.mob_died(&golem);
-            assert_eq!(game.dropped.len(), dropped);
-            // An armor stand that breaks fires it with nothing in the list.
-            game.armor_stands
-                .push(horizon_client::entities::ArmorStand::new(
-                    9000,
-                    Vec3::new(4.5, 64.0, 4.5),
-                    0.0,
-                ));
-            game.break_armor_stand_by_anything(0, "minecraft:player_explosion", 12);
-            let seen = seen.lock().unwrap();
-            assert_eq!(
-                seen.last().unwrap(),
-                "minecraft:armor_stand [] minecraft:player_explosion false"
-            );
+            });
         });
     }
 }
