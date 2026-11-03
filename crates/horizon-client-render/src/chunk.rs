@@ -79,6 +79,10 @@ impl LevelShape {
     pub fn max_y(self) -> i32 {
         self.min_y + self.height
     }
+    /// Whether a block Y is inside the dimension's build height.
+    pub fn contains_y(self, y: i32) -> bool {
+        (self.min_y..self.max_y()).contains(&y)
+    }
     pub fn min_section(self) -> i32 {
         self.min_y >> 4
     }

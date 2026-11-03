@@ -264,7 +264,7 @@ impl Game<'_> {
             if let Some(rule) = gamerules::rule(name)
                 && self.ui.rules.set(rule.name, *value)
             {
-                self.game_rule_changed(rule.name, *value);
+                self.game_rule_changed(rule.name, *value, None);
             }
         }
         self.sync_rules();

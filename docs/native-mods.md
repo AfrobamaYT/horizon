@@ -870,9 +870,7 @@ API 85 adds menus of content mods' own menu types (vanilla's `MenuType`): a mod 
 
 API 86 adds `native_block_highlight(pos, state, partial, canceled)` runs before building the eligible targeted block's selection outline, after hidden-HUD and game-mode restrictions. Set `canceled` to suppress only that outline; default behavior is unchanged otherwise. Position is block coordinates and state is the current block state ID. No entity outlines are affected. Bundles need "hooks": 86.
 
-API 87 adds `native_render_hand(hand, stack, partial, swing, equip, canceled)` runs before each visible first-person hand: `Hand::Main` or `Hand::Off`, the displayed stack (None for an empty arm), partial tick, swing progress and inverse equip height including swap animation scale. Set `canceled` to skip the default geometry for that hand (arms and maps included). It runs after the existing spectator, hidden-HUD, sleep and camera gates. It only hides: the hook has no way to draw a replacement. Bundles need "hooks": 87.
-
-`native_render_hand_pose` runs after cancellation for each visible first-person hand, including maps and the empty main-hand arm (the same path as `RenderArmEvent`). Add to `x`, `y`, `z` in blocks and `pitch`, `yaw`, `roll` in degrees, and multiply `scale` to compose with other mods. The pose is applied in hand view space before the ordinary hand and item poses, in translation, pitch, yaw, roll, scale order. Non-finite or out-of-range components are ignored individually: offsets must be within -16..=16 blocks, angles within -3600..=3600 degrees and scale within 0.01..=100. Bundles need "hooks": @API:render_hand_pose@.
+API 87 adds `native_render_hand(render, canceled)` before each visible first-person hand, including maps and the empty main-hand arm. `render` carries the player UUID and entity id, hand, displayed stack, partial tick, interpolated pitch, light, swing and inverse equip height including swap animation scale. Adjust its translation (blocks), rotation (pitch, yaw, roll in degrees) and scale; the pose is applied in that order before the ordinary hand and item poses. Non-finite or out-of-range components are ignored individually: offsets must be within -16..=16 blocks, angles within -3600..=3600 degrees and scale within 0.01..=100. Set `canceled` to skip default geometry. Unlike NeoForge's `RenderHandEvent`, this hook does not expose the full pose stack, player render state or submission collector and cannot draw a replacement. Bundles need "hooks": 87.
 
 `native_screen_opening(screen)`, `native_screen_init_post(screen)` and `native_screen_closing(screen)` observe screens once per frame with `NativeScreenView`, including sign editors, book edit/sign/view and lectern screens, dialogs and prompts. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. Screens opened and closed within one frame are missed; cancelling an opening is not possible because there is no single transition point. Bundles need "hooks": @API:screen_opening@.
 
@@ -975,7 +973,7 @@ tick. This first slice supports only linear size/opacity curves and constant gra
 there is no per-particle code hook.
 
 
-API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`, as `native_key` hands it over; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself, no `native_key` — while its release still arrives, so a `native_key` listener sees that release without its press, and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves. Bundles need "hooks": 104.
+API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself — while its release still arrives and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves. Bundles need "hooks": 104.
 
 API 105 adds `native_push_player([x, y, z])` on a client, added to the local player's velocity as an explosion's knockback is, and `native_set_flying_speed(player, speed)` for server mods, a player's creative flying speed, kept across respawns and game mode changes and saved with the player as vanilla's `abilities.flySpeed` is. Bundles need `"hooks": 105`.
 
@@ -1002,7 +1000,7 @@ API 112 adds `native_camera_distance(partial, mirrored, entity, distance)` recei
 
 API 113 adds `native_compute_fog_color(partial, camera, fog_type, rgb)` adjusts the final world fog RGB after normal biome, weather and effect calculation and before GPU upload. Camera is its world position; fog_type distinguishes atmosphere, water, lava and powder snow. Only finite components in 0..=1 are accepted; invalid requests retain the original RGB. Alpha and all distance fields are unchanged. Title panoramas skip this hook. Bundles need "hooks": 113.
 
-API 114 adds `native_mouse_button_pre(button, pressed, modifiers, canceled)` sees real button events on any screen, before normal dispatch. Button and modifiers use the screen hooks' GLFW encoding. Physical button bookkeeping already ran. Cancellation skips normal dispatch and Post. Accepted events call `native_mouse_button_post(button, pressed, modifiers)` after dispatch, including screen handlers' early returns. Synthetic pad/focus clicks skip both hooks. Existing screen-specific hooks and native_key notifications remain. Bundles need "hooks": 114.
+API 114 adds `native_mouse_button_pre(button, pressed, modifiers, canceled)` sees real button events on any screen, before normal dispatch. Button and modifiers use the screen hooks' GLFW encoding. Physical button bookkeeping already ran. Cancellation skips normal dispatch and Post. Accepted events call `native_mouse_button_post(button, pressed, modifiers)` after dispatch, including screen handlers' early returns. Synthetic pad/focus clicks skip both hooks. Existing screen-specific hooks remain. Bundles need "hooks": 114.
 
 API 115 adds a player respawning: `native_player_respawned(player, name)` is heard once at the end of `PlayerList.respawn`, with the player placed and their health, food and experience reset (NeoForge's `PlayerRespawnEvent`), on a server, with their state swapped in so the helpers reach them. Bundles that use it need `"hooks": 115`.
 
@@ -1010,7 +1008,7 @@ API 116 adds a client mod's view and items: `native_raycast(distance)` and `nati
 
 API 117 adds `native_render_fog(partial, camera, fog_type, fog)` adjusts final FogData after normal environment/effect/render-distance calculation and Horizon's fog option, before GPU upload. Title panoramas skip it. The whole request is accepted only when color components are finite in 0..=1, all distances are finite, environmental and render-distance ends exceed their starts, and sky/cloud ends are nonnegative. Negative near planes remain valid (water/lava). Invalid requests retain the original whole fog. Bundles need "hooks": 117.
 
-API 118 adds `native_screen_key_released_pre(screen, key, modifiers, canceled)` runs before a named key's release reaches an open screen, with the same screen exclusions and GLFW modifier encoding as the existing key-press hook. It does not fire for presses/repeats or unnamed keys. Cancel bypasses screen handling and its legacy native_key notification, but physical key removal and mapped keyboard/toggle releases still happen to prevent stuck inputs. Mouse mappings retain their existing gameplay-only gate. Bundles need "hooks": 118.
+API 118 adds `native_screen_key_released_pre(screen, key, modifiers, canceled)` runs before a named key's release reaches an open screen, with the same screen exclusions and GLFW modifier encoding as the existing key-press hook. It does not fire for presses/repeats or unnamed keys. Cancel bypasses screen handling, but physical key removal and mapped keyboard/toggle releases still happen to prevent stuck inputs. Mouse mappings retain their existing gameplay-only gate. Bundles need "hooks": 118.
 
 API 119 adds music for client mods: `native_music(music, volume)` changes the track the music manager plays and its volume each
 tick, and `native_music_layers(layers)` lists looping tracks played over it, each easing to its own volume (stems that
@@ -1018,7 +1016,7 @@ grow fuller). Bundles that use them need `"hooks": 119`.
 
 API 120 adds a server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player (NeoForge asks per joining player); Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types. Bundles need "hooks": 120.
 
-API 121 adds `native_input_key(event, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats. event is the original winit::event::KeyEvent with physical/logical key, location, text, state and repeat; modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad/focus/control-socket input retains its existing native_key route. The legacy native_key hook is unchanged. Bundles need "hooks": 121.
+API 121 adds `native_input_key(event, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats. event is the original winit::event::KeyEvent with physical/logical key, location, text, state and repeat; modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events. Bundles need "hooks": 121.
 
 API 122 adds `native_mouse_scrolling(scroll, accumulated, buttons, cursor, modifiers, canceled)` fires with a player in gameplay and no open screen/prompt/sleeping UI, after accumulation and before hotbar/spectator handling, including when no whole step has accumulated. scroll is x/y after discrete/sensitivity scaling (touchpad pixels normalized by 30), accumulated is the whole x/y pair, buttons are physical left/middle/right, cursor is the GUI position, and modifiers use GLFW bits. Cancel skips gameplay scrolling; accumulated whole steps remain consumed. Synthetic input follows the same gameplay scroll path; screen-scroll hooks are unchanged. Bundles need "hooks": 122.
 
@@ -1281,8 +1279,6 @@ API 229 adds A furnace finishes smelting `item` into `result` at `pos` (`native_
 
 API 230 adds A furnace begins cooking `item` at `pos` when its cooking timer first advances (`native_furnace_start_smelt`). Bundles need "hooks": 230.
 
-API 231 adds A generic world game event fired at `pos`: `native_game_event(event, pos)` reports its registered event id and position, whether or not vibration listeners are nearby. Bundles need "hooks": 231.
-
 API 232 adds A hopper is about to pick up a dropped stack: `native_hopper_pickup_item(dimension, pos, item, count, cancel)` names its position and stack. Set `cancel` to leave the item in the world. Bundles need "hooks": 232.
 
 API 233 adds `native_inventory_block_start(player, name, pos, cancel)` runs before a guest opens an inventory supplied by a block at `pos`. Set `cancel` to leave it closed; the guest's state is not swapped in. Bundles need "hooks": 233.
@@ -1313,8 +1309,6 @@ API 245 adds `native_world_border_bounds_changed()` is told after `/worldborder 
 
 API 246 adds `native_world_border_center_changed()` is told after `/worldborder center` moves the border center. It hears successful commands only. Bundles need "hooks": 246.
 
-API 247 adds `native_world_game_rule_change(player, name, rule, value)` is told after an operator changes a world game rule through the server's game rule screen, with its final value. Bundles need "hooks": 247.
-
 API 249 adds A server player completed an advancement after progress was recorded; `advancement` is its identifier, such as `minecraft:story/mine_stone`. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 249.
 
 API 250 adds A server player's main-hand punch swing and attack-strength reset have happened: `native_player_attack_cooldown_reset(player, name)`. Helpers looking up the player through `self.lan` may find nothing during a guest packet. Bundles need "hooks": 250.
@@ -1336,7 +1330,6 @@ API 258 adds A server player threw an egg after its projectile was launched and 
 
 API 259 adds A server player used a firework rocket to boost while gliding, after the rocket was launched and consumed. Bundles need "hooks": 259.
 
-API 260 adds A server player's experience points from an orb pickup: `native_player_exp_change(player, name, amount)` is called after mending has taken its share and before the remaining points are added. Change `amount` to change the points added; negative values become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Command experience changes use another path and are not heard. Bundles need "hooks": 260.
 
 API 261 adds A server player's XP orb pickup cooldown changed, after its new value is stored (`native_player_exp_cooldown_change(player, name, ticks)`). Bundles need "hooks": 261.
 
@@ -1390,8 +1383,6 @@ API 285 adds The server synced changed motion to a player: `native_player_veloci
 API 286 adds `native_portal_create(dimension, pos)` is told after a Nether portal for dimension travel or the End arrival platform has been built, with its dimension and lower corner or platform origin. Bundles need "hooks": 286.
 
 API 287 adds A thrown splash or lingering potion finished applying its hit effects; the hook reports the potion item and impact position. Experience bottles are excluded. Bundles need "hooks": 287.
-
-API 289 adds A grindstone result was prepared: `native_prepare_grindstone(player, name, pos, result)` is called for a server player at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 289.
 
 API 290 adds A crafting-grid result was prepared: `native_prepare_item_craft(player, name, pos, result)` is called for the inventory grid (None) or a table at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 290.
 
@@ -1792,9 +1783,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
   `mixins/<id>/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
   The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
   `horizon-native.json`. `revoked.toml` takes a bad release down.
-  A content mod's entry may turn `native-mod` once (never back): its `.hmod` versions stay published and
-  are checked as `.hmod`s, the index lists only its versions with native code, and the launcher's update keeps the
-  player's `.hmod` (the game runs it until a native build has the mod, then skips it); removing the mod removes both.
+  A project's kind never changes.
 - **Isolation of data.** Native mods run only in the instance they are installed in, with its worlds, options and
   logs (the default Horizon instance's, when they are installed there); other instances play their own versions.
 - What this does not do: sandbox the compiled game. horizon-mixins' checks stop mistakes, not a malicious helper
@@ -1964,10 +1953,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   keep the old slot; the client is sent that slot again.
 - **`native_furnace_burn(pos, fuel)`**: a furnace consumed `fuel` and started burning at `pos`.
 - **`native_furnace_smelt(pos, item, result)`**: a furnace finished smelting `item` into `result` at `pos`.
-- **`native_player_exp_change(player, name, amount)`**: a server player's experience points from an orb pickup are
-  about to be added, after mending has taken its share. Change `amount` to change the points added; negative values
-  become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing
-  while a guest packet is being handled. Command experience changes use another path and are not heard.
 - **`native_player_item_cooldown(player, name, item, ticks, cancel)`**: an item cooldown is about to start for a
   server player, including a used item's cooldown and a shield disabled by a hit. `item` is the item id and `ticks`
   its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound.
@@ -2202,7 +2187,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_prepare_item_enchant(player, name, pos, costs)`**: enchanting offers were calculated at `pos`; change the three offer costs before they are sent to the player's menu. Guest state is not swapped in.
 - **`native_anvil_craft_pre(player, name, pos, craft, cancel)`**: a player took an anvil's result at `pos` (NeoForge's `AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` has the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Fires on the server only; the window's predicted take does not call it.
 - **`native_anvil_craft_post(player, name, pos, craft)`**: the levels, inputs and anvil wear of that take are done (NeoForge's `AnvilCraftEvent.Post`); a broken anvil is already air. `craft` is the same as in `native_anvil_craft_pre`. Not called when it cancelled.
-- **`native_prepare_grindstone(player, name, pos, result)`**: a grindstone result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
 - **`native_prepare_smithing(player, name, pos, result)`**: a smithing result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
 - **`native_prepare_item_craft(player, name, pos, result)`**: a crafting-grid result was prepared; `pos` is the crafting table, or None for the player's inventory grid. Change it before it is sent to the menu. Guest state is not swapped in.
 - **`native_trade_select(player, name, villager, index)`**: a player selected offer `index` in a villager's trading menu; `villager` is its entity id when known. The menu has updated and the player's state is not swapped in.
@@ -2224,7 +2208,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `"hooks": 308`.
 - **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": 245`.
 - **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": 246`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": 247`.
 - **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": 244`.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": 286`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
@@ -2232,7 +2215,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_world_saved(wait)`**: the server completed its world save cycle; `wait` is true when chunk writes were flushed before returning.
 - **`native_entities_load(dimension, chunk, count)`**: saved entity records for `chunk` finished loading into `dimension`.
 - **`native_entities_unload(dimension, chunk, count)`**: entities in `chunk` left the active world and were queued for saving.
-- **`native_game_event(event, pos)`**: a generic world game event was fired at `pos`, including events with no nearby vibration listeners.
 - **`native_tab_complete(player, name, command, range, suggestions)`**: a guest's server completion request was evaluated; mods may add or filter suggestions. `range` is the replaced byte range. Guest state is not swapped in, and helpers that look through `self.lan` may find nothing while the guest packet is handled.
 - **`native_broadcast_message(line, cancel)`**: a system broadcast line is about to be logged and sent to every player. A mod may change `line` or set `cancel` to drop the broadcast.
 - **`native_whitelist_state_update(enabled)`**: the dedicated server's player whitelist was enabled or disabled.
@@ -2961,7 +2943,7 @@ a mod's own tests drive a hook through its dispatch function ([Testing a trait m
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
-the same mod: for example, `set_block` fires `block_changed`. Mods keep mutable
+the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods keep mutable
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
