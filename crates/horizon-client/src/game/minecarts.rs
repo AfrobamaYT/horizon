@@ -1007,7 +1007,7 @@ impl Game<'_> {
                 c.velocity = v;
                 v = self.natural_slowdown(c, ridden, 0.975);
                 if v.length_squared() > 0.0 {
-                    let speed = v.length().min(self.cart_max_speed(c));
+                    let speed = v.length().min(self.max_speed_new(c));
                     v = v.normalize().scale(speed);
                 }
             }
@@ -1142,7 +1142,11 @@ impl Game<'_> {
     }
     /// `comeOffTrack`.
     fn come_off_track(&self, c: &mut Minecart) {
-        let max = self.cart_max_speed(c);
+        let max = if self.minecart_improvements() {
+            self.max_speed_new(c)
+        } else {
+            self.max_speed(c)
+        };
         c.velocity.x = c.velocity.x.clamp(-max, max);
         c.velocity.z = c.velocity.z.clamp(-max, max);
         if c.on_ground {
@@ -1196,8 +1200,13 @@ impl Game<'_> {
         c.previous = c.position;
         c.previous_yaw = c.yaw;
         c.previous_pitch = c.pitch;
-        c.hurt_time = (c.hurt_time - 1).max(0);
-        c.damage = (c.damage - 1.0).max(0.0);
+        // AbstractMinecart.tick: each counts down only while positive.
+        if c.hurt_time > 0 {
+            c.hurt_time -= 1;
+        }
+        if c.damage > 0.0 {
+            c.damage -= 1.0;
+        }
         // NewMinecartBehavior.tick snaps a newly created cart before gravity.
         if self.minecart_improvements() && c.first_tick {
             let pos = self.rail_block(c.position);
@@ -1352,6 +1361,8 @@ impl Game<'_> {
         }
         c.fuse = 80;
         let at = [c.position.x, c.position.y, c.position.z];
+        // MinecartTNT.primeFuse: clients start their own countdown.
+        self.lan_entity_event(c.id as i32, 70, at);
         self.audio
             .play("minecraft:entity.tnt.primed", Some(at), 1.0, 1.0);
     }
@@ -1688,10 +1699,13 @@ impl Game<'_> {
                 continue;
             };
             let mut c = self.carts[i].clone();
+            // Writes a mod makes to this cart while it ticks are kept here.
+            self.native_cart_writes = Some((id, Vec::new()));
             let alive = self.tick_cart(&mut c, [0.0; 2]);
             if c.kind == CartKind::Hopper && c.enabled {
                 self.hopper_cart_suck(&mut c);
             }
+            let writes = self.native_cart_writes.take().map(|w| w.1);
             let Some(i) = cart_at(&self.carts, id, i) else {
                 self.native_tick_post_one(&round, id, kind);
                 continue;
@@ -1699,6 +1713,9 @@ impl Game<'_> {
             if alive {
                 let due = std::mem::take(&mut c.command_due);
                 self.carts[i] = c;
+                for write in writes.into_iter().flatten() {
+                    write.apply(&mut self.carts[i]);
+                }
                 if due {
                     self.perform_cart_command(id);
                 }
@@ -2023,10 +2040,13 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|s| matches!(&*s.item, "minecraft:coal" | "minecraft:charcoal"));
                 let c = &mut self.carts[i];
-                if fuel && c.fuel + 3600 <= 32000 {
-                    c.fuel += 3600;
-                    let p = self.player.as_ref().map_or(c.position, |p| p.position);
-                    c.push = Vec3::new(c.position.x - p.x, 0.0, c.position.z - p.z);
+                // Java int arithmetic: a mod can set any fuel.
+                if fuel && let Some(next) = furnace_fuel_after(c.fuel) {
+                    c.fuel = next;
+                    if c.fuel > 0 {
+                        let p = self.player.as_ref().map_or(c.position, |p| p.position);
+                        c.push = Vec3::new(c.position.x - p.x, 0.0, c.position.z - p.z);
+                    }
                     if !self.creative {
                         self.consume_held();
                     }
@@ -2688,6 +2708,13 @@ fn tnt_ignites_by_collision(horizontal_collision: bool, speed_sqr: f64) -> bool 
 /// the cast: HotSpot's atan2, multiplied then divided in Java's order.
 fn java_degrees(y: f64, x: f64) -> f64 {
     horizon_core::jmath::atan2(y, x) * 180.0 / std::f64::consts::PI
+}
+
+/// `MinecartFurnace.addFuel`: Java int arithmetic, so a fuel a mod set near
+/// `i32::MAX` wraps negative and takes more.
+pub(super) fn furnace_fuel_after(fuel: i32) -> Option<i32> {
+    let next = fuel.wrapping_add(3600);
+    (next <= 32000).then_some(next)
 }
 
 /// `MinecartFurnace.getMaxSpeed`: half the behavior's speed, three quarters

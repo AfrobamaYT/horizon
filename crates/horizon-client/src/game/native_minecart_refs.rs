@@ -6,6 +6,40 @@ use super::{
 };
 use horizon_client::mod_api::{EntityRef, MinecartRef, NativeMinecartKind};
 
+/// A change a mod makes to one minecart.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum CartWrite {
+    Flipped(bool),
+    Damage(f32),
+    HurtTime(i32),
+    Fuel(i32),
+    Fuse(i32),
+    HopperEnabled(bool),
+}
+
+impl CartWrite {
+    /// The only kind of cart the write fits, if it is kind-specific.
+    fn kind(self) -> Option<CartKind> {
+        match self {
+            Self::Fuel(_) => Some(CartKind::Furnace),
+            Self::Fuse(_) => Some(CartKind::Tnt),
+            Self::HopperEnabled(_) => Some(CartKind::Hopper),
+            Self::Flipped(_) | Self::Damage(_) | Self::HurtTime(_) => None,
+        }
+    }
+
+    pub(super) fn apply(self, cart: &mut Minecart) {
+        match self {
+            Self::Flipped(flipped) => cart.flipped = flipped,
+            Self::Damage(damage) => cart.damage = damage,
+            Self::HurtTime(ticks) => cart.hurt_time = ticks,
+            Self::Fuel(fuel) => cart.fuel = fuel,
+            Self::Fuse(fuse) => cart.fuse = fuse,
+            Self::HopperEnabled(enabled) => cart.enabled = enabled,
+        }
+    }
+}
+
 impl Game<'_> {
     fn native_minecart_index(&self, cart: MinecartRef) -> Option<usize> {
         let Target::Cart(id) = self.native_entity_target(cart.entity())? else {
@@ -18,21 +52,27 @@ impl Game<'_> {
         self.carts.get(self.native_minecart_index(cart)?)
     }
 
-    /// Edits a cart of one kind in place; false for another kind or a handle
-    /// that no longer resolves.
-    fn native_minecart_edit(
-        &mut self,
-        cart: MinecartRef,
-        kind: CartKind,
-        edit: impl FnOnce(&mut Minecart),
-    ) -> bool {
+    /// Writes to a cart. While that cart is ticking (a mod's callback inside
+    /// its tick) the tick's copy replaces the stored cart afterwards, so the
+    /// write is kept and applied again then. False for a kind the write does
+    /// not fit, or a handle that no longer resolves.
+    fn native_minecart_write(&mut self, cart: MinecartRef, write: CartWrite) -> bool {
         let Some(index) = self.native_minecart_index(cart) else {
             return false;
         };
-        if self.carts[index].kind != kind {
+        if write
+            .kind()
+            .is_some_and(|kind| self.carts[index].kind != kind)
+        {
             return false;
         }
-        edit(&mut self.carts[index]);
+        write.apply(&mut self.carts[index]);
+        let id = self.carts[index].id;
+        if let Some((ticking, writes)) = &mut self.native_cart_writes
+            && *ticking == id
+        {
+            writes.push(write);
+        }
         true
     }
 
@@ -76,11 +116,7 @@ impl Game<'_> {
 
     /// `AbstractMinecart.setFlipped`; saved as `FlippedRotation`, not synced.
     pub(super) fn native_minecart_set_flipped(&mut self, cart: MinecartRef, flipped: bool) -> bool {
-        let Some(index) = self.native_minecart_index(cart) else {
-            return false;
-        };
-        self.carts[index].flipped = flipped;
-        true
+        self.native_minecart_write(cart, CartWrite::Flipped(flipped))
     }
 
     /// `VehicleEntity.getDamage`, the wobble damage (`DATA_ID_DAMAGE`).
@@ -88,13 +124,10 @@ impl Game<'_> {
         Some(self.native_minecart(cart)?.damage)
     }
 
-    /// `VehicleEntity.setDamage`: synced to clients.
+    /// `VehicleEntity.setDamage`: synced to clients. The tick counts it down
+    /// only while positive.
     pub(super) fn native_minecart_set_damage(&mut self, cart: MinecartRef, damage: f32) -> bool {
-        let Some(index) = self.native_minecart_index(cart) else {
-            return false;
-        };
-        self.carts[index].damage = damage;
-        true
+        self.native_minecart_write(cart, CartWrite::Damage(damage))
     }
 
     /// `VehicleEntity.getHurtTime`, the wobble ticks (`DATA_ID_HURT`).
@@ -104,11 +137,7 @@ impl Game<'_> {
 
     /// `VehicleEntity.setHurtTime`: synced to clients.
     pub(super) fn native_minecart_set_hurt_time(&mut self, cart: MinecartRef, ticks: i32) -> bool {
-        let Some(index) = self.native_minecart_index(cart) else {
-            return false;
-        };
-        self.carts[index].hurt_time = ticks;
-        true
+        self.native_minecart_write(cart, CartWrite::HurtTime(ticks))
     }
 
     /// `MinecartFurnace`'s fuel ticks; None for another kind of cart.
@@ -117,12 +146,11 @@ impl Game<'_> {
         (cart.kind == CartKind::Furnace).then_some(cart.fuel)
     }
 
-    /// Sets a furnace minecart's fuel ticks. Vanilla saves it as a short, so a
-    /// value outside that range is refused; so is another kind of cart. The
-    /// lit flag (`DATA_ID_FUEL`) follows with fuel above zero.
+    /// Sets a furnace minecart's fuel ticks, any int as vanilla's field holds
+    /// it (saved as a short, the low 16 bits). False for another kind of cart.
+    /// The lit flag (`DATA_ID_FUEL`) follows with fuel above zero.
     pub(super) fn native_minecart_set_fuel(&mut self, cart: MinecartRef, fuel: i32) -> bool {
-        i16::try_from(fuel).is_ok()
-            && self.native_minecart_edit(cart, CartKind::Furnace, |c| c.fuel = fuel)
+        self.native_minecart_write(cart, CartWrite::Fuel(fuel))
     }
 
     /// `MinecartTNT`'s fuse ticks, -1 when it is not primed; None for another
@@ -132,8 +160,9 @@ impl Game<'_> {
         (cart.kind == CartKind::Tnt).then_some(cart.fuse)
     }
 
-    /// `MinecartTNT.primeFuse(null)`: an 80 tick fuse and the primed sound.
-    /// False for another kind of cart, or with the `tnt_explodes` rule off.
+    /// `MinecartTNT.primeFuse(null)`: an 80 tick fuse, the primed sound and
+    /// entity event 70 for clients. False for another kind of cart, or with
+    /// the `tnt_explodes` rule off.
     pub(super) fn native_minecart_prime_fuse(&mut self, cart: MinecartRef) -> bool {
         let Some(index) = self.native_minecart_index(cart) else {
             return false;
@@ -143,8 +172,7 @@ impl Game<'_> {
         }
         let mut primed = self.carts[index].clone();
         self.prime_cart(&mut primed);
-        self.carts[index] = primed;
-        true
+        self.native_minecart_write(cart, CartWrite::Fuse(primed.fuse))
     }
 
     /// `MinecartHopper.isEnabled`; None for another kind of cart.
@@ -159,7 +187,7 @@ impl Game<'_> {
         cart: MinecartRef,
         enabled: bool,
     ) -> bool {
-        self.native_minecart_edit(cart, CartKind::Hopper, |c| c.enabled = enabled)
+        self.native_minecart_write(cart, CartWrite::HopperEnabled(enabled))
     }
 }
 
@@ -175,6 +203,20 @@ mod tests {
         game.carts.push(Minecart::new(id, kind, Vec3::ZERO));
         game.native_minecart_ref(game.native_entity(id).unwrap())
             .unwrap()
+    }
+
+    #[test]
+    fn furnace_fuel_adds_with_java_int_arithmetic() {
+        assert_eq!(super::super::minecarts::furnace_fuel_after(0), Some(3600));
+        assert_eq!(
+            super::super::minecarts::furnace_fuel_after(28_400),
+            Some(32_000)
+        );
+        assert_eq!(super::super::minecarts::furnace_fuel_after(28_401), None);
+        assert_eq!(
+            super::super::minecarts::furnace_fuel_after(i32::MAX),
+            Some(i32::MIN + 3599)
+        );
     }
 
     #[test]
@@ -243,16 +285,33 @@ mod tests {
             assert_eq!(furnace.fuel(game), Some(0));
             assert!(furnace.set_fuel(game, 3600));
             assert_eq!(furnace.fuel(game), Some(3600));
-            assert!(!furnace.set_fuel(game, 40_000));
             assert!(!tnt.set_fuel(game, 5));
             assert_eq!(tnt.fuel(game), None);
             let saved = game.carts[2].to_nbt([0; 4], None);
             assert_eq!(saved.get("Fuel"), Some(&Tag::Short(3600)));
+            // The field is an int; only the save casts to a short.
+            assert!(furnace.set_fuel(game, 40_000));
+            assert_eq!(furnace.fuel(game), Some(40_000));
+            assert_eq!(
+                game.carts[2].to_nbt([0; 4], None).get("Fuel"),
+                Some(&Tag::Short(40_000_i32 as i16))
+            );
+            assert!(furnace.set_fuel(game, i32::MIN));
+            assert_eq!(furnace.fuel(game), Some(i32::MIN));
+            assert!(furnace.set_fuel(game, 3600));
 
             // TNT fuse.
             assert_eq!(tnt.fuse(game), Some(-1));
+            game.audio.capture = Some(Vec::new());
             assert!(tnt.prime_fuse(game));
             assert_eq!(tnt.fuse(game), Some(80));
+            // MinecartTNT.primeFuse broadcasts entity event 70 for clients.
+            assert!(
+                game.lan_entity_events
+                    .iter()
+                    .any(|e| (e.0, e.1) == (tnt.entity().id() as i32, 70))
+            );
+            game.audio.capture = None;
             assert_eq!(
                 game.carts[3].to_nbt([0; 4], None).get("fuse"),
                 Some(&Tag::Int(80))
@@ -266,6 +325,26 @@ mod tests {
             assert!(!tnt.prime_fuse(game));
             assert_eq!(tnt.fuse(game), Some(-1));
 
+            // The tick counts wobble down only while positive.
+            assert!(rideable.set_hurt_time(game, i32::MIN));
+            assert!(rideable.set_damage(game, 0.0));
+            game.tick_carts();
+            assert_eq!(rideable.hurt_time(game), Some(i32::MIN));
+            assert!(rideable.set_hurt_time(game, -1));
+            assert!(rideable.set_damage(game, -0.5));
+            game.tick_carts();
+            assert_eq!(
+                (rideable.hurt_time(game), rideable.damage(game)),
+                (Some(-1), Some(-0.5))
+            );
+            assert!(rideable.set_hurt_time(game, 3));
+            assert!(rideable.set_damage(game, 2.5));
+            game.tick_carts();
+            assert_eq!(
+                (rideable.hurt_time(game), rideable.damage(game)),
+                (Some(2), Some(1.5))
+            );
+
             // Hopper.
             assert_eq!(hopper.hopper_enabled(game), Some(true));
             assert!(hopper.set_hopper_enabled(game, false));
@@ -275,6 +354,18 @@ mod tests {
             );
             assert!(!rideable.set_hopper_enabled(game, false));
             assert_eq!(rideable.hopper_enabled(game), None);
+
+            // A write while a cart ticks is kept for after its tick copy is
+            // stored over the cart (a Part callback inside the hopper's tick).
+            game.native_cart_writes = Some((14, Vec::new()));
+            assert!(hopper.set_hopper_enabled(game, true));
+            assert!(rideable.set_flipped(game, false));
+            let (_, writes) = game.native_cart_writes.take().unwrap();
+            assert_eq!(writes.len(), 1);
+            let mut ticked = game.carts[4].clone();
+            ticked.enabled = false;
+            writes[0].apply(&mut ticked);
+            assert!(ticked.enabled);
 
             let stale = MinecartRef::new(EntityRef::new(
                 NativeWorldEpoch::new(rideable.entity().epoch().get() + 1),
