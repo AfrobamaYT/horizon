@@ -581,7 +581,6 @@ mod tests {
     use super::*;
     use horizon_client::mod_api::NativeWorldEpoch;
     use horizon_core::geometry::Vec3;
-    use std::f32::consts::FRAC_1_SQRT_2;
 
     fn push(game: &mut Game<'_>, id: u32, kind: &str) -> DisplayRef {
         game.options.dedicated = Some(Vec::new());
@@ -625,7 +624,7 @@ mod tests {
             );
             let moved = NativeTransformation {
                 translation: [0.0, 1.5, 0.0],
-                left_rotation: [0.0, FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2],
+                left_rotation: [0.0, 1.0, 0.0, 0.0],
                 scale: [2.0, 2.0, 2.0],
                 right_rotation: [0.0, 0.0, 0.0, 1.0],
             };
