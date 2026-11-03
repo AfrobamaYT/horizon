@@ -2044,6 +2044,7 @@ pub(crate) mod tests {
             }
         }
         struct WeakPowerMod;
+        #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
             fn register(&self, r: &mut Registrar) {
                 r.block_part("minecraft:glass", WeakPower);
