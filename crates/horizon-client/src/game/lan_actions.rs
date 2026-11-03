@@ -1200,12 +1200,11 @@ impl Game<'_> {
     /// What reaches the players around a point (a beacon's powers, a splash
     /// potion, a warden's darkness, an elder guardian's curse) lands on each
     /// of them, not only on the host. A server has no player of its own.
-    /// Inside a guest's action (the hub taken) only that player is in place.
     pub(super) fn for_each_player(&mut self, mut f: impl FnMut(&mut Self)) {
         if self.player.is_some() {
             f(self);
         }
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return;
         };
         let conns: Vec<u32> = host
@@ -1216,9 +1215,8 @@ impl Game<'_> {
             .map(|g| g.conn)
             .collect();
         for conn in conns {
-            self.as_guest(&mut host, conn, &mut f);
+            self.as_guest(conn, &mut f);
         }
-        self.lan = Some(host);
     }
 
     /// The game mode fields without `set_mode`'s side effects on the host.
@@ -1252,11 +1250,7 @@ impl Game<'_> {
         if self.lan_acting == Some(conn) {
             hook(self);
         } else {
-            let Some(mut host) = self.lan.take() else {
-                return true;
-            };
-            self.as_guest(&mut host, conn, hook);
-            self.lan = Some(host);
+            self.as_guest(conn, hook);
         }
         !cancel
     }
@@ -1846,13 +1840,9 @@ impl Game<'_> {
         };
         let mut cancel = false;
         // With the guest's state swapped in, so that the helpers reach them.
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
-        self.as_guest(&mut host, conn, |g| {
+        self.as_guest(conn, |g| {
             g.native_player_toggle_flight(uuid, &name, flying, &mut cancel);
         });
-        self.lan = Some(host);
         if !cancel {
             return;
         }
@@ -4736,10 +4726,15 @@ impl Game<'_> {
 
     /// `PlayerList.broadcastSystemMessage` of the advancements guests made
     /// (their own actions, commands and ticks).
-    pub(super) fn announce_guest_advancements(&mut self, host: &mut LanHost) {
+    pub(super) fn announce_guest_advancements(&mut self) {
+        if self.lan.is_none() {
+            return;
+        }
         for text in std::mem::take(&mut self.adv.announced) {
-            host.hub
-                .system_message(horizon_client::lan::data::component_nbt(&text.component()));
+            if let Some(host) = self.lan.as_mut() {
+                host.hub
+                    .system_message(horizon_client::lan::data::component_nbt(&text.component()));
+            }
             if self.options.dedicated.is_none() {
                 self.system_message(text);
             }

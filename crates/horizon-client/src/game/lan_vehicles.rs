@@ -135,16 +135,12 @@ impl Game<'_> {
                 self.native_vehicle_moved(None, &kind, from, to);
                 continue;
             };
-            let Some(mut host) = self.lan.take() else {
-                continue;
-            };
             let hook = |game: &mut Self| game.native_vehicle_moved(Some(uuid), &kind, from, to);
             if self.lan_acting == Some(conn) {
                 hook(self);
             } else {
-                self.as_guest(&mut host, conn, hook);
+                self.as_guest(conn, hook);
             }
-            self.lan = Some(host);
         }
     }
 
@@ -265,10 +261,7 @@ impl Game<'_> {
         }
         // Getting out goes through leave_guest, which tells the client and
         // teleports it (ServerPlayer.dismountTo).
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
-        let seat = self.as_guest(&mut host, conn, |game| {
+        let seat = self.as_guest(conn, |game| {
             // A cushion does not move: the rider sits on it until it sneaks
             // (`Cushion.removePassenger` plays the get-up sound).
             if game.cushions.iter().any(|c| Some(c.id) == game.riding) {
@@ -299,12 +292,13 @@ impl Game<'_> {
             let p = game.player.as_ref()?.position;
             Some([p.x, p.y, p.z])
         });
-        if let Some(Some(at)) = seat {
+        if let Some(Some(at)) = seat
+            && let Some(host) = self.lan.as_mut()
+        {
             let g = &mut host.hub.guests[gi];
             g.previous_position = g.position;
             g.position = at;
         }
-        self.lan = Some(host);
     }
 
     /// After an interaction: a player that got into a vehicle sits in it,
@@ -356,22 +350,20 @@ impl Game<'_> {
             return;
         }
         // An animal: the rider sits where `positionRider` puts it.
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
-        let seat = self.as_guest(&mut host, conn, |game| {
+        let seat = self.as_guest(conn, |game| {
             game.position_rider();
             game.player
                 .as_ref()
                 .map(|p| [p.position.x, p.position.y, p.position.z])
         });
-        if let Some(Some(at)) = seat {
+        if let Some(Some(at)) = seat
+            && let Some(host) = self.lan.as_mut()
+        {
             let g = &mut host.hub.guests[gi];
             g.previous_position = g.position;
             g.position = at;
             g.on_ground = false;
         }
-        self.lan = Some(host);
     }
 
     /// `ServerGamePacketListenerImpl.handleMoveVehicle`: the boat or the

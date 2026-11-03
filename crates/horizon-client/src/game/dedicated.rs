@@ -1426,11 +1426,10 @@ impl Game<'_> {
         self.console_broadcast = Some(inform);
         self.console_command(state, line);
         self.console_broadcast = None;
-        if let Some(mut host) = self.lan.take() {
+        if let Some(host) = self.lan.as_ref() {
             crash_fixture("hub", || host.hub.guests.iter().any(|g| g.placed));
-            self.run_level_teleports(&mut host);
-            self.send_admin_feedback(&mut host, None);
-            self.lan = Some(host);
+            self.run_level_teleports();
+            self.send_admin_feedback(None);
         }
         self.admin_feedback.clear();
     }

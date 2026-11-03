@@ -646,10 +646,8 @@ impl Game<'_> {
         // guests' hooks use the ones taken as their turns start).
         if self.lan_acting.is_none()
             && matches!(h.state, State::Flying | State::Hooked(_))
-            && let Some(host) = self.lan.take()
         {
-            self.refresh_hook_targets(&host);
-            self.lan = Some(host);
+            self.refresh_hook_targets();
         }
         h.previous = h.position;
         if h.on_ground {
@@ -885,26 +883,19 @@ impl Game<'_> {
     /// pulled: their velocity moves, and a guest's reaches their client.
     pub(super) fn flush_hook_pulls(&mut self) {
         let pulls = std::mem::take(&mut self.creatures.hook_pulls);
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
         for (id, delta) in pulls {
             let push = |g: &mut Self| {
                 if let Some(p) = g.player.as_mut() {
                     p.velocity = p.velocity.add_vector(delta);
                 }
             };
-            if let Some(conn) = host
-                .hub
-                .guests
-                .iter()
+            let conn = self.lan.as_ref().and_then(|host| host.hub.guests.iter()
                 .find(|g| g.entity_id as u32 == id)
-                .map(|g| g.conn)
-            {
-                self.guest_hit_by(&mut host, conn, push);
+                .map(|g| g.conn));
+            if let Some(conn) = conn {
+                self.guest_hit_by(conn, push);
             }
         }
-        self.lan = Some(host);
     }
     /// `FishingRodCast`: the stack in the arm holding the rod
     /// (`FishingHookRenderer.getHoldingArm`) while the hook is out.
