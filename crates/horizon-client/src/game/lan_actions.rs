@@ -2742,8 +2742,10 @@ impl Game<'_> {
                     if d2 >= range * range {
                         return None;
                     }
+                    // The block's item, a part's in its place, then the block
+                    // entity's data on whichever won (addBlockDataToItem).
                     let include_data = g.creative && p.include_data;
-                    let stack = g.picked_stack(p.pos, include_data);
+                    let stack = g.clone_stack(p.pos, include_data);
                     let state = g.world.block(p.pos[0], p.pos[1], p.pos[2]);
                     let mut replacement = None;
                     g.native_clone_item_stack(
@@ -2754,7 +2756,11 @@ impl Game<'_> {
                         include_data,
                         &mut replacement,
                     );
-                    replacement.or(stack)
+                    let mut stack = replacement.or(stack)?;
+                    if include_data {
+                        g.add_block_data(p.pos, &mut stack);
+                    }
+                    Some(stack)
                 });
             }
             // handlePickItemFromEntity.
@@ -5646,6 +5652,7 @@ mod tests {
             fn register(&self, r: &mut Registrar) {
                 r.block_part("minecraft:stone", Picker(self.0.clone()));
                 r.block_part("minecraft:beehive", Picker(self.0.clone()));
+                r.block_part("minecraft:chest", Picker(self.0.clone()));
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -5663,6 +5670,7 @@ mod tests {
                 let state = |name| game.pack.assets.registry.default_state(name).unwrap();
                 let stone = state("minecraft:stone");
                 let crop = state("minecraft:wheat");
+                let chest = state("minecraft:chest");
                 game.world.set(0, 64, 0, stone).unwrap();
                 game.world.set(1, 64, 0, crop).unwrap();
                 let settings = LanSettings {
@@ -5753,6 +5761,34 @@ mod tests {
                 );
                 assert_eq!(*seen.lock().unwrap(), [true, false]);
 
+                // addBlockDataToItem runs on the part's item: a chest picked with
+                // its data gives the part's diamond carrying the chest's contents.
+                game.world.set(3, 64, 0, chest).unwrap();
+                let mut slots = vec![None; 27];
+                slots[0] = Some(horizon_client::items::ItemStack::new("minecraft:apple", 2));
+                game.world.block_entities.insert(
+                    (3, 64, 0),
+                    horizon_client::containers::BlockEntity::Chest(slots),
+                );
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {
+                        pos: [3, 64, 0],
+                        include_data: true,
+                    }),
+                );
+                let guest = &host.hub.guests[0];
+                let picked = guest.inventory[guest.selected].as_ref().unwrap();
+                assert_eq!(&*picked.item, "minecraft:diamond");
+                let Some(horizon_world::nbt::Tag::Compound(components)) =
+                    horizon_client::item_data::encode_components(picked)
+                else {
+                    panic!("the chest's data is on the diamond");
+                };
+                assert!(components.contains_key(&"minecraft:container".into()));
+                assert_eq!(*seen.lock().unwrap(), [true, false, true]);
+
                 let hive = game
                     .pack
                     .assets
@@ -5772,7 +5808,7 @@ mod tests {
                         .iter()
                         .any(|item| &*item.stack.item == "minecraft:beehive")
                 );
-                assert_eq!(*seen.lock().unwrap(), [true, false]);
+                assert_eq!(*seen.lock().unwrap(), [true, false, true]);
             })
         });
     }
