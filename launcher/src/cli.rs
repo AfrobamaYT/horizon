@@ -1071,7 +1071,6 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
                         .ok_or_else(|| format!("{value}: say performance, dev or release"))?,
                 ),
             };
-            s.native_release = false;
         }
         "proxy" => {
             if value == "default" || value.is_empty() {
