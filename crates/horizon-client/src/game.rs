@@ -6478,9 +6478,7 @@ impl Game<'_> {
             || self.interact_cushion(target)
             || self.interact_boat(target)
             || self.interact_cart(target)
-            || self.interact_mob(target)?
-            // A guest's Interact naming a knot's id goes to `use_knot` before this.
-            || target.is_none() && self.interact_knot())
+            || self.interact_mob(target)?)
     }
     /// `ItemStack.applyAfterUseComponentSideEffects`: a used stack with a
     /// `use_cooldown` component starts its entry (`UseCooldown.apply`). A
@@ -6557,104 +6555,112 @@ impl Game<'_> {
                 }
             }
         }
-        // A fence click reaches the hook before attaching a lead.
-        if on_block
-            && (self.hand == Hand::Main && use_block.or(!(sneaking && hands_full))
-                || use_item.or(true)
-                    && self
-                        .held()
-                        .is_some_and(|stack| &*stack.item == "minecraft:lead"))
-            && self.interact_knot()
-        {
-            return Ok(true);
-        }
-        // MultiPlayerGameMode.useItemOn: blocks react first.
+        // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates,
+        // BlockState.useItemOn runs before every block-specific behaviour.
         if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
-            if self.use_on_cauldron(hit.pos)? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if let Some(placed) = self.use_on_campfire(hit.pos)? {
-                if placed {
-                    self.swing_arm();
+            let mut block_answer = None;
+            if !horizon_client::mod_api::mods().is_empty() {
+                let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+                if !horizon_client::mod_api::parts("use_item_on")
+                    .block_state(state)
+                    .is_empty()
+                {
+                    let click = self.block_click(hit, self.hand, held.as_ref());
+                    self.native_use_item_on(state, &click, &mut block_answer);
                 }
-                return Ok(true);
             }
-            if self.use_lectern(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_sign_applicator(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_golem_statue(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_jukebox(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if let Some(swings) = self.use_shelf(hit) {
-                let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
-                if swings {
-                    self.swing_arm();
+            let mut chains_sign = false;
+            if block_answer.is_none() {
+                // FenceBlock.useWithoutItem binds the player's mobs after its default
+                // useItemOn returned TRY_WITH_EMPTY_HAND.
+                if self.hand == Hand::Main && self.interact_knot() {
+                    return Ok(true);
                 }
-                return Ok(true);
-            }
-            if let Some(swings) = self.use_chiseled_bookshelf(hit, held.as_ref()) {
-                if swings {
-                    self.swing_arm();
-                }
-                return Ok(true);
-            }
-            if self.use_composter(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_vault(hit.pos, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_decorated_pot(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_pumpkin(hit.pos, hit.face, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_beehive(hit.pos, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_campfire_douse(hit, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_redstone_ore(hit.pos, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            match self.use_respawn_anchor(hit.pos, held.as_ref())? {
-                respawn_anchor::AnchorUse::Charged => {
+                if self.use_on_cauldron(hit.pos)? {
                     self.swing_arm();
                     return Ok(true);
                 }
-                // The main hand passes; its item is used, then the off hand's glowstone.
-                respawn_anchor::AnchorUse::Pass => anchor_passed = true,
-                respawn_anchor::AnchorUse::Other => {}
-            }
-            // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the
-            // underside passes, so the next sign chains below instead of
-            // opening the editor, unless the side has click commands to run
-            // (`shouldTryToChainAnotherHangingSign`).
-            let chains_sign = hit.face == [0, -1, 0]
+                if let Some(placed) = self.use_on_campfire(hit.pos)? {
+                    if placed {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if self.use_lectern(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_sign_applicator(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_golem_statue(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_jukebox(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if let Some(swings) = self.use_shelf(hit) {
+                    let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
+                    if swings {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if let Some(swings) = self.use_chiseled_bookshelf(hit, held.as_ref()) {
+                    if swings {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if self.use_composter(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_vault(hit.pos, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_decorated_pot(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_pumpkin(hit.pos, hit.face, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_beehive(hit.pos, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_campfire_douse(hit, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_redstone_ore(hit.pos, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                match self.use_respawn_anchor(hit.pos, held.as_ref())? {
+                    respawn_anchor::AnchorUse::Charged => {
+                        self.swing_arm();
+                        return Ok(true);
+                    }
+                    // The main hand passes; its item is used, then the off hand's glowstone.
+                    respawn_anchor::AnchorUse::Pass => anchor_passed = true,
+                    respawn_anchor::AnchorUse::Other => {}
+                }
+                // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the
+                // underside passes, so the next sign chains below instead of
+                // opening the editor, unless the side has click commands to run
+                // (`shouldTryToChainAnotherHangingSign`).
+                chains_sign = hit.face == [0, -1, 0]
                 // `instanceof HangingSignItem`, independent of the item's name.
                 && held.as_ref().is_some_and(|s| {
                     self.res.behaviours().item_binding(&s.item)
@@ -6672,11 +6678,24 @@ impl Game<'_> {
                     Some(BlockEntity::Sign(_))
                 )
                 && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
-            let mut block_answer = None;
-            if !anchor_passed && !chains_sign && !horizon_client::mod_api::mods().is_empty() {
-                let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-                let click = self.block_click(hit, self.hand, held.as_ref());
-                self.native_use_item_on(state, &click, &mut block_answer);
+            }
+            // These game-owned behaviours combine both methods. The item override
+            // skipped their useItemOn; TRY_WITH_EMPTY_HAND still runs their empty use.
+            if block_answer == Some(Answer::TryWithEmptyHand) && self.hand == Hand::Main {
+                if self.interact_knot() {
+                    self.trigger_default_block_use(hit.pos);
+                    return Ok(true);
+                }
+                if self.use_jukebox(hit.pos, None) || self.use_decorated_pot(hit.pos, None) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if let Some(swings) = self.use_chiseled_bookshelf(hit, None) {
+                    if swings {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
             }
             // TRY_WITH_EMPTY_HAND: only the main hand's turn uses the block
             // itself (useWithoutItem). The block's item behaviour hears both hands.
@@ -6846,6 +6865,11 @@ impl Game<'_> {
         }
         if claimed {
             self.swing_arm();
+            return Ok(true);
+        }
+        // LeadItem.useOn follows the block and the item's override, including
+        // when sneaking bypassed the block's useWithoutItem.
+        if block_hit.is_some() && &*stack.item == "minecraft:lead" && self.interact_knot() {
             return Ok(true);
         }
         // ItemStack.useOn: after the block's own useItemOn/useWithoutItem
