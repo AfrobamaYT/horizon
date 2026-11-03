@@ -5650,6 +5650,7 @@ mod tests {
             }
         }
         struct Mod(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut Registrar) {
                 r.block_part("minecraft:stone", Picker(self.0.clone()));

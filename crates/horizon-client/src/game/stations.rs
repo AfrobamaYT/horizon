@@ -3090,8 +3090,10 @@ mod tests {
         };
 
         struct DefaultMod;
+        #[mod_api::__subscriptions]
         impl Hooks for DefaultMod {}
         struct Listener(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Listener {
             fn anvil_update(&self, _: &mut dyn Host, _: &mut AnvilUpdateEvent<'_>) -> Flow {
                 self.0.fetch_add(1, Ordering::Relaxed);

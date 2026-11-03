@@ -7965,6 +7965,7 @@ mod mob_subscription_tests {
     fn empty_mod_stops_deferring_after_each_default_handler() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
+        #[mod_api::__subscriptions]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
         mod_api::testing::with_mods(mods, || {
@@ -8625,8 +8626,10 @@ mod conversion_subscriber_tests {
     #[ignore = "needs prepared resources"]
     fn post_only_listener_survives_pre_pruning() {
         struct DefaultMod;
+        #[mod_api::__subscriptions]
         impl Hooks for DefaultMod {}
         struct PostOnly(Arc<Mutex<Vec<(u32, u32)>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for PostOnly {
             fn living_conversion_post(
                 &self,
