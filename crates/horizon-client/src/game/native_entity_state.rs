@@ -83,11 +83,13 @@ impl Game<'_> {
     pub(super) fn native_entity_is_crouching(&self, entity: EntityRef) -> Option<bool> {
         Some(self.native_entity_pose(entity)? == "crouching")
     }
-    /// Whether the player sprints (`Entity.isSprinting`); false for the
-    /// other kinds. API @API:entity_state@.
+    /// Whether the entity sprints (`Entity.isSprinting`): a player, or a
+    /// cat or ocelot dashing after its target (their shared sprinting flag);
+    /// false for the other kinds. API @API:entity_state@.
     pub(super) fn native_entity_is_sprinting(&self, entity: EntityRef) -> Option<bool> {
         Some(match self.native_entity_body(entity)? {
             Body::Player(p) => p.sprinting,
+            Body::Mob(m) => m.extra.sprinting,
             _ => false,
         })
     }
