@@ -2381,7 +2381,7 @@ pub struct SaveDir {
     outstanding: Arc<Outstanding>,
     /// Set by `Persistent` before the first load.
     pub tables: OnceLock<Arc<SaveTables>>,
-    loot: Mutex<Option<Arc<horizon_world::loot::LootData>>>,
+    loot: crate::structure_blocks::LootSnapshot,
     /// The dimension's skylight and height, from its folder name.
     pub shape: LevelShape,
     /// Which chunks each region file holds, for far terrain (`lod_saved`).
@@ -2479,16 +2479,16 @@ impl SaveDir {
             writer: Mutex::new(None),
             outstanding: Default::default(),
             tables: OnceLock::new(),
-            loot: Mutex::new(None),
+            loot: Default::default(),
             shape,
             lod_regions: Default::default(),
             lod_decoded: Default::default(),
             datafix_context: OnceLock::new(),
         }
     }
-    /// Publish the server loot snapshot used by this dimension's chunk readers.
-    pub fn set_loot(&self, loot: Option<Arc<horizon_world::loot::LootData>>) {
-        *self.loot.lock().unwrap_or_else(|e| e.into_inner()) = loot;
+    /// Share the world's loot snapshot with this dimension's chunk readers.
+    pub fn set_loot_source(&mut self, loot: crate::structure_blocks::LootSnapshot) {
+        self.loot = loot;
     }
 
     /// 26.3's TicketStorage: persistent tickets live in each dimension's
@@ -2666,7 +2666,7 @@ impl SaveDir {
     pub fn load(&self, x: i32, z: i32, registry: &BlockRegistry, biomes: &Biomes) -> Option<Chunk> {
         let root = self.read_record("region", x, z)?;
         let tables = self.tables.get().map(|t| &**t);
-        let loot = self.loot.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let loot = self.loot.get();
         let mut chunk = decode_with_loot(
             &root,
             registry,
@@ -2709,7 +2709,7 @@ impl SaveDir {
             root
         };
         let tables = self.tables.get().map(|t| &**t);
-        let loot = self.loot.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let loot = self.loot.get();
         let mut chunk = decode_with_loot(
             &root,
             registry,

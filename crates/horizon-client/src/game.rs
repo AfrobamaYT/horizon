@@ -2845,7 +2845,7 @@ struct Game<'a> {
     /// keeps `Resources.rest`'s own in use).
     world_tables: Option<WorldTables>,
     /// Server-owned loot and item snapshots, independent of client preloads.
-    server_loot: Option<Arc<horizon_world::loot::LootData>>,
+    server_loot: horizon_client::structure_blocks::LootSnapshot,
     server_items: Option<Items>,
     /// The world is superflat (`ServerLevel.isFlat`, for every dimension).
     world_flat: bool,
@@ -4672,7 +4672,7 @@ impl Game<'_> {
             loot: if self.remote.is_some() {
                 None
             } else {
-                self.server_loot.clone()
+                self.server_loot.get()
             },
             registry: self.pack.assets.registry,
             rules,
@@ -12285,7 +12285,9 @@ impl Game<'_> {
             session_lock,
             rand_sequences,
             locator,
+            loot,
         } = prepared;
+        self.server_loot = loot;
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
@@ -12315,7 +12317,6 @@ impl Game<'_> {
         // Warm the loot data with this world's packs before chunks decode
         // (`save::roll_loaded_loot` reads the cached copy).
         self.load_server_loot();
-        save.set_loot(self.server_loot.clone());
         // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
         // its chunks and players are.
         self.native_server_data_loaded(false);
@@ -12659,7 +12660,7 @@ impl Game<'_> {
             return self.leave_server(None);
         }
         // The save screen has finished every write before releasing storage.
-        self.server_loot = None;
+        self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
         self.world_icon = None;
@@ -19373,7 +19374,7 @@ impl<'a> Game<'a> {
             rcon_source: false,
             server_lists: None,
             world_tables: None,
-            server_loot: None,
+            server_loot: Default::default(),
             server_items: None,
             cmds: Default::default(),
             ui: chat::UiState::new(),
@@ -19811,10 +19812,7 @@ impl Game<'_> {
             items.set_loot_tables(loot.tables().clone());
             self.server_items = Some(items);
         }
-        if let Some(terrain) = self.end.locator() {
-            terrain.set_loot(loot.clone());
-        }
-        self.server_loot = loot;
+        self.server_loot.set(loot);
     }
 
     /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
@@ -19845,8 +19843,6 @@ impl Game<'_> {
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
-        self.save.set_loot(self.server_loot.clone());
-        self.levels.set_loot(self.server_loot.clone());
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players

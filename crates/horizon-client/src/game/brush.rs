@@ -170,7 +170,7 @@ impl Game<'_> {
             "minecraft:brushable_block",
         );
         self.trigger_loot_table(&table);
-        let loot = self.server_loot.clone();
+        let loot = self.server_loot.get();
         decorated_pot::unpack_loot(
             &mut tag,
             loot.as_deref(),

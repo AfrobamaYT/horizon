@@ -127,16 +127,6 @@ pub(super) struct Levels {
 }
 
 impl Levels {
-    /// Publish a reload's loot snapshot to all parked dimensions.
-    pub(super) fn set_loot(&self, loot: Option<Arc<horizon_world::loot::LootData>>) {
-        for level in self.parked.values() {
-            level.save.set_loot(loot.clone());
-            if let Some(terrain) = &level.locator {
-                terrain.set_loot(loot.clone());
-            }
-        }
-    }
-
     /// A parked level, without opening or loading it.
     pub(super) fn parked_world(&self, dim: Dim) -> Option<&World> {
         self.parked.get(&dim).map(|level| &level.world)
@@ -192,11 +182,8 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
+            self.server_loot.clone(),
         )?;
-        save.set_loot(self.server_loot.clone());
-        if let Some(terrain) = &locator {
-            terrain.set_loot(self.server_loot.clone());
-        }
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());

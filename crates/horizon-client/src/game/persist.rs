@@ -1170,7 +1170,7 @@ impl Game<'_> {
         if cart.items.is_empty() || cart.items.iter().any(Option::is_some) {
             return;
         }
-        let loot = self.server_loot.clone();
+        let loot = self.server_loot.get();
         let p = cart.position;
         let pos = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         let biome = self.biome_name_at(p).unwrap_or_default();
