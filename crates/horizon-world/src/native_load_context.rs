@@ -43,12 +43,6 @@ impl LoadContext {
         Self { origin, inputs }
     }
 
-    /// Start another owning load over this resource generation's metadata.
-    /// Only the boundary chooses the new origin; readers borrow its context.
-    pub fn for_load(&self, origin: DataLoadOrigin) -> Self {
-        Self::new(origin, self.inputs.clone())
-    }
-
     pub fn origin(&self) -> DataLoadOrigin {
         self.origin
     }

@@ -2173,9 +2173,6 @@ impl Resources {
     fn item_defaults(&self) -> &horizon_world::item_defaults::ItemDefaults {
         self.core.item_data.defaults()
     }
-    fn load_context(&self) -> &horizon_world::native_load_context::LoadContext {
-        self.core.item_data.context()
-    }
     fn items(&self) -> &Items {
         &self.rest().items
     }
@@ -2351,12 +2348,14 @@ impl PackResources {
         facts: &BlockFacts,
         biomes: Arc<Biomes>,
         light: Arc<LightTables>,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> Result<Self> {
         let visibility = models::load_visibility(root, assets.registry)?;
         let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
             render.model_library.clone(),
+            item_data,
         )?;
         Ok(Self::assemble(
             root,
@@ -20172,10 +20171,6 @@ impl Game<'_> {
         }
         let overlay = horizon_world::loot::PackOverlay { files: &files };
         let root = &self.options.resources;
-        let context = self
-            .res
-            .load_context()
-            .for_load(self.options.execution_role.data_load_origin());
         let items = match Items::load(
             root,
             self.pack.assets.registry,
@@ -20192,7 +20187,7 @@ impl Game<'_> {
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
-        let recipes = match Recipes::load(root, &items, &overlay, &context) {
+        let recipes = match Recipes::load(root, &items, &overlay) {
             Ok(recipes) => recipes,
             Err(e) => {
                 log::warn!("Horizon: the world's data packs are not applied: {e}");
@@ -20232,17 +20227,13 @@ impl Game<'_> {
                 self.res.item_defaults(),
             )
         } else {
-            let context = self
-                .res
-                .load_context()
-                .for_load(self.options.execution_role.data_load_origin());
             match horizon_world::loot::LootData::load(
                 &self.options.resources,
                 &overlay,
                 self.res.item_defaults(),
             ) {
                 Ok(mut loot) => {
-                    loot.apply_native_table_loads(&context);
+                    loot.apply_native_table_loads();
                     Some(Arc::new(loot))
                 }
                 Err(e) => {
@@ -20299,7 +20290,7 @@ impl Game<'_> {
         let kept = self.lan.as_ref().map(|host| host.hub.lan.shared.sync());
         match kept {
             Some(kept) => {
-                match lan::reload_sync_data(&self.options.resources, &self.pack_files(), &kept) {
+                match lan::reload_sync_data(&self.res.core.item_data, &self.pack_files(), &kept) {
                     Ok(sync) => {
                         if let Some(host) = self.lan.as_mut() {
                             host.hub.reload_resources(sync);
@@ -20525,13 +20516,13 @@ fn load_core(
                         horizon_client::item_render::ItemRenderer::load_for_server(
                             root,
                             library,
-                            item_data.defaults(),
+                            item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
                             root,
                             library,
-                            item_data.defaults(),
+                            item_data,
                         )
                     }
                 })
@@ -20980,7 +20971,7 @@ fn load_world_rest(
         // hold its files so it is read once.
         let _recipe_files = horizon_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let recipes = startup::time("rest.recipes", || {
-            Recipes::load(root, &items, overlay, resources.load_context())
+            Recipes::load(root, &items, overlay)
         })?;
         let stations = startup::time("rest.stations", || {
             horizon_client::stations::StationData::load(

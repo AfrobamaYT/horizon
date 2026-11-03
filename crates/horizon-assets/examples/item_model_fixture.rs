@@ -178,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let raw: BTreeMap<String, Components> = serde_json::from_slice(&fs::read(prototypes_path)?)?;
     let mut models = ItemModels {
-        prototypes: raw,
+        prototypes: std::sync::Arc::new(raw),
         ..Default::default()
     };
     writeln!(
