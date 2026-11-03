@@ -1263,6 +1263,81 @@ pub trait Host {
         let _ = entity;
         unimplemented!("Host::entity_level")
     }
+    /// How many tanks of the block at `pos` in the level in place its side `side` reaches
+    /// (none: every tank), for the game's own fluid capability: a mod block's by its table, a
+    /// cauldron's one. None where no tanks are, as `native_fluid_tanks`.
+    fn fluid_tank_count(&self, pos: [i32; 3], side: Option<Direction>) -> Option<usize> {
+        let _ = pos;
+        let _ = side;
+        unimplemented!("Host::fluid_tank_count")
+    }
+    /// What tank `tank` of those `side` reaches at `pos` holds (`native_fluid_tank_count`).
+    fn fluid_tank(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+    ) -> Option<FluidStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        unimplemented!("Host::fluid_tank")
+    }
+    /// How much of `fluid` tank `tank` of those `side` reaches at `pos` holds when empty: a mod
+    /// block's fillable tank its capacity, a cauldron a bucket; none for another tank, a
+    /// drain-only one, or a fluid the tanks there don't take: other than water and lava, or
+    /// with components into a mod block's tanks.
+    fn fluid_tank_capacity(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        fluid: &FluidStack,
+    ) -> u32 {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        let _ = fluid;
+        unimplemented!("Host::fluid_tank_capacity")
+    }
+    /// Puts as much of `fluid` as tank `tank` of those `side` reaches at `pos` takes: a mod
+    /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
+    /// whole thirds, lava only whole into an empty one, discarding the fluid's components as
+    /// NeoForge's `CauldronFluidContent` does. What didn't fit. `simulate` changes
+    /// nothing and answers as the real call.
+    fn fluid_tank_insert(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        fluid: FluidStack,
+        simulate: bool,
+    ) -> Option<FluidStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        let _ = fluid;
+        let _ = simulate;
+        unimplemented!("Host::fluid_tank_insert")
+    }
+    /// Takes up to `max` out of tank `tank` of those `side` reaches at `pos`: a mod block's
+    /// drainable tank, a cauldron by whole thirds and lava only whole. What came out.
+    /// `simulate` changes nothing and answers as the real call.
+    fn fluid_tank_extract(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        max: u32,
+        simulate: bool,
+    ) -> Option<FluidStack> {
+        let _ = pos;
+        let _ = side;
+        let _ = tank;
+        let _ = max;
+        let _ = simulate;
+        unimplemented!("Host::fluid_tank_extract")
+    }
     /// The type id of the mod block entity at `pos` (`mymod:press`), which its capability parts
     /// are registered by. None for a vanilla block entity, for none, and for the mod block entity
     /// ticking now.
@@ -1441,6 +1516,32 @@ pub trait Host {
         let _ = stack;
         unimplemented!("Host::drop_at")
     }
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    fn level_set_block(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        let _ = level;
+        let _ = pos;
+        let _ = state;
+        let _ = flags;
+        unimplemented!("Host::level_set_block")
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    fn level_destroy_block(&mut self, level: LevelRef, pos: [i32; 3], drop: bool) -> bool {
+        let _ = level;
+        let _ = pos;
+        let _ = drop;
+        unimplemented!("Host::level_destroy_block")
+    }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -1465,6 +1566,56 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::level_entities_in")
     }
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block_state")
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block")
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        let _ = key;
+        unimplemented!("Host::level_block_property")
+    }
+    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_is_loaded")
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+        let _ = level;
+        unimplemented!("Host::level_height")
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_game_time")
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    fn level_day_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_day_time")
+    }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
     /// client, for a stale handle, or for a closed level. Unloaded blocks read
@@ -1480,6 +1631,44 @@ pub trait Host {
         let _ = pos;
         let _ = kind;
         unimplemented!("Host::level_block_shape")
+    }
+    /// The world's seed (`WorldOptions.seed`), as `/seed` shows it. API
+    /// @API:level_world@.
+    fn level_seed(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_seed")
+    }
+    /// The difficulty (`Level.getDifficulty`): `peaceful`, `easy`, `normal`
+    /// or `hard`, as `/difficulty` names it. API @API:level_world@.
+    fn level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
+        let _ = level;
+        unimplemented!("Host::level_difficulty")
+    }
+    /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
+    /// `/gamerule` queries it: None for an unknown rule. API @API:level_world@.
+    fn level_game_rule(&self, level: LevelRef, rule: &str) -> Option<GameRuleValue> {
+        let _ = level;
+        let _ = rule;
+        unimplemented!("Host::level_game_rule")
+    }
+    /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
+    /// `getThunderLevel`): both 0 in a level with no weather, as the Nether
+    /// and the End. API @API:level_world@.
+    fn level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
+        let _ = level;
+        unimplemented!("Host::level_weather")
+    }
+    /// Whether it rains (`Level.isRaining`: a rain level above 0.2). API
+    /// @API:level_world@.
+    fn level_is_raining(&self, level: LevelRef) -> Option<bool> {
+        let _ = level;
+        unimplemented!("Host::level_is_raining")
+    }
+    /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
+    /// API @API:level_world@.
+    fn level_is_thundering(&self, level: LevelRef) -> Option<bool> {
+        let _ = level;
+        unimplemented!("Host::level_is_thundering")
     }
     /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
     /// player, an armor stand or the dragon), or None for another kind or a
@@ -1601,6 +1790,25 @@ impl EntityRef {
     }
 }
 impl LevelRef {
+    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
+    /// stale handles, clients and unloaded or out-of-height positions return
+    /// false. Client-update and client-render flags are not supported; Horizon
+    /// sends every change to clients. API @API:level_block_writes@.
+    pub fn set_block(
+        self,
+        host: &mut dyn Host,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        host.level_set_block(self, pos, state, flags)
+    }
+    /// Destroy a block in the level in place (`Level.destroyBlock`), optionally
+    /// dropping its resources. Parked levels and invalid positions return false.
+    /// API @API:level_block_writes@.
+    pub fn destroy_block(self, host: &mut dyn Host, pos: [i32; 3], drop: bool) -> bool {
+        host.level_destroy_block(self, pos, drop)
+    }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -1622,6 +1830,44 @@ impl LevelRef {
     ) -> Option<Vec<EntityRef>> {
         host.level_entities_in(self, min, max)
     }
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    pub fn block_state(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block_state(self, pos)
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    pub fn block(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block(self, pos)
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    pub fn block_property(self, host: &dyn Host, pos: [i32; 3], key: &str) -> Option<String> {
+        host.level_block_property(self, pos, key)
+    }
+    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    pub fn is_loaded(self, host: &dyn Host, pos: [i32; 3]) -> bool {
+        host.level_is_loaded(self, pos)
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    pub fn height(self, host: &dyn Host) -> Option<(i32, i32)> {
+        host.level_height(self)
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    pub fn game_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_game_time(self)
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    pub fn day_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_day_time(self)
+    }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
     /// client, for a stale handle, or for a closed level. Unloaded blocks read
@@ -1634,6 +1880,37 @@ impl LevelRef {
         kind: NativeBlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
         host.level_block_shape(self, pos, kind)
+    }
+    /// The world's seed (`WorldOptions.seed`), as `/seed` shows it. API
+    /// @API:level_world@.
+    pub fn seed(self, host: &dyn Host) -> Option<i64> {
+        host.level_seed(self)
+    }
+    /// The difficulty (`Level.getDifficulty`): `peaceful`, `easy`, `normal`
+    /// or `hard`, as `/difficulty` names it. API @API:level_world@.
+    pub fn difficulty(self, host: &dyn Host) -> Option<&'static str> {
+        host.level_difficulty(self)
+    }
+    /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
+    /// `/gamerule` queries it: None for an unknown rule. API @API:level_world@.
+    pub fn game_rule(self, host: &dyn Host, rule: &str) -> Option<GameRuleValue> {
+        host.level_game_rule(self, rule)
+    }
+    /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
+    /// `getThunderLevel`): both 0 in a level with no weather, as the Nether
+    /// and the End. API @API:level_world@.
+    pub fn weather(self, host: &dyn Host) -> Option<(f32, f32)> {
+        host.level_weather(self)
+    }
+    /// Whether it rains (`Level.isRaining`: a rain level above 0.2). API
+    /// @API:level_world@.
+    pub fn is_raining(self, host: &dyn Host) -> Option<bool> {
+        host.level_is_raining(self)
+    }
+    /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
+    /// API @API:level_world@.
+    pub fn is_thundering(self, host: &dyn Host) -> Option<bool> {
+        host.level_is_thundering(self)
     }
 }
 impl LivingRef {

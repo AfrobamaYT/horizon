@@ -15,6 +15,34 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+## Conditional item model properties
+
+A client mod supplies its own namespaced `minecraft:condition` property by implementing
+`Hooks::item_model_property`. This hook is the registration: match your property name, answer
+through `value`, and leave other names untouched. The resolver calls it when choosing a branch,
+not when loading resources. It defaults to false without a provider and skips dispatch entirely
+when no trait mods are loaded. Vanilla properties do not enter the hook.
+
+```rust,ignore
+fn item_model_property(
+    &self,
+    _host: &dyn Host,
+    event: &mut ItemModelPropertyEvent<'_>,
+) {
+    if event.property == "example:charged" {
+        event.value = event.stack.patch.get("example:charged").and_then(Option::as_ref)
+            .and_then(serde_json::Value::as_bool) == Some(true);
+    }
+}
+```
+
+`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
+defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
+Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
+`minecraft:condition` node. Custom special model renderers are not supplied by this hook.
+Bundles need `"hooks": @API:item_model_property@` once this pending hook is stamped.
+
 ## Item frame rendering
 
 `native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame. Bundles need "hooks": @API:render_item_in_frame@.
@@ -2433,6 +2461,12 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
+- `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
+  alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
+  read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
+- `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
+  `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
+  where the level has no weather), `is_raining` and `is_thundering` read its world settings.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
@@ -2445,6 +2479,8 @@ a dimension.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
+
+`level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags. Bundles need `"hooks": ["level_block_writes"]`.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
 (`entity`, `level`) also becomes a method of that handle.
@@ -3043,6 +3079,26 @@ bigger stack: from a player's hand as vanilla's filled bucket (into the inventor
 and in creative the hand is kept), from a block entity's or an item's slot into that container's other slots.
 A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and
 the other stays as it was.
+
+Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
+millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
+fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
+components. The game's own answer is a mod block's tanks by side (`block_entity_fluids`) and a cauldron, one tank
+of 1000 mB that holds water in thirds and lava only whole; a cauldron has no block entity and is answered by
+position, and a powder snow cauldron holds no fluid. A cauldron takes water and lava whatever their components and
+discards them, as NeoForge's `CauldronFluidContent` does, so what comes out of it is plain: the one place a fluid's
+components are dropped. A mod block's saved tanks take no fluid with components. `host.transfer_fluids(from, from_side, to, to_side, max)` moves
+one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFluidTransfer`, until a round moves
+nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
+whole, then the source really gives with that request and the target is filled with exactly what came out. A
+handler whose real calls answer as its simulations never loses fluid and is never warned.
+`native_fluid_insert`, `native_fluid_extract`, `native_fluid_tanks` and `native_move_fluids` use a mod's handler
+where one is registered; they name a fluid by its id, so they leave fluids with components alone.
+
+A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
+mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
+to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
+broken handler can void.
 
 ### Testing a trait mod
 
