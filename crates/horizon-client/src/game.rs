@@ -9692,6 +9692,7 @@ impl Game<'_> {
         }
         let crafted = std::mem::take(&mut menu.crafted);
         let brewed = std::mem::take(&mut menu.brewed);
+        let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let equipped = std::mem::take(&mut menu.equipped);
         for (i, stack) in after.into_iter().enumerate() {
             if let Some(g) = game_of[i] {
@@ -9702,13 +9703,13 @@ impl Game<'_> {
         if !offhand_mapped {
             self.offhand = menu.player_item(40).cloned();
         }
-        if !brewed.is_empty() {
-            let player = self.native_acting_id();
-            for stack in &brewed {
-                self.native_player_brewed_potion(player, stack);
-            }
-        }
         if !predicting {
+            if !brewed_potion_takes.is_empty() {
+                let player = self.native_acting_id();
+                for stack in &brewed_potion_takes {
+                    self.native_player_brewed_potion(player, stack);
+                }
+            }
             for stack in dropped {
                 self.player_drop(stack);
             }

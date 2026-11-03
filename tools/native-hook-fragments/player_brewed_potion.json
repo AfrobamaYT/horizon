@@ -3,7 +3,7 @@
     {
       "name": "player_brewed_potion",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_brewed_potion",
-      "side": "both",
+      "side": "server",
       "neoforge": "PlayerBrewedPotionEvent",
       "mod_api": {
         "contract": "listen"
@@ -11,5 +11,5 @@
     }
   ],
   "rust_summary": "A player took a potion from a brewing stand (`native_player_brewed_potion`).",
-  "doc_summary": "A player took a potion from a brewing stand bottle slot: `native_player_brewed_potion(player, stack)`. Both sides. Bundles need \"hooks\": @API:player_brewed_potion@."
+  "doc_summary": "A player took a potion from a brewing stand bottle slot: `native_player_brewed_potion(player, stack)`. Server-side, non-cancellable. Bundles need \"hooks\": @API:player_brewed_potion@."
 }
