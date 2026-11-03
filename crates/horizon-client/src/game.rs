@@ -250,6 +250,7 @@ mod native_player_modes;
 mod native_player_stats;
 mod native_projectiles;
 mod native_quick_move;
+mod native_raid_refs;
 mod native_recipes;
 mod native_server;
 mod native_shaders;

@@ -440,6 +440,11 @@ impl Game<'_> {
         }
         Some(id)
     }
+    /// The raids of the level in place, once they are loaded (the first
+    /// raid tick loads them).
+    pub(super) fn raids_in_place(&self) -> Option<&Raids> {
+        (self.raiding.loaded == Some(self.dim)).then_some(&self.raiding.raids)
+    }
     /// `ServerLevel.getRaidAt`.
     pub(super) fn raiding_nearby(&self, at: [i32; 3]) -> Option<i32> {
         self.raiding.raids.nearby(at).map(|(id, _)| id)
@@ -470,7 +475,9 @@ impl Game<'_> {
         let Some(r) = self.raiding.raids.get_mut(id) else {
             return 0;
         };
-        std::mem::replace(&mut r.omen_level, level)
+        let before = std::mem::replace(&mut r.omen_level, level);
+        self.raiding.raids.dirty = true;
+        before
     }
     pub(super) fn raid_glow(&mut self, id: i32) {
         for m in &mut self.mobs {
@@ -496,7 +503,7 @@ impl Game<'_> {
         )
     }
     /// A raid's members (`groupRaiderMap`): the living raiders it counts.
-    fn raid_members(&self, id: i32) -> impl Iterator<Item = &Mob> {
+    pub(super) fn raid_members(&self, id: i32) -> impl Iterator<Item = &Mob> {
         self.mobs.iter().filter(move |m| {
             m.alive() && !m.removed && raider::state(m).is_some_and(|s| s.raid_id == Some(id))
         })
