@@ -111,7 +111,8 @@ A content mod has capability `registries` and carries `assets/` and `data/` in t
 by declaring them in `data/<id>/horizon/block/*.json` and `data/<id>/horizon/item/*.json`, each copying a vanilla
 template ([modpacks.md](modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
 effects, entity types and menu types (each below) in `creative_tab/`, `mob_effect/`, `entity_type/` and `menu/` beside
-them. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
+them. `fluid/` gives a fluid a client look (`sprite`, an atlas sprite id, and `tint`, `0xAARRGGBB`, both optional), as
+NeoForge's `IClientFluidTypeExtensions`; the fluid needs no block, and a recipe page draws its well from it. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
 content is refused when it joins, with the reason.
 
 Every Horizon server checks loaded mods in the configuration phase (`horizon_protocol::mod_list`, channel
