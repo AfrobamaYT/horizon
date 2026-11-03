@@ -126,23 +126,6 @@ impl Capability {
             Capability::Storage | Capability::Players | Capability::World
         )
     }
-    /// The WIT interface it grants, in `horizon:mods`.
-    pub fn interface(self) -> &'static str {
-        match self {
-            Capability::GameRead => "game",
-            Capability::Chat => "chat",
-            Capability::Hud => "hud",
-            Capability::Storage => "storage",
-            Capability::Command => "command",
-            Capability::Registries => "registries",
-            Capability::Ui => "ui",
-            Capability::Render => "render",
-            Capability::Input => "input",
-            Capability::Players => "players",
-            Capability::World => "world",
-            Capability::Recipes => "recipes",
-        }
-    }
     /// May change in any release: a mod uses it only with
     /// `experimental = ["<name>"]` in its manifest.
     pub fn is_experimental(self) -> bool {
@@ -173,29 +156,6 @@ impl Capability {
                 "read the game's recipes and items and which recipes you know, place recipes in your crafting grid and, in creative mode, give you items"
             }
         }
-    }
-    /// The capability a component import needs, `Ok(None)` for one every
-    /// mod has; `Err` for an import Horizon does not offer.
-    pub fn of_import(name: &str) -> Result<Option<Capability>, String> {
-        let unknown = || format!("imports {name}, which Horizon does not offer");
-        let rest = name.strip_prefix("horizon:mods/").ok_or_else(unknown)?;
-        let (interface, version) = rest.split_once('@').ok_or_else(unknown)?;
-        if !version.starts_with("0.1.") {
-            return Err(format!("needs API {version}; this Horizon runs {API}"));
-        }
-        if interface == "log" {
-            return Ok(None);
-        }
-        // A recipe viewer's panel is part of capability `ui`.
-        if interface == "browser" {
-            return Ok(Some(Capability::Ui));
-        }
-        Capability::ALL
-            .into_iter()
-            .filter(|c| *c != Capability::Registries)
-            .find(|c| c.interface() == interface)
-            .map(Some)
-            .ok_or_else(unknown)
     }
 }
 impl fmt::Display for Capability {
@@ -297,20 +257,6 @@ impl Manifest {
     /// The namespaces the mod's content owns: its id, then `namespaces`.
     pub fn owned_namespaces(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.id.as_str()).chain(self.namespaces.iter().map(String::as_str))
-    }
-    /// Checks that the component's imports need only declared capabilities.
-    pub fn check_imports<'a>(
-        &self,
-        imports: impl IntoIterator<Item = &'a str>,
-    ) -> Result<(), String> {
-        for name in imports {
-            if let Some(c) = Capability::of_import(name)?
-                && !self.capabilities.contains(&c)
-            {
-                return Err(format!("uses capability {c}, missing from {MANIFEST}"));
-            }
-        }
-        Ok(())
     }
 }
 
@@ -432,35 +378,10 @@ capabilities = ["game-read", "hud"]
 "#;
 
     #[test]
-    fn parses_and_checks_imports() {
+    fn parses_manifest() {
         let m = Manifest::parse(EXAMPLE).unwrap();
         assert_eq!(m.side, Side::Client);
         assert_eq!(m.capabilities, [Capability::GameRead, Capability::Hud]);
-        let ok = [
-            "horizon:mods/log@0.1.0",
-            "horizon:mods/game@0.1.0",
-            "horizon:mods/hud@0.1.2",
-        ];
-        assert_eq!(m.check_imports(ok), Ok(()));
-        let chat = m.check_imports(["horizon:mods/chat@0.1.0"]);
-        assert_eq!(
-            chat,
-            Err("uses capability chat, missing from horizon-mod.toml".into())
-        );
-        assert!(m.check_imports(["wasi:filesystem/types@0.2.0"]).is_err());
-        assert!(m.check_imports(["horizon:mods/game@0.2.0"]).is_err());
-        let storage = m.check_imports(["horizon:mods/storage@0.1.0"]);
-        assert_eq!(
-            storage,
-            Err("uses capability storage, missing from horizon-mod.toml".into())
-        );
-        assert_eq!(
-            m.check_imports(["horizon:mods/command@0.1.0"]),
-            Err("uses capability command, missing from horizon-mod.toml".into())
-        );
-        let with_storage = EXAMPLE.replace("\"hud\"", "\"hud\", \"storage\"");
-        let m = Manifest::parse(&with_storage).unwrap();
-        assert_eq!(m.check_imports(["horizon:mods/storage@0.1.0"]), Ok(()));
     }
 
     #[test]
@@ -480,9 +401,7 @@ capabilities = ["game-read", "hud"]
                 "id = \"w\"\nname = \"W\"\nversion = \"1\"\napi = \"{api}\"\nside = \"{side}\"\ncapabilities = [{caps}]\n"
             ))
         };
-        let m = server("0.3", "server", "\"players\", \"storage\"").unwrap();
-        let imports = ["horizon:mods/players@0.1.0", "horizon:mods/storage@0.1.0"];
-        assert_eq!(m.check_imports(imports), Ok(()));
+        server("0.3", "server", "\"players\", \"storage\"").unwrap();
         for (api, side) in [("0.3", "client"), ("0.3", "both"), ("0.1", "server")] {
             let e = server(api, side, "").unwrap_err();
             assert!(e.contains("a server mod is side"), "{e}");
