@@ -3014,6 +3014,7 @@ pub fn cushion_from_nbt(tag: &Tag, id: u32) -> Option<Cushion> {
     let color =
         crate::entities::dye_index(&text(tag.get("color")).unwrap_or_else(|| "white".into()));
     Some(Cushion {
+        join: Default::default(),
         id,
         position,
         pos,
@@ -3030,6 +3031,7 @@ mod cushion_tests {
     #[test]
     fn cushion_save_preserves_color_anchor_rotation_and_unknown_data() {
         let cushion = Cushion {
+            join: Default::default(),
             id: 7,
             position: Vec3::new(-1.5, 64.5, 3.5),
             pos: [-2, 64, 3],
@@ -3088,6 +3090,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
     let pos = attached_block_pos(tag)?;
     Some(ItemFrame {
+        join: Default::default(),
         id,
         pos,
         facing: number(tag.get("Facing")).unwrap_or(2).clamp(0, 5) as u8,
