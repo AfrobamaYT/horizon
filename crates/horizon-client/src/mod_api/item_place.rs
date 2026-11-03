@@ -88,8 +88,8 @@ pub trait PlaceProvider: Send + Sync + 'static {
 /// provider, if the game has one.
 pub struct ItemCapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    default: Option<fn(&mut dyn Host, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
-    handler: PhantomData<fn() -> Box<T>>,
+    pub(super) default: Option<fn(&mut dyn Host, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
+    pub(super) handler: PhantomData<fn() -> Box<T>>,
 }
 
 impl<T: ?Sized + 'static> ItemCapabilityKey<T> {
@@ -211,8 +211,8 @@ impl ResourceHandler<ItemResource> for GameItemItems {
 static BROKEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 /// `owner`'s handler at `at` answered more than it was asked: a mod bug, warned once per mod.
-pub(crate) fn warn_broken(owner: Option<usize>, at: &dyn Debug) {
-    let owner = owner.map_or_else(|| "the game".to_owned(), super::mod_name);
+pub(crate) fn warn_broken(owner: Option<&'static str>, at: &dyn Debug) {
+    let owner = owner.unwrap_or("the game").to_owned();
     let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
     if warned.get_or_insert_default().insert(owner.clone()) {
         log::warn!(
