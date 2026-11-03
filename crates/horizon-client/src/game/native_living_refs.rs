@@ -398,6 +398,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_core::geometry::Vec3;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -789,6 +790,62 @@ mod tests {
         assert!(!alive_at(0.0));
         assert!(!alive_at(-1.0));
         assert!(!alive_at(f32::NAN));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_stand_first_tick_equipment_change_fires_after_base_tick() {
+        use crate::mod_api::{self, Hooks, LivingEquipmentChangeEvent, ModEntry, ServerHost};
+        struct Reequip;
+        #[mod_api::__subscriptions]
+        impl Hooks for Reequip {
+            fn living_equipment_change(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut LivingEquipmentChangeEvent<'_>,
+            ) {
+                if event.entity == 18 && event.slot == "mainhand" {
+                    let entity = host.entity(event.entity).unwrap();
+                    let living = host.living(entity).unwrap();
+                    assert!(living.set_equipment(
+                        host,
+                        EquipmentSlot::Head,
+                        Some(ItemStack::new("minecraft:iron_helmet", 1)),
+                    ));
+                }
+            }
+        }
+        mod_api::testing::with_mods(
+            vec![ModEntry::new("first_tick_equipment", Box::new(Reequip))].into(),
+            || {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    let mut stand = horizon_client::entities::ArmorStand::new(
+                        18,
+                        Vec3::new(0.5, 70.0, 0.5),
+                        0.0,
+                    );
+                    stand.no_gravity = true;
+                    stand.equipment[0] = Some(ItemStack::new("minecraft:stone", 1));
+                    game.armor_stands.push(stand);
+                    game.audio.capture = Some(Vec::new());
+                    super::super::dispense_fixture::start_recording();
+                    game.tick_armor_stands().unwrap();
+                    let events = super::super::dispense_fixture::stop_recording();
+                    assert_eq!(
+                        game.armor_stands[0].equipment[5],
+                        Some(ItemStack::new("minecraft:iron_helmet", 1)),
+                        "real listener/handle write control",
+                    );
+                    assert!(!game.armor_stands[0].first_tick);
+                    let sounds = game.audio.capture.as_ref().unwrap().len();
+                    let equips = events
+                        .iter()
+                        .filter(|e| e.ends_with("minecraft:equip"))
+                        .count();
+                    assert_eq!((sounds, equips), (1, 1));
+                });
+            },
+        );
     }
 
     #[test]
