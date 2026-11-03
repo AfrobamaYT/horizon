@@ -1226,12 +1226,12 @@ impl Game<'_> {
 
     /// Hand a container the guest opened over (ServerPlayer.openMenu);
     /// false when it is not one a guest can open.
-    fn lan_open_container(&mut self, host: &mut LanHost, conn: u32, pos: (i32, i32, i32)) -> bool {
+    fn lan_open_container(&mut self, conn: u32, pos: (i32, i32, i32)) -> bool {
         // A chest minecart, hopper minecart or chest boat keeps its slots
         // under a placeholder key (`ContainerEntity`): the menu is the
         // vehicle's own, not a block's.
         if pos.1 == super::minecarts::CART_KEY_Y {
-            return self.lan_open_vehicle_container(host, conn, pos);
+            return self.lan_open_vehicle_container(conn, pos);
         }
         let name = &self
             .res
@@ -1300,6 +1300,7 @@ impl Game<'_> {
             // Opened by a mod (`native_open_menu`), never here.
             Slots::Native => return false,
         };
+        let Some(host) = self.lan.as_ref() else { return false; };
         let Some(items) = host
             .hub
             .guest(conn)
@@ -1338,6 +1339,7 @@ impl Game<'_> {
             locked |= check;
         }
         if locked {
+            let Some(host) = self.lan.as_mut() else { return false; };
             host.hub.send_to(
                 conn,
                 &C::SystemChat(play::SystemChat {
@@ -1373,12 +1375,13 @@ impl Game<'_> {
         }
         // A mod menu type only for a client that has it: as
         // `ServerPlayer.openMenu` with no menu, nothing opens.
+        let Some(host) = self.lan.as_ref() else { return false; };
         let brand = host.hub.guest(conn).map_or("", |g| g.brand.as_str());
         if !horizon_client::containers::menu_reaches(brand, menu) {
             return false;
         }
         // The mods may stop the menu; the click is spent.
-        if !self.guest_may_open(host, conn, menu, Some([pos.0, pos.1, pos.2])) {
+        if !self.guest_may_open(conn, menu, Some([pos.0, pos.1, pos.2])) {
             return true;
         }
         let mut cancel = false;
@@ -1387,11 +1390,12 @@ impl Game<'_> {
             return false;
         }
         // ServerPlayer.openMenu closes the menu that was open.
-        self.guest_close_all(host, conn);
+        self.guest_close_all(conn);
         // A block's or a double chest's menu counts among the openers of its
         // lid (a vehicle keeps its own `Container`, an ender chest has none).
         let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
+        let Some(host) = self.lan.as_mut() else { return false; };
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
         if !hidden.is_empty() {
@@ -1415,7 +1419,6 @@ impl Game<'_> {
     /// hopper minecart - titled with the vehicle's name.
     fn lan_open_vehicle_container(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         pos: (i32, i32, i32),
     ) -> bool {
@@ -1439,6 +1442,7 @@ impl Game<'_> {
             &[],
         );
         let slots = Slots::Block(pos);
+        let Some(host) = self.lan.as_ref() else { return false; };
         let Some(items) = host
             .hub
             .guest(conn)
@@ -1447,11 +1451,12 @@ impl Game<'_> {
             return false;
         };
         // The mods may stop the menu; the click is spent.
-        if !self.guest_may_open(host, conn, menu, None) {
+        if !self.guest_may_open(conn, menu, None) {
             return true;
         }
         // ServerPlayer.openMenu closes the menu that was open.
-        self.guest_close_all(host, conn);
+        self.guest_close_all(conn);
+        let Some(host) = self.lan.as_mut() else { return false; };
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
         true
@@ -1462,10 +1467,12 @@ impl Game<'_> {
     /// sound is played for everyone around (`ChestBlockEntity.onClose`, a
     /// `playSound` with no player), the guest included, once the last opener
     /// has left.
-    pub(super) fn guest_container_closed(&mut self, host: &mut LanHost, conn: u32) {
-        if let Some(g) = host.hub.guest(conn)
-            && let Some(pos) = g.menu.as_ref().and_then(|m| m.pos)
-            && !g.spectator()
+    pub(super) fn guest_container_closed(&mut self, conn: u32) {
+        let pos = self.lan.as_ref().and_then(|host| {
+            let guest = host.hub.guest(conn)?;
+            (!guest.spectator()).then(|| guest.menu.as_ref().and_then(|m| m.pos)).flatten()
+        });
+        if let Some(pos) = pos
             && self.container_openers_changed(pos, false)
         {
             self.container_edge_sound(pos, false);
@@ -1480,7 +1487,8 @@ impl Game<'_> {
     /// Nothing is sent to the client: this is for a guest who is leaving or
     /// whose server is closing. The guest must be in `host.hub.guests` and the
     /// level they are in must be the one in place.
-    pub(super) fn guest_close_all(&mut self, host: &mut LanHost, conn: u32) {
+    pub(super) fn guest_close_all(&mut self, conn: u32) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
@@ -1489,21 +1497,23 @@ impl Game<'_> {
             .as_ref()
             .map(|m| (m.window, m.slots))
         {
-            self.guest_container_closed(host, conn);
+            self.guest_container_closed(conn);
             if let Slots::Block(key) = slots
                 && key.1 == super::minecarts::CART_KEY_Y
             {
-                self.close_guest_vehicle_menu(host, conn, key);
+                self.close_guest_vehicle_menu(conn, key);
             }
-            host.hub.container_closed(conn, window);
+            if let Some(host) = self.lan.as_mut() {
+                host.hub.container_closed(conn, window);
+            }
         }
-        self.lan_merchant_closed(host, conn, None);
-        self.lan_crafting_closed(host, conn, None);
-        self.lan_station_closed(host, conn, None);
-        self.lan_mount_closed(host, conn, None);
-        self.guest_carried_back(host, gi);
+        self.lan_merchant_closed(conn, None);
+        self.lan_crafting_closed(conn, None);
+        self.lan_station_closed(conn, None);
+        self.lan_mount_closed(conn, None);
+        self.guest_carried_back(gi);
         // `PlayerContainerEvent.Close`, after the menu's `removed`.
-        self.player_menu_closing(host, conn);
+        self.player_menu_closing(conn);
     }
 
     /// `ContainerEntity`'s `Container.stopOpen` when a vehicle menu closes
@@ -1513,7 +1523,10 @@ impl Game<'_> {
     /// the closing player as the source. A hopper minecart keeps
     /// `Container.stopOpen`'s no-op. Called by the close packet and by the
     /// `ServerPlayer.tick` reach/destroyed close.
-    fn close_guest_vehicle_menu(&mut self, host: &LanHost, conn: u32, key: (i32, i32, i32)) {
+    fn close_guest_vehicle_menu(&mut self, conn: u32, key: (i32, i32, i32)) {
+        if self.lan.is_none() {
+            return;
+        }
         self.store_cart_items(key);
         self.world.block_entities.remove(&key);
         let at = if let Some(b) = self.boats.iter().find(|b| b.id as i32 == key.2) {
@@ -1528,7 +1541,7 @@ impl Game<'_> {
             None
         };
         if let Some(at) = at {
-            let spect = host.hub.guest(conn).is_some_and(|g| g.spectator());
+            let spect = self.lan.as_ref().and_then(|host| host.hub.guest(conn)).is_some_and(|g| g.spectator());
             let ctx = horizon_client::sculk::Context {
                 source: Some(horizon_client::mobs::Who::Player),
                 spectator: spect,
@@ -1544,7 +1557,8 @@ impl Game<'_> {
     /// `ServerPlayer.tick`'s `stillValid`: a guest's block container closes
     /// once the guest is out of reach of its block (a removed block closes it
     /// in the hub's `sync_containers`).
-    fn lan_containers_tick(&mut self, host: &mut LanHost) {
+    fn lan_containers_tick(&mut self) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let far: Vec<(u32, Option<(i32, i32, i32)>)> = host
             .hub
             .guests
@@ -1560,13 +1574,15 @@ impl Game<'_> {
             })
             .collect();
         for (conn, vehicle) in far {
-            self.guest_container_closed(host, conn);
-            host.hub.close_container(conn);
-            if let Some(key) = vehicle {
-                self.close_guest_vehicle_menu(host, conn, key);
+            self.guest_container_closed(conn);
+            if let Some(host) = self.lan.as_mut() {
+                host.hub.close_container(conn);
             }
-            if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
-                self.guest_carried_back(host, gi);
+            if let Some(key) = vehicle {
+                self.close_guest_vehicle_menu(conn, key);
+            }
+            if let Some(gi) = self.lan.as_ref().and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn)) {
+                self.guest_carried_back(gi);
             }
         }
     }
@@ -1585,7 +1601,8 @@ impl Game<'_> {
     /// `AbstractContainerMenu.stillValid` of whatever menu the guest has open
     /// (a container or vehicle, a trade, the crafting table, a station, a
     /// lectern, a mount's inventory). True when none is open.
-    fn guest_menu_still_valid(&self, host: &LanHost, conn: u32) -> bool {
+    fn guest_menu_still_valid(&self, conn: u32) -> bool {
+        let Some(host) = self.lan.as_ref() else { return true; };
         let Some(g) = host.hub.guest(conn) else {
             return true;
         };
@@ -1619,10 +1636,11 @@ impl Game<'_> {
     /// window with it, so the click lands on nothing
     /// (`ServerGamePacketListenerImpl.handleContainerClick` and the others
     /// ask `stillValid` first).
-    fn guest_validate_menu(&mut self, host: &mut LanHost, conn: u32) {
-        if self.guest_menu_still_valid(host, conn) {
+    fn guest_validate_menu(&mut self, conn: u32) {
+        if self.guest_menu_still_valid(conn) {
             return;
         }
+        let Some(host) = self.lan.as_ref() else { return; };
         let mut windows: Vec<i32> = host
             .hub
             .guest(conn)
@@ -1636,7 +1654,8 @@ impl Game<'_> {
             windows.extend(p.merchant.as_ref().map(|m| m.window));
             windows.extend(p.mount_window.as_ref().map(|m| m.window));
         }
-        self.guest_close_all(host, conn);
+        self.guest_close_all(conn);
+        let Some(host) = self.lan.as_mut() else { return; };
         for container in windows {
             host.hub
                 .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
@@ -1664,7 +1683,8 @@ impl Game<'_> {
     /// DedicatedServer.isUnderSpawnProtection: no operators, an operator or a
     /// radius of 0 or less is never under it; else a block within the radius
     /// of the world spawn (square, in the Overworld) is.
-    fn under_spawn_protection(&self, host: &LanHost, gi: usize, pos: [i32; 3]) -> bool {
+    fn under_spawn_protection(&self, gi: usize, pos: [i32; 3]) -> bool {
+        let Some(host) = self.lan.as_ref() else { return false; };
         let g = &host.hub.guests[gi];
         let radius = host.hub.spawn_protection;
         if self.options.dedicated.is_none() || radius <= 0 || g.dimension != "minecraft:overworld" {
@@ -1682,7 +1702,8 @@ impl Game<'_> {
     }
 
     /// ServerPlayer.sendSpawnProtectionMessage.
-    fn spawn_protection_message(&self, host: &LanHost, conn: u32, pos: [i32; 3]) {
+    fn spawn_protection_message(&self, conn: u32, pos: [i32; 3]) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let message = horizon_client::text::Text::translate(
             "build.spawn_protection",
             &[horizon_client::text::Text::literal(format!(
@@ -1719,7 +1740,8 @@ impl Game<'_> {
     }
 
     /// `ServerPlayer.sendBuildLimitMessage`: the red overlay with the limit.
-    fn build_limit_message(&self, host: &LanHost, conn: u32, too_high: bool, limit: i32) {
+    fn build_limit_message(&self, conn: u32, too_high: bool, limit: i32) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let message = horizon_client::text::Text::translate(
             if too_high {
                 "build.tooHigh"
@@ -1742,19 +1764,21 @@ impl Game<'_> {
     /// mods hear it with the guest's state swapped in, and when one cancels,
     /// the guest keeps what they had and is sent their abilities again, as
     /// vanilla answers what it refuses.
-    pub(super) fn lan_flight_toggled(&mut self, host: &mut LanHost, conn: u32, flying: bool) {
-        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+    pub(super) fn lan_flight_toggled(&mut self, conn: u32, flying: bool) {
+        let Some((uuid, name)) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)).map(|g| (g.uuid, g.name.clone())) else {
             return;
         };
         let mut cancel = false;
         // With the guest's state swapped in, so that the helpers reach them.
-        self.as_guest(host, conn, |g| {
+        let Some(mut host) = self.lan.take() else { return; };
+        self.as_guest(&mut host, conn, |g| {
             g.native_player_toggle_flight(uuid, &name, flying, &mut cancel);
         });
+        self.lan = Some(host);
         if !cancel {
             return;
         }
-        if let Some(g) = host.hub.guest_mut(conn) {
+        if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
             g.flying = !flying;
             g.send(&C::PlayerAbilities(play::PlayerAbilities {
                 flags: g.ability_flags(),
@@ -2883,15 +2907,16 @@ impl Game<'_> {
         g.new_body(true);
         host.hub.teleport(gi, Some(at));
     }
-    fn guest_tick_death(&mut self, host: &mut LanHost, gi: usize) {
-        if host.hub.guests[gi].tick_death() {
-            self.guest_drop_carried(host, gi);
+    fn guest_tick_death(&mut self, gi: usize) {
+        if self.lan.as_mut().is_some_and(|host| host.hub.guests[gi].tick_death()) {
+            self.guest_drop_carried(gi);
         }
     }
 
-    fn guest_drop_carried(&mut self, host: &mut LanHost, gi: usize) {
-        if let Some(c) = host.hub.guests[gi].carried.take() {
-            self.drop_guest_items(host, gi, vec![c]);
+    fn guest_drop_carried(&mut self, gi: usize) {
+        let carried = self.lan.as_mut().and_then(|host| host.hub.guests[gi].carried.take());
+        if let Some(c) = carried {
+            self.drop_guest_items(gi, vec![c]);
         }
     }
 
@@ -2899,10 +2924,13 @@ impl Game<'_> {
     /// cursor goes back into their inventory (`placeItemBackInInventory`,
     /// dropped only if it doesn't fit), and their client's cursor empties
     /// with the inventory it is sent.
-    pub(super) fn guest_carried_back(&mut self, host: &mut LanHost, gi: usize) {
-        if let Some(c) = host.hub.guests[gi].carried.take() {
-            self.lan_place_back(host, gi, vec![c]);
-            host.hub.send_inventory(gi);
+    pub(super) fn guest_carried_back(&mut self, gi: usize) {
+        let carried = self.lan.as_mut().and_then(|host| host.hub.guests[gi].carried.take());
+        if let Some(c) = carried {
+            self.lan_place_back(gi, vec![c]);
+            if let Some(host) = self.lan.as_mut() {
+                host.hub.send_inventory(gi);
+            }
         }
     }
 

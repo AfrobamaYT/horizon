@@ -309,14 +309,14 @@ impl Game<'_> {
         gm.merchant.session = session;
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
-            if let Some(g) = self
+            if let Some((uuid, name)) = self
                 .lan
                 .as_ref()
                 .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
+                .map(|g| (g.uuid, g.name.clone()))
+                && let Some(entity_id) = gm.merchant.mob
             {
-                if let Some(entity_id) = gm.merchant.mob {
-                    self.native_player_trade(g.uuid, &g.name, entity_id);
-                }
+                self.native_player_trade(uuid, &name, entity_id);
             }
             if let Some(mut host) = self.lan.take() {
                 self.as_guest(&mut host, conn, |g| {
