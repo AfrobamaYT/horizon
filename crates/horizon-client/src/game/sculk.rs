@@ -537,15 +537,25 @@ impl Game<'_> {
                 pos[2].floor() as i32
             )
         });
-        if self.remote.is_some() || !self.sculk.tables.built {
+        if self.remote.is_some() {
             return;
         }
         if !horizon_client::mod_api::mods().is_empty() {
+            let cause = match ctx.source {
+                Some(Who::Player) => self
+                    .network_entity_id(super::commands::Target::Player)
+                    .map(|id| id as u32),
+                Some(Who::Mob(id)) => Some(id),
+                None => None,
+            };
             let mut cancel = false;
-            self.native_vanilla_game_event(event, pos, &mut cancel);
+            self.native_vanilla_game_event(self.dim.id(), event, pos, cause, &mut cancel);
             if cancel {
                 return;
             }
+        }
+        if !self.sculk.tables.built {
+            return;
         }
         let at = block_of(pos);
         let radius = sculk::notification_radius(event).min(16);

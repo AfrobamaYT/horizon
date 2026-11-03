@@ -124,11 +124,9 @@ pub fn teleport_to(
     if m.extra.passenger {
         return false;
     }
-    let Some(mut spot) = ground(w, x, y, z) else {
-        return false;
-    };
-    // EntityTeleportEvent.EnderEntity, once the spot stands on ground
-    // (NeoForge fires it in `EnderMan.teleport` before `randomTeleport`).
+    // EntityTeleportEvent.EnderEntity: `Enderman.teleport` hands `randomTeleport`
+    // the raw target, so the event sees every try, grounded or not.
+    let (mut x, mut y, mut z) = (x, y, z);
     if crate::native_client_hooks::has_mods() {
         let mut target = [x, y, z];
         let mut cancel = false;
@@ -142,13 +140,13 @@ pub fn teleport_to(
         if cancel {
             return false;
         }
-        if target != [x, y, z] && target.iter().all(|v| v.is_finite()) {
-            let Some(moved) = ground(w, target[0], target[1], target[2]) else {
-                return false;
-            };
-            spot = moved;
+        if target.iter().all(|v| v.is_finite()) {
+            [x, y, z] = target;
         }
     }
+    let Some(spot) = ground(w, x, y, z) else {
+        return false;
+    };
     let (x, by, z) = spot;
     let ny = f64::from(by + 1);
     let half = f64::from(m.width()) / 2.0;

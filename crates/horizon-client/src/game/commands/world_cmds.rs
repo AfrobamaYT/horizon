@@ -1613,9 +1613,15 @@ impl Game<'_> {
                     (self.network_entity_id(t), self.target_position(t))
             {
                 let mut moved = to;
+                let uuid = match t {
+                    Target::Player => self.lan_acting_uuid,
+                    Target::Guest(conn) => self.command_guest(conn).map(|g| g.uuid),
+                    _ => None,
+                };
                 self.native_spread_players_teleport(
                     self.dim.id(),
                     entity as u32,
+                    uuid,
                     from,
                     &mut moved,
                     &mut skip,

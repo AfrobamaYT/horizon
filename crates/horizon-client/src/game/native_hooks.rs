@@ -4247,7 +4247,8 @@ impl Game<'_> {
     /// A server entity is about to be placed by `/spreadplayers` (NeoForge's
     /// `EntityTeleportEvent.SpreadPlayersCommand`, vanilla's
     /// `SpreadPlayersCommand.setPlayerPositions`): once per entity, after the
-    /// spread worked out its spot. `entity` is its network id, `from` where
+    /// spread worked out its spot. `entity` is its network id, `player` its UUID (None for a
+    /// non-player), `from` where
     /// it stands and `target` the spot. A mod may move `target` (a value that
     /// is not a number is ignored). Canceling leaves the entity where it is;
     /// the spread's other entities, its random draws and its feedback are
@@ -4256,6 +4257,7 @@ impl Game<'_> {
         &mut self,
         dimension: &str,
         entity: u32,
+        player: Option<u128>,
         from: [f64; 3],
         target: &mut [f64; 3],
         cancel: &mut bool,
@@ -4265,24 +4267,37 @@ impl Game<'_> {
             mod_api::mods(),
             dimension,
             entity,
+            player,
             from,
             target,
             cancel,
         );
     }
     /// A vanilla game event is about to reach its listeners (NeoForge's
-    /// `VanillaGameEvent`, vanilla's `Level.gameEvent`): `event` is its id
-    /// (`minecraft:step`), `pos` where it happened. Canceling keeps the sculk
-    /// sensors, wardens and allays from hearing it. The listen-only
-    /// `native_game_event` still hears every event. Server-side.
-    /// @API:vanilla_game_event@.
+    /// `VanillaGameEvent`, vanilla's `Level.gameEvent`): every event, in
+    /// `dimension`. `event` is its id (`minecraft:step`), `pos` where it
+    /// happened and `cause` the network id of the entity that caused it
+    /// (None for none). The context's affected block state is not tracked
+    /// here. Canceling keeps the sculk sensors, wardens and allays from
+    /// hearing it. The listen-only `native_game_event` also hears events on
+    /// a client. Server-side. @API:vanilla_game_event@.
     pub(super) fn native_vanilla_game_event(
         &mut self,
+        dimension: &str,
         event: &str,
         pos: [f64; 3],
+        cause: Option<u32>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_vanilla_game_event(self, mod_api::mods(), event, pos, cancel);
+        mod_api::dispatch_vanilla_game_event(
+            self,
+            mod_api::mods(),
+            dimension,
+            event,
+            pos,
+            cause,
+            cancel,
+        );
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
