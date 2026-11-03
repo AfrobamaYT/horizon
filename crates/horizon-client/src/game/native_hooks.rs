@@ -149,7 +149,6 @@
 //!
 //! API 289 adds Grindstone result prepared (`native_prepare_grindstone`).
 //!
-//! API 288 adds Anvil result prepared (`native_prepare_anvil`).
 //!
 //! API 287 adds A thrown potion applied its hit effects (`native_potion_splash`).
 //!
@@ -5839,17 +5838,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_prepare_item_enchant(self, mod_api::mods(), player, name, pos, costs);
     }
-    /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. 288.
-    pub(super) fn native_prepare_anvil(
-        &mut self,
-        player: u128,
-        name: &str,
-        pos: [i32; 3],
-        result: &mut Option<ItemStack>,
-        cost: &mut i32,
-    ) {
-        mod_api::dispatch_prepare_anvil(self, mod_api::mods(), player, name, pos, cost, result);
-    }
     /// A player took an anvil's result at `pos` (`AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` holds the inputs and the result as they were before. Set `cancel` to refuse the take: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. 328.
     pub(super) fn native_anvil_craft_pre(
         &mut self,
@@ -5877,7 +5865,9 @@ impl Game<'_> {
     /// `update` holds the inputs (the right one may be empty, for a rename),
     /// the rename text and vanilla's result, and its `output`, `xp_cost`
     /// and `material_cost` start at vanilla's for the mods to change; set
-    /// `cancel` for no result. Before `prepare_anvil`. Both sides: the
+    /// `cancel` for no result. Negative costs are clamped to zero, unlike
+    /// the NeoForge event. `player_name` is available on the server.
+    /// Both sides: the
     /// server's menu, and a server's client menu with the local player.
     /// @API:anvil_update@.
     pub(super) fn native_anvil_update(
