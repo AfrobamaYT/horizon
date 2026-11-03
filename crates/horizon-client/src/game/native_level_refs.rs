@@ -532,11 +532,12 @@ mod tests {
         });
     }
 
-    use horizon_client::mod_api::{ChunkTicketsValidateEvent, Hooks, ModEntry, ServerHost};
+    use horizon_client::mod_api::{self, ChunkTicketsValidateEvent, Hooks, ModEntry, ServerHost};
     use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
 
     /// Removes the block at [1, 64, 1] from the tickets it is shown.
     struct Prune;
+    #[mod_api::__subscriptions]
     impl Hooks for Prune {
         fn chunk_tickets_validate(
             &self,
@@ -548,6 +549,7 @@ mod tests {
     }
     /// Subscribes to nothing.
     struct Idle;
+    #[mod_api::__subscriptions]
     impl Hooks for Idle {}
 
     fn saved(mod_id: &str, pos: [i32; 3], chunk: (i32, i32)) -> ModTicket {
