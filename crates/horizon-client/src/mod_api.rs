@@ -874,6 +874,19 @@ pub struct NativePlayerFood {
     pub exhaustion: f32,
 }
 
+/// A player's experience (`Player.experienceLevel`, `experienceProgress`,
+/// `totalExperience`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerExperience {
+    /// Experience level.
+    pub level: i32,
+    /// Progress toward the next level, from 0 to 1.
+    pub progress: f32,
+    /// Points gained in all.
+    pub total: i32,
+}
+
 /// Damage sources supported for a mod effect tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
