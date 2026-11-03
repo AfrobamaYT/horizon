@@ -1,4 +1,7 @@
 //! `horizon-mod.toml`, a content mod's manifest, and the `.hmod` file around it.
+mod jar;
+pub use jar::JarRef;
+
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
