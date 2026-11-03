@@ -5404,6 +5404,16 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_use_item_on(self, state, click, answer);
     }
+    /// `BlockBehaviour.useWithoutItem`: the captured state's empty-hand method,
+    /// after useItemOn asks for it, on the server and main hand only.
+    pub(super) fn native_use_without_item(
+        &mut self,
+        state: BlockStateId,
+        click: &NativeBlockClick<'_>,
+        answer: &mut Option<NativeInteractionResult>,
+    ) {
+        mod_api::dispatch_use_without_item(self, state, click, answer);
+    }
     /// A player uses `stack` (right click) with `self.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
@@ -7482,19 +7492,6 @@ impl Game<'_> {
         }
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
         self.with_level(|b, level, ticks| b.best_neighbor_signal(level, ticks, at))
-    }
-    /// The light at `pos` in the world in place, as `(block, sky)`, each 0 to
-    /// 15 (`Level.getBrightness` for `LightLayer.BLOCK` and `LightLayer.SKY`).
-    /// A solar panel checks for full sky light above it, a lamp or a mob farm
-    /// for darkness. `(0, 0)` in a chunk that isn't loaded. Like the other
-    /// reads here it reads the world this game holds: the level in place on
-    /// a server, the server's copy on a client.
-    pub(super) fn native_light(&self, pos: [i32; 3]) -> (u8, u8) {
-        if !self.world.loaded(pos[0], pos[2]) {
-            return (0, 0);
-        }
-        let light = self.world.light(pos[0], pos[1], pos[2]);
-        (light & 15, light >> 4)
     }
     /// The rain and thunder levels of the world in place, each 0.0 to 1.0
     /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel

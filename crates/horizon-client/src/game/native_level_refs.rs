@@ -5,7 +5,7 @@
 //! block in a chunk that isn't loaded.
 use super::Game;
 use horizon_client::mod_api::{
-    BlockStateId, ChunkRef, ChunkStatus, LevelRef, NativeTicketOwner, TicketController,
+    BlockStateId, ChunkRef, ChunkStatus, LevelRef, LightLayer, NativeTicketOwner, TicketController,
 };
 use horizon_client::mod_chunk_tickets::ModTicket;
 use horizon_client::{streaming::Streaming, world::World};
@@ -22,6 +22,15 @@ fn calling_mod_owns(controller: TicketController) -> bool {
     controller
         .owner()
         .is_some_and(|owner| horizon_client::crash::current_native_mod() == Some(owner))
+}
+
+/// The stored light of `layer` at `pos` in `world`, as the game's own light query reads it.
+pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) -> i32 {
+    let light = world.light(pos[0], pos[1], pos[2]);
+    i32::from(match layer {
+        LightLayer::Block => light & 15,
+        LightLayer::Sky => light >> 4,
+    })
 }
 
 impl Game<'_> {
@@ -231,8 +240,7 @@ impl Game<'_> {
     ) -> Option<BlockStateId> {
         let world = self.native_level_world(level)?;
         let [x, y, z] = pos;
-        let inside = world.shape.contains_y(y);
-        (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
+        world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
     }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`.
@@ -273,9 +281,21 @@ impl Game<'_> {
     /// read or write there finds the world. False on a client or for a stale
     /// handle: the position is not loaded here.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.native_level_world(level).is_some_and(|w| {
-            w.shape.contains_y(pos[1]) && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
-        })
+        self.native_level_world(level)
+            .is_some_and(|w| w.is_loaded_at(pos[0], pos[1], pos[2]))
+    }
+    /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
+    /// None as for `block_state`: a position that isn't loaded has no light to read.
+    pub(super) fn native_level_brightness(
+        &self,
+        level: LevelRef,
+        layer: LightLayer,
+        pos: [i32; 3],
+    ) -> Option<i32> {
+        let world = self.native_level_world(level)?;
+        world
+            .is_loaded_at(pos[0], pos[1], pos[2])
+            .then(|| world_brightness(world, layer, pos))
     }
     /// The lowest block `y` and the height of the level
     /// (`LevelHeightAccessor.getMinY`, `getHeight`).
@@ -300,7 +320,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
-    use horizon_client::mod_api::{ChunkRef, NativeWorldEpoch};
+    use horizon_client::mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
+    use horizon_core::position::BlockPos;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1003,6 +1024,66 @@ mod tests {
             game.validate_mod_chunk_tickets(game.dim);
             assert!(!game.streaming.forced.contains(&(7, 7)), "saved one pruned");
             assert!(game.streaming.forced.contains(&(6, 6)), "fresh one kept");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn light_and_loaded_reads_match_the_games_query_and_load_nothing() {
+        use horizon_client::chunk::{Chunk, Light};
+        use horizon_client::mod_api::LevelHost;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            let mut chunk = Chunk::empty(0, 0);
+            // Block light 5 and sky light 12 in the lowest section.
+            Arc::make_mut(&mut chunk.sections[0]).light = Light::Uniform(0xC5);
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let lit = [3, -60, 5];
+            let sky = game.world.light(3, -60, 5) >> 4;
+            let block = game.world.light(3, -60, 5) & 15;
+            assert_eq!((sky, block), (12, 5));
+            let chunks = game.world.chunks.len();
+            let darken = game.sky_darken();
+
+            game.with_level(|_, host, _| {
+                assert_eq!(host.brightness(LightLayer::Block, lit), 5);
+                assert_eq!(host.brightness(LightLayer::Sky, lit), 12);
+                assert_eq!(host.raw_brightness(lit, 0), 12);
+                assert_eq!(host.raw_brightness(lit, 9), 5);
+                let pos = BlockPos::new(lit[0], lit[1], lit[2]);
+                assert_eq!(
+                    host.raw_brightness(lit, darken),
+                    horizon_world::level::raw_brightness(&*host, pos, darken)
+                );
+                assert!(host.is_loaded([0, 319, 0]));
+                assert!(!host.is_loaded([0, 320, 0]));
+                assert!(!host.is_loaded([0, -65, 0]));
+                assert!(!host.is_loaded([16, -60, 0]));
+            });
+            assert_eq!(
+                game.native_level_brightness(level, LightLayer::Block, lit),
+                Some(5)
+            );
+            assert_eq!(
+                game.native_level_brightness(level, LightLayer::Sky, lit),
+                Some(12)
+            );
+            assert_eq!(
+                game.native_level_brightness(level, LightLayer::Sky, [16, -60, 0]),
+                None
+            );
+            assert_eq!(
+                game.native_level_brightness(level, LightLayer::Sky, [0, 320, 0]),
+                None
+            );
+            let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.id());
+            assert_eq!(
+                game.native_level_brightness(stale, LightLayer::Sky, lit),
+                None
+            );
+            assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
         });
     }
 }

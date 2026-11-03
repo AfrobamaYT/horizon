@@ -463,6 +463,11 @@ impl World {
     pub fn loaded(&self, x: i32, z: i32) -> bool {
         self.chunks.contains_key(&(x >> 4, z >> 4))
     }
+    /// `Level.isLoaded`: `y` is inside the build height and the chunk of `(x, z)` is loaded.
+    /// Never loads a chunk.
+    pub fn is_loaded_at(&self, x: i32, y: i32, z: i32) -> bool {
+        self.shape.contains_y(y) && self.loaded(x, z)
+    }
     /// `LockCode`: the `lock` a container block entity refuses to open
     /// without, as the tag it was loaded or set with carries it (Horizon's
     /// model holds no field for it).

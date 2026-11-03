@@ -118,7 +118,16 @@ the catalog, not a global API number, source comments or documentation histories
   `Pass`/`Fail` let the item try its `useOn`, and `TryWithEmptyHand` tries the block's `useWithoutItem`
   on the main hand only. `None` leaves the template in charge. This is the block's behaviour, not
   NeoForge's separate `UseItemOnBlockEvent` broadcast interceptor. The earlier `right_click_block`
-  event still decides whether the block is used at all.
+  event still decides whether the block is used at all. Dispatch asks the global `Hooks`
+  subscriber (when present), then the clicked state's parts.
+
+- A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces
+  `Block.useWithoutItem` on the server, on the main hand only, after `useItemOn` returns
+  `TryWithEmptyHand`. The event keeps the original state's key even if the item phase
+  changed the block. `Some` replaces the template; `None` runs it, including jukebox ejection,
+  pot wobble and bookshelf removal. Consuming results trigger DEFAULT_BLOCK_USE.
+  `Pass`, `Fail` and `TryWithEmptyHand` continue to the item; the empty method is never
+  retried. Dispatch asks the global `Hooks` subscriber (when present), then the clicked state's parts.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
@@ -868,7 +877,7 @@ one, where vanilla gives the `by` one.
 
 - `native_neighbor_signal(dimension, pos)`, the strongest redstone signal reaching a block from its neighbours (`SignalGetter.getBestNeighborSignal`, 0 to 15), as a dispenser or a piston reads it: what a mod's explosive, launcher or machine needs to go off or switch on from its block entity's tick. 0 on a client and for another dimension.
 
-- `native_light(pos)` (block and sky light, 0 to 15, both 0 where the chunk isn't loaded), `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `native_world_height()` (min y and height) and `native_max_stack_size(item)`: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
+- `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `native_world_height()` (min y and height) and `native_max_stack_size(item)`, with `level.brightness(host, layer, pos)` for light: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals.
 
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
@@ -2471,7 +2480,8 @@ the server entity and level reads available on a client.
   `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
   `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any
   level the server has loaded, not only the one in place. A block in a chunk that isn't loaded or a `y` outside
-  the world's height reads as `None`.
+  the world's height reads as `None`. `level.brightness(host, LightLayer::Block | Sky, pos)` reads the stored light
+  (`getBrightness`) the same way, as the game's own light query holds it, and is `None` where the block read is.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
@@ -3099,7 +3109,13 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
+`state_with_property`. It also reads light and loaded state, through the game's own queries:
+`brightness(LightLayer::Block | Sky, pos)` (`getBrightness`, the stored 0 to 15),
+`raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
+and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk).
+None of them loads a chunk. Light above the build height reads as full sky and below it as
+none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
+so check `is_loaded` first. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and

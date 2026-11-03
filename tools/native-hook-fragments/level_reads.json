@@ -28,6 +28,11 @@
       "receiver": "level"
     },
     {
+      "name": "level_brightness", "side": "server",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_brightness",
+      "receiver": "level"
+    },
+    {
       "name": "level_height", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_height",
       "receiver": "level"
