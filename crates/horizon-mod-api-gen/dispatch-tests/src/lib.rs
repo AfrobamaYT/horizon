@@ -262,6 +262,12 @@ mod tests {
         Parts
     }
     impl Parts {
+        fn block<'k>(
+            &self,
+            _: impl FnOnce() -> Option<&'k str>,
+        ) -> &'static [&'static dyn BlockPart] {
+            &[]
+        }
         fn block_state(&self, _: BlockStateId) -> &'static [&'static dyn BlockPart] {
             &[]
         }
