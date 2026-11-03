@@ -375,11 +375,12 @@ pub trait LevelAccess {
     fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
         true
     }
-    /// Returns the new note, or None to cancel tuning.
+    /// Returns the new note, or None to cancel tuning. `instrument` is the
+    /// block's index in `data::INSTRUMENTS`.
     fn note_block_change(
         &self,
         _pos: BlockPos,
-        _instrument: &str,
+        _instrument: u8,
         _old: i32,
         new: i32,
     ) -> Option<i32> {

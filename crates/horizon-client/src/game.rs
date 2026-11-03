@@ -1300,7 +1300,7 @@ impl LevelAccess for GameLevel<'_> {
     fn note_block_change(
         &self,
         pos: BlockPos,
-        instrument: &str,
+        instrument: u8,
         old: i32,
         mut new: i32,
     ) -> Option<i32> {
@@ -1310,10 +1310,7 @@ impl LevelAccess for GameLevel<'_> {
                 dimension: self.dimension,
                 pos,
                 instrument: horizon_client::mod_api::NativeNoteInstrument::ALL
-                    [horizon_world::level::data::INSTRUMENTS
-                        .iter()
-                        .position(|name| *name == instrument)
-                        .unwrap_or(0)],
+                    [usize::from(instrument)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);

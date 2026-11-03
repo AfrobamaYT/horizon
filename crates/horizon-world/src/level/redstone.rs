@@ -1260,14 +1260,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.set_block(pos, b.table.set_bool(next, p.powered, signal), 3);
         }
     }
+    /// The note block's `instrument`, as its index in `data::INSTRUMENTS`.
+    pub(crate) fn note_instrument(&self, state: BlockStateId) -> u8 {
+        let b = self.b;
+        let instrument = b.table.text(state, b.props.instrument);
+        super::data::INSTRUMENTS
+            .iter()
+            .position(|n| *n == instrument)
+            .map_or(0, |i| i as u8)
+    }
     /// `NoteBlock.playNote`: queues the block event and emits the game event.
     pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId) {
         let b = self.b;
-        let instrument = b.table.text(state, b.props.instrument);
-        let index = super::data::INSTRUMENTS
-            .iter()
-            .position(|n| *n == instrument)
-            .map_or(0, |i| i as u8);
+        let index = self.note_instrument(state);
         if super::data::instrument_works_above(index) || b.is_air(self.above_state(pos)) {
             let note = b.table.int(state, b.props.note);
             let (mut played, mut played_note) = (index, note);

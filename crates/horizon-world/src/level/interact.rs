@@ -237,7 +237,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let next = table.cycle(state, p.note);
                     let old_note = table.int(state, p.note);
                     let new_note = table.int(next, p.note);
-                    let instrument = table.text(state, p.instrument);
+                    let instrument = self.note_instrument(state);
                     let Some(note) = self
                         .level
                         .note_block_change(pos, instrument, old_note, new_note)
