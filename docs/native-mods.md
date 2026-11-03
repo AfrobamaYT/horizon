@@ -1610,17 +1610,15 @@ trusting native code is the player's decision, never an agent's.
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with `performance`. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
    as they are. The Mods page's "Native build" row, `horizon-launcher settings native-profile performance|dev|release`
-   or `native-build --profile ...` pick one (the setting's older value `fast` still means `performance`, and an older
-   settings file's "Release build" switch still picks `release`).
+   or `native-build --profile ...` pick one. `native-mods.json` records the profile.
 
-   A revision whose `Cargo.toml` has no `fast` builds with `release`; `native-mods.json` says which (`profile`).
    Each profile is in the build's key, so their builds never mix and may all stay. `performance` and `dev` share
    `native/target/fast/`: every crate but `horizon-client` is built with the same settings, so switching between
    them recompiles only `horizon-client`, and Cargo keeps both builds of it, so switching back finds the other
    still there. `release` has its own folder (`native/target/release/`). The first build in a folder builds every
    crate once (1½ to 3½ minutes measured through the launcher, depending on the machine); later builds reuse them.
    Post-build steps build with the same
-   profile, reusing its crates. The mods feature is passed while the revision still has it. Cargo downloads the locked crates from crates.io (Horizon has no git
+   profile, reusing its crates. Cargo downloads the locked crates from crates.io (Horizon has no git
    dependencies). The compiler and the horizon-mixins build run at the lowest priority (`rust_toolchain::low_priority`:
    nice 19 and the idle I/O class on Linux, nice 19 on macOS, below-normal priority on Windows), so the desktop and a
    game in play stay smooth; on an otherwise idle computer they still use every core. The log is `native/build.log`;
@@ -1825,7 +1823,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
 Builds a standalone dedicated-server engine into `DIR`, which must not exist yet. `FOLDER` (a mod folder or a
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.
 It reuses the pinned toolchain, source and horizon-mixins and compiles `--no-default-features` (no audio or
-controllers), keeping the mods feature when the revision has it. `--version` pins the Horizon release/Nightly the
+controllers). `--version` pins the Horizon release/Nightly the
 export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources,
 `native-data/` and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
