@@ -1048,6 +1048,7 @@ mod tests {
                 Hand::Main,
                 hit,
                 7,
+                41,
                 &mut claimed,
             );
             assert_eq!(claimed, expected, "{block}");
