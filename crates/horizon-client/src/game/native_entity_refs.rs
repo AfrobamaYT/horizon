@@ -870,6 +870,8 @@ pub(super) mod tests {
             real.placed = true;
             hub.guests.push(real);
             hub.guests.push(fake);
+            assert!(hub.here(&hub.guests[0]));
+            assert!(!hub.here(&hub.guests[1]));
             let packet = Clientbound::SetSimulationDistance(Distance { distance: 8 });
             let hold = Holding::start();
             hub.send_to(fake_id, &packet);
@@ -894,9 +896,64 @@ pub(super) mod tests {
             .unwrap();
             let mut host = game.lan.take().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
+            host.hub.guests[1].position = [1600.0, 64.0, 0.0];
+            game.lan_update_streaming(&host);
+            assert!(
+                game.streaming
+                    .extra
+                    .iter()
+                    .any(|(chunk, _)| *chunk == (0, 0))
+            );
+            assert!(
+                !game
+                    .streaming
+                    .extra
+                    .iter()
+                    .any(|(chunk, _)| *chunk == (100, 0))
+            );
+            game.lan = Some(host);
+            let players = game.native_server_players();
+            assert_eq!(players.len(), 1);
+            assert_eq!(players[0].uuid, 1);
+            game.lan_acting = Some(real_id);
+            let selector = horizon_client::command::args::Selector {
+                kind: 'a',
+                limit: usize::MAX,
+                ..Default::default()
+            };
+            assert_eq!(game.select(&selector).len(), 1);
+            let named = horizon_client::command::args::Selector {
+                player_name: Some("fake".into()),
+                ..Default::default()
+            };
+            assert!(game.select(&named).is_empty());
+            assert!(game.run_command_quietly("list"));
+            assert!(!game.run_command_quietly("tp fake 0 64 0"));
+            game.lan_acting = None;
+            let mut host = game.lan.take().unwrap();
             game.guest_packets
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(&mut host, fake_id, |game| {
+                assert!(game.lan_acting_fake);
+                let source = horizon_client::command::args::Selector {
+                    kind: 's',
+                    limit: 1,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    game.select(&source),
+                    vec![super::super::commands::Target::Player]
+                );
+                let named = horizon_client::command::args::Selector {
+                    player_name: Some("fake".into()),
+                    ..Default::default()
+                };
+                assert!(game.select(&named).is_empty());
+                let uuid = horizon_client::command::args::Selector {
+                    uuid: Some(2),
+                    ..Default::default()
+                };
+                assert!(game.select(&uuid).is_empty());
                 game.guest_packets
                     .push(Clientbound::SetSimulationDistance(Distance {
                         distance: 12,
@@ -910,13 +967,16 @@ pub(super) mod tests {
             assert_eq!(host.hub.guests[1].sender.pending.load(Ordering::Relaxed), 0);
             assert!(rx.try_recv().is_err());
             let outer = game.enter_guest(&mut host, real_id).unwrap();
+            assert!(!game.lan_acting_fake);
             game.guest_cooldowns.push(("minecraft:real".into(), 7));
             game.guest_player_sounds
                 .push(("outer".into(), [0.0; 3], 1.0, 1.0));
             game.as_guest(&mut host, fake_id, |game| {
+                assert!(game.lan_acting_fake);
                 game.guest_cooldowns.push(("minecraft:fake".into(), 20));
             })
             .unwrap();
+            assert!(!game.lan_acting_fake);
             assert_eq!(game.guest_cooldowns.len(), 1);
             assert_eq!(&*game.guest_cooldowns[0].0, "minecraft:real");
             assert_eq!(game.guest_player_sounds[0].0, "outer");
@@ -938,15 +998,18 @@ pub(super) mod tests {
 
             // A real turn nested in a fake must not receive the fake's cooldown.
             let outer = game.enter_guest(&mut host, fake_id).unwrap();
+            assert!(game.lan_acting_fake);
             game.guest_cooldowns
                 .push(("minecraft:fake_outer".into(), 8));
             game.guest_player_sounds
                 .push(("fake_outer".into(), [0.0; 3], 1.0, 1.0));
             game.as_guest(&mut host, real_id, |game| {
+                assert!(!game.lan_acting_fake);
                 game.guest_cooldowns
                     .push(("minecraft:real_inner".into(), 9));
             })
             .unwrap();
+            assert!(game.lan_acting_fake);
             assert_eq!(&*game.guest_cooldowns[0].0, "minecraft:fake_outer");
             assert_eq!(game.guest_player_sounds[0].0, "fake_outer");
             game.guest_player_sounds.clear();
