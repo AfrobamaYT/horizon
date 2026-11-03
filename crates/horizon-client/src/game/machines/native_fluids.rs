@@ -128,10 +128,14 @@ fn side_tanks(tanks: &ModFluidTanks, side: Option<Direction>) -> Vec<usize> {
     }
 }
 
-/// Whether the game's own tanks hold `fluid`: water or lava, with no components. They are the
-/// game's only fluids, and a mod block's saved tanks keep an id and an amount.
-fn game_holds(fluid: &FluidStack) -> bool {
-    matches!(&*fluid.fluid, "minecraft:water" | "minecraft:lava") && !fluid.has_components()
+/// Whether the game's tanks at `at` take `fluid`: water or lava, the game's only fluids. A mod
+/// block's saved tanks keep an id and an amount, so they take none with components. A cauldron
+/// takes water and lava whatever their components and discards them, as NeoForge's
+/// `CauldronFluidContent` does: the one place a fluid's components are dropped, and what comes
+/// out of a cauldron is plain.
+fn game_holds(fluid: &FluidStack, at: &FluidAt) -> bool {
+    matches!(&*fluid.fluid, "minecraft:water" | "minecraft:lava")
+        && (matches!(at, FluidAt::Cauldron(_)) || !fluid.has_components())
 }
 
 /// A capability amount in the API 54 helpers' millibuckets.
@@ -310,7 +314,7 @@ impl Game<'_> {
     }
     /// How much of `fluid` tank `tank` of those `side` reaches at `pos` holds when empty: a mod
     /// block's fillable tank its capacity, a cauldron a bucket; none for another tank, a
-    /// drain-only one, or a fluid the game's tanks don't hold (`game_holds`).
+    /// drain-only one, or a fluid the tanks there don't take (`game_holds`).
     pub(in crate::game) fn native_fluid_tank_capacity(
         &self,
         pos: [i32; 3],
@@ -318,10 +322,8 @@ impl Game<'_> {
         tank: usize,
         fluid: &FluidStack,
     ) -> u32 {
-        if !game_holds(fluid) {
-            return 0;
-        }
         match self.native_fluid_at(self.dim.id(), pos) {
+            Some(at) if !game_holds(fluid, &at) => 0,
             Some(FluidAt::Mod(tanks)) => side_tanks(&tanks, side)
                 .get(tank)
                 .filter(|real| tanks.inputs.contains(real))
@@ -332,7 +334,8 @@ impl Game<'_> {
     }
     /// Puts as much of `fluid` as tank `tank` of those `side` reaches at `pos` takes: a mod
     /// block's fillable tank, empty or holding that fluid, up to its capacity; a cauldron by
-    /// whole thirds, lava only whole into an empty one. What didn't fit. `simulate` changes
+    /// whole thirds, lava only whole into an empty one, its components discarded
+    /// (`game_holds`). What didn't fit. `simulate` changes
     /// nothing and answers as the real call.
     pub(in crate::game) fn native_fluid_tank_insert(
         &mut self,
@@ -345,11 +348,9 @@ impl Game<'_> {
         if fluid.amount == 0 {
             return None;
         }
-        if !game_holds(&fluid) {
-            return Some(fluid);
-        }
         let amount = mb(fluid.amount);
         let took = match self.native_fluid_at(self.dim.id(), pos) {
+            Some(at) if !game_holds(&fluid, &at) => 0,
             Some(FluidAt::Mod(tanks)) => {
                 let real = side_tanks(&tanks, side)
                     .get(tank)
@@ -734,8 +735,10 @@ impl Game<'_> {
                 return None;
             }
             let host: &mut dyn Host = self;
-            let moved =
-                host.transfer_fluids(from, Some(from_face), to, Some(to_face), max.unsigned_abs())?;
+            // These helpers name a fluid by its id, so fluids with components stay put.
+            let plain = |fluid: &FluidStack| !fluid.has_components();
+            let (from_side, to_side, max) = (Some(from_face), Some(to_face), max.unsigned_abs());
+            let moved = host.transfer_fluids_where(from, from_side, to, to_side, max, &plain)?;
             return Some((moved.fluid.to_string(), mb(moved.amount)));
         }
         // Ask the source for no more than the target has room for: a
@@ -903,6 +906,32 @@ mod tests {
         assert_eq!(
             drain(Lava, 1000),
             Some(("minecraft:lava", 1000, (0, false)))
+        );
+    }
+
+    #[test]
+    fn a_cauldron_takes_water_and_lava_whatever_their_components_and_a_mod_tank_none_with_them() {
+        use super::{CauldronFluids, FluidAt, FluidStack, game_holds};
+        let potion = |fluid| FluidStack {
+            components: Some(Box::new(horizon_client::item_data::StackData {
+                potion: Some(Arc::from("minecraft:healing")),
+                ..Default::default()
+            })),
+            ..FluidStack::new(fluid, 1000)
+        };
+        let cauldron = FluidAt::Cauldron(CauldronFluids::Empty);
+        let tank = FluidAt::Mod(Arc::default());
+        for fluid in ["minecraft:water", "minecraft:lava"] {
+            assert!(game_holds(&potion(fluid), &cauldron), "{fluid}");
+            assert!(game_holds(&FluidStack::new(fluid, 1000), &tank), "{fluid}");
+            assert!(!game_holds(&potion(fluid), &tank), "{fluid}");
+        }
+        assert!(!game_holds(&potion("test:potion"), &cauldron));
+        // What a cauldron gives is named by its fluid alone: its components are gone.
+        let (fluid, amount, _) = CauldronFluids::Water(3).drain(1000).unwrap();
+        assert_eq!(
+            FluidStack::new(fluid, amount.unsigned_abs()),
+            FluidStack::new("minecraft:water", 1000)
         );
     }
 
