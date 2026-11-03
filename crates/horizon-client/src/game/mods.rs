@@ -122,7 +122,9 @@ pub(super) fn content_root(
         let candidate = ContentMod {
             id: m.id.clone(),
             content,
-            jars: Vec::new(),
+            // The manifest's jars, in list order, layered under this mod's
+            // own files (`docs/native-mods.md`).
+            jars: package.manifest.jar.clone(),
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
             Ok(_) if announce => announced.push(announced_entry(m, path)),
