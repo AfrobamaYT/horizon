@@ -257,6 +257,7 @@ mod native_net;
 mod native_panel;
 mod native_panel_recipes;
 mod native_player_cooldowns;
+mod native_player_death;
 mod native_player_food;
 mod native_player_modes;
 mod native_player_stats;
