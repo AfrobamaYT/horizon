@@ -31,6 +31,17 @@ impl ExecutionRole {
 }
 
 use super::Game;
+use crate::mod_api::HostSide;
+
+impl<'a> HostSide<'a> {
+    pub(super) fn of(game: &'a mut Game<'_>) -> Self {
+        if game.is_logical_server() {
+            Self::Server(game)
+        } else {
+            Self::Client(game)
+        }
+    }
+}
 
 impl Game<'_> {
     /// This game's side: a server simulates the world, a client does not. The

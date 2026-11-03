@@ -1336,6 +1336,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1468,6 +1469,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1599,7 +1601,17 @@ version = "0.1.0"
 dependencies = [
  "horizon-client-core",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

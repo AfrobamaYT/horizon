@@ -32,11 +32,6 @@ fn main_rs(template: &str, ids: &[&str]) -> String {
     template.replace("/* MOD_ENTRIES */", &entries)
 }
 
-/// API objects in the same order as the generated executable's mod list.
-pub(super) fn with_api(mods: &[Bundle]) -> impl Iterator<Item = &Bundle> {
-    mods.iter()
-}
-
 /// Add API packages and the generated executable to the fresh staged workspace.
 pub(super) fn stage(
     stage: &Path,
@@ -60,18 +55,18 @@ pub(super) fn stage(
             .and_then(|p| p.get("name"))
             .and_then(toml::Value::as_str)
             .ok_or_else(|| format!("{}: missing package name", path.display()))?;
-        packages.insert(bundle.id.as_str(), name.to_owned());
+        packages.insert(bundle.manifest.id.as_str(), name.to_owned());
     }
     let post_builds: Vec<_> = mods
         .iter()
         .flat_map(|(_, bundle)| {
-            let package = &packages[bundle.id.as_str()];
+            let package = &packages[bundle.manifest.id.as_str()];
             bundle
                 .native()
                 .post_build
                 .iter()
                 .map(move |step| super::crates::PostBuild {
-                    mod_id: bundle.id.clone(),
+                    mod_id: bundle.manifest.id.clone(),
                     package: package.clone(),
                     bin: step.bin.clone(),
                     args: step.args.clone(),
@@ -93,17 +88,12 @@ pub(super) fn stage(
     }
     let mut members = Vec::new();
     for (i, (index, bundle)) in mods.iter().enumerate() {
-        let relative = format!("native-api/{}", bundle.id);
+        let relative = format!("native-api/{}", bundle.manifest.id);
         let dest = stage.join(&relative);
         super::copy_bundle(bundle, &dest)?;
         let path = dest.join("Cargo.toml");
         let mut manifest = read(&path)?;
-        let package = manifest
-            .get("package")
-            .and_then(|p| p.get("name"))
-            .and_then(toml::Value::as_str)
-            .ok_or_else(|| format!("{}: missing package name", path.display()))?
-            .to_owned();
+        let package = packages[bundle.manifest.id.as_str()].clone();
         let dependencies = manifest
             .get_mut("dependencies")
             .and_then(toml::Value::as_table_mut)
@@ -138,7 +128,7 @@ pub(super) fn stage(
                 package: packages.get(dependency.id.as_str()).map(String::as_str),
             })
             .collect();
-        let enabled = super::dependencies::rewrite(&bundle.id, &mut manifest, &targets)
+        let enabled = super::dependencies::rewrite(&bundle.manifest.id, &mut manifest, &targets)
             .map_err(|e| e.to_string())?;
         write(&path, &manifest)?;
         let mut dep = toml::Table::new();
@@ -204,7 +194,10 @@ pub(super) fn stage(
         )])),
     );
     write(&game.join("Cargo.toml"), &manifest)?;
-    let ids: Vec<_> = mods.iter().map(|(_, bundle)| bundle.id.as_str()).collect();
+    let ids: Vec<_> = mods
+        .iter()
+        .map(|(_, bundle)| bundle.manifest.id.as_str())
+        .collect();
     fs::write(game.join("src/main.rs"), main_rs(&template, &ids)).map_err(|e| e.to_string())?;
     let root = stage.join("Cargo.toml");
     let mut workspace = read(&root)?;
@@ -314,11 +307,9 @@ mod tests {
         );
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         let members = root["workspace"]["members"].as_array().unwrap();
-        assert!(
-            members
-                .iter()
-                .any(|v| v.as_str() == Some("native-api/example"))
-        );
+        assert!(members
+            .iter()
+            .any(|v| v.as_str() == Some("native-api/example")));
         assert!(members.iter().any(|v| v.as_str() == Some(GAME)));
         let engine = read(&stage_dir.join("native-api/example/Cargo.toml")).unwrap();
         assert_eq!(
@@ -338,16 +329,14 @@ mod tests {
             game["package"]["build"].as_str(),
             Some("../horizon-client/build.rs")
         );
-        assert!(
-            stage_dir
-                .join(GAME)
-                .join(
-                    game["dependencies"]["horizon-client"]["path"]
-                        .as_str()
-                        .unwrap()
-                )
-                .ends_with("crates/native-game/../horizon-client")
-        );
+        assert!(stage_dir
+            .join(GAME)
+            .join(
+                game["dependencies"]["horizon-client"]["path"]
+                    .as_str()
+                    .unwrap()
+            )
+            .ends_with("crates/native-game/../horizon-client"));
         // The game's default features are the generated package's alone, so a server build's
         // `--no-default-features` reaches horizon-client.
         assert_eq!(
@@ -392,15 +381,13 @@ mod tests {
             assert!(!stage_dir.join(GAME).exists());
             assert!(!stage_dir.join("native-api").exists());
         }
-        assert!(
-            !stage(
-                &stage_dir,
-                &[],
-                &[],
-                &super::super::dependencies::Resolution { order: vec![] },
-            )
-            .unwrap()
-        );
+        assert!(!stage(
+            &stage_dir,
+            &[],
+            &[],
+            &super::super::dependencies::Resolution { order: vec![] },
+        )
+        .unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
 

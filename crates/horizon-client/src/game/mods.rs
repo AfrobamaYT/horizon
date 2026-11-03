@@ -66,7 +66,7 @@ pub(super) fn content_root(
     root: &std::path::Path,
     enabled: &std::collections::BTreeSet<String>,
     dev: &[std::path::PathBuf],
-) -> std::path::PathBuf {
+) -> horizon_client::Result<std::path::PathBuf> {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::Content;
     let here = std::env::current_dir().unwrap_or_default();
@@ -77,7 +77,6 @@ pub(super) fn content_root(
         .unwrap_or_default();
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
-    // The first load's list stays (`set_local`): a reload does not hash the files again.
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
     for selected in horizon_mods::selection::packages(&here, enabled, &built, dev) {
@@ -106,8 +105,7 @@ pub(super) fn content_root(
                 Ok(types) => known.insert(types),
                 Err(e) => {
                     log::warn!("Horizon: content mods not loaded: {e}");
-                    register_mob_effects(&[]);
-                    return root.to_owned();
+                    return Err(e);
                 }
             },
         };
@@ -116,7 +114,7 @@ pub(super) fn content_root(
             content,
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) if announce => announced.push(announced_entry(m, path)),
+            Ok(_) if announce => announced.push(announced_entry(m)),
             Ok(_) => {}
             Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
         }
@@ -140,53 +138,30 @@ pub(super) fn content_root(
             }
         }
     }
-    match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
-        Ok(out) => {
-            if announce {
-                horizon_protocol::mod_list::set_local(announced);
-            }
-            if out != root {
-                log::info!(
-                    "Horizon: content from {} mod(s) in {}",
-                    mods.len(),
-                    out.display()
-                );
-            }
-            register_mob_effects(&mods);
-            register_entity_types(&mods);
-            register_menu_types(&mods);
-            out
-        }
-        Err(e) => {
-            log::warn!("Horizon: content mods not loaded: {e}");
-            register_mob_effects(&[]);
-            register_entity_types(&[]);
-            register_menu_types(&[]);
-            root.to_owned()
-        }
+    let out = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;
+    if announce {
+        horizon_protocol::mod_list::set_local(announced);
     }
+    if out != root {
+        log::info!(
+            "Horizon: content from {} mod(s) in {}",
+            mods.len(),
+            out.display()
+        );
+    }
+    register_mob_effects(&mods);
+    register_entity_types(&mods);
+    register_menu_types(&mods);
+    Ok(out)
 }
 
-/// A loaded mod as a server tells joining clients (`horizon_protocol::mod_list`): its manifest's
-/// id, version and side, and the SHA-256 of its `.hmod` (none for a folder).
-fn announced_entry(
-    m: &horizon_mods::Manifest,
-    path: &std::path::Path,
-) -> horizon_protocol::mod_list::Entry {
+/// Manifest identity for the configuration-phase mod check.
+fn announced_entry(m: &horizon_mods::Manifest) -> horizon_protocol::mod_list::Entry {
     use horizon_mods::Side;
     use horizon_protocol::mod_list;
-    use sha2::{Digest, Sha256};
-    let sha256 = if path.is_file() {
-        std::fs::read(path)
-            .ok()
-            .map(|bytes| Sha256::digest(bytes).into())
-    } else {
-        None
-    };
     mod_list::Entry {
         id: m.id.clone(),
         version: m.version.clone(),
-        sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
             Side::Client => mod_list::Side::Client,

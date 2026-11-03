@@ -397,9 +397,8 @@ fn checked(bytes: &[u8], dir: &Path) -> Result<Packed, String> {
     })
 }
 
-/// Every mod folder under `root`: a `horizon-mixin.toml`, or an unpacked `.hmod`
-/// (`horizon-native.json`), the rules of `native-build <folder>`. A mod's folder is not searched
-/// further.
+/// Every flat native project under `root`, using the same reader as native-build.
+/// A mod's folder is not searched further.
 pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     fn walk(dir: &Path, depth: usize, out: &mut Vec<Bundle>) -> Result<(), String> {
         if let Some(found) = native_mods::bundle_in(dir)? {
@@ -428,7 +427,7 @@ pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     }
     let mut found = Vec::new();
     walk(root, DEPTH, &mut found)?;
-    found.sort_by(|a, b| a.id.cmp(&b.id));
+    found.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
     Ok(found)
 }
 
@@ -475,13 +474,13 @@ pub fn fetch(found: &Resolved) -> Result<Vec<Packed>, String> {
     let mods = find_mods(&top)?;
     if mods.is_empty() {
         return Err(format!(
-            "{} holds no native mod (a folder with horizon-mixin.toml, or an unpacked .hmod).",
+            "{} holds no native mod (horizon-mod.toml and Cargo.toml).",
             found.label()
         ));
     }
     let packed: Result<Vec<Packed>, String> = mods
         .iter()
-        .map(|m| checked(&pack(m)?, &dir).map_err(|e| format!("{}: {e}", m.id)))
+        .map(|m| checked(&pack(m)?, &dir).map_err(|e| format!("{}: {e}", m.manifest.id)))
         .collect();
     let _ = fs::remove_dir_all(dir.join("source"));
     packed

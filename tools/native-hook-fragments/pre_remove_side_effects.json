@@ -1,0 +1,10 @@
+{
+  "hooks": [
+    {
+      "name": "pre_remove_side_effects",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_pre_remove_side_effects",
+      "side": "server",
+      "mod_api": {"contract": "collect", "out": "drops", "scope": "block_entity", "key": "entity"}
+    }
+  ]
+}

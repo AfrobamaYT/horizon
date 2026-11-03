@@ -406,7 +406,16 @@ impl Package {
             for (name, _) in crate::content::folder_files(path)? {
                 check_folder_file(path, &name)?;
             }
-            std::fs::read_to_string(path.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?
+            let mut text = String::new();
+            std::fs::File::open(path.join(MANIFEST))
+                .map_err(|e| format!("{MANIFEST}: {e}"))?
+                .take(MAX_MANIFEST + 1)
+                .read_to_string(&mut text)
+                .map_err(|e| format!("{MANIFEST}: {e}"))?;
+            if text.len() as u64 > MAX_MANIFEST {
+                return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
+            }
+            text
         } else {
             if !metadata.is_file() {
                 return Err(format!(
@@ -502,6 +511,8 @@ impl Package {
                             .checked_add(size)
                             .ok_or("native package too large")?;
                     } else if name.starts_with("assets/") || name.starts_with("data/") {
+                        crate::content::check_path(&name)?;
+                        crate::content::check_namespace(&name, &package.manifest)?;
                         if size > crate::content::MAX_FILE {
                             return Err(format!("{name} exceeds the content file size limit"));
                         }
@@ -548,19 +559,19 @@ impl Package {
     }
     /// Select and validate a flat project's source and resource files deterministically.
     pub fn directory_files(
+        &self,
         root: &Path,
     ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
-        let package = Self::read(root)?;
-        let content = crate::Content::read(root, &package.manifest)?;
+        let content = crate::Content::read(root, &self.manifest)?;
         let mut files = std::collections::BTreeMap::new();
         let mut reader = content.reader()?;
         for name in &content.files {
             files.insert(name.clone(), reader.read(name)?);
         }
-        if let Some(icon) = package.icon {
+        if let Some(icon) = &self.icon {
             files.insert("icon.png".to_string(), icon.bytes().to_vec());
         }
-        if package.manifest.native.is_some() {
+        if self.manifest.native.is_some() {
             fn walk(
                 root: &Path,
                 dir: &Path,
@@ -614,7 +625,8 @@ impl Package {
 
     /// Pack a flat project, selecting its source and resource files deterministically.
     pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
-        let mut files = Self::directory_files(root)?;
+        let package = Self::read(root)?;
+        let mut files = package.directory_files(root)?;
         let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
             .map_err(|e| e.to_string())?;
         let files: Vec<_> = files

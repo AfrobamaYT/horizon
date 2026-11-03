@@ -115,12 +115,18 @@ mod tests {
         let mut pick = ItemStack::new("minecraft:diamond_pickaxe", 1);
         pick.damage = 1560;
         p.extra.set_main_hand_stack(Some(pick.clone()));
-        p.extra.off_hand = Some("minecraft:shield".into());
-        p.extra.head = Some("minecraft:iron_helmet".into());
+        p.extra.set_slot_id(
+            horizon_items::equipment::OFFHAND,
+            Some("minecraft:shield".into()),
+        );
+        p.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:iron_helmet".into()),
+        );
         let mut boots = ItemStack::new("minecraft:leather_boots", 1);
         boots.damage = 64;
-        p.extra.feet = Some(boots.item.clone());
-        p.extra.armor[3] = Some(boots.clone());
+        p.extra
+            .set_slot_stack(horizon_items::equipment::FEET, Some(boots.clone()));
         let item = |slot| p.item_by_slot(slot).map(|s: ItemStack| (s.item, s.damage));
         assert_eq!(
             item(EquipmentSlot::MainHand),
@@ -147,7 +153,10 @@ mod tests {
             ("minecraft:zombie_nautilus", Species::ZombieNautilus),
         ] {
             let mut m = mob(name, species);
-            m.extra.head = Some("minecraft:iron_helmet".into());
+            m.extra.set_slot_id(
+                horizon_items::equipment::HEAD,
+                Some("minecraft:iron_helmet".into()),
+            );
             assert!(m.item_by_slot(m.sun_protection_slot()).is_none());
             m.extra
                 .set_body(Some("minecraft:leather_horse_armor".into()));
@@ -164,7 +173,10 @@ mod tests {
             .extra
             .set_body(Some("minecraft:leather_horse_armor".into()));
         assert!(zombie.item_by_slot(zombie.sun_protection_slot()).is_none());
-        zombie.extra.head = Some("minecraft:iron_helmet".into());
+        zombie.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:iron_helmet".into()),
+        );
         assert!(zombie.item_by_slot(zombie.sun_protection_slot()).is_some());
     }
 

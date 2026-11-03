@@ -12,7 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, BlockSide, Capability, Host, ItemResource, ResourceHandler},
+    mod_api::{self, BlockSide, Capability, ItemResource, ResourceHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -209,7 +209,7 @@ impl Containers<'_> {
         // ticking now is out of the world (an empty id marks its place): what
         // went into its place would be lost when it comes back.
         if let BlockEntity::Mod(m) = entity {
-            if m.id.is_empty() {
+            if m.id().is_empty() {
                 return None;
             }
             let container = Arc::clone(self.world.block_entities.mod_container(state.0)?);
@@ -788,6 +788,7 @@ impl Game<'_> {
             return;
         }
         self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
+        let c = self.containers();
         let mut changed = false;
         if !c.is_empty(&view) {
             changed = self.hopper_eject(pos, &view);
@@ -933,7 +934,7 @@ impl Game<'_> {
     ) -> u32 {
         let resource = ItemResource::of(stack);
         mod_api::run_transaction(self, |game, tx| {
-            let host: &mut dyn Host = game;
+            let host: &mut dyn horizon_client::mod_api::ServerHost = game;
             let went = part.insert_any(host, tx, &resource, stack.count);
             match part.checked(went, stack.count, &at) {
                 Some(0) | None => Err(()),
@@ -951,7 +952,7 @@ impl Game<'_> {
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
     /// is a capability part: whether a mod canceled the move.
-    fn part_move_canceled(&self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
+    fn part_move_canceled(&mut self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
         let mut cancel = false;
         self.native_inventory_move_item(source, destination, item, &mut cancel);
         cancel
@@ -1004,7 +1005,7 @@ impl Game<'_> {
                 continue;
             }
             let moved = mod_api::run_transaction(self, |game, tx| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn horizon_client::mod_api::ServerHost = game;
                 let came = part.extract(host, tx, slot, &resource, 1);
                 if part.checked(came, 1, &at) != Some(1) {
                     return Err(());
@@ -1198,6 +1199,7 @@ impl Game<'_> {
             Some([above.0, above.1, above.2]),
             None,
         );
+        let c = self.containers();
         if let Kind::Composter(level) = source.kind {
             if level != 8 {
                 return Some(false);
@@ -1978,7 +1980,7 @@ mod capacity_tests {
 mod part_front_tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
-    use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use horizon_client::containers::{BlockEntity, ModBlockEntity};
     use horizon_client::items::ItemStack;
     use horizon_client::mod_api::NativeBlockUpdateFlags;
     use horizon_core::position::BlockPos;
@@ -2020,10 +2022,10 @@ mod part_front_tests {
             ));
             game.world.block_entities.insert(
                 (1, 64, 8),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(ModBlockEntityFields {
-                    id: "test:pipe".into(),
-                    ..Default::default()
-                }))),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    "test:pipe".into(),
+                    Default::default(),
+                ))),
             );
             if let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(2, 64, 8)) {
                 c.items[3] = Some(stack("minecraft:oak_planks", 1));
@@ -2074,10 +2076,10 @@ mod part_front_tests {
             ));
             game.world.block_entities.insert(
                 (1, 64, 8),
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(ModBlockEntityFields {
-                    id: "test:pipe".into(),
-                    ..Default::default()
-                }))),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    "test:pipe".into(),
+                    Default::default(),
+                ))),
             );
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(2, 64, 8))
             {
@@ -2133,11 +2135,7 @@ mod part_front_tests {
                 .unwrap();
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
             let mod_part = |id: &str| {
-                let fields = ModBlockEntityFields {
-                    id: id.into(),
-                    ..Default::default()
-                };
-                BlockEntity::Mod(Box::new(ModBlockEntity::new(fields)))
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(id.into(), Default::default())))
             };
             let chest_items =
                 |game: &super::Game<'_>, z| match game.world.block_entities.get(&(2, 64, z)) {

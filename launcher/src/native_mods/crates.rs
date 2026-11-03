@@ -1,15 +1,12 @@
-//! Native mods' own crates and post-build steps (docs/native-mods.md, "Crates" and
-//! "Post-build steps"). horizon-mixins stages a mod's `[[crate]]` as
-//! `native-crates/<mod>/<crate>/`, a workspace member, and lists its `[[post_build]]` steps in
-//! `native-post-build.json`. A mod's crate may use only what Horizon's own `Cargo.lock` has: the
-//! lock file is the allow list, so a build never downloads a crate Horizon doesn't already ship.
-use std::collections::BTreeSet;
+//! Lock-file isolation and post-build programs for the launcher's flat native crates.
+//! The launcher stages one crate at native-api/<mod>/ and owns its post-build plan.
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-/// Where horizon-mixins stages the mods' crates, in the workspace it writes.
-pub(super) const DIR: &str = "native-crates";
+/// Where the launcher stages the mods' crates.
+pub(super) const DIR: &str = "native-api";
 /// The post-build steps it found, in mod order.
 const POST_BUILD: &str = "native-post-build.json";
 
@@ -52,8 +49,11 @@ pub(super) struct Wanted {
     pub version: String,
 }
 
-/// What every crate of `stage/native-crates/<mod>/<crate>/` asks for.
-pub(super) fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
+/// Registry dependencies of each staged crate, validating generated local paths as well.
+pub(super) fn wanted(
+    stage: &Path,
+    declared: &BTreeMap<&str, BTreeSet<&str>>,
+) -> Result<Vec<Wanted>, String> {
     let mut out = Vec::new();
     let staged_manifests = manifests(&stage.join(DIR))?;
     for (mod_id, manifest) in &staged_manifests {
@@ -115,7 +115,17 @@ pub(super) fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
                     })?,
                     None => key,
                 };
-                validate_sibling_path(mod_id, manifest, path, package, &staged_manifests)?;
+                if package == "horizon-client" && path == "../../crates/horizon-client" {
+                    continue;
+                }
+                validate_sibling_path(
+                    mod_id,
+                    manifest,
+                    path,
+                    package,
+                    &staged_manifests,
+                    declared,
+                )?;
                 continue;
             }
             out.push(Wanted {
@@ -129,7 +139,7 @@ pub(super) fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
     Ok(out)
 }
 
-/// `(mod id, its crate's Cargo.toml)` under `native-crates/`, sorted.
+/// `(mod id, its crate's Cargo.toml)` under `native-api/`, sorted.
 fn manifests(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     let mut out = Vec::new();
     let read = |d: &Path| -> Result<Vec<PathBuf>, String> {
@@ -162,31 +172,29 @@ fn manifests(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        // A folder left empty by an earlier build (the stage keeps folders) is no crate.
-        for krate in read(&mod_dir)? {
-            let manifest = krate.join("Cargo.toml");
-            match fs::symlink_metadata(&manifest) {
-                Ok(metadata) if is_link_or_junction(&metadata) => {
-                    return Err(format!("{}: linked crate manifest", manifest.display()));
-                }
-                Ok(metadata) if metadata.is_file() => out.push((id.clone(), manifest)),
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(format!("{}: {error}", manifest.display())),
+        let manifest = mod_dir.join("Cargo.toml");
+        match fs::symlink_metadata(&manifest) {
+            Ok(metadata) if is_link_or_junction(&metadata) => {
+                return Err(format!("{}: linked crate manifest", manifest.display()));
             }
+            Ok(metadata) if metadata.is_file() => out.push((id, manifest)),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{}: {error}", manifest.display())),
         }
     }
     Ok(out)
 }
 
-/// Only a literal `../<crate-id>` may name another staged crate. Its directory and manifest must
-/// be ordinary entries in the same mod; never canonicalize a source path or follow a link.
+/// Only a declared `../<mod-id>` may name another staged mod's crate. Its directory and
+/// manifest must be ordinary entries; never canonicalize a source path or follow a link.
 fn validate_sibling_path(
     mod_id: &str,
     manifest: &Path,
     path: &str,
     package: &str,
     staged_manifests: &[(String, PathBuf)],
+    declared: &BTreeMap<&str, BTreeSet<&str>>,
 ) -> Result<(), String> {
     let invalid = || {
         format!(
@@ -197,7 +205,13 @@ fn validate_sibling_path(
     let Some(crate_id) = path.strip_prefix("../") else {
         return Err(invalid());
     };
-    if crate_id.is_empty() || crate_id.contains('/') || crate_id.contains('\\') {
+    if crate_id.is_empty()
+        || crate_id.contains('/')
+        || crate_id.contains('\\')
+        || !declared
+            .get(mod_id)
+            .is_some_and(|ids| ids.contains(crate_id))
+    {
         return Err(invalid());
     }
     let mut components = Path::new(path).components();
@@ -223,7 +237,7 @@ fn validate_sibling_path(
     }
     if !staged_manifests
         .iter()
-        .any(|(staged_mod, staged)| staged_mod == mod_id && staged == &sibling_manifest)
+        .any(|(_, staged)| staged == &sibling_manifest)
     {
         return Err(invalid());
     }
@@ -351,7 +365,7 @@ pub(super) fn post_builds(stage: &Path) -> Result<Vec<PostBuild>, String> {
 }
 
 /// Whether `stage` has any mod's crate: a build with none skips the crate check, even when an
-/// earlier build left `native-crates/` behind (the stage keeps folders).
+/// earlier build left `native-api/` behind (the stage keeps folders).
 pub(super) fn any(stage: &Path) -> bool {
     let dir = stage.join(DIR);
     match fs::symlink_metadata(&dir) {
@@ -427,7 +441,12 @@ mod tests {
         }
 
         fn add_crate(&self, mod_id: &str, crate_id: &str, package: &str, body: &str) -> PathBuf {
-            let dir = self.root.join(DIR).join(mod_id).join(crate_id);
+            let id = if crate_id == "engine" {
+                mod_id
+            } else {
+                crate_id
+            };
+            let dir = self.root.join(DIR).join(id);
             write_manifest(&dir, package, body);
             dir
         }
@@ -446,6 +465,25 @@ mod tests {
             format!("[package]\nname = {package:?}\nversion = \"0.1.0\"\n{body}"),
         )
         .unwrap();
+    }
+
+    fn wanted(stage: &Path) -> Result<Vec<Wanted>, String> {
+        let targets = [
+            "same_name",
+            "industrial_sim",
+            "test_support",
+            "build_helper",
+            "unix_helper",
+            "windows_test",
+            "target_build",
+            "actual",
+            "absolute",
+            "linked",
+            "local",
+            "not_a_crate",
+        ];
+        let declared = BTreeMap::from([("bake", targets.into_iter().collect())]);
+        super::wanted(stage, &declared)
     }
 
     fn assert_rejected_path(label: &str, dependency: impl FnOnce(&StageFixture) -> String) {
@@ -553,7 +591,7 @@ checksum = "def"
         let stage =
             std::env::temp_dir().join(format!("horizon-native-crates-{}", std::process::id()));
         let _ = fs::remove_dir_all(&stage);
-        let krate = stage.join(DIR).join("bake").join("engine");
+        let krate = stage.join(DIR).join("bake");
         fs::create_dir_all(&krate).unwrap();
         fs::write(
             krate.join("Cargo.toml"),
@@ -574,7 +612,7 @@ checksum = "def"
                 wants("bake", "sha2", "0.10"),
             ]
         );
-        fs::create_dir_all(stage.join(DIR).join("gone/engine/src")).unwrap();
+        fs::create_dir_all(stage.join(DIR).join("gone/src")).unwrap();
         assert_eq!(
             wanted(&stage).unwrap().len(),
             5,
@@ -680,10 +718,33 @@ checksum = "def"
         });
         assert_rejected_path("path is not a string", |_| "local = { path = 7 }".into());
         assert_rejected_path("sibling Cargo.toml is not a regular file", |stage| {
-            let sibling = stage.root.join(DIR).join("bake").join("not_a_crate");
+            let sibling = stage.root.join(DIR).join("not_a_crate");
             fs::create_dir_all(sibling.join("Cargo.toml")).unwrap();
             "local = { path = \"../not_a_crate\" }".into()
         });
+    }
+
+    #[test]
+    fn sibling_crates_require_a_manifest_dependency_and_the_game_path_is_exact() {
+        let stage = StageFixture::new();
+        stage.add_crate(
+            "bake",
+            "engine",
+            "bake-engine",
+            "[dependencies]\nother={path='../other'}\n",
+        );
+        stage.add_crate("other", "other", "other", "");
+        assert!(super::wanted(stage.root(), &BTreeMap::new()).is_err());
+        let declared = BTreeMap::from([("bake", BTreeSet::from(["other"]))]);
+        assert!(super::wanted(stage.root(), &declared).is_ok());
+        let root = stage.root().join(DIR).join("bake/Cargo.toml");
+        for (path, valid) in [
+            ("../../crates/horizon-client", true),
+            ("../../other/horizon-client", false),
+        ] {
+            fs::write(&root, format!("[package]\nname='bake'\nversion='1'\n[dependencies]\nclient={{package='horizon-client',path='{path}'}}\n")).unwrap();
+            assert_eq!(super::wanted(stage.root(), &BTreeMap::new()).is_ok(), valid);
+        }
     }
 
     #[test]

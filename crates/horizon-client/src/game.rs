@@ -227,6 +227,8 @@ mod native_explosions;
 mod native_falling;
 #[cfg(test)]
 mod native_guest_turn_tests;
+#[cfg(test)]
+mod native_held_out_tests;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;
@@ -325,6 +327,7 @@ mod sculk;
 mod sculk_fixture;
 mod server_links;
 mod server_packs;
+mod server_reload;
 mod server_travel;
 mod shader_packs;
 mod shelf;
@@ -350,6 +353,7 @@ mod structure_edit;
 mod structures;
 mod subtitle_hud;
 mod sulfur_cubes;
+mod tempban;
 mod test_block_edit;
 mod test_blocks;
 mod test_entities;
@@ -1453,6 +1457,26 @@ impl LevelAccess for GameLevel<'_> {
             self.native_is_signal_source(state, &mut source);
         }
         source
+    }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        self.native_should_redstone_wire_connect_to(
+            self.dimension,
+            pos,
+            state,
+            direction,
+            &mut connected,
+        );
+        connected
     }
     fn adjust_signal(
         &self,
@@ -2836,6 +2860,7 @@ struct Game<'a> {
     cooldowns: horizon_client::cooldowns::Cooldowns,
     /// The source of a command run through /execute (the player otherwise).
     command_source: Option<commands::execute::Source>,
+    native_command_filter: bool,
     titles: titles::Titles,
     /// `Hud.toolHighlightTimer`: the selected item name.
     tool_highlight: horizon_client::hud_overlays::ToolHighlight,
@@ -3090,6 +3115,8 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    /// Entities whose copies are held out of storage; their handles refuse until stored back.
+    held_out: Vec<u32>,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
@@ -3258,10 +3285,10 @@ struct Game<'a> {
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
-    /// The joined guests' attachments, by UUID: here rather than in their
+    /// The joined guests' attachments, by connection: here rather than in their
     /// records, so a hook in one guest's turn still reaches the others'.
     /// The acting guest's are in `player_attachments` for the turn.
-    guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
+    guest_attachments: HashMap<u32, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -12421,8 +12448,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        self.fns = Default::default();
-        let stack = self.reload_datapacks(false, &level.enabled_features);
+        let stack = self.reload_datapacks(false, &level.enabled_features)?;
         self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
@@ -13917,7 +13943,7 @@ impl Game<'_> {
         let player = self
             .player
             .as_ref()
-            .filter(|p| !p.health.dead_or_dying() && !spectator);
+            .filter(|p| !p.health.dead_or_dying() && !spectator && !self.lan_acting_fake);
         // ExperienceOrb.followNearbyPlayer: each orb goes for the nearest
         // living player within 8 blocks, the host's own or a guest.
         let mut followed: Vec<([f64; 3], [f64; 3])> = player
@@ -13933,7 +13959,13 @@ impl Game<'_> {
                 host.hub
                     .guests
                     .iter()
-                    .filter(|g| g.placed && g.loaded && !g.dead && g.health > 0.0)
+                    .filter(|g| {
+                        g.placed
+                            && g.participates_in_player_simulation()
+                            && g.loaded
+                            && !g.dead
+                            && g.health > 0.0
+                    })
                     .filter(|g| !g.spectator())
                     .map(|g| {
                         let p = g.position;
@@ -19353,6 +19385,7 @@ impl<'a> Game<'a> {
             shield_cooldown: 0,
             cooldowns: Default::default(),
             command_source: None,
+            native_command_filter: false,
             titles: Default::default(),
             tool_highlight: Default::default(),
             saving_indicator: Default::default(),
@@ -19519,6 +19552,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_input: Default::default(),
             native_lifecycle: Default::default(),
+            held_out: Vec::with_capacity(4),
             native_net: Default::default(),
             native_mod_screen: None,
             sky_darken_memo: Default::default(),
@@ -19970,7 +20004,7 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-    fn build_world_tables(&self, stack: &functions::PackStack) -> Option<WorldTables> {
+    fn build_world_tables(&mut self, stack: &functions::PackStack) -> Option<WorldTables> {
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
@@ -20054,6 +20088,8 @@ impl Game<'_> {
             horizon_client::mod_api::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
                 item: &|id| items.items.contains_key(id),
+                state_count: registry.len(),
+                state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
         .map_err(|refused| format!("Mod parts refused:\n{}", refused.join("\n")).into())
@@ -21926,7 +21962,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         &early_settings.mods.enabled,
         &options.dev_mods,
     )
-    .unwrap_or_else(|e| {
+    .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
         mods::content_root(
@@ -21934,7 +21970,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
             &early_settings.mods.enabled,
             &options.dev_mods,
         )
-    });
+    })?;
     let loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),
@@ -22264,18 +22300,20 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
+    use crate::mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn reload_resolves_parts_against_reloaded_tags() {
-        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Host, Registrar};
+        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
         struct TagPart;
         impl BlockPart for TagPart {}
         struct ReloadMod;
+        #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
-            fn data_pack_files(&self, _: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+            fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
                 event.files.push((
                     "tags/test:block/reload".into(),
                     br#"{"values":["minecraft:stone"]}"#.to_vec(),
@@ -22295,11 +22333,13 @@ mod tests {
                 &game.level.enabled_features,
             );
             game.reload_world_tables(&stack);
-            assert!(
-                !mod_api::parts("test")
-                    .block(|| Some("minecraft:stone"))
-                    .is_empty()
-            );
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            assert!(!mod_api::parts("test").block_state(stone).is_empty());
         });
     }
     use super::*;
@@ -22309,17 +22349,18 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn right_click_block_controls_cauldron_use() {
         use horizon_client::mod_api::{
-            self, Flow, Hooks, Host, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
+            self, Flow, Hooks, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
         };
         use std::sync::{
             Arc,
             atomic::{AtomicBool, AtomicUsize, Ordering},
         };
         struct Observer(Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn right_click_block(
                 &self,
-                _: &mut dyn Host,
+                _: crate::mod_api::HostSide,
                 event: &mut RightClickBlockEvent<'_>,
             ) -> Flow {
                 self.2.fetch_add(1, Ordering::SeqCst);
