@@ -1369,6 +1369,23 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
+/// current interaction ranges. Entity ids identify this world's network
+/// entities, including dragon parts; they are not persistent handles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum NativeCrosshairTarget {
+    Block {
+        pos: BlockPos,
+        state: BlockStateId,
+        hit: BlockHit,
+    },
+    Entity {
+        id: i32,
+        point: [f64; 3],
+    },
+}
+
 /// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeItemCooldown {
