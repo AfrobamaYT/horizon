@@ -8004,10 +8004,13 @@ mod breeding_tests {
         }
         let joins = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
-        let mods: mod_api::Mods = vec![Box::new(Observer {
-            joins: joins.clone(),
-            cancel: cancel.clone(),
-        }) as Box<dyn Hooks>]
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "breeding-observer",
+            Box::new(Observer {
+                joins: joins.clone(),
+                cancel: cancel.clone(),
+            }),
+        )]
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
