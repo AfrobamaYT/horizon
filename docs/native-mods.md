@@ -469,7 +469,7 @@ matches every recipe.
 ### A mod's own enchantment effect kinds
 
 A `minecraft:post_attack` entry with `enchanted` attacker and `affected` victim whose `effect.type` is in a
-namespace outside `minecraft:` — where the game used to skip it silently — reaches
+namespace outside `minecraft:` reaches
 `native_enchant_effect(enchantment, kind, data, level, victim)` when a player's weapon hits a mob and the entry's
 `requirements` pass. `victim` is the mob's id, and the acting player is the one holding the weapon. A bare type
 name is minecraft's own. Other components and pairs, a hit on a player, and an entry inside `minecraft:all_of`
@@ -477,15 +477,13 @@ aren't told yet. An unclaimed kind does nothing.
 
 ### A mod's own consume effects
 
-A consumable's `on_consume_effects` entry of a type in a namespace of its own — where the old loader
-dropped it silently — reaches `native_consume_effect(kind, data)` when the item is consumed, on the server
+A consumable's `on_consume_effects` entry of a type in a namespace of its own reaches `native_consume_effect(kind, data)` when the item is consumed, on the server
 thread, for the acting player. The kind and the JSON the file wrote are there; the game's own effects,
 sounds, teleports and drops are open to the hook. An unclaimed kind does nothing.
 
 ### A mod's own loot functions and conditions
 
-A loot table's function or condition that names a `type` in a namespace outside `minecraft:` — where the
-loot roll used to silently skip it — reaches `native_loot_function(kind, data, ctx, stack)` or
+A loot table's function or condition that names a `type` in a namespace outside `minecraft:` reaches `native_loot_function(kind, data, ctx, stack)` or
 `native_loot_condition(kind, data, ctx, holds)` when the table rolls. The function changes the stack; the
 condition says whether it holds. The context brings the entity, the damage, the player who killed it, the
 tool, the block, the luck, the biome and a seed from the roll's random. An unclaimed function leaves the
@@ -771,7 +769,7 @@ one, where vanilla gives the `by` one.
 
 - Mod-block entity contacts: `native_block_step_on`, `native_block_entity_inside` and `native_block_fall_on`. Each receives the server dimension, entity id/type, block state and position. The landing hook also receives fall distance and mutable calculated damage; zero prevents fall hurt and its generic fall sounds. Creative and fall-immune entities notify with zero and retain immunity. Invalid non-finite damage changes are ignored; negative damage is clamped to zero. Hooks run synchronously without `self`, like `native_living_incoming_damage`.
 
-- A consumable's effect of a mod's own kind. The item's `on_consume_effects` entry of a type in a namespace of its own — where the old loader dropped it silently — reaches `native_consume_effect(kind, data)` when the
+- A consumable's effect of a mod's own kind. The item's `on_consume_effects` entry of a type in a namespace of its own reaches `native_consume_effect(kind, data)` when the
   item is consumed, on the server thread, for the acting player. The kind and the JSON the file wrote are there;
   the game's own effects, sounds, teleports and drops are open to the hook. An unclaimed kind does nothing.
   The hook sees the item's own consumable component, not a patch on the stack; a bare vanilla name and an unknown `minecraft:` kind are the loader's, not the hook's.
@@ -861,11 +859,11 @@ one, where vanilla gives the `by` one.
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
 
-- A mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `native_acting_player` is None), and a mod sets `ran`. `native_feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher as before; the single player owner's console is not covered.
+- A mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `native_acting_player` is None), and a mod sets `ran`. `native_feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher; the single player owner's console is not covered.
 
 - Player-use drops to `native_loot_drops`: shears on a sheep, a mooshroom, a snow golem or a bogged, a brush on an
   armadillo or a suspicious block, carving a pumpkin, picking sweet berries or cave vines, and a player taking an item frame or
-  its item now pass through it too, with `NativeLootDrops::used` set and the player named.
+  its item pass through it, with `NativeLootDrops::used` set and the player named.
 
 - Server experience: `native_experience_orbs(dimension, min, max)` reads the experience orbs in a box; `PlayerRef::give_experience_points` gives points as an orb they touch does (Mending first), and `PlayerRef::give_levels` gives or, for a negative amount, takes levels.
 
@@ -896,7 +894,7 @@ A mod particle may opt into declarative behaviour in that same particle JSON (no
 `animation` chooses how the particle walks through its sprites: `age` (first to last over its
 lifetime), `loop` (cycles every `frame_ticks` ticks, 1..200, only valid with `loop`), `random` (one random
 sprite, kept) or `first` (the first sprite, kept). Without `animation` the particle keeps the sprite it was
-spawned with, as before.
+spawned with.
 
 Every field is optional. Omit `horizon:behaviour` (or use `{}`) to keep the existing behaviour,
 including its random draws, unchanged. `velocity` replaces the initial randomized velocity with
@@ -1045,7 +1043,7 @@ there is no per-particle code hook.
 
 - Blocks and items a native mod declares in code, as NeoForge's `DeferredRegister.Blocks` and `.Items` drained by `RegisterEvent`, instead of one content file each: `native_blocks(blocks)` and `native_items(items)`, asked once at start on every side, take `horizon_mods::content::Block` and `Item`, the declarations a content mod's `data/<id>/horizon/block/` and `item/` files hold (a vanilla template and what differs; `item: true` gives a block its item). Ids are in the mod's namespace. They join the content mods' blocks and items, inside the content mod whose id is that namespace when it is on (its models, textures, loot and recipes), else on their own with the template's look, so their network ids, saves and the joining client's content check are the files' (docs/mods.md). They pass the files' checks; a namespace whose declarations don't is logged and left out.
 
-- Entities ticking, through `native_entity_tick_pre` (NeoForge's `EntityTickEvent.Pre`) and `native_entity_tick_post` (`EntityTickEvent.Post`), with the entity's id and type (`minecraft:zombie`, `minecraft:item`) and the level. Set `canceled` in the Pre and the entity doesn't tick this tick (and its Post isn't told). Told for the mobs, item entities, minecarts and boats that tick in an entity-ticking chunk, on the single player server thread and on a dedicated server; not for a player's own boat or minecart, projectiles, orbs, primed TNT, falling blocks or armor stands yet (check `kind`: later APIs add kinds). Mobs and items hear every Pre before the family's first tick and every Post after its last; minecarts and boats hear theirs around each one's tick. A mod that hooks them also hooks `native_entity_tick_listened(listened)` and sets `*listened = true`: otherwise no entity's tick is told. It runs each tick for every ticking entity, so keep it cheap.
+- Entities ticking, through `native_entity_tick_pre` (NeoForge's `EntityTickEvent.Pre`) and `native_entity_tick_post` (`EntityTickEvent.Post`), with the entity's id and type (`minecraft:zombie`, `minecraft:item`) and the level. Set `canceled` in the Pre and the entity doesn't tick this tick (and its Post isn't told). Told for the mobs, item entities, minecarts and boats that tick in an entity-ticking chunk, on the single player server thread and on a dedicated server; not for a player's own boat or minecart, projectiles, orbs, primed TNT, falling blocks or armor stands. Check `kind`. Mobs and items hear every Pre before the family's first tick and every Post after its last; minecarts and boats hear theirs around each one's tick. A mod that hooks them also hooks `native_entity_tick_listened(listened)` and sets `*listened = true`: otherwise no entity's tick is told. It runs each tick for every ticking entity, so keep it cheap.
 
 - A mob's or an armor stand's equipment changing, on the single player server thread and on a dedicated server: `native_living_equipment_change(entity, kind, slot, from, to)` once for each slot (`mainhand`, `offhand`, `feet`, `legs`, `chest`, `head`, `body`, `saddle`) that holds another stack than the mods last heard (NeoForge's `LivingEquipmentChangeEvent`, vanilla's `LivingEntity.collectEquipmentChanges`). A mob new to the level counts from empty on its first tick. A mod that hooks it also hooks `native_living_equipment_listened(listened)` and sets `*listened = true`: otherwise the game does not read every mob's equipment each tick, and only armor stands are told. Players keep `native_on_equip`. It only hears.
 
@@ -1403,7 +1401,7 @@ there is no per-particle code hook.
 
 - `native_item_expire(entity, stack, extra_life)`, a dropped item reaching its lifetime on the server (NeoForge's `ItemExpireEvent`, vanilla `ItemEntity.tick`): every mod may set or add to `extra_life`, in ticks from zero; a positive total keeps the item that much longer, zero or less lets it expire. Extensions are capped at 32766 ticks.
 
-- The title's own screens to the screen hooks. `NativeScreenView.id` gains one id per title state (`title`, `world_select`, `world_create`, `world_create_flat`, `world_create_buffet`, `world_edit`, `world_backup`, `world_backup_confirm`, `world_optimize_confirm`, `world_optimize`, `low_disk_space`, `world_delete`, `world_recover`, `world_recovered`, `error`, `multiplayer`, `add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, `disconnected`, `multiplayer_warning`, `onboarding`, `ban_notice`), with no `menu`, no `title` and no `slots`, and the whole window as `rect`. `native_screen_render_post` fires after the title draws its screen (before its toasts), and the `_pre` input hooks — mouse buttons, drag, wheel, key press and release, character typed — fire on it and can cancel it as on any screen, so a mod draws its own button or browser over Create New World and takes the clicks. A dialog, a prompt or a server's pack prompt over the title keeps them away, and typing still goes to the title's own boxes (the key's text stays on the key there, as on Options, so `native_screen_char_typed_pre` does not fire from the keyboard on the title's own screens; the control socket's `type` now types into them too). `native_instance_dir()` is the instance folder, where `options.txt`, `saves/`, `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are; a world's `datapacks/` is in that world's folder.
+- The title's own screens to the screen hooks. `NativeScreenView.id` has one id per title state (`title`, `world_select`, `world_create`, `world_create_flat`, `world_create_buffet`, `world_edit`, `world_backup`, `world_backup_confirm`, `world_optimize_confirm`, `world_optimize`, `low_disk_space`, `world_delete`, `world_recover`, `world_recovered`, `error`, `multiplayer`, `add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, `disconnected`, `multiplayer_warning`, `onboarding`, `ban_notice`), with no `menu`, no `title` and no `slots`, and the whole window as `rect`. `native_screen_render_post` fires after the title draws its screen (before its toasts), and the `_pre` input hooks — mouse buttons, drag, wheel, key press and release, character typed — fire on it and can cancel it as on any screen, so a mod draws its own button or browser over Create New World and takes the clicks. A dialog, a prompt or a server's pack prompt over the title keeps them away, and typing still goes to the title's own boxes (the key's text stays on the key there, as on Options, so `native_screen_char_typed_pre` does not fire from the keyboard on the title's own screens; the control socket's `type` types into them). `native_instance_dir()` is the instance folder, where `options.txt`, `saves/`, `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are; a world's `datapacks/` is in that world's folder.
 
 - A player took an anvil's result: `native_anvil_craft_post(player, name, pos, craft)` (NeoForge's `AnvilCraftEvent.Post`) is heard after the levels, the inputs and the anvil wear are done, so a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not heard when `native_anvil_craft_pre` cancelled.
 
@@ -1537,8 +1535,8 @@ trusting native code is the player's decision, never an agent's.
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with `performance`. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
    as they are. The Mods page's "Native build" row, `horizon-launcher settings native-profile performance|dev|release`
-   or `native-build --profile ...` pick one (the setting's older value `fast` still means `performance`, and an older
-   settings file's "Release build" switch still picks `release`).
+   or `native-build --profile ...` pick one. The `fast` setting value selects `performance`, and the settings file's
+   "Release build" switch selects `release`.
 
    A revision whose `Cargo.toml` has no `fast` builds with `release`; `native-mods.json` says which (`profile`).
    Each profile is in the build's key, so their builds never mix and may all stay. `performance` and `dev` share
@@ -1560,8 +1558,8 @@ trusting native code is the player's decision, never an agent's.
    it. The game lists its `mods` with their versions in a crash report's details (`Native Mods: id version, …`;
    they stay in the local report, not in crash telemetry). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
-   it is, and their clean-up never removes a native build. An instance built before this (the **Native mods**
-   instance the default home's mods used to go to) keeps its worlds and its build.
+   it is, and their clean-up never removes a native build. The **Native mods**
+   instance keeps its worlds and its build.
 
 ### Build log
 
@@ -1655,7 +1653,7 @@ environment. `release` has no incremental compilation (the release profile's own
 profile's folder, kept in `native/built.json`) or "First build: the whole game (several minutes)". While compiling it shows the
 crate, crates done of the total (Cargo's own progress), and the time taken; afterwards "Built in 42 s (performance,
 incremental)". The window shows it in the Native mods row, `native-build` prints each step with its time on standard
-error; `native/build.log` keeps Cargo's output as before (without the progress bar).
+error; `native/build.log` keeps Cargo's output without the progress bar.
 
 Measured 2026-10-30 on Linux (x86_64 desktop), Zoom 2.0.0 and FPS Counter 2.0.0 on Nightly `6f8c7a0`, the `fast`
 profile, the launcher at nice 19 with `CARGO_BUILD_JOBS=10` (an empty launcher home: Rust, the crates and the
@@ -1942,7 +1940,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_perform_console_command(command, ran)`**: a registered command typed on the dedicated server's console
   (without its slash), run as the server at level 4: no player, so `native_acting_player()` is None and the player-only
   helpers give nothing. The mod parses the line and sets `ran`; `native_feedback` answers on the console. A name no mod
-  registered goes to vanilla's dispatcher as before. The single player owner's console (`horizon-ctl command`, the MCP
+  registered goes to vanilla's dispatcher. The single player owner's console (`horizon-ctl command`, the MCP
   command tool) is a player's: it reaches `native_perform_command` with the owner, at level 4.
 - **`native_player_respawned(player, name)`**: a dead player came back, once per respawn, on a server: after
   `PlayerList.respawn` reset their health, food and experience and placed them at their bed, anchor or the world spawn
@@ -2287,7 +2285,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_tick_block(ticks, dimension, pos, state, handled)`** (on `GameLevel`): a due scheduled tick of a block
   that is still there (`ServerLevel.tickBlock`), before its own `tick`; the same contract as `native_random_tick`.
 - **`native_explosion_detonate(dimension, center, blocks)`**: the positions an explosion is about to break,
-  before any is hit; take out the ones to spare. Entities are hurt as before.
+  before any is hit; take out the ones to spare. Entity damage is unchanged.
 - **`native_explosion_knockback(dimension, center, blocks, entity, knockback_velocity)`**: a server explosion's
   calculated velocity, before it is added to the entity. Replace `knockback_velocity` to change the push;
   `entity` is None for a player, whom `native_acting_player` names. The player packet uses the same replacement. Wind bursts are heard too.
@@ -2822,8 +2820,8 @@ horizon-mixins' priority, mod ID, then injection ID; dependency order does not c
 
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
 and in the server thread's log line, with the bundle's `[mod] id` (the generated executable passes the ids to
-`mod_api::name_mods`; a build that doesn't gives the mod's place in dispatch order, `#0` first). The game still
-stops as before. Render hooks and trait injections are not named yet.
+`mod_api::name_mods`; a build that doesn't gives the mod's place in dispatch order, `#0` first). The game
+stops. Render hooks and trait injections are not named yet.
 
 A bundle with an `[api]` package may declare its own injection in the trait:
 
@@ -3365,16 +3363,16 @@ The following documented `Game` helpers are not in the trait yet:
 - `with_mod_block_entity` and `trigger_criterion` are generic or take
   `impl Trait`, so their signatures cannot be called through `dyn Host`.
 
-The following catalog hooks are not in the trait yet:
+The following catalog hooks are not in the trait:
 
-- Newly added upstream hooks `player_command`, `perform_console_command`, `item_decorations`,
+- `player_command`, `perform_console_command`, `item_decorations`,
   `client_resources_reloaded`, `camera_shake`, `screen_key_pressed_pre`, `screen_char_typed_pre`,
   `screen_mouse_scrolled_pre`, `use_duration`, `use_animation`, `can_eat`,
   `living_entity_use_item_start`, `living_entity_use_item_finish`, `render_hand`, `shader_params`
-  and `block_highlight` will join a later slice.
-- Newer upstream hooks `biome_colors`, `camera_distance`, `compute_fog_color`, `compute_fov`,
+  and `block_highlight`.
+- `biome_colors`, `camera_distance`, `compute_fog_color`, `compute_fov`,
   `data_pack_files`, `mob_submit`, `mouse_button_pre`, `mouse_button_post`, `player_respawned`
-  and `server_data_loaded` will join a later slice.
+  and `server_data_loaded`.
 
 The client `tooltip_color` hook changes the background and top and bottom border gradient colours as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered; no texture hook is offered.
 
