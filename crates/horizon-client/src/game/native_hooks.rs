@@ -4767,6 +4767,23 @@ impl Game<'_> {
     pub(super) fn native_brewing_complete(&self, pos: [i32; 3]) {
         mod_api::dispatch_brewing_complete(self, mod_api::mods(), pos);
     }
+    /// A server player took `stack` from a brewing stand bottle slot
+    /// (`BrewingStandMenu.PotionSlot.onTake`): `player` is their UUID and
+    /// `player_entity_id` their network id. @API:player_brewed_potion@.
+    pub(super) fn native_player_brewed_potion(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+    ) {
+        mod_api::dispatch_player_brewed_potion(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            stack,
+        );
+    }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_campfire_start(self, mod_api::mods(), pos, item);
