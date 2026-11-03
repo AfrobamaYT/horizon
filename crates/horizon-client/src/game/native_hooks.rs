@@ -147,8 +147,6 @@
 //!
 //! API 290 adds Crafting-grid result prepared (`native_prepare_item_craft`).
 //!
-//! API 289 adds Grindstone result prepared (`native_prepare_grindstone`).
-//!
 //! API 288 adds Anvil result prepared (`native_prepare_anvil`).
 //!
 //! API 287 adds A thrown potion applied its hit effects (`native_potion_splash`).
@@ -5901,9 +5899,9 @@ impl Game<'_> {
     /// A grindstone at `pos` made its result after its inputs changed, for
     /// the server player `player` (UUID) and `player_entity_id`
     /// (`GrindstoneEvent.OnPlaceItem`, in `GrindstoneMenu.createResult`):
-    /// `place` holds the inputs and no output. Set its `output` to replace
-    /// vanilla's result, and with it `xp` (0 or more) for what taking it
-    /// gives; set `cancel` for no result. Before `prepare_grindstone`.
+    /// `place` holds the inputs, the vanilla result and an initially empty
+    /// override. Set `output` to replace the result and `xp` (0 or more)
+    /// for what taking it gives; set `cancel` for no result.
     /// Server-side. @API:grindstone_place@.
     pub(super) fn native_grindstone_place(
         &mut self,
@@ -5949,16 +5947,6 @@ impl Game<'_> {
             take,
             cancel,
         );
-    }
-    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. 289.
-    pub(super) fn native_prepare_grindstone(
-        &mut self,
-        player: u128,
-        name: &str,
-        pos: [i32; 3],
-        result: &mut Option<ItemStack>,
-    ) {
-        mod_api::dispatch_prepare_grindstone(self, mod_api::mods(), player, name, pos, result);
     }
     /// A smithing result was prepared for a server player at `pos`. Change it before it is sent. 292.
     pub(super) fn native_prepare_smithing(

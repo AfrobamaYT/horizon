@@ -541,11 +541,13 @@ impl AnvilUpdate {
 
 /// What `GrindstoneEvent.OnPlaceItem` asks about once the inputs changed,
 /// and what the mods may set: an `output` (none until a mod sets one) and,
-/// with it, `xp` (-1 for vanilla's experience).
+/// with it, `xp` (-1 for vanilla's experience). `vanilla_output` is the
+/// computed vanilla result, which mods may inspect or change separately.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GrindstonePlace {
     pub top: Option<ItemStack>,
     pub bottom: Option<ItemStack>,
+    pub vanilla_output: Option<ItemStack>,
     pub output: Option<ItemStack>,
     pub xp: i32,
 }
@@ -1369,6 +1371,7 @@ impl Menu {
         GrindstonePlace {
             top: self.containers[MAIN][0].clone(),
             bottom: self.containers[MAIN][1].clone(),
+            vanilla_output: self.containers[RESULT][0].clone(),
             output: None,
             xp: -1,
         }
@@ -1376,15 +1379,18 @@ impl Menu {
 
     /// The mods' answer to [`Self::grindstone_place`]: a cancel leaves no
     /// result; an output replaces vanilla's, and its `xp` (when 0 or more)
-    /// is what taking it gives; otherwise vanilla's result and experience stay.
+    /// is what taking it gives; otherwise the vanilla-result snapshot and
+    /// vanilla experience are used.
     pub fn grindstone_placed(&mut self, place: GrindstonePlace, cancel: bool) {
         self.grind_xp = -1;
-        if cancel {
-            self.containers[RESULT][0] = None;
+        self.containers[RESULT][0] = if cancel {
+            None
         } else if let Some(output) = place.output {
-            self.containers[RESULT][0] = Some(output);
             self.grind_xp = place.xp.max(-1);
-        }
+            Some(output)
+        } else {
+            place.vanilla_output
+        };
     }
 
     /// The rest of a taken grindstone result's `onTake` once the mods
@@ -3921,10 +3927,30 @@ pub(crate) mod tests {
             assert_eq!(menu.slot(1), stack("iron_sword", 1).as_ref());
             assert_eq!(menu.ground, None);
 
-            // A cancelled placement leaves no result.
             let mut menu = Menu::new(Kind::Grindstone);
             menu.set_slot(env, 0, stack("iron_sword", 1));
-            let place = menu.grindstone_place();
+            menu.load_slot(2, stack("golden_sword", 1));
+            let mut place = menu.grindstone_place();
+            assert_eq!(place.vanilla_output, stack("golden_sword", 1));
+            assert_eq!(place.output, None);
+            place.vanilla_output = stack("dirt", 1);
+            menu.grindstone_placed(place, false);
+            assert_eq!(menu.slot(2), stack("dirt", 1).as_ref());
+
+            let mut place = menu.grindstone_place();
+            place.vanilla_output = stack("golden_sword", 1);
+            place.output = stack("stick", 1);
+            menu.grindstone_placed(place, false);
+            assert_eq!(menu.slot(2), stack("stick", 1).as_ref());
+
+            let mut place = menu.grindstone_place();
+            place.vanilla_output = None;
+            menu.grindstone_placed(place, false);
+            assert_eq!(menu.slot(2), None);
+
+            // Cancellation wins even when a mod supplies an override.
+            let mut place = menu.grindstone_place();
+            place.output = stack("stick", 1);
             menu.grindstone_placed(place, true);
             assert_eq!(menu.slot(2), None);
         });
