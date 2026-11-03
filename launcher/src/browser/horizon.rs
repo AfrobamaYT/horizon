@@ -617,11 +617,7 @@ fn install_version(
     let old = list.entries.iter().find(|e| ours(e)).cloned();
     if old.as_ref().is_some_and(|o| {
         o.kind != project.kind
-            || (o
-                .file
-                .starts_with(&format!("{}/", crate::native_mods::INSTALLED))
-                != native
-                && project.kind == Kind::Mod)
+            || (project.kind == Kind::Mod && index::native::holds(&home.join(&o.file)) != native)
     }) {
         return Err(format!(
             "{} has a different installed kind: remove it before installing this version.",
