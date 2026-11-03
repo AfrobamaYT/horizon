@@ -4,27 +4,7 @@
 //! isn't online here. Writes return false (or None) for those, for a dead
 //! player, and, inside another player's turn, for anyone but that player.
 use super::{Game, stats::Stats};
-use horizon_client::mod_api::PlayerRef;
-
-/// The vanilla stat types (`BuiltInRegistries.STAT_TYPE`), by path.
-const STAT_TYPES: [&str; 9] = [
-    "mined",
-    "crafted",
-    "used",
-    "broken",
-    "picked_up",
-    "dropped",
-    "killed",
-    "killed_by",
-    "custom",
-];
-
-/// A stat type's path (`minecraft:used` or `used`), or None for one vanilla
-/// doesn't have.
-fn stat_type(ty: &str) -> Option<&str> {
-    let path = ty.strip_prefix("minecraft:").unwrap_or(ty);
-    STAT_TYPES.contains(&path).then_some(path)
-}
+use horizon_client::mod_api::{NativeStatType, PlayerRef};
 
 /// An id with its namespace: `stone` is `minecraft:stone`.
 fn qualified(id: &str) -> String {
@@ -65,51 +45,44 @@ impl Game<'_> {
         })
     }
 
-    /// The value of statistic `stat_type` (`minecraft:mined`,
-    /// `minecraft:custom`...) for `key` (`minecraft:stone`,
+    /// The value of statistic `stat_type` for `key` (`minecraft:stone`,
     /// `minecraft:jump`...), as `ServerStatsCounter.getValue`: 0 when never
-    /// counted. None for a stat type vanilla doesn't have. API
-    /// @API:player_stats@.
+    /// counted. API @API:player_stats@.
     pub(super) fn native_player_stat(
         &self,
         player: PlayerRef,
-        stat_type: &str,
+        stat_type: NativeStatType,
         key: &str,
     ) -> Option<i32> {
-        let ty = self::stat_type(stat_type)?;
+        let ty = stat_type.path();
         let stats = self.native_player_stats(player)?;
         Some(stats.map_or(0, |s| s.get(ty, &qualified(key))))
     }
     /// `Player.awardStat(stat, amount)`: adds `amount`, as the game does
     /// for its own counts, so `player_stat_award` hears it and may cancel
-    /// it, and scoreboard criteria follow. False for an unknown stat type,
-    /// or a player it can't reach. API @API:player_stats@.
+    /// it, and scoreboard criteria follow. False for a player it can't
+    /// reach. API @API:player_stats@.
     pub(super) fn native_player_award_stat(
         &mut self,
         player: PlayerRef,
-        stat_type: &str,
+        stat_type: NativeStatType,
         key: &str,
         amount: i32,
     ) -> bool {
-        let Some(ty) = self::stat_type(stat_type) else {
-            return false;
-        };
+        let ty = stat_type.path();
         let key = qualified(key);
         self.native_player_current(player)
             && self.native_as_player(player.uuid(), |game| game.award_stat(ty, &key, amount))
     }
     /// `Player.resetStat`: sets the statistic back to 0, which scoreboard
-    /// criteria follow. False for an unknown stat type, or a player it can't
-    /// reach. API @API:player_stats@.
+    /// criteria follow. False for a player it can't reach. API @API:player_stats@.
     pub(super) fn native_player_reset_stat(
         &mut self,
         player: PlayerRef,
-        stat_type: &str,
+        stat_type: NativeStatType,
         key: &str,
     ) -> bool {
-        let Some(ty) = self::stat_type(stat_type) else {
-            return false;
-        };
+        let ty = stat_type.path();
         let key = qualified(key);
         self.native_player_current(player)
             && self.native_as_player(player.uuid(), |game| game.stats.reset(ty, &key))
@@ -175,5 +148,94 @@ impl Game<'_> {
             count = game.change_recipes(give, &ids);
         })
         .then_some(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use horizon_client::mod_api::NativeStatType;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_resting_guest_reads_from_their_own_record() {
+        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+        with_game(|game| {
+            let settings = super::super::lan::LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                announce: false,
+                ..NetConfig::lan(0, "StatsTest".into(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 10,
+                simulation_distance: 10,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 2,
+                integrated: false,
+                levels: Default::default(),
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let (tx, _rx) = mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 1,
+                    uuid: 123,
+                    name: "guest".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:1".parse().unwrap(),
+                },
+                20,
+                [0.0; 3],
+                8,
+            );
+            guest.placed = true;
+            guest.recipe_book.recipes.insert("minecraft:stick".into());
+            let host = game.lan.as_mut().unwrap();
+            host.hub.guests.push(guest);
+            let mut play = super::super::lan_actions::GuestPlay::default();
+            play.stats.add("custom", "minecraft:jump", 7);
+            host.play.insert(1, play);
+            game.stats.add("custom", "minecraft:jump", 3);
+
+            let player = game.native_player_ref(123).unwrap();
+            let jump = |game: &super::Game<'_>| {
+                game.native_player_stat(player, NativeStatType::Custom, "jump")
+            };
+            assert_eq!(jump(game), Some(7));
+            assert_eq!(
+                game.native_player_has_discovered_recipe(player, "stick"),
+                Some(true)
+            );
+            assert_eq!(
+                game.native_player_has_discovered_recipe(player, "minecraft:diamond_pickaxe"),
+                Some(false)
+            );
+            // In the guest's turn their state is in the game.
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            assert_eq!(jump(game), Some(3));
+            game.lan_acting_uuid = None;
+            game.lan_acting_entity = None;
+            // A guest without play state yet has counted nothing.
+            game.lan.as_mut().unwrap().play.remove(&1);
+            assert_eq!(jump(game), Some(0));
+        });
     }
 }
