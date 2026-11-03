@@ -1,49 +1,42 @@
 //! A server player's last death location for native mods, through a
 //! `PlayerRef` (docs/native-mods.md): `Player.getLastDeathLocation` and
-//! `setLastDeathLocation`. It is kept in the player's record (swapped into
-//! `level.last_death` for the player's turn), saved as `LastDeathLocation`, and
-//! sent with their next respawn packet, which is what the recovery compass
-//! follows. Players resolve through the shared player-handle path
-//! (`native_server.rs`), so reads return None for a stale handle, for a player
-//! who isn't online here or whose record is swapped out, and when the player
-//! never died. A death in a level that is not loaded reads as None too. A
-//! write needs a living player (`native_as_player`), so it is refused inside
-//! `player_died`, where the read still works.
+//! `setLastDeathLocation`, as a `GlobalPos` (the dimension's key and the
+//! block), so a death in a dimension that is not open still reads. It is kept
+//! in the player's record (swapped into `level.last_death` for the player's
+//! turn), saved as `LastDeathLocation`, and sent with their next respawn
+//! packet, which is what the recovery compass follows. Players resolve
+//! through the shared player-handle path (`native_server.rs`), so reads return
+//! None for a stale handle, for a player who isn't online here or whose record
+//! is swapped out, and when the player never died. A write needs a living
+//! player (`native_as_player`), so it is refused inside `player_died`, where
+//! the read still works.
 use super::Game;
-use horizon_client::mod_api::{LevelRef, PlayerRef};
+use horizon_client::mod_api::{GlobalPos, PlayerRef};
+use horizon_core::position::BlockPos;
 
 impl Game<'_> {
-    /// The level and block of the player's last death
+    /// The dimension and block of the player's last death
     /// (`Player.getLastDeathLocation`).
-    pub(super) fn native_player_last_death_location(
-        &self,
-        player: PlayerRef,
-    ) -> Option<(LevelRef, [i32; 3])> {
-        let (dimension, pos) = self.native_player_last_death_record(player)?;
-        Some((self.native_level(&dimension)?, pos))
+    pub(super) fn native_player_last_death_location(&self, player: PlayerRef) -> Option<GlobalPos> {
+        let (dimension, [x, y, z]) = self.native_player_last_death_record(player)?;
+        Some(GlobalPos::new(dimension, BlockPos::new(x, y, z)))
     }
 
     /// `Player.setLastDeathLocation`: stores where the player died, or
     /// forgets it for None. The client hears of it with the player's next
-    /// respawn, as in vanilla. False in the cases a read gives None, and for
-    /// a stale `LevelRef`.
+    /// respawn, as in vanilla. False in the cases a read gives None.
     pub(super) fn native_player_set_last_death_location(
         &mut self,
         player: PlayerRef,
-        location: Option<(LevelRef, [i32; 3])>,
+        location: Option<GlobalPos>,
     ) -> bool {
-        let stored = match location {
-            Some((level, pos)) => {
-                if self.native_lifecycle.epoch() != Some(level.epoch()) {
-                    return false;
-                }
-                Some((level.dimension().to_owned(), pos))
-            }
-            None => None,
-        };
         if self.native_player_ref(player.uuid()) != Some(player) {
             return false;
         }
+        let stored = location.map(|l| {
+            let p = l.pos();
+            (l.dimension().to_owned(), [p.x, p.y, p.z])
+        });
         let mut done = false;
         self.native_as_player(player.uuid(), |game| {
             game.level.last_death = stored;
@@ -57,7 +50,13 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
 
     use super::super::Game;
-    use horizon_client::mod_api::PlayerRef;
+    use horizon_client::mod_api::{GlobalPos, PlayerRef};
+    use horizon_core::position::BlockPos;
+
+    /// A block of the overworld.
+    fn at([x, y, z]: [i32; 3]) -> GlobalPos {
+        GlobalPos::new("minecraft:overworld", BlockPos::new(x, y, z))
+    }
 
     /// A placed guest record.
     fn new_guest(conn: u32, uuid: u128) -> horizon_client::lan::guest::Guest {
@@ -128,24 +127,17 @@ mod tests {
             assert_eq!(player.last_death_location(&*game), None);
 
             // A death records the level and block (`ServerPlayer.die`).
-            let overworld = game.native_level("minecraft:overworld").unwrap();
             let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
             guest.last_death = Some(("minecraft:overworld".into(), [4, 70, -9]));
-            assert_eq!(
-                player.last_death_location(&*game),
-                Some((overworld, [4, 70, -9]))
-            );
+            assert_eq!(player.last_death_location(&*game), Some(at([4, 70, -9])));
 
             // The setter stores it, and None forgets it.
-            assert!(player.set_last_death_location(game, Some((overworld, [1, 2, 3]))));
+            assert!(player.set_last_death_location(game, Some(at([1, 2, 3]))));
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guests[0].last_death,
                 Some(("minecraft:overworld".into(), [1, 2, 3]))
             );
-            assert_eq!(
-                player.last_death_location(&*game),
-                Some((overworld, [1, 2, 3]))
-            );
+            assert_eq!(player.last_death_location(&*game), Some(at([1, 2, 3])));
             assert!(player.set_last_death_location(game, None));
             assert_eq!(player.last_death_location(&*game), None);
 
@@ -163,18 +155,6 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests[0].placed = false;
             assert_eq!(player.last_death_location(&*game), None);
             game.lan.as_mut().unwrap().hub.guests[0].placed = true;
-
-            // A level handle of an earlier open is refused, and nothing is
-            // stored.
-            game.native_lifecycle
-                .begin_open(horizon_client::mod_api::NativeAuthority::IntegratedServer);
-            let player = game.native_player_ref(123).unwrap();
-            let fresh = game.native_level("minecraft:overworld").unwrap();
-            game.lan.as_mut().unwrap().hub.guests[0].last_death = None;
-            assert!(!player.set_last_death_location(game, Some((overworld, [7, 8, 9]))));
-            assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].last_death, None);
-            assert!(player.set_last_death_location(game, Some((fresh, [7, 8, 9]))));
-            assert_eq!(player.last_death_location(&*game), Some((fresh, [7, 8, 9])));
         });
     }
 
@@ -183,25 +163,17 @@ mod tests {
     fn the_acting_players_location_reads_and_writes_through_their_turn() {
         with_game(|game| {
             let player = add_guest(game);
-            let overworld = game.native_level("minecraft:overworld").unwrap();
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [4, 70, -9]));
             // During the guest's turn the acting player resolves, and the record is the one swapped into the level.
             let seen = game
                 .as_guest(1, |game| {
                     let before = player.last_death_location(&*game);
-                    let set = player.set_last_death_location(game, Some((overworld, [1, 2, 3])));
+                    let set = player.set_last_death_location(game, Some(at([1, 2, 3])));
                     (before, set, player.last_death_location(&*game))
                 })
                 .unwrap();
-            assert_eq!(
-                seen,
-                (
-                    Some((overworld, [4, 70, -9])),
-                    true,
-                    Some((overworld, [1, 2, 3]))
-                )
-            );
+            assert_eq!(seen, (Some(at([4, 70, -9])), true, Some(at([1, 2, 3]))));
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guests[0].last_death,
                 Some(("minecraft:overworld".into(), [1, 2, 3]))
@@ -216,8 +188,7 @@ mod tests {
 
         with_game(|game| {
             let player = add_guest(game);
-            let overworld = game.native_level("minecraft:overworld").unwrap();
-            assert!(player.set_last_death_location(game, Some((overworld, [4, 70, -9]))));
+            assert!(player.set_last_death_location(game, Some(at([4, 70, -9]))));
 
             let world = std::env::temp_dir().join(format!(
                 "horizon-death-location-{}-{:?}",
@@ -238,10 +209,7 @@ mod tests {
 
             // Put in place of the saved one, it reads through the handle.
             game.lan.as_mut().unwrap().hub.guests[0] = fresh;
-            assert_eq!(
-                player.last_death_location(&*game),
-                Some((overworld, [4, 70, -9]))
-            );
+            assert_eq!(player.last_death_location(&*game), Some(at([4, 70, -9])));
             std::fs::remove_dir_all(&world).unwrap();
         });
     }
@@ -266,8 +234,14 @@ mod tests {
                 guest.last_death,
                 Some(("minecraft:the_nether".into(), [-2, 64, 7]))
             );
-            // The nether is not an open level here, so the read finds none.
-            assert_eq!(game.native_player_last_death_location(player), None);
+            // The Nether is not open here; the location still reads.
+            assert_eq!(
+                player.last_death_location(&*game),
+                Some(GlobalPos::new(
+                    "minecraft:the_nether",
+                    BlockPos::new(-2, 64, 7)
+                ))
+            );
         });
     }
 }

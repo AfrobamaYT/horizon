@@ -1065,6 +1065,33 @@ pub enum NativeMinecartKind {
     Spawner,
 }
 
+/// A block in a dimension, vanilla's `GlobalPos`: the dimension's key
+/// (`minecraft:the_nether`) and the block. The dimension is data, so it need
+/// not be open; `host.level(pos.dimension())` gives its level when it is.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GlobalPos {
+    dimension: String,
+    pos: BlockPos,
+}
+
+impl GlobalPos {
+    /// A block in the dimension with key `dimension`.
+    pub fn new(dimension: impl Into<String>, pos: BlockPos) -> Self {
+        Self {
+            dimension: dimension.into(),
+            pos,
+        }
+    }
+    /// The dimension's key (`minecraft:overworld`).
+    pub fn dimension(&self) -> &str {
+        &self.dimension
+    }
+    /// The block.
+    pub fn pos(&self) -> BlockPos {
+        self.pos
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

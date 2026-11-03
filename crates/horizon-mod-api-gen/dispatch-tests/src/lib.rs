@@ -26,6 +26,7 @@ mod tests {
         pub(super) struct Direction;
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
+        pub(super) struct GlobalPos;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {
