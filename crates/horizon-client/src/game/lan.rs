@@ -1794,18 +1794,17 @@ impl Game<'_> {
     /// command closed the hub.
     fn lan_process_events(
         &mut self,
-        mut host: LanHost,
         events: impl IntoIterator<Item = HostEvent>,
         entities: &[EntityState],
         spawn: [f64; 3],
-    ) -> Option<LanHost> {
+    ) {
         for event in events {
             match event {
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
                 }
                 HostEvent::Ban { uuid, name, reason } => {
-                    self.anticheat_ban(&mut host.hub, uuid, &name, &reason);
+                    self.anticheat_ban(uuid, &name, &reason);
                 }
                 HostEvent::ChatFiltered {
                     sender,
@@ -1814,9 +1813,9 @@ impl Game<'_> {
                     text,
                     count,
                     action,
-                } => self.chat_filtered(&mut host, sender, &name, place, &text, count, action),
+                } => self.chat_filtered(sender, &name, place, &text, count, action),
                 HostEvent::PlayerChat { sender, text } => {
-                    self.lan_player_chatted(&mut host, sender, &text);
+                    self.lan_player_chatted(sender, &text);
                 }
                 HostEvent::ChatSubmitted {
                     message,
@@ -2077,7 +2076,6 @@ impl Game<'_> {
                 }
             }
         }
-        Some(host)
     }
 
     /// Handle this level's player packets before scheduled block ticks
