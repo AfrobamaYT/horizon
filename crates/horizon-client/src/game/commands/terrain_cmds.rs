@@ -46,7 +46,8 @@ impl Game<'_> {
         let dim = Text::literal(self.dim.id());
         match id {
             "forceload.query" if ctx.get("pos").is_none() => {
-                let mut forced: Vec<(i32, i32)> = self.streaming.forced.iter().copied().collect();
+                let mut forced: Vec<(i32, i32)> =
+                    self.streaming.commanded().iter().copied().collect();
                 // ForceLoadCommand sorts its LongStream before formatting chunks.
                 forced.sort_unstable_by_key(|&(x, z)| ChunkPos::new(x, z).pack());
                 if forced.is_empty() {
@@ -75,7 +76,7 @@ impl Game<'_> {
             "forceload.query" => {
                 let [x, z] = self.column_arg(ctx, "pos")?;
                 let key = (x >> 4, z >> 4);
-                if self.streaming.forced.contains(&key) {
+                if self.streaming.commanded().contains(&key) {
                     self.feedback(Text::translate(
                         "commands.forceload.query.success",
                         &[chunk_text(key.0, key.1), dim],

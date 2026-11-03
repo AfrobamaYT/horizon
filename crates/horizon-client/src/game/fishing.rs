@@ -351,7 +351,7 @@ impl Game<'_> {
             // rod's damage, or cancel the catch.
             let mut rod_damage = if hook.on_ground { 2 } else { 1 };
             if let Some(player) = self.lan_acting_uuid
-                && !horizon_client::mod_api::mods().is_empty()
+                && crate::mod_api::listened(crate::mod_api::HookId::ItemFished)
             {
                 let fished = horizon_client::mod_api::NativeItemFished {
                     hook: hook.id,
