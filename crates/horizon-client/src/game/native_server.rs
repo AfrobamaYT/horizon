@@ -757,7 +757,7 @@ impl Game<'_> {
     }
     /// The player whose action or command a hook hears, as their state is
     /// swapped in (`native_perform_command`, `native_right_click_block`,
-    /// `native_use_item_on`, `native_destroy_block`...): None outside such a
+    /// `native_use_on`, `native_destroy_block`...): None outside such a
     /// hook.
     pub(super) fn native_acting_player(&self) -> Option<NativeServerPlayer> {
         let p = self.player.as_ref()?;

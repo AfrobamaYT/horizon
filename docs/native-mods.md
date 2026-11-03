@@ -105,15 +105,15 @@ the catalog, not a global API number, source comments or documentation histories
 - Item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
   lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip.
 
-- Using an item, on the server for every player: `native_use_item_on` hears a right click with an item on a
+- Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
-  after `native_use_item_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
+  after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
   instead of the item's use.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims
-  `native_use_item_on`, which runs before it.
+  `native_use_on`, which runs before it.
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
   `native_block_entity_tick`): made when the block is placed, ticked on the server and saved with the chunk.
@@ -2220,7 +2220,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `native_acting_player`, `native_tell` and the
   item helpers reach them. Not heard: the host of a LAN world.
 - `native_acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
-  `native_right_click_block`, `native_use_item_on`, `native_destroy_block`...; None elsewhere);
+  `native_right_click_block`, `native_use_on`, `native_destroy_block`...; None elsewhere);
   `native_run_command(line)`, a command run as the server's console (level 4, no output), only where no player is
   swapped in (`native_tick`, a menu hook): a teleport to another level (`execute in minecraft:the_nether run tp Alex 0
   70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
