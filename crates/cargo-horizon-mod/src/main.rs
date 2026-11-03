@@ -10,8 +10,10 @@
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.hmod`, `.hpack`, resource pack `.zip`, `.hshader`).
 //! - `registry build|review|check|list`: the registry repository's CI.
+//! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
 use horizon_mods::{Content, Manifest, Package, manifest::MANIFEST};
 mod check;
+mod jar;
 mod registry;
 
 use std::{
@@ -33,7 +35,8 @@ fn main() -> ExitCode {
         Some("run") => run(&args[1..]),
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),
-        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list".into()),
+        Some("use-jar") => jar::run(&args[1..]),
+        _ => Err("usage: cargo horizon-mod new <path> [--name \"Name\"] [--template content|native [--horizon <commit>]] | build | run [--game <horizon-client>] [-- <game args>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list | use-jar <path>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
