@@ -3,8 +3,8 @@
 //! after every mod's `Hooks` method. Parts attached by tag are resolved by each game against its
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread.
 use super::{
-    BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, Hooks, Host,
-    ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, PlaceProvider,
+    BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, EntityCapabilityKey,
+    EntityRef, Hooks, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, PlaceProvider,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -60,14 +60,17 @@ pub struct Parts {
     capabilities: Capabilities,
     /// Item capability providers by capability name, then by item, in registration order.
     item_capabilities: Capabilities,
+    /// Entity capability providers by capability name, then by entity type, in registration
+    /// order.
+    entity_capabilities: Capabilities,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
     place_providers: HashMap<&'static str, (usize, Arc<dyn PlaceProvider>)>,
 }
 
 type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
 
-/// A capability provider a mod registered: an `Arc` of [`BlockProvider`] or [`ItemProvider`]
-/// of the capability's handler trait.
+/// A capability provider a mod registered: an `Arc` of [`BlockProvider`], [`ItemProvider`] or
+/// [`EntityProvider`] of the capability's handler trait.
 #[derive(Clone)]
 pub(crate) struct CapabilityPart {
     mod_index: usize,
@@ -82,6 +85,17 @@ pub type BlockProvider<T> = dyn Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> +
 /// What answers an item capability for one item: given where the stack lives, its handler, or
 /// none to leave it to the next provider.
 pub type ItemProvider<T> = dyn Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync;
+/// What answers an entity capability for one entity type: given the entity, its handler, or none
+/// to leave it to the next provider.
+pub type EntityProvider<T> = dyn Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync;
+
+/// Which things a capability's providers are registered by.
+#[derive(Clone, Copy)]
+pub(crate) enum ProvidedBy {
+    BlockEntity,
+    Item,
+    Entity,
+}
 
 /// The parts attached by tag, by tag name, in registration order.
 #[derive(Default)]
@@ -310,24 +324,24 @@ pub(crate) fn answered<T: ?Sized>(
     }
 }
 
-/// The providers mods registered for capability `name` (an item capability's with `items`) and
-/// the id `id` works out, in registration order. With none registered for `name`, `id` isn't
-/// asked.
-pub(crate) fn providers<'h>(
-    items: bool,
+/// The providers mods registered for capability `name`, of the things `by` names, for the id
+/// `id` works out, in registration order. With none registered for `name`, `id` isn't asked.
+pub(crate) fn providers<'h, S: AsRef<str>>(
+    by: ProvidedBy,
     name: &str,
     host: &'h dyn Host,
-    id: impl FnOnce(&'h dyn Host) -> Option<&'h str>,
+    id: impl FnOnce(&'h dyn Host) -> Option<S>,
 ) -> &'static [CapabilityPart] {
-    let table = INSTALLED.get().map(|installed| match items {
-        true => &installed.keys.item_capabilities,
-        false => &installed.keys.capabilities,
+    let table = INSTALLED.get().map(|installed| match by {
+        ProvidedBy::BlockEntity => &installed.keys.capabilities,
+        ProvidedBy::Item => &installed.keys.item_capabilities,
+        ProvidedBy::Entity => &installed.keys.entity_capabilities,
     });
     let by_id = table
         .and_then(|table| table.get(name))
         .filter(|by_id| !by_id.is_empty());
     by_id
-        .and_then(|by_id| by_id.get(id(host)?))
+        .and_then(|by_id| by_id.get(id(host)?.as_ref()))
         .map_or(&[][..], Vec::as_slice)
 }
 
@@ -371,7 +385,9 @@ pub fn block_entity_providers<T: ?Sized + 'static>(
     host: &dyn Host,
     at: BlockSide,
 ) -> Option<BlockEntityProviders<T>> {
-    let parts = providers(false, key.name, host, |host| at.kind(host));
+    let parts = providers(ProvidedBy::BlockEntity, key.name, host, |host| {
+        at.kind(host)
+    });
     (!parts.is_empty()).then_some(BlockEntityProviders {
         parts,
         at,
@@ -528,6 +544,42 @@ impl Registrar {
     ) {
         let provider: Arc<ItemProvider<T>> = Arc::new(provider);
         self.capability(|p| &mut p.item_capabilities, key.name, item, true, provider);
+    }
+    /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
+    /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
+    /// `r.entity_capability(&ENTITY_ITEMS, "mymod:robot", |_, robot| Some(Box::new(Cargo(robot))))`.
+    /// Asked as [`block_entity_capability`](Self::block_entity_capability)'s are.
+    pub fn entity_capability<T: ?Sized + 'static>(
+        &mut self,
+        key: &EntityCapabilityKey<T>,
+        kind: &str,
+        provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        let provider: Arc<EntityProvider<T>> = Arc::new(provider);
+        self.capability(
+            |p| &mut p.entity_capabilities,
+            key.name,
+            kind,
+            false,
+            provider,
+        );
+    }
+    /// [`entity_capability`](Self::entity_capability), asked ahead of the game's own provider,
+    /// as a mod that replaces how a player's inventory is reached.
+    pub fn entity_capability_before_game<T: ?Sized + 'static>(
+        &mut self,
+        key: &EntityCapabilityKey<T>,
+        kind: &str,
+        provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        let provider: Arc<EntityProvider<T>> = Arc::new(provider);
+        self.capability(
+            |p| &mut p.entity_capabilities,
+            key.name,
+            kind,
+            true,
+            provider,
+        );
     }
     /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
     /// as an accessory mod exposes its slots. One provider a name.
@@ -749,6 +801,7 @@ pub(crate) mod tests {
             r.block_entity_capability_before_game(&ITEMS, "test:item_overstates", |_, _| {
                 Some(Box::new(ItemOverstates))
             });
+            r.entity_capability(&ENTITY_ITEMS, "test:robot", |_, _| Some(Box::new(Cargo)));
             r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
                 Some(Box::new(Pouch(place.clone())))
             });
@@ -1230,6 +1283,13 @@ pub(crate) mod tests {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+        fn entity_container_size(&self, _: u32) -> Option<usize> {
+            None
+        }
+        // The player holds hotbar slot 5.
+        fn player_selected_slot(&self, _: PlayerRef) -> Option<usize> {
+            Some(5)
+        }
         fn item_container_slots(&self, _: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
             None
         }
@@ -1277,6 +1337,42 @@ pub(crate) mod tests {
         }
     }
     impl Host for Player {
+        // Entity 1 is the player, 2 a pig, 3 a mod's robot, 4 a player in another level.
+        fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+            let kind = [
+                "minecraft:player",
+                "minecraft:pig",
+                "test:robot",
+                "minecraft:player",
+            ];
+            kind.get(entity.id().checked_sub(1)? as usize)
+                .map(|&kind| kind.into())
+        }
+        fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+            Some(u128::from(entity.id()))
+        }
+        fn player(&self, uuid: u128) -> Option<PlayerRef> {
+            let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
+            Some(PlayerRef { entity, uuid })
+        }
+        fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+            Some(match entity.id() {
+                4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
+                _ => here(),
+            })
+        }
+        fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
+            let helmet = item == "minecraft:iron_helmet";
+            match component {
+                "minecraft:max_stack_size" => Some(Tag::Int(if helmet { 1 } else { 64 })),
+                "minecraft:equippable" if helmet => Some(Tag::Compound(
+                    [("slot".into(), Tag::String("head".into()))]
+                        .into_iter()
+                        .collect(),
+                )),
+                _ => None,
+            }
+        }
         fn backend(&self, _: BackendToken) -> &dyn Backend {
             self
         }
@@ -1307,6 +1403,116 @@ pub(crate) mod tests {
                 _ => {}
             }
         }
+    }
+
+    /// A mod robot's three empty slots.
+    struct Cargo;
+    impl ResourceHandler<ItemResource> for Cargo {
+        fn size(&self, _: &mut dyn Host) -> usize {
+            3
+        }
+        fn resource(&self, _: &mut dyn Host, _: usize) -> Option<ItemResource> {
+            None
+        }
+        fn amount(&self, _: &mut dyn Host, _: usize) -> u32 {
+            0
+        }
+        fn capacity(&self, _: &mut dyn Host, _: usize, _: &ItemResource) -> u32 {
+            0
+        }
+        fn insert(
+            &self,
+            _: &mut dyn Host,
+            _: &Transaction,
+            _: usize,
+            _: &ItemResource,
+            _: u32,
+        ) -> u32 {
+            0
+        }
+        fn extract(
+            &self,
+            _: &mut dyn Host,
+            _: &Transaction,
+            _: usize,
+            _: &ItemResource,
+            _: u32,
+        ) -> u32 {
+            0
+        }
+    }
+
+    #[test]
+    fn a_players_items_are_their_inventory_and_each_index_takes_only_what_fits_there() {
+        game_thread();
+        let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
+        let helmet = || stack("minecraft:iron_helmet", 1, 0);
+        let mut player = Player {
+            slots: [
+                (3, stack("minecraft:stick", 10, 0)),
+                (5, stack("minecraft:stick", 60, 0)),
+            ]
+            .into_iter()
+            .collect(),
+            ..Player::default()
+        };
+        let host: &mut dyn Host = &mut player;
+        let items = entity(1).capability(host, &ENTITY_ITEMS).unwrap();
+        assert_eq!(items.owner(), "the game");
+        assert_eq!(items.size(host), 41);
+        let (sticks, helmet_) = (ItemResource::of(&stick()), ItemResource::of(&helmet()));
+        // The main inventory takes a stack of anything; an armour slot only what goes there,
+        // a helmet on the head (index 39), not the feet (36).
+        assert_eq!(items.capacity(host, 0, &sticks), 64);
+        assert_eq!(items.capacity(host, 36, &sticks), 0);
+        assert_eq!(items.capacity(host, 39, &helmet_), 1);
+        assert_eq!(items.capacity(host, 36, &helmet_), 0);
+        assert_eq!(items.capacity(host, 40, &helmet_), 1);
+        assert_eq!(items.capacity(host, 39, &sticks), 0);
+        assert_eq!(items.amount(host, 3), 10);
+        // Into one index, no further: 54 of 60 fill slot 3, and nothing goes elsewhere.
+        let insert = |host: &mut dyn Host, index, resource: &ItemResource, amount| {
+            let went = host.transaction(|host, tx| {
+                Ok::<_, ()>(items.insert(host, tx, index, resource, amount))
+            });
+            went.unwrap()
+        };
+        assert_eq!(insert(host, 3, &sticks, 60), 54);
+        assert_eq!(insert(host, 38, &sticks, 1), 0);
+        assert_eq!(insert(host, 39, &helmet_, 1), 1);
+        assert_eq!(player.slots[&3].count, 64);
+        assert_eq!(player.slots[&103], helmet());
+        assert!(player.given.is_empty());
+        // Without an index, as `Inventory.add`: the selected slot's sticks first, then an
+        // empty slot.
+        let host: &mut dyn Host = &mut player;
+        let aborted = host.transaction(|host, tx| {
+            assert_eq!(items.insert_any(host, tx, &sticks, 10), 10);
+            Err::<(), ()>(())
+        });
+        assert!(aborted.is_err());
+        assert_eq!(player.slots[&5], stack("minecraft:stick", 60, 0));
+        let host: &mut dyn Host = &mut player;
+        let went =
+            host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 10)));
+        assert_eq!(went, Ok(10));
+        assert_eq!(player.slots[&5], stack("minecraft:stick", 64, 0));
+        assert_eq!(player.slots[&0], stack("minecraft:stick", 6, 0));
+        assert!(player.given.is_empty());
+    }
+
+    #[test]
+    fn an_entitys_items_come_from_its_types_provider_and_none_outside_the_level_in_place() {
+        game_thread();
+        let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
+        let mut player = Player::default();
+        let host: &mut dyn Host = &mut player;
+        // A pig has no items; a mod's robot has its provider's; a player in a parked level
+        // is asked nothing.
+        assert!(entity(2).capability(host, &ENTITY_ITEMS).is_none());
+        let robot = entity(3).capability(host, &ENTITY_ITEMS).unwrap();
+        assert_eq!((robot.owner(), robot.size(host)), (mod_name(0), 3));
+        assert!(entity(4).capability(host, &ENTITY_ITEMS).is_none());
     }
 
     /// Items counted with what they hold: a pouch's sticks, a bag's pouch and its sticks.

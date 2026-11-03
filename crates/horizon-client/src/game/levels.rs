@@ -191,6 +191,7 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
+            self.server_loot.clone(),
         )?;
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
