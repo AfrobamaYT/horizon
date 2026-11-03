@@ -2015,6 +2015,31 @@ pub(crate) mod tests {
         mods
     }
 
+    /// Install a weak-power part on glass for a real-game query.
+    pub(crate) fn weak_power_game_thread() {
+        struct WeakPower;
+        impl BlockPart for WeakPower {
+            fn should_check_weak_power(
+                &self,
+                _: &dyn LevelHost,
+                event: &mut ShouldCheckWeakPowerEvent,
+            ) {
+                event.check = true;
+            }
+        }
+        struct WeakPowerMod;
+        impl Hooks for WeakPowerMod {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:glass", WeakPower);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("weak_power_test", Box::new(WeakPowerMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// The comparator reading of state `state`, from 1.
     fn read(state: u32) -> i32 {
         let mut output = 1;
