@@ -78,12 +78,13 @@ impl Game<'_> {
                 // tryToTame: one time in three.
                 self.use_nautilus_food(item);
                 let rolled = self.mobs[index].random.next_int_bound(3).unwrap_or(1) == 0;
+                let acting = self.acting_player_uuid();
                 let (tamer, tamer_entity_id) = (self.native_acting_id(), self.own_entity_id());
                 let tamed = rolled && !self.animal_tame_cancelled(index, tamer, tamer_entity_id);
                 let m = &mut self.mobs[index];
                 if tamed {
                     m.extra.tame = true;
-                    m.extra.owner = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+                    m.extra.owner = Some(acting);
                     m.persistent = true;
                     m.nav_stop();
                     m.ai.target = None;

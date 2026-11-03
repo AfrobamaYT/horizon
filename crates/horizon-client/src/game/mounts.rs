@@ -601,7 +601,6 @@ impl Game<'_> {
                     && self.animal_tame_cancelled(index, uuid, entity_id)
                 {
                     let m = &mut self.mobs[index];
-                    m.extra.tame = false;
                     let mut events = Vec::new();
                     horizon_client::mobs::equine::refuse_rider(m, &mut events);
                     if let Err(e) = self.handle_mob_events(events) {
@@ -622,6 +621,7 @@ impl Game<'_> {
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
                 }
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                    m.extra.tame = true;
                     m.extra.owner = owner;
                     m.persistent = true;
                     // AbstractHorse.tameWithName: entity event 7, spawnTamingParticles(true).
