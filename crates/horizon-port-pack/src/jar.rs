@@ -50,6 +50,7 @@ pub struct JarIdentity {
 }
 
 /// Read a NeoForge or Fabric jar's own identity, refusing missing or invalid metadata.
+/// Each metadata entry is limited to 1 MiB after decompression.
 pub fn read_identity(path: &Path) -> Result<JarIdentity, String> {
     let (info, loader) = read_inner(path, true)?;
     let loader = loader.expect("strict metadata always has a loader");
@@ -88,14 +89,24 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", path.display()))?;
     let text =
         |zip: &mut zip::ZipArchive<fs::File>, name: &str| -> Result<Option<String>, String> {
-            let mut entry = match zip.by_name(name) {
+            let entry = match zip.by_name(name) {
                 Ok(entry) => entry,
                 Err(zip::result::ZipError::FileNotFound) => return Ok(None),
                 Err(e) if strict => return Err(format!("{}: {name}: {e}", path.display())),
                 Err(_) => return Ok(None),
             };
+            const MAX_METADATA_BYTES: u64 = 1024 * 1024;
+            let limit = if strict {
+                MAX_METADATA_BYTES + 1
+            } else {
+                u64::MAX
+            };
             let mut s = String::new();
-            match entry.read_to_string(&mut s) {
+            match entry.take(limit).read_to_string(&mut s) {
+                Ok(_) if strict && s.len() as u64 > MAX_METADATA_BYTES => Err(format!(
+                    "{}: {name}: metadata exceeds {MAX_METADATA_BYTES} bytes",
+                    path.display()
+                )),
                 Ok(_) => Ok(Some(s)),
                 Err(e) if strict => Err(format!("{}: {name}: {e}", path.display())),
                 Err(_) => Ok(None),
@@ -791,6 +802,29 @@ mandatory = true
             (fabric_info.mod_id.as_str(), fabric_info.version.as_str()),
             ("fabric", "fabric-version")
         );
+    }
+
+    #[test]
+    fn strict_identity_bounds_decompressed_metadata_without_changing_inventory() {
+        for size in [1_048_576, 1_048_577] {
+            let mut metadata = br#"{"id":"bounded","version":"1","description":""#.to_vec();
+            metadata.resize(size - 2, b'x');
+            metadata.extend_from_slice(b"\"}");
+            let jar = synthetic_jar("metadata-boundary", &[("fabric.mod.json", metadata)]);
+            let identity = read_identity(&jar.0);
+            if size == 1_048_576 {
+                let identity = identity.unwrap();
+                assert_eq!(identity.id, "bounded");
+                assert_eq!(identity.version, "1");
+            } else {
+                let error = identity.unwrap_err();
+                assert!(
+                    error.contains("fabric.mod.json: metadata exceeds 1048576 bytes"),
+                    "{error}"
+                );
+            }
+            assert_eq!(read(&jar.0).unwrap().mod_id, "bounded");
+        }
     }
 
     #[test]
