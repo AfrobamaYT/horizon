@@ -4,6 +4,7 @@
 use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::RegistrationContext;
 use horizon_client::mod_list::{self, Installed};
+use horizon_mods::selection::{BUILD_INFO, built_ids};
 use std::{
     path::PathBuf,
     sync::{Mutex, OnceLock},
@@ -41,10 +42,7 @@ pub(super) struct ModsState {
 /// treats as no custom components, and `registries.json` isn't read.
 pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Result<()> {
     let mut names = Vec::new();
-    Game::native_component_types(
-        &RegistrationContext::new(),
-        &mut names,
-    );
+    Game::native_component_types(&RegistrationContext::new(), &mut names);
     if names.is_empty() {
         return Ok(());
     }
@@ -71,14 +69,8 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(
-            &RegistrationContext::new(),
-            &mut blocks,
-        );
-        Game::native_items(
-            &RegistrationContext::new(),
-            &mut items,
-        );
+        Game::native_blocks(&RegistrationContext::new(), &mut blocks);
+        Game::native_items(&RegistrationContext::new(), &mut items);
         let types = crate::mod_api::block_entity_types()
             .iter()
             .map(|kind| horizon_mods::content::BlockEntityType {
@@ -100,10 +92,7 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
         return;
     }
     let mut names = Vec::new();
-    Game::native_standalone_models(
-        &RegistrationContext::new(),
-        &mut names,
-    );
+    Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     horizon_client::models::register_standalone(names);
 }
 
@@ -316,20 +305,6 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
-}
-
-/// What the launcher writes beside a game it built with native mods: their ids under `mods`.
-const BUILD_INFO: &str = "native-mods.json";
-
-/// IDs compiled into this executable, from the launcher's build record.
-fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
-    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
-    info["mods"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str().map(str::to_owned))
-        .collect()
 }
 
 /// `native-mods.json`'s `mods` list is not empty: the game was built with mods.

@@ -56,6 +56,8 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hpack`, resource pack `.zip`
   and `.hshader` files.
 - `registry build|review|check|list|release|page` is the registry repository's CI ([api/mod-index.md](api/mod-index.md)).
+- `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
+  ([Java jars as external assets](#java-jars-as-external-assets)).
 
 ### The manifest
 
@@ -79,6 +81,29 @@ is supported only for code mods. Both kinds may include a fixed-name `icon.png` 
 manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](api/mod-files.md)).
 Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
 installed through a modpack. Code is never silently skipped.
+
+### Java jars as external assets
+
+From a content or native mod's project folder:
+
+```sh
+cargo horizon-mod use-jar /path/to/original-mod.jar
+```
+
+The command reads NeoForge or Fabric metadata and appends a `[[jar]]` table to `horizon-mod.toml` with the original
+`id`, `version` and the exact file's `sha512` (128 lowercase hexadecimal characters). It does not infer identity
+from the filename, rename the Java mod to the Horizon mod's namespace, or run Java code. An unknown jar, invalid
+identity, unresolved version or file larger than the shared 512 MiB hash limit is refused without changing the manifest.
+
+The original manifest text, comments and existing list order are preserved. Listing the same hash and identity again
+leaves the file byte-for-byte unchanged; a hash already listed with another ID or version is an error to correct,
+not another entry. Use `[[jar]]` tables rather than an inline `jar = [...]` array when adding further jars with the command.
+The list is ordered: new references are appended, not sorted.
+
+Jar bytes stay external. The launcher finds the exact hash locally or asks before downloading that exact file from
+Modrinth. Its `assets/` and `data/` are passive pack layers below the Horizon mod's own files; a player-local runtime
+cache is not part of the mod package. Do not copy a jar or its extracted files into the mod's source or `.hmod`.
+A jar reference supplies assets and data, not the original Java behavior: port that behavior through the mod API.
 
 ### Content mods (API 0.2)
 

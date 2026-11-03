@@ -1029,5 +1029,16 @@
   "Play online with your Microsoft account": "Jogue online com sua conta Microsoft",
   "Sign in with the account that owns Minecraft: Java Edition. Your name and skin come along to online servers, like in other launchers.": "Entre com a conta que tem o Minecraft: Java Edition. Seu nome e sua skin vão junto para os servidores online, como em outros launchers.",
   "Microsoft's own page opens in your browser. Horizon never sees your password.": "A própria página da Microsoft abre no seu navegador. O Horizon nunca vê sua senha.",
-  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Colore os botões, os interruptores e o céu. Escolha uma, ou digite qualquer cor hex."
+  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Colore os botões, os interruptores e o céu. Escolha uma, ou digite qualquer cor hex.",
+  "A new world takes a minute the first time": "Um mundo novo leva um minuto na primeira vez",
+  "Cannot read or write jar cache {path}: {error}. Check the file and its permissions before retrying.": "Não foi possível ler ou gravar o cache JAR {path}: {error}. Verifique o arquivo e suas permissões antes de tentar novamente.",
+  "Download jars": "Baixar arquivos JAR",
+  "Download {count} original Java jars from Modrinth?": "Baixar {count} arquivos JAR Java originais do Modrinth?",
+  "Jar downloads were not allowed. Supply the original files at these exact cache paths, or pass --allow-jar-downloads:\n": "O download de arquivos JAR não foi permitido. Coloque os arquivos originais nestes caminhos exatos do cache ou use --allow-jar-downloads:\n",
+  "Jar {id} {version}: {reason}. Put the original file with this exact SHA-512 at {path}, then retry.": "JAR {id} {version}: {reason}. Coloque o arquivo original com este SHA-512 exato em {path} e tente novamente.",
+  "Only assets and data are used; Java code is never run. Each file is checked against the manifest's SHA-512.": "Somente os recursos e os dados são usados; o código Java nunca é executado. Cada arquivo é verificado com o SHA-512 do manifesto.",
+  "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "SHA-512 incorreto em {path}: esperado {expected}, obtido {actual}. Substitua esta entrada do cache pelo arquivo original exato ou remova-a e tente novamente com --allow-jar-downloads.",
+  "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "O SHA-512 {hash} identifica tanto {first_id} {first_version} quanto {second_id} {second_version}.",
+  "no exact file on Modrinth": "nenhum arquivo exato no Modrinth",
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
 }

@@ -1029,5 +1029,16 @@
   "Play online with your Microsoft account": "العب عبر الإنترنت بحساب Microsoft",
   "Sign in with the account that owns Minecraft: Java Edition. Your name and skin come along to online servers, like in other launchers.": "سجّل الدخول بالحساب الذي يملك Minecraft: Java Edition. يرافقك اسمك ومظهرك إلى الخوادم عبر الإنترنت، كما في المشغلات الأخرى.",
   "Microsoft's own page opens in your browser. Horizon never sees your password.": "تُفتح صفحة Microsoft نفسها في متصفحك. لا يرى Horizon كلمة مرورك أبدًا.",
-  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "يلوّن الأزرار والمفاتيح والسماء. اختر لونًا، أو اكتب أي لون بصيغة hex."
+  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "يلوّن الأزرار والمفاتيح والسماء. اختر لونًا، أو اكتب أي لون بصيغة hex.",
+  "A new world takes a minute the first time": "يستغرق إنشاء عالم جديد دقيقة في المرة الأولى",
+  "Cannot read or write jar cache {path}: {error}. Check the file and its permissions before retrying.": "تعذرت قراءة ذاكرة JAR المؤقتة {path} أو الكتابة إليها: {error}. تحقق من الملف وأذوناته قبل المحاولة مجددًا.",
+  "Download jars": "تنزيل ملفات JAR",
+  "Download {count} original Java jars from Modrinth?": "هل تريد تنزيل {count} من ملفات Java JAR الأصلية من Modrinth؟",
+  "Jar downloads were not allowed. Supply the original files at these exact cache paths, or pass --allow-jar-downloads:\n": "لم يُسمح بتنزيل ملفات JAR. ضع الملفات الأصلية في مسارات ذاكرة التخزين المؤقت المحددة هذه، أو استخدم --allow-jar-downloads:\n",
+  "Jar {id} {version}: {reason}. Put the original file with this exact SHA-512 at {path}, then retry.": "ملف JAR ‏{id} ‏{version}: ‏{reason}. ضع الملف الأصلي الذي يطابق قيمة SHA-512 هذه تمامًا في {path}، ثم حاول مجددًا.",
+  "Only assets and data are used; Java code is never run. Each file is checked against the manifest's SHA-512.": "تُستخدم الموارد والبيانات فقط؛ ولا يُشغَّل كود Java مطلقًا. يُتحقق من كل ملف بمقارنته بقيمة SHA-512 في ملف البيان.",
+  "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "عدم تطابق SHA-512 في {path}: المتوقع {expected}، والفعلي {actual}. استبدل هذا الإدخال في ذاكرة التخزين المؤقت بالملف الأصلي المطابق تمامًا، أو احذفه وحاول مجددًا باستخدام --allow-jar-downloads.",
+  "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "تشير قيمة SHA-512 ‏{hash} إلى كل من {first_id} ‏{first_version} و{second_id} ‏{second_version}.",
+  "no exact file on Modrinth": "لا يوجد ملف مطابق تمامًا على Modrinth",
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
 }
