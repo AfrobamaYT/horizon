@@ -917,6 +917,54 @@ mod tests {
     }
 
     #[test]
+    fn mining_events_identify_the_player_and_keep_mod_decisions() {
+        struct MiningProbe(Arc<Mutex<Vec<u32>>>);
+        impl Hooks for MiningProbe {
+            fn player_harvest_check(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerHarvestCheckEvent,
+            ) {
+                self.0.lock().unwrap().push(event.player);
+                event.can_harvest = false;
+            }
+            fn player_break_speed(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerBreakSpeedEvent,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.player);
+                event.new_speed = 2.0;
+                Flow::Continue
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(MiningProbe(seen.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut harvest = true;
+        let mut speed = 1.0;
+        let mut canceled = false;
+        dispatch_player_harvest_check(&mut host, &mods, 42, [1, 2, 3], 7, &mut harvest);
+        dispatch_player_break_speed(
+            &mut host,
+            &mods,
+            42,
+            [1, 2, 3],
+            7,
+            1.0,
+            &mut speed,
+            &mut canceled,
+        );
+        assert_eq!(*seen.lock().unwrap(), [42, 42]);
+        assert!(!harvest);
+        assert_eq!(speed, 2.0);
+        assert!(!canceled);
+    }
+
+    #[test]
     #[should_panic(expected = "Host::tell")]
     fn an_unexpected_host_call_names_the_method() {
         // Another test installs parts with tags: a dispatch must run on a game thread.

@@ -7028,15 +7028,6 @@ impl Game<'_> {
             }
             return;
         }
-        let facts = self.res.facts().get(state).clone();
-        // The server's own getDestroyProgress: under water, off the ground,
-        // with haste, fatigue and efficiency, so the client stops digging
-        // when the server is done too (#1254).
-        let progress = if facts.hardness == 0.0 {
-            1.0
-        } else {
-            self.destroy_progress(hit.pos)
-        };
         // sameDestroyTarget: the same block and still the item the break began with.
         let held = self.main_hand_key();
         let same = self.remote.as_ref().is_some_and(|r| {
@@ -7050,6 +7041,10 @@ impl Game<'_> {
         if start && same && running {
             return;
         }
+        // The server's own getDestroyProgress: under water, off the ground,
+        // with haste, fatigue and efficiency, so the client stops digging
+        // when the server is done too (#1254).
+        let progress = self.destroy_progress(hit.pos);
         if !same || start {
             // startDestroyBlock aborts only a break that is running; a target left by a stop that
             // ended one is just replaced by the START below.

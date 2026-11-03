@@ -4816,6 +4816,48 @@ impl Game<'_> {
         );
     }
 
+    /// A player's ability to harvest the block at `pos` may be changed.
+    /// @API:player_harvest_check@.
+    pub(super) fn native_player_harvest_check(
+        &mut self,
+        player: u32,
+        pos: [i32; 3],
+        state: u32,
+        can_harvest: &mut bool,
+    ) {
+        mod_api::dispatch_player_harvest_check(
+            self,
+            mod_api::mods(),
+            player,
+            pos,
+            state,
+            can_harvest,
+        );
+    }
+
+    /// A player's destroy speed for the block at `pos` may be changed or canceled.
+    /// @API:player_break_speed@.
+    pub(super) fn native_player_break_speed(
+        &mut self,
+        player: u32,
+        pos: [i32; 3],
+        state: u32,
+        original_speed: f32,
+        new_speed: &mut f32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_player_break_speed(
+            self,
+            mod_api::mods(),
+            player,
+            pos,
+            state,
+            original_speed,
+            new_speed,
+            canceled,
+        );
+    }
+
     /// A guest's block inventory lock check at `pos`. `locked` is the
     /// vanilla result and may be changed. The guest's state is not swapped in.
     /// 195.
