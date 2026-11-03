@@ -45,6 +45,9 @@ pub struct Manifest {
     /// that are on may share one (`content::clash`).
     #[serde(default)]
     pub namespaces: Vec<String>,
+    /// Original Java jars, layered in list order below this mod's own files.
+    #[serde(default)]
+    pub jar: Vec<JarRef>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -375,6 +378,23 @@ capabilities = ["registries"]
                 .side,
             Side::Both
         );
+    }
+
+    #[test]
+    fn reads_jars_in_list_order() {
+        let one = "1".repeat(128);
+        let text = format!(
+            "{EXAMPLE}\n[[jar]]\nid = \"create\"\nversion = \"6.0.4\"\nsha512 = \"{one}\"\n"
+        );
+        let m = Manifest::parse(&text).unwrap();
+        assert_eq!(m.jar.len(), 1);
+        assert_eq!(m.jar[0].id(), "create");
+        assert_eq!(m.jar[0].version(), "6.0.4");
+        assert_eq!(m.jar[0].sha512(), one.as_str());
+        // A bad jar entry refuses the manifest, and none defaults empty.
+        let bad = text.replace("6.0.4", "");
+        assert!(Manifest::parse(&bad).is_err());
+        assert!(Manifest::parse(EXAMPLE).unwrap().jar.is_empty());
     }
 
     #[test]
