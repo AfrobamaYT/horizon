@@ -315,7 +315,8 @@
     {
       "name": "give",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_give", "side": "client"
-    },    {
+    },
+    {
       "name": "push_player",
       "target": "horizon_client::game::native_motion::Game<'_>::native_push_player", "side": "client"
     },
