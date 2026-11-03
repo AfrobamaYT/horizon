@@ -7921,6 +7921,34 @@ mod breeding_tests {
 }
 
 #[cfg(test)]
+mod breeze_random_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn breeze_deflection_does_not_draw_from_level_random() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let breeze = game
+                .res
+                .mob_types()
+                .get("minecraft:breeze")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(1, breeze, Vec3::new(0.0, 64.0, 0.0), 0.0));
+            let mut projectile =
+                Projectile::new(ProjectileKind::Snowball, Vec3::new(-2.0, 64.5, 0.0), None);
+            projectile.velocity = Vec3::new(3.0, 0.0, 0.0);
+            game.creatures.projectiles.push(projectile);
+            let before = game.world.random.state();
+            game.tick_projectiles().unwrap();
+            assert!(game.creatures.projectiles[0].velocity.x < 0.0);
+            assert_eq!(game.world.random.state(), before);
+        });
+    }
+}
+
+#[cfg(test)]
 mod damage_type_tests {
     use super::*;
 
