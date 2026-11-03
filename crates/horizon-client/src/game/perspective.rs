@@ -1029,7 +1029,7 @@ impl Game<'_> {
         else {
             return;
         };
-        if horizon_client::mobs::trader::is_invisible(m) {
+        if m.is_invisible() {
             return;
         }
         let layers = chest

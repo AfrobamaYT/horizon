@@ -2657,7 +2657,7 @@ fn flower_contact_effects(m: &mut Mob, w: &MobWorld) {
 
 /// MobEffect ticking for the effects mobs receive (poison, wither,
 /// regeneration), and a content mod's on a server.
-fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
+pub(crate) fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
     // LivingEntity.tickEffects ticks each active effect with the mob's list
     // still in place: the damage a Poison or Wither tick deals reads the
     // list it finds (Resistance softens the hit, Infested spawns silverfish,
@@ -2723,6 +2723,14 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             let ticks = &mut m.extra.effects[i].1;
             *ticks = if expired { 0 } else { *ticks - 1 };
         }
+        // LivingEntity.tickEffects refreshes a surviving effect every 600 ticks.
+        if m.extra
+            .effects
+            .get(i)
+            .is_some_and(|e| e.0 == effect && e.1 > 0 && e.1 % 600 == 0)
+        {
+            m.effects_dirty = true;
+        }
         i += 1;
     }
     // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
@@ -2732,13 +2740,19 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             m.absorption = (m.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
         }
     }
-    m.extra.effects.retain(|e| e.1 > 0 || e.1 == -1);
+    m.retain_effects(|e| e.1 > 0 || e.1 == -1);
     m.extra
         .hidden_effects
         .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
     m.extra
         .ambient_effects
         .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
+    if m.effects_dirty {
+        let invisible = m.has_effect("minecraft:invisibility");
+        m.needs_sync |= m.invisible != invisible;
+        m.invisible = invisible;
+        m.effects_dirty = false;
+    }
 }
 
 /// `Entity.getMovementEmission` is not NONE (silverfish, endermites,
@@ -3071,6 +3085,53 @@ mod poison_effect_tests {
         assert_eq!(pig.effective_gravity(), 0.01);
         pig.velocity.y = 0.5;
         assert_eq!(pig.effective_gravity(), full);
+    }
+
+    #[test]
+    fn invisibility_flag_updates_only_when_effects_change() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("invisibility", 4, 0);
+        tick_effects(&mut pig, None);
+        assert!(pig.is_invisible());
+        pig.invisible = false;
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.add_effect("speed", 10, 0);
+        tick_effects(&mut pig, None);
+        assert!(pig.is_invisible());
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+    }
+
+    #[test]
+    fn effect_refresh_every_600_ticks_resets_manual_visibility() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.add_effect("speed", 602, 0);
+        tick_effects(&mut pig, None);
+        assert!(!pig.is_invisible());
+        pig.invisible = true;
+        tick_effects(&mut pig, None);
+        assert_eq!(pig.extra.effects[0].1, 600);
+        assert!(
+            !pig.is_invisible(),
+            "LivingEntity's periodic effect update clears the manual flag at duration 600"
+        );
     }
 
     /// `LivingEntity.tickEffects` ticks each effect with the mob's list in
