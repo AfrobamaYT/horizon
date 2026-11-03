@@ -5,6 +5,7 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_tool_modification",
       "neoforge": "BlockEvent.BlockToolModificationEvent",
       "side": "both",
+      "host": "read",
       "cancellable": true,
       "mod_api": {
         "contract": "cancel",
