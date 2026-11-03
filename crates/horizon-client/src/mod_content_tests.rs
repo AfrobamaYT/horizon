@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "mod_content_farmland_tests.rs"]
+mod farmland_tests;
 use crate::{assets::Assets, blocks::BlockFacts, items::Items};
 
 #[test]

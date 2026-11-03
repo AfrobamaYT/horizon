@@ -138,6 +138,8 @@ takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
 
+A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
+
 A block whose template is one of vanilla's signs is a sign, whatever its name: it has vanilla's sign block
 entity, so the text, the editor, dye, glow ink, wax and saving all work as they do on an oak sign, and the
 client draws its text. A wooden sign is two blocks and a hanging sign two more, one form per template, and the
