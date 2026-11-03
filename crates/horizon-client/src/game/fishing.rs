@@ -3,7 +3,7 @@
 //! `gameplay/fishing` loot) and `FishingHookRenderer` (bobber and line).
 use super::{Game, lan_mobs::guest_bounds, view_vector};
 use horizon_client::advancements::EntityView;
-use horizon_client::lan::{entity::States, hub::Hub};
+use horizon_client::lan::entity::States;
 use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
@@ -19,9 +19,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use horizon_protocol::entity_data::{Value, serializer};
-use std::{collections::HashMap, sync::Arc};
-
-use super::lan_actions::GuestPlay;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
@@ -644,9 +642,7 @@ impl Game<'_> {
         h.tick_count += 1;
         // The players it can catch, as they stand now (the host's own hook;
         // guests' hooks use the ones taken as their turns start).
-        if self.lan_acting.is_none()
-            && matches!(h.state, State::Flying | State::Hooked(_))
-        {
+        if self.lan_acting.is_none() && matches!(h.state, State::Flying | State::Hooked(_)) {
             self.refresh_hook_targets();
         }
         h.previous = h.position;
@@ -866,7 +862,9 @@ impl Game<'_> {
     /// The players a hook can catch: everyone but spectators and the dead
     /// (`Projectile.canHitEntity`), the host and the guests in the level.
     pub(super) fn refresh_hook_targets(&mut self) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let mut targets = Vec::new();
         for g in &host.hub.guests {
             if host.hub.here(g) && g.loaded && !g.dead && !g.spectator() {
@@ -889,9 +887,13 @@ impl Game<'_> {
                     p.velocity = p.velocity.add_vector(delta);
                 }
             };
-            let conn = self.lan.as_ref().and_then(|host| host.hub.guests.iter()
-                .find(|g| g.entity_id as u32 == id)
-                .map(|g| g.conn));
+            let conn = self.lan.as_ref().and_then(|host| {
+                host.hub
+                    .guests
+                    .iter()
+                    .find(|g| g.entity_id as u32 == id)
+                    .map(|g| g.conn)
+            });
             if let Some(conn) = conn {
                 self.guest_hit_by(conn, push);
             }
@@ -1221,14 +1223,12 @@ impl Hook {
 
 impl Game<'_> {
     /// The hooks guests track: each player's in the level.
-    pub(super) fn lan_hook_states(
-        &self,
-        play: &HashMap<u32, GuestPlay>,
-        hub: &Hub,
-        out: &mut States,
-    ) {
-        for g in hub.guests.iter().filter(|g| hub.here(g)) {
-            if let Some(h) = play.get(&g.conn).and_then(|p| p.hook.as_ref()) {
+    pub(super) fn lan_hook_states(&self, out: &mut States) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
+            if let Some(h) = host.play.get(&g.conn).and_then(|p| p.hook.as_ref()) {
                 h.track(g.entity_id, out);
             }
         }
