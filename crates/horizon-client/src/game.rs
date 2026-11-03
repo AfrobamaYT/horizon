@@ -12892,7 +12892,11 @@ impl Game<'_> {
         }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
         let slot = self.held_slot();
-        let mut hand = powder_snow::HeldSlot { game: self, slot };
+        let mut hand = powder_snow::HeldSlot {
+            game: self,
+            slot,
+            dropper: None,
+        };
         let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
         if result.outcome == Outcome::Pass {
             return Ok(false);

@@ -106,12 +106,18 @@ impl Game<'_> {
             if !written || simulate {
                 return;
             }
+            g.journal_player(player);
             if one_by_one && let ItemPlace::PlayerHand { hand, .. } = place {
                 let slot = match hand {
                     Hand::Main => g.selected,
                     Hand::Off => OFFHAND_SLOT,
                 };
-                cauldron::create_filled_result(&mut HeldSlot { game: g, slot }, stack, true);
+                let mut held = HeldSlot {
+                    game: g,
+                    slot,
+                    dropper: Some(player),
+                };
+                cauldron::create_filled_result(&mut held, stack, true);
                 return;
             }
             let Some(slot) = g.player_place(place) else {
@@ -126,7 +132,7 @@ impl Game<'_> {
                 held.count -= 1;
             }
             if let Some(rest) = (stack.count > 0).then(|| g.give(stack)).flatten() {
-                g.drop_plain(rest);
+                g.drop_after_commit(player, rest);
             }
         });
         written
