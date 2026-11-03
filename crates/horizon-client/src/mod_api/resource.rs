@@ -1,7 +1,8 @@
 //! NeoForge 26.3's transfer API (#41 §7): a resource is what a handler holds, without an amount
 //! ([`ItemResource`]), and a [`ResourceHandler`] is the indexed contents of one holder, written
 //! only inside a transaction.
-use super::{Host, ItemStack, Transaction};
+use super::{Capability, Compound, Host, ItemStack, Tag, Transaction};
+use horizon_world::nbt::JavaString;
 use std::fmt;
 
 /// An item and its components, without a count, as NeoForge's `ItemResource`: what a slot holds.
@@ -31,6 +32,41 @@ impl ItemResource {
     /// Whether `stack` is this item with these components.
     pub fn matches(&self, stack: &ItemStack) -> bool {
         self.0.same_item_same_components(stack)
+    }
+    /// This item's own value of component `id` (`minecraft:damage`, `minecraft:custom_data`), as
+    /// saved (`ItemResource.get`); none where it keeps the item's default.
+    pub fn component(&self, id: &str) -> Option<Tag> {
+        crate::item_data::encode_components(&self.0)?
+            .get(id)
+            .cloned()
+    }
+    /// This item with component `id` set to `value` (`ItemResource.with`). A stack changes where
+    /// it lives by an exchange of one of it for this: `place.exchange(host, tx, &changed, 1)`,
+    /// which splits it off a bigger stack, in the transaction.
+    pub fn with_component(&self, id: &str, value: Tag) -> Self {
+        self.patched(id, Some(value))
+    }
+    /// This item with its own value of component `id` dropped, back to the item's default.
+    pub fn without_component(&self, id: &str) -> Self {
+        self.patched(id, None)
+    }
+    /// This item with its own components, as saved, changed at `id`.
+    fn patched(&self, id: &str, value: Option<Tag>) -> Self {
+        let mut components = match crate::item_data::encode_components(&self.0) {
+            Some(Tag::Compound(components)) => components,
+            _ => Compound::new(),
+        };
+        match value {
+            Some(value) => components.insert(JavaString::from(id), value),
+            None => components.remove(&JavaString::from(id)),
+        };
+        let (damage, extra) = crate::item_data::decode_components(Some(&Tag::Compound(components)));
+        Self(ItemStack {
+            item: self.0.item.clone(),
+            count: 1,
+            damage,
+            extra,
+        })
     }
 }
 
@@ -110,4 +146,52 @@ pub trait ResourceHandler<R> {
         }
         came
     }
+}
+
+/// Moves up to `max` of what `filter` accepts out of `from` into wherever `to` takes it, index by
+/// index from 0 (NeoForge's `ResourceHandlerUtil.move`), in transaction `tx`: how much moved.
+/// Each move is all or nothing, in a transaction of its own: what `to` won't take stays in
+/// `from`. A handler answering more than it was asked is warned once by mod; its move is undone
+/// and the moving ends there.
+pub fn move_resources<R>(
+    host: &mut dyn Host,
+    from: &Capability<dyn ResourceHandler<R>>,
+    to: &Capability<dyn ResourceHandler<R>>,
+    filter: impl Fn(&R) -> bool,
+    max: u32,
+    tx: &Transaction,
+) -> u32 {
+    let _ = tx;
+    let mut moved = 0;
+    for index in 0..from.size(host) {
+        while moved < max {
+            let Some(resource) = from.resource(host, index).filter(|r| filter(r)) else {
+                break;
+            };
+            // `Err(Some(took))`: `to` took only that much, so the move is undone and tried again
+            // with that; `Err(None)`: a handler answered more than it was asked.
+            let step = |host: &mut dyn Host, want: u32| {
+                host.transaction(|host, tx| {
+                    let out = from.extract(host, tx, index, &resource, want);
+                    let out = from.checked(out, want, &index).ok_or(None)?;
+                    let took = to.insert_any(host, tx, &resource, out);
+                    match to.checked(took, out, &index).ok_or(None)? {
+                        took if took == out => Ok(out),
+                        took => Err(Some(took)),
+                    }
+                })
+            };
+            let want = (max - moved).min(from.amount(host, index));
+            let went = match step(host, want) {
+                Err(Some(took)) if took > 0 => step(host, took),
+                answer => answer,
+            };
+            match went {
+                Ok(went) if went > 0 => moved += went,
+                Ok(_) | Err(Some(_)) => break,
+                Err(None) => return moved,
+            }
+        }
+    }
+    moved
 }

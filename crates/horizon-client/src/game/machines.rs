@@ -912,12 +912,13 @@ impl Game<'_> {
         side: Direction,
     ) -> Option<Capability<dyn ResourceHandler<ItemResource>>> {
         let at = BlockSide {
+            level: self.native_level_here()?,
             pos: [pos.0, pos.1, pos.2],
             side: Some(side),
         };
         let host: &mut dyn Host = self;
         mod_api::block_entity_capability(&mod_api::ITEMS, host, at, |host| {
-            host.container_size(at.pos, None).is_some()
+            host.container_size(at).is_some()
         })
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end

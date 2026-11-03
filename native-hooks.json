@@ -301,10 +301,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_property"
     },
     {
-      "name": "insert_item",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_insert_item"
-    },
-    {
       "name": "cursor",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_cursor"
     },
@@ -427,14 +423,6 @@
     {
       "name": "dimension",
       "target": "horizon_client::game::machines::native_items::Game<'_>::native_dimension"
-    },
-    {
-      "name": "extract_item",
-      "target": "horizon_client::game::machines::native_items::Game<'_>::native_extract_item"
-    },
-    {
-      "name": "move_items",
-      "target": "horizon_client::game::machines::native_items::Game<'_>::native_move_items"
     },
     {
       "name": "hide_player",
@@ -2156,16 +2144,6 @@
       }
     },
     {
-      "name": "item_fluid_tank",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_fluid_tank",
-      "neoforge": "Capabilities.FluidHandler.ITEM",
-      "mod_api": {
-        "contract": "replace",
-        "out": "capacity"
-      }
-    },
-    {
       "name": "living_equipment_change",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_equipment_change",
@@ -3022,16 +3000,6 @@
       "side": "server",
       "mod_api": {
         "contract": "listen"
-      }
-    },
-    {
-      "name": "item_energy_buffer",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_energy_buffer",
-      "neoforge": "Capabilities.Energy.ITEM",
-      "mod_api": {
-        "contract": "replace",
-        "out": "buffer"
       }
     },
     {
