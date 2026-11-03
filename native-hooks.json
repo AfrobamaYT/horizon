@@ -109,10 +109,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_neighbor_signal", "side": "server"
     },
     {
-      "name": "light",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_light", "side": "both"
-    },
-    {
       "name": "weather",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_weather", "side": "both"
     },
