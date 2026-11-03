@@ -155,22 +155,22 @@ impl Game<'_> {
         self.world_root.join("datapacks.json")
     }
     /// Discover and load the data packs of the world (once, or on `/reload`).
-    pub(super) fn ensure_datapacks(&mut self) {
+    pub(super) fn ensure_datapacks(&mut self, enabled_features: &[String]) {
         if self.fns.loaded || self.world_root.as_os_str().is_empty() {
             return;
         }
-        self.reload_datapacks(false);
+        self.reload_datapacks(false, enabled_features);
     }
-    pub(super) fn reload_datapacks(&mut self, run_load: bool) {
+    pub(super) fn reload_datapacks(&mut self, run_load: bool, enabled_features: &[String]) {
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
+            enabled_features,
         );
         self.fns.packs = stack.packs;
         self.fns.enabled = stack.enabled;
-        self.rebuild_store();
+        self.rebuild_store(enabled_features);
         self.fns.loaded = true;
         self.fns.load_pending = true;
         // An explicit reload (`/reload`, `/datapack`) reloads the content
@@ -184,13 +184,13 @@ impl Game<'_> {
             self.load_schedule();
         }
     }
-    fn rebuild_store(&mut self) {
+    fn rebuild_store(&mut self, enabled_features: &[String]) {
         // The built-in pack first (lowest priority), unless disabled.
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
+            enabled_features,
         );
         let packs: Vec<&DataPack> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
         let store = DataStore::load(&packs);
@@ -352,7 +352,6 @@ impl Game<'_> {
 
     /// `ServerFunctionManager.tick` and the scheduled events.
     pub(super) fn tick_functions(&mut self) {
-        self.ensure_datapacks();
         if self.remote.is_some() {
             return;
         }
@@ -451,7 +450,7 @@ impl Game<'_> {
     }
     /// The functions a `FunctionArgument` names: a function or a tag.
     pub(in crate::game) fn functions_named(&mut self, name: &str) -> R<Vec<Function>> {
-        self.ensure_datapacks();
+        self.ensure_datapacks(&self.level.enabled_features.clone());
         match name.strip_prefix('#') {
             // ServerFunctionLibrary.getTag: an unknown tag is empty.
             Some(tag) => {
@@ -596,7 +595,7 @@ impl Game<'_> {
         Ok(value)
     }
     pub(super) fn cmd_schedule(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks();
+        self.ensure_datapacks(&self.level.enabled_features.clone());
         if id == "schedule.clear" {
             let Some(Arg::Resource(name)) = ctx.get("function").cloned() else {
                 return Ok(0);
@@ -675,7 +674,7 @@ impl Game<'_> {
     /// ReloadCommand: the message, then the (asynchronous) reload; returns 0.
     pub(super) fn cmd_reload(&mut self) -> R<i32> {
         self.feedback(Text::translate("commands.reload.success", &[]));
-        self.reload_datapacks(true);
+        self.reload_datapacks(true, &self.level.enabled_features.clone());
         Ok(0)
     }
     /// `PackLocationInfo.createChatLink`: the id decorated with its source
@@ -791,7 +790,7 @@ impl Game<'_> {
         Ok(1)
     }
     pub(super) fn cmd_datapack(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks();
+        self.ensure_datapacks(&self.level.enabled_features.clone());
         let name = match ctx.get("name") {
             Some(Arg::Str(n)) => Some(n.clone()),
             _ => None,
@@ -933,7 +932,7 @@ impl Game<'_> {
     /// tables with the functions.
     fn apply_pack_change(&mut self) {
         self.save_datapack_settings();
-        self.rebuild_store();
+        self.rebuild_store(&self.level.enabled_features.clone());
         self.fns.load_pending = true;
         self.reload_world_tables();
     }
@@ -942,7 +941,7 @@ impl Game<'_> {
 
     /// `if predicate`: a datapack predicate tested for the source entity.
     pub(in crate::game) fn check_predicate(&mut self, id: &str) -> R<bool> {
-        self.ensure_datapacks();
+        self.ensure_datapacks(&self.level.enabled_features.clone());
         let Some(json) = self.fns.store.predicates.get(id).cloned() else {
             return Err(err("argument.predicate.unknown", &[&id]));
         };
