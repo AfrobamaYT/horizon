@@ -589,7 +589,7 @@ impl Game<'_> {
             return;
         };
         match (body, broke) {
-            (true, false) => m.extra.body_damage = stack.damage as i32,
+            (true, false) => m.extra.set_body_damage(stack.damage as i32),
             (true, true) => {
                 m.extra.set_body_stack(None);
             }
@@ -712,7 +712,7 @@ impl Game<'_> {
                 m.extra.set_body_stack(None);
                 true
             } else {
-                m.extra.body_damage = lost as i32;
+                m.extra.set_body_damage(lost as i32);
                 false
             }
         };
@@ -874,7 +874,7 @@ impl Game<'_> {
                     // A player's input this tick, and whether it steers.
                     "ridden": m.rider.map(|r| r.steer),
                     "controlled": horizon_client::mobs::equine::controlled(m),
-                    "saddled": m.extra.saddled,
+                    "saddled": m.extra.saddled(),
                     "enchants": horizon_client::mobs::gear::gear(m).map(|g| g.slots.iter().map(|s| s.iter().map(|(e, l)| format!("{e}:{l}")).collect::<Vec<_>>()).collect::<Vec<_>>()),
                     "ints": m.extra.ints,
                     "pois": [m.extra.home, m.extra.bed, m.extra.meeting],
@@ -896,7 +896,7 @@ impl Game<'_> {
                 // Set apart: one json! with every key goes past the default macro recursion
                 // limit, and horizon-client can't raise it (#8169).
                 state["head"] = m.extra.head.as_deref().into();
-                state["body"] = m.extra.body.as_deref().into();
+                state["body"] = m.extra.body_id().into();
                 state["warden"] = serde_json::json!(horizon_client::mobs::warden::describe(m));
                 state["villager"] = serde_json::json!(horizon_client::mobs::villager::ext(m).map(|e| serde_json::json!({
                     "food_level": e.food_level,
@@ -5982,7 +5982,7 @@ impl Game<'_> {
                 if item == "minecraft:shears"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.body.is_some()
+                    && m.extra.body_id().is_some()
                     && !sneaking =>
             {
                 armor_drop = m.equipment_stacks()[6].clone();
@@ -6009,13 +6009,13 @@ impl Game<'_> {
                 if item == "minecraft:wolf_armor"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.body.is_none()
+                    && m.extra.body_id().is_none()
                     && !m.is_baby() =>
             {
-                m.extra.body = Some(item.as_str().into());
-                m.extra.body_count = 0;
-                m.extra.body_damage = held_damage;
-                m.extra.body_extra = held_extra;
+                let mut body = ItemStack::new(item.as_str(), 1);
+                body.damage = held_damage.max(0) as u32;
+                body.extra = held_extra;
+                m.extra.set_body_stack(Some(body));
                 consume = true;
                 eat = Some(("item.armor.equip_wolf", 1.0, 1.0));
             }
@@ -6026,12 +6026,13 @@ impl Game<'_> {
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
                     && m.extra.sitting
-                    && m.extra.body.is_some()
-                    && m.extra.body_damage > 0 =>
+                    && m.extra.body_id().is_some()
+                    && m.extra.body_damage() > 0 =>
             {
-                m.extra.body_damage = (m.extra.body_damage
-                    - (horizon_client::mobs::WOLF_ARMOR_DURABILITY as f32 * 0.125) as i32)
-                    .max(0);
+                m.extra.set_body_damage(
+                    m.extra.body_damage()
+                        - (horizon_client::mobs::WOLF_ARMOR_DURABILITY as f32 * 0.125) as i32,
+                );
                 consume = true;
                 eat = Some(("item.wolf_armor.repair", 1.0, 1.0));
             }

@@ -624,7 +624,7 @@ pub(super) mod tests {
                 };
                 assert!(used);
                 assert!(game.dropped.iter().any(|drop| drop.stack == stack));
-                assert!(game.mobs[index].extra.body.is_none());
+                assert!(game.mobs[index].extra.body_id().is_none());
             }
         });
     }
