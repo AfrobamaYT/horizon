@@ -84,9 +84,13 @@ pub struct GoalSelector {
 }
 impl GoalSelector {
     pub fn add(&mut self, priority: i32, goal: impl Goal + 'static) {
+        self.add_boxed(priority, Box::new(goal));
+    }
+    /// `add` for a goal built at runtime (`Box<dyn Goal>`).
+    pub fn add_boxed(&mut self, priority: i32, goal: Box<dyn Goal>) {
         self.goals.push(Wrapped {
             priority,
-            goal: Box::new(goal),
+            goal,
             running: false,
         });
     }
@@ -184,6 +188,41 @@ impl GoalSelector {
             self.stop(i, m, cx);
         }
         self.locked = [None; 4];
+    }
+    /// `GoalSelector.removeAllGoals(predicate)`: every goal `predicate`
+    /// picks goes, a running one stopped first (`removeGoal` stops it), and
+    /// the flag locks it held move with the list. How many went.
+    pub fn remove_all(
+        &mut self,
+        predicate: impl Fn(&dyn Goal) -> bool,
+        m: &mut Mob,
+        cx: &mut Cx,
+    ) -> usize {
+        let mut removed = 0;
+        let mut i = 0;
+        while i < self.goals.len() {
+            if predicate(&*self.goals[i].goal) {
+                self.stop(i, m, cx);
+                self.goals.remove(i);
+                removed += 1;
+                for slot in &mut self.locked {
+                    match *slot {
+                        Some(j) if j == i => *slot = None,
+                        Some(j) if j > i => *slot = Some(j - 1),
+                        _ => {}
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
+        removed
+    }
+    /// Every goal as (priority, name, running), in registration order.
+    pub fn entries(&self) -> impl Iterator<Item = (i32, &'static str, bool)> + '_ {
+        self.goals
+            .iter()
+            .map(|g| (g.priority, g.goal.name(), g.running))
     }
 }
 
@@ -3133,5 +3172,90 @@ mod built_by_player_tests {
         let mut zombie = mob(Species::Zombie);
         zombie.extra.player_created = true;
         assert!(!zombie.built_by_player());
+    }
+}
+
+#[cfg(test)]
+mod remove_all_tests {
+    use super::*;
+    use crate::mobs::world::with_built_test_world_rules;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// A goal that always wants to walk and leaves a mark while it runs, so
+    /// `removeAllGoals` has one running to stop.
+    #[derive(Clone, Debug)]
+    struct Walk;
+    impl Goal for Walk {
+        goal_clone!();
+        fn flags(&self) -> u8 {
+            MOVE
+        }
+        fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+            true
+        }
+        fn start(&mut self, m: &mut Mob, _: &mut Cx) {
+            m.ai.panicking = true;
+        }
+        fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+            m.ai.panicking = false;
+        }
+        fn name(&self) -> &'static str {
+            "Walk"
+        }
+    }
+
+    /// `removeAllGoals` stops a running goal before it goes, frees the flag
+    /// lock it held, and moves the locks behind the removed one, so the next
+    /// tick still finds the survivor that kept its place.
+    #[test]
+    fn remove_all_stops_the_running_goal_and_moves_the_locks() {
+        let ran = with_built_test_world_rules(
+            &[],
+            true,
+            |_, _| {},
+            |w, types| {
+                let kind = Arc::new(types.types["minecraft:zombie"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                // `Mob::new` registered the species' own goals; only the ones
+                // this test adds matter here.
+                let mut goals = {
+                    let mut goals = std::mem::take(&mut m.ai.goals);
+                    goals.clear();
+                    goals
+                };
+                goals.add(0, Float);
+                goals.add(1, Walk);
+                let mut lr = LegacyRandom::new(0);
+                let mut events = Vec::new();
+                {
+                    let mut cx = Cx {
+                        w,
+                        lr: &mut lr,
+                        events: &mut events,
+                    };
+                    goals.tick(&mut m, &mut cx);
+                    // The Walk runs; Float needs water the empty world has none of.
+                    assert_eq!(
+                        goals.entries().collect::<Vec<_>>(),
+                        vec![(0, "Float", false), (1, "Walk", true)]
+                    );
+                    assert!(m.ai.panicking);
+                    // The Walk before it goes: its lock index moves with the list.
+                    let removed = goals.remove_all(|g| g.name() == "Float", &mut m, &mut cx);
+                    assert_eq!(removed, 1);
+                    // A stale lock would point past the list's end here.
+                    goals.tick(&mut m, &mut cx);
+                    assert_eq!(goals.entries().collect::<Vec<_>>(), vec![(1, "Walk", true)]);
+                    // The running Walk's own removal stops it.
+                    let removed = goals.remove_all(|g| g.name() == "Walk", &mut m, &mut cx);
+                    assert_eq!(removed, 1);
+                }
+                assert!(!m.ai.panicking);
+                assert_eq!(goals.entries().count(), 0);
+                m.ai.goals = goals;
+            },
+        );
+        assert!(ran, "the test world's resources are missing");
     }
 }
