@@ -21923,7 +21923,7 @@ pub fn run_with() -> Result<()> {
         &early_settings.mods.enabled,
         &options.dev_mods,
     )
-    .unwrap_or_else(|e| {
+    .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
         mods::content_root(
@@ -21931,7 +21931,7 @@ pub fn run_with() -> Result<()> {
             &early_settings.mods.enabled,
             &options.dev_mods,
         )
-    });
+    })?;
     let loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),

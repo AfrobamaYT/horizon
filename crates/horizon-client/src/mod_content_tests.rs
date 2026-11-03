@@ -1146,7 +1146,7 @@ fn content_root_is_reused_until_a_mod_changes() {
     };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-reuse-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
-    let m = ruby_mod(&scratch.join("ruby"));
+    let mut m = ruby_mod(&scratch.join("ruby"));
     let cache = scratch.join("cache");
     let root = resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
     // A rebuild starts from an empty folder: this file tells them apart.
@@ -1157,18 +1157,31 @@ fn content_root_is_reused_until_a_mod_changes() {
         root
     );
     assert!(sentinel.exists(), "an unchanged mod rebuilt the root");
+    let old_lang = fs::read(root.join("assets/ruby/lang/en_us.json")).unwrap();
     let lang = scratch.join("ruby/assets/ruby/lang/en_us.json");
     fs::write(&lang, r#"{"block.ruby.ruby_block": "Ruby Block"}"#).unwrap();
     let file = fs::File::options().write(true).open(&lang).unwrap();
     file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
         .unwrap();
-    resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
-    assert!(!sentinel.exists(), "a changed mod kept the old root");
+    let changed = resource_root(&base, std::slice::from_ref(&m), &cache).unwrap();
+    assert_ne!(changed, root);
+    assert!(sentinel.exists(), "a rebuild removed the active root");
+    assert_eq!(
+        fs::read(root.join("assets/ruby/lang/en_us.json")).unwrap(),
+        old_lang
+    );
     assert!(
-        fs::read_to_string(root.join("assets/ruby/lang/en_us.json"))
+        fs::read_to_string(changed.join("assets/ruby/lang/en_us.json"))
             .unwrap()
             .contains("Ruby Block")
     );
+    m.content.blocks[0].template = "minecraft:missing_template".into();
+    assert!(resource_root(&base, std::slice::from_ref(&m), &cache).is_err());
+    assert!(
+        changed.exists(),
+        "a refused rebuild removed the accepted root"
+    );
+    assert!(sentinel.exists());
     let _ = fs::remove_dir_all(&scratch);
 }
 
