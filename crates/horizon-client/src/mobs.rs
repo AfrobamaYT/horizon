@@ -4770,6 +4770,22 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn absorption_downgrade_keeps_spent_hearts() {
+        // LivingEntity.onEffectUpdated -> refreshDirtyAttributes clamps
+        // absorption to the new MAX_ABSORPTION (4 for amplifier 0); it never raises it.
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 0, false, true);
+        m.add_effect_with("absorption", 90, 1, false, true);
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 2.0;
+        for _ in 0..90 {
+            ai::tick_effects(&mut m, None);
+        }
+        assert_eq!(m.extra.effects, vec![("minecraft:absorption", 110, 0)]);
+        assert_eq!(m.absorption, 2.0);
+    }
+
+    #[test]
     fn stronger_effect_restores_its_hidden_predecessor_after_expiry() {
         let mut m = witch();
         m.add_effect_with("speed", 200, 0, false, true);
