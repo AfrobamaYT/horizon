@@ -12404,7 +12404,7 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         self.fns = Default::default();
-        self.ensure_datapacks(&level.enabled_features);
+        self.ensure_datapacks(Some(&level.enabled_features));
         self.world_tables = self.build_world_tables();
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.

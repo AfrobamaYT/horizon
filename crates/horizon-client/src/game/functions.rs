@@ -155,10 +155,18 @@ impl Game<'_> {
         self.world_root.join("datapacks.json")
     }
     /// Discover and load the data packs of the world (once, or on `/reload`).
-    pub(super) fn ensure_datapacks(&mut self, enabled_features: &[String]) {
+    pub(super) fn ensure_datapacks(&mut self, enabled_features: Option<&[String]>) {
         if self.fns.loaded || self.world_root.as_os_str().is_empty() {
             return;
         }
+        let current_features;
+        let enabled_features = match enabled_features {
+            Some(features) => features,
+            None => {
+                current_features = self.level.enabled_features.clone();
+                &current_features
+            }
+        };
         self.reload_datapacks(false, enabled_features);
     }
     pub(super) fn reload_datapacks(&mut self, run_load: bool, enabled_features: &[String]) {
@@ -450,7 +458,7 @@ impl Game<'_> {
     }
     /// The functions a `FunctionArgument` names: a function or a tag.
     pub(in crate::game) fn functions_named(&mut self, name: &str) -> R<Vec<Function>> {
-        self.ensure_datapacks(&self.level.enabled_features.clone());
+        self.ensure_datapacks(None);
         match name.strip_prefix('#') {
             // ServerFunctionLibrary.getTag: an unknown tag is empty.
             Some(tag) => {
@@ -595,7 +603,7 @@ impl Game<'_> {
         Ok(value)
     }
     pub(super) fn cmd_schedule(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks(&self.level.enabled_features.clone());
+        self.ensure_datapacks(None);
         if id == "schedule.clear" {
             let Some(Arg::Resource(name)) = ctx.get("function").cloned() else {
                 return Ok(0);
@@ -790,7 +798,7 @@ impl Game<'_> {
         Ok(1)
     }
     pub(super) fn cmd_datapack(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks(&self.level.enabled_features.clone());
+        self.ensure_datapacks(None);
         let name = match ctx.get("name") {
             Some(Arg::Str(n)) => Some(n.clone()),
             _ => None,
@@ -941,7 +949,7 @@ impl Game<'_> {
 
     /// `if predicate`: a datapack predicate tested for the source entity.
     pub(in crate::game) fn check_predicate(&mut self, id: &str) -> R<bool> {
-        self.ensure_datapacks(&self.level.enabled_features.clone());
+        self.ensure_datapacks(None);
         let Some(json) = self.fns.store.predicates.get(id).cloned() else {
             return Err(err("argument.predicate.unknown", &[&id]));
         };
