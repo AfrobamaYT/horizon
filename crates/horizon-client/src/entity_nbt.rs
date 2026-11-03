@@ -1247,16 +1247,10 @@ pub fn mob_to_nbt(
                 }
             }
         }
-        let body = m.extra.body.as_ref().map(|id| {
-            let mut stack = crate::items::ItemStack::new(id, m.extra.body_count.max(1));
-            stack.damage = m.extra.body_damage.max(0) as u32;
-            stack.extra = m.extra.body_extra.clone();
-            stack
-        });
         horizon_items::equipment::put(
             &mut equipment,
             horizon_items::equipment::BODY,
-            body.as_ref(),
+            m.extra.body_stack(),
         );
         horizon_items::equipment::put(
             &mut equipment,
@@ -1505,11 +1499,8 @@ pub fn mob_from_nbt(
         m.extra.head = slot("head");
         // Body and saddle: the one `equipment` codec.
         let equipment = horizon_items::equipment::Equipment::read(eq);
-        let body = equipment.get(horizon_items::equipment::BODY);
-        m.extra.body = body.map(|s| s.item.clone());
-        m.extra.body_count = body.map_or(0, |s| s.count);
-        m.extra.body_damage = body.map_or(0, |s| s.damage as i32);
-        m.extra.body_extra = body.and_then(|s| s.extra.clone());
+        m.extra
+            .set_body_stack(equipment.get(horizon_items::equipment::BODY).cloned());
         m.set_saddle(equipment.get(horizon_items::equipment::SADDLE).cloned());
         m.extra.chest = slot("chest");
         m.extra.legs = slot("legs");

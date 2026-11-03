@@ -931,20 +931,15 @@ pub struct Extra {
     pub sheared: bool,
     /// `Mob.canPickUpLoot` (also lets dispensers equip it).
     pub pick_up_loot: bool,
-    pub saddled: bool,
-    /// Count of the body stack (zero means an ordinary single item).
-    pub body_count: u32,
-    /// The durability a wolf's body armor has lost.
-    pub body_damage: i32,
-    /// The components (dye, name...) of that armor stack.
-    pub body_extra: Option<Box<crate::item_data::StackData>>,
+    /// The body (horse and wolf armour, harnesses, carpets) and saddle
+    /// (`EquipmentSlot.BODY`, `SADDLE`), with their count, damage and
+    /// components. The hands and armour are in the fields below until they
+    /// move here too.
+    pub equipment: horizon_items::equipment::Equipment,
     /// `Cat.RELAX_STATE_ONE`: watching a sleeping owner before lying down.
     pub relax_one: bool,
     /// `Cat.isLyingOnTopOfSleepingPlayer` (the client's own, from `Cat.handleLieDown`).
     pub on_sleeper: bool,
-    /// The saddle's components (name, enchantments...) when it is not a bare
-    /// one; `saddled` stays the gameplay flag.
-    pub saddle_stack: Option<crate::items::ItemStack>,
     pub chested: bool,
     /// The chest contents of a donkey or mule (15 slots).
     pub items: Vec<Option<crate::items::ItemStack>>,
@@ -980,8 +975,6 @@ pub struct Extra {
     pub off_hand: Option<Arc<str>>,
     /// The head item (`getItemBySlot(HEAD)`), on every mob.
     pub head: Option<Arc<str>>,
-    /// Equipment in the separate body slot (horse armour, wolf armour, harnesses).
-    pub body: Option<Arc<str>>,
     /// Worn armour below the head (humanoid mobs).
     pub chest: Option<Arc<str>>,
     pub legs: Option<Arc<str>>,
@@ -1159,11 +1152,46 @@ pub struct Extra {
     pub equipment_heard: Option<Box<horizon_items::equipment::Equipment>>,
 }
 impl Extra {
+    /// The body item id (`getItemBySlot(BODY)`).
+    pub fn body(&self) -> Option<Arc<str>> {
+        self.equipment
+            .get(horizon_items::equipment::BODY)
+            .map(|s| s.item.clone())
+    }
+    /// The body item id as a string.
+    pub fn body_id(&self) -> Option<&str> {
+        self.body_stack().map(|s| &*s.item)
+    }
+    /// The body stack, with its count, damage and components.
+    pub fn body_stack(&self) -> Option<&crate::items::ItemStack> {
+        self.equipment.get(horizon_items::equipment::BODY)
+    }
     pub fn set_body_stack(&mut self, stack: Option<crate::items::ItemStack>) {
-        self.body = stack.as_ref().map(|s| s.item.clone());
-        self.body_count = stack.as_ref().map_or(0, |s| s.count);
-        self.body_damage = stack.as_ref().map_or(0, |s| s.damage as i32);
-        self.body_extra = stack.and_then(|s| s.extra);
+        self.equipment.set(horizon_items::equipment::BODY, stack);
+    }
+    /// Wears a plain body item of this id.
+    pub fn set_body(&mut self, item: Option<Arc<str>>) {
+        self.set_body_stack(item.map(|id| crate::items::ItemStack::new(&id, 1)));
+    }
+    /// The durability the body armour has lost.
+    pub fn body_damage(&self) -> i32 {
+        self.body_stack().map_or(0, |s| s.damage as i32)
+    }
+    pub fn set_body_damage(&mut self, damage: i32) {
+        if let Some(stack) = &mut self.equipment[horizon_items::equipment::BODY] {
+            stack.damage = damage.max(0) as u32;
+        }
+    }
+    /// `Mob.isSaddled`.
+    pub fn saddled(&self) -> bool {
+        self.equipment
+            .get(horizon_items::equipment::SADDLE)
+            .is_some()
+    }
+    /// Wears or takes off a plain saddle.
+    pub fn set_saddled(&mut self, saddled: bool) {
+        let saddle = saddled.then(|| crate::items::ItemStack::new("minecraft:saddle", 1));
+        self.equipment.set(horizon_items::equipment::SADDLE, saddle);
     }
 
     pub fn set_main_hand(&mut self, item: Option<Arc<str>>) {
@@ -2257,7 +2285,6 @@ impl Mob {
             (3, &e.legs, armor[2].as_ref()),
             (4, &e.chest, armor[1].as_ref()),
             (5, &e.head, armor[0].as_ref()),
-            (6, &e.body, None),
         ];
         let mut out: [Option<ItemStack>; 8] = Default::default();
         for (slot, item, worn) in slots {
@@ -2266,30 +2293,10 @@ impl Mob {
             };
             // The worn armour keeps its stack: a dyed leather piece keeps
             // its colour.
-            out[slot] = Some(worn.cloned().unwrap_or_else(|| ItemStack {
-                item: item.clone(),
-                count: if slot == 6 { e.body_count.max(1) } else { 1 },
-                // Body equipment retains its damage and components.
-                damage: if slot == 6 {
-                    e.body_damage.max(0) as u32
-                } else {
-                    0
-                },
-                extra: if slot == 6 {
-                    e.body_extra.clone()
-                } else {
-                    None
-                },
-            }));
+            out[slot] = Some(worn.cloned().unwrap_or_else(|| ItemStack::new(item, 1)));
         }
-        if e.saddled {
-            out[7] = Some(e.saddle_stack.clone().unwrap_or(ItemStack {
-                item: Arc::from("minecraft:saddle"),
-                count: 1,
-                damage: 0,
-                extra: None,
-            }));
-        }
+        out[6] = e.body_stack().cloned();
+        out[7] = e.equipment.get(horizon_items::equipment::SADDLE).cloned();
         out.into()
     }
     /// Remove and return the complete body stack.
@@ -2997,8 +3004,7 @@ impl Mob {
     pub fn worn_armor(&self) -> (f32, f32) {
         let body = if equine::is_equine(self.species()) {
             self.extra
-                .body
-                .as_deref()
+                .body_id()
                 .map_or((0.0, 0.0), spawning::horse_armor_stats)
         } else {
             (0.0, 0.0)
@@ -3232,7 +3238,7 @@ impl Mob {
         // llama, camel, the skeleton and zombie horses — wear nothing.
         if let Some(damage) = armor_hit
             && self.species() == Species::Horse
-            && self.extra.body.is_some()
+            && self.extra.body().is_some()
         {
             self.outbox.push(MobEvent::ArmorHurt {
                 mob: self.id,
@@ -3341,7 +3347,7 @@ impl Mob {
     /// the world and the untyped kills).
     fn wolf_armor_absorbs(&self, source: &Damage) -> bool {
         self.species() == Species::Wolf
-            && self.extra.body.as_deref() == Some("minecraft:wolf_armor")
+            && self.extra.body_id() == Some("minecraft:wolf_armor")
             && !matches!(
                 source.kind,
                 DamageKind::Drown
@@ -3365,7 +3371,7 @@ impl Mob {
             let left = (WOLF_ARMOR_DURABILITY - lost) as f32 / WOLF_ARMOR_DURABILITY as f32;
             [0.95_f32, 0.69, 0.32].iter().filter(|t| left < **t).count()
         };
-        let before = self.extra.body_damage;
+        let before = self.extra.body_damage();
         let after = before + damage.ceil() as i32;
         let at = [self.position.x, self.position.y, self.position.z];
         if after >= WOLF_ARMOR_DURABILITY {
@@ -3373,7 +3379,7 @@ impl Mob {
             self.outbox
                 .push(MobEvent::Sound("item.wolf_armor.break", at, 1.0, 1.0));
         } else {
-            self.extra.body_damage = after;
+            self.extra.set_body_damage(after);
             if crack(before) != crack(after) {
                 self.outbox
                     .push(MobEvent::Sound("item.wolf_armor.crack", at, 1.0, 1.0));
@@ -3839,21 +3845,16 @@ pub fn render_model(
 impl Mob {
     /// The saddle worn, with its components.
     pub fn saddle_item(&self) -> Option<crate::items::ItemStack> {
-        self.extra.saddled.then(|| {
-            self.extra
-                .saddle_stack
-                .clone()
-                .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:saddle", 1))
-        })
+        self.extra
+            .equipment
+            .get(horizon_items::equipment::SADDLE)
+            .cloned()
     }
     /// Wear (or take off) a saddle stack, keeping its components.
     pub fn set_saddle(&mut self, saddle: Option<crate::items::ItemStack>) {
-        self.extra.saddled = saddle.is_some();
-        // A plain saddle is implied by `saddled`; anything else (a copper
-        // golem's antenna flower) is kept as it is.
-        self.extra.saddle_stack = saddle.filter(|s| {
-            s.count != 1 || s.damage != 0 || s.extra.is_some() || &*s.item != "minecraft:saddle"
-        });
+        self.extra
+            .equipment
+            .set(horizon_items::equipment::SADDLE, saddle);
     }
 }
 

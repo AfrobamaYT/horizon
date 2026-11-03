@@ -246,7 +246,7 @@ pub fn swallowable(m: &Mob, item: &str) -> bool {
     m.kind.tempt.iter().any(|t| t == item)
 }
 pub fn has_body(m: &Mob) -> bool {
-    m.extra.body.is_some()
+    m.extra.body().is_some()
 }
 
 #[cfg(test)]
@@ -274,7 +274,7 @@ mod knockback_sync_tests {
     }
 }
 pub fn archetype(m: &Mob) -> Option<&'static Archetype> {
-    m.extra.body.as_deref().and_then(archetype_of)
+    m.extra.body_id().and_then(archetype_of)
 }
 /// The archetype whose bounciness, friction and air drag attributes a
 /// sulfur cube's physics use (no other mob has those modifiers).

@@ -244,7 +244,7 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
         "chest" => (m.extra.chest.as_deref(), Some(gear::CHEST)),
         "legs" => (m.extra.legs.as_deref(), Some(gear::LEGS)),
         "feet" => (m.extra.feet.as_deref(), Some(gear::FEET)),
-        "body" => (m.extra.body.as_deref(), None),
+        "body" => (m.extra.body_id(), None),
         "saddle" => {
             let saddle = m.saddle_item()?;
             let mut stack = loot_stack(&saddle.item, 1);
@@ -264,7 +264,7 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
     };
     let mut stack = loot_stack(item?, count as i32);
     if slot == "body" && m.species() == Species::Wolf {
-        stack.damage = m.extra.body_damage;
+        stack.damage = m.extra.body_damage();
     }
     if let Some(full) = stored_slot_stack(m, slot) {
         stack.damage = full.damage as i32;

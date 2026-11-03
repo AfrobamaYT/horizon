@@ -1179,7 +1179,7 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
         &m.extra.chest,
         &m.extra.legs,
         &m.extra.feet,
-        &m.extra.body,
+        &m.extra.body(),
     ]
     .into_iter()
     .flatten()
