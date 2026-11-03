@@ -1968,7 +1968,7 @@ fn content_shapes_drive_outline_and_collision() {
             ("horizon-mod.toml", &manifest("shapetest", "")),
             (
                 "data/shapetest/horizon/block/rod.json",
-                r#"{"template":"minecraft:oak_log","shapes":{"property":"axis","values":{"x":[[0,0.25,0.25,1,0.75,0.75]],"y":[[0.25,0,0.25,0.75,1,0.75]],"z":[[0.25,0.25,0,0.75,0.75,1]]}}}"#,
+                r#"{"template":"minecraft:oak_log","shapes":{"properties":["axis"],"values":{"x":[[0,0.25,0.25,1,0.75,0.75]],"y":[[0.25,0,0.25,0.75,1,0.75]],"z":[[0.25,0.25,0,0.75,0.75,1]]}}}"#,
             ),
             (
                 "data/shapetest/horizon/block/plain.json",
@@ -2119,9 +2119,9 @@ fn shapes_reject_unknown_or_missing_template_values() {
         std::env::temp_dir().join(format!("horizon-shape-invalid-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
     for declaration in [
-        r#"{"template":"minecraft:oak_log","shapes":{"property":"typo","values":{"x":[]}}}"#,
-        r#"{"template":"minecraft:oak_log","shapes":{"property":"axis","values":{"x":[]}}}"#,
-        r#"{"template":"minecraft:oak_log","shapes":{"property":"axis","values":{"x":[],"y":[],"z":[],"bad":[]}}}"#,
+        r#"{"template":"minecraft:oak_log","shapes":{"properties":["typo"],"values":{"x":[]}}}"#,
+        r#"{"template":"minecraft:oak_log","shapes":{"properties":["axis"],"values":{"x":[]}}}"#,
+        r#"{"template":"minecraft:oak_log","shapes":{"properties":["axis"],"values":{"x":[],"y":[],"z":[],"bad":[]}}}"#,
     ] {
         let m = folder_mod(
             &scratch.join("mod"),
@@ -3263,7 +3263,7 @@ fn the_nbt_tables_fan_out_with_the_states() {
 fn a_shape_and_the_state_count_cover_every_combination() {
     let declaration = r#"{"template":"minecraft:test","item":false,
       "state_properties":{"lit":{"type":"boolean"}},
-      "shapes":{"property":"axis","values":{"x":[[0,0,0,1,1,1]],"y":[[0,0,0,0.5,1,1]]}}}"#;
+      "shapes":{"properties":["axis"],"values":{"x":[[0,0,0,1,1,1]],"y":[[0,0,0,0.5,1,1]]}}}"#;
     let (base, mods) = block_base("block-shape-fanout", &[declaration]);
     let plan = Plan::new(&base, &mods).unwrap();
     // The template's two states, no shapes yet, every vanilla state unmapped.
@@ -3645,7 +3645,7 @@ fn biome_modifiers_place_mod_features_in_vanilla_biomes() {
 }
 
 /// 26.3's feature directory feeds the configured-feature bundle and command
-/// registry, including nested paths; the old documented path warns instead.
+/// registry, including nested paths, while other directories are not loaded.
 #[test]
 fn configured_features_load_from_the_26_3_path() {
     let base = biome_base("feature-paths");
@@ -3678,9 +3678,6 @@ fn configured_features_load_from_the_26_3_path() {
         .as_array()
         .unwrap();
     assert_eq!(ids, &[serde_json::json!("zinc:nested/new")]);
-    let warnings = fs::read_to_string(root.join(WARNINGS)).unwrap();
-    assert!(warnings.contains("data/zinc/worldgen/configured_feature/old.json"));
-    assert!(warnings.contains("use worldgen/feature/ in 26.3"));
     fs::remove_dir_all(scratch).unwrap();
 }
 

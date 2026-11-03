@@ -158,6 +158,76 @@ fn api_types(source: &str, generated: &str) -> Result<ApiTypes, String> {
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HelperSide {
+    Server,
+    Client,
+    Both,
+}
+
+impl HelperSide {
+    fn parse(value: &serde_json::Value) -> Result<Option<Self>, String> {
+        let side = match value.get("side") {
+            None => Ok(None),
+            Some(serde_json::Value::String(side)) => match side.as_str() {
+                "server" => Ok(Some(Self::Server)),
+                "client" => Ok(Some(Self::Client)),
+                "both" => Ok(Some(Self::Both)),
+                _ => Err(format!("unknown helper side {side}")),
+            },
+            Some(_) => Err("helper side must be a string".into()),
+        }?;
+        if value.get("client_target").is_some() && side != Some(Self::Both) {
+            return Err("client_target requires side both".into());
+        }
+        Ok(side)
+    }
+}
+
+fn helper_target<'a>(
+    game: &'a [(String, syn::ItemFn)],
+    name: &str,
+    target: &str,
+) -> Result<&'a syn::ItemFn, String> {
+    let native = target
+        .rsplit("::")
+        .next()
+        .ok_or("helper target missing method")?;
+    if !native.starts_with("native_") {
+        return Err(format!("invalid helper target {target}"));
+    }
+    let method = one_function(game.iter().map(|(_, method)| method), native)?;
+    let (module, _) = game
+        .iter()
+        .find(|(_, other)| std::ptr::eq(other, method))
+        .expect("method found");
+    let expected = format!("{module}::Game<'_>::{native}");
+    if target != expected {
+        return Err(format!(
+            "wrong target for helper {name}: {target}, it is {expected}"
+        ));
+    }
+    Ok(method)
+}
+
+fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<(), String> {
+    let normalize = |code: &str| -> Result<String, String> {
+        let mut sig = syn::parse_str::<syn::ImplItemFn>(code)
+            .map_err(|e| format!("{name}: {e}"))?
+            .sig;
+        for arg in &mut sig.inputs {
+            if let syn::FnArg::Typed(arg) = arg {
+                *arg.pat = syn::parse_quote!(_);
+            }
+        }
+        Ok(sig.to_token_stream().to_string())
+    };
+    if normalize(server)? != normalize(client)? {
+        return Err(format!("{name}: client and server signatures differ"));
+    }
+    Ok(())
+}
+
 fn host_method(
     method: &syn::ItemFn,
     name: &str,
@@ -530,10 +600,21 @@ fn host_for(is_level: bool, mutable: Option<bool>, ticks: bool) -> Option<(&'sta
     })
 }
 
-fn catalog_hooks(
-    root: &Path,
-    catalog: &serde_json::Value,
-) -> Result<Vec<serde_json::Value>, String> {
+#[derive(Debug)]
+struct CatalogHook {
+    entry: serde_json::Value,
+    side: HelperSide,
+}
+
+impl std::ops::Deref for CatalogHook {
+    type Target = serde_json::Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
     let mut hooks = catalog["hooks"]
         .as_array()
         .ok_or("catalog hooks must be an array")?
@@ -559,11 +640,15 @@ fn catalog_hooks(
         );
     }
     let mut seen = HashSet::new();
-    for hook in &hooks {
+    let mut validated = Vec::with_capacity(hooks.len());
+    for hook in hooks {
         let name = hook["name"].as_str().ok_or("hook name missing")?;
         if !seen.insert(name.to_owned()) {
             return Err(format!("duplicate hook {name}"));
         }
+        let side = HelperSide::parse(&hook)
+            .map_err(|e| format!("hook {name}: {e}"))?
+            .ok_or_else(|| format!("hook {name}: side missing"))?;
         for key in ["neoforge", "fabric", "paper"] {
             if let Some(value) = hook.get(key) {
                 let valid = value.is_string()
@@ -577,8 +662,9 @@ fn catalog_hooks(
                 }
             }
         }
+        validated.push(CatalogHook { entry: hook, side });
     }
-    Ok(hooks)
+    Ok(validated)
 }
 
 /// The crate folder and module path of a hook target that is a free function
@@ -1007,6 +1093,12 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             &mut dispatch
         };
         let mut method_source = doc_comments(&method.attrs, name, false)?;
+        let side = match hook.side {
+            HelperSide::Server => "server",
+            HelperSide::Client => "client",
+            HelperSide::Both => "both",
+        };
+        method_source.push_str(&format!("/// Side: {side}.\n"));
         match (contract, out) {
             ("cancel", Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped.\n"
@@ -1145,29 +1237,28 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
+        let side =
+            HelperSide::parse(helper)?.ok_or_else(|| format!("helper {name}: side missing"))?;
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
         let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let native = target
-            .rsplit("::")
-            .next()
-            .ok_or("helper target missing method")?;
-        if !native.starts_with("native_") {
-            return Err(format!("invalid helper target {target}"));
-        }
-        let method = one_function(game.iter().map(|(_, method)| method), native)?;
-        let (module, _) = game
-            .iter()
-            .find(|(_, other)| std::ptr::eq(other, method))
-            .expect("the method was found in the list");
-        let expected = format!("{module}::Game<'_>::{native}");
-        if target != expected {
-            return Err(format!(
-                "wrong target for helper {name}: {target}, it is {expected}"
-            ));
-        }
+        let method = helper_target(&game, name, target)?;
         let (declaration, implementation) = host_method(method, name, &types.exports)?;
+        if let Some(client_target) = helper.get("client_target") {
+            let client_target = client_target
+                .as_str()
+                .ok_or("client_target must be a string")?;
+            let client = helper_target(&game, name, client_target)?;
+            let (_, client_implementation) = host_method(client, name, &types.exports)?;
+            matching_helper_signatures(&implementation, &client_implementation, name)?;
+        }
+        let side_doc = match side {
+            HelperSide::Server => "/// Side: server.\n",
+            HelperSide::Client => "/// Side: client.\n",
+            HelperSide::Both => "/// Side: both.\n",
+        };
+        host_traits.push_str(side_doc);
         host_traits.push_str(&declaration);
         host_impl.push_str(&implementation);
         if let Some(receiver) = helper.get("receiver") {
@@ -1175,7 +1266,9 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
                 .as_str()
                 .ok_or("helper receiver must be a string")?;
             let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
-            handles.entry(handle).or_default().push_str(&code);
+            let methods = handles.entry(handle).or_default();
+            methods.push_str(side_doc);
+            methods.push_str(&code);
         }
     }
     let handles = handles
@@ -1278,6 +1371,75 @@ pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn helper_side_is_optional_and_typed() {
+        use super::HelperSide;
+        use serde_json::json;
+        assert_eq!(HelperSide::parse(&json!({})), Ok(None));
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"server"})),
+            Ok(Some(HelperSide::Server))
+        );
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"client"})),
+            Ok(Some(HelperSide::Client))
+        );
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"both"})),
+            Ok(Some(HelperSide::Both))
+        );
+        assert!(HelperSide::parse(&json!({"side":null})).is_err());
+        assert!(HelperSide::parse(&json!({"side":"unknown"})).is_err());
+        assert!(HelperSide::parse(&json!({"client_target":"somewhere"})).is_err());
+        assert!(HelperSide::parse(&json!({"side":"server", "client_target":"somewhere"})).is_err());
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"both", "client_target":"somewhere"})),
+            Ok(Some(HelperSide::Both))
+        );
+    }
+    #[test]
+    fn helper_targets_must_name_the_real_game_method() {
+        let game = vec![(
+            "horizon_client::game::sample".to_owned(),
+            syn::parse_quote!(
+                fn native_sample(&self) {}
+            ),
+        )];
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::sample::Game<'_>::native_sample"
+            )
+            .is_ok()
+        );
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::wrong::Game<'_>::native_sample"
+            )
+            .is_err()
+        );
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::sample::Game<'_>::missing"
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn dual_targets_require_matching_host_signatures() {
+        let server = "fn value(&self, x: i32) -> Option<i32> { None }";
+        let same = "fn value(&self, y: i32) -> Option<i32> { Some(y) }";
+        let wrong_type = "fn value(&self, y: u32) -> Option<i32> { None }";
+        let wrong_receiver = "fn value(&mut self, y: i32) -> Option<i32> { None }";
+        assert!(super::matching_helper_signatures(server, same, "value").is_ok());
+        assert!(super::matching_helper_signatures(server, wrong_type, "value").is_err());
+        assert!(super::matching_helper_signatures(server, wrong_receiver, "value").is_err());
+    }
     use quote::ToTokens;
     use serde_json::Value;
     #[test]
@@ -1296,6 +1458,7 @@ mod tests {
             .unwrap()
             .hooks;
         assert!(generated.contains("fn recipes_received("));
+        assert!(generated.contains("/// Side: client."));
 
         let dir = root
             .join("target")
@@ -1305,10 +1468,10 @@ mod tests {
         std::fs::write(fragments.join("empty.json"), r#"{"hooks":[]}"#).unwrap();
         std::fs::write(
             fragments.join("duplicate.json"),
-            r#"{"hooks":[{"name":"same"}]}"#,
+            r#"{"hooks":[{"name":"same","side":"server"}]}"#,
         )
         .unwrap();
-        let catalog = serde_json::json!({"hooks":[{"name":"same"}]});
+        let catalog = serde_json::json!({"hooks":[{"name":"same","side":"server"}]});
         assert_eq!(
             super::catalog_hooks(&dir, &catalog).unwrap_err(),
             "duplicate hook same"
@@ -1325,13 +1488,24 @@ mod tests {
             .join(format!("mod-api-counterparts-{}", std::process::id()));
         std::fs::create_dir_all(root.join("tools/native-hook-fragments")).unwrap();
         let catalog = serde_json::json!({"hooks": [
-            {"name": "one", "fabric": "Event.ONE", "neoforge": "OneEvent"},
-            {"name": "two", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
-            {"name": "none"}
+            {"name": "one", "side": "server", "fabric": "Event.ONE", "neoforge": "OneEvent"},
+            {"name": "two", "side": "both", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
+            {"name": "none", "side": "client"}
         ]});
         assert_eq!(super::catalog_hooks(&root, &catalog).unwrap().len(), 3);
+        for side in [serde_json::json!(null), serde_json::json!("invalid")] {
+            let invalid = serde_json::json!({"hooks": [{"name": "bad", "side": side}]});
+            assert!(super::catalog_hooks(&root, &invalid).is_err());
+        }
+        let missing = serde_json::json!({"hooks": [{"name": "bad"}]});
+        assert!(
+            super::catalog_hooks(&root, &missing)
+                .unwrap_err()
+                .contains("side missing")
+        );
         for key in ["fabric", "neoforge", "paper"] {
-            let invalid = serde_json::json!({"hooks": [{"name": "bad", key: ["ok", 4]}]});
+            let invalid =
+                serde_json::json!({"hooks": [{"name": "bad", "side": "server", key: ["ok", 4]}]});
             assert!(
                 super::catalog_hooks(&root, &invalid)
                     .unwrap_err()
@@ -1668,6 +1842,19 @@ mod tests {
         }
         let catalog_path = root.join("native-hooks.json");
         let original_catalog = std::fs::read_to_string(&catalog_path).unwrap();
+        for group in ["helpers", "hooks"] {
+            let mut missing: Value = serde_json::from_str(&original_catalog).unwrap();
+            let entry = &mut missing[group][0];
+            let name = entry["name"].as_str().unwrap().to_owned();
+            entry.as_object_mut().unwrap().remove("side").unwrap();
+            std::fs::write(&catalog_path, missing.to_string()).unwrap();
+            let kind = if group == "hooks" { "hook" } else { "helper" };
+            assert_eq!(
+                super::sources(&root, super::FillMode::Require).unwrap_err(),
+                format!("{kind} {name}: side missing")
+            );
+        }
+        std::fs::write(&catalog_path, &original_catalog).unwrap();
         let without_counterparts = super::sources(&root, super::FillMode::Require)
             .unwrap()
             .hooks;
