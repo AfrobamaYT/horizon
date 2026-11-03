@@ -147,6 +147,110 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entity_energy_and_fluids_move_and_roll_back() {
+        use super::super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::fast_hash::FxHashMap;
+        use horizon_client::mobs::Mob;
+        use horizon_client::mod_api::part_tests::{ROBOT_FLUID, game_thread};
+        use horizon_client::mod_api::{
+            ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, NativeBlockUpdateFlags, move_energy,
+            move_resources,
+        };
+        use horizon_core::geometry::{Direction, Vec3};
+        with_game(|game| {
+            let _mods = game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let block = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world
+                .block_entities
+                .set_mod_energy(FxHashMap::from_iter([(
+                    block.0,
+                    Arc::new(buffer(1000, 1000, 1000)),
+                )]));
+            let pos = [0, 64, 0];
+            assert!(game.native_level_set_block(
+                level,
+                pos,
+                block,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            let mut fields = ModBlockEntityFields::default();
+            fields.nbt.insert("energy".into(), Tag::Int(800));
+            game.world.block_entities.insert(
+                (0, 64, 0),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new("test:battery".into(), fields))),
+            );
+            for id in [13, 14] {
+                game.armor_stands.push(ArmorStand::new(id, Vec3::ZERO, 0.0));
+            }
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(15, pig, Vec3::ZERO, 0.0));
+            let (stand, other, pig) = (
+                game.native_entity(13).unwrap(),
+                game.native_entity(14).unwrap(),
+                game.native_entity(15).unwrap(),
+            );
+            let host: &mut dyn ServerHost = game;
+            assert!(pig.capability(host, &ENTITY_ENERGY, None).is_none());
+            assert!(pig.capability(host, &ENTITY_FLUIDS, None).is_none());
+            let source = level.capability(host, &ENERGY, pos, None).unwrap();
+            // The side reaches the provider: this one answers from every side but below.
+            assert!(
+                stand
+                    .capability(host, &ENTITY_ENERGY, Some(Direction::Down))
+                    .is_none()
+            );
+            assert!(
+                stand
+                    .capability(host, &ENTITY_ENERGY, Some(Direction::Up))
+                    .is_some()
+            );
+            let target = stand.capability(host, &ENTITY_ENERGY, None).unwrap();
+            assert_eq!(
+                host.transaction(|host, tx| move_energy(host, &source, &target, 100, tx)),
+                Ok(100)
+            );
+            assert_eq!((source.amount(host), target.amount(host)), (700, 100));
+            let abort: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(move_energy(host, &source, &target, 100, tx), Ok(100));
+                Err(())
+            });
+            assert!(abort.is_err());
+            assert_eq!((source.amount(host), target.amount(host)), (700, 100));
+            ROBOT_FLUID.set(host, Holder::Entity(14), 600).unwrap();
+            let tank = stand.capability(host, &ENTITY_FLUIDS, None).unwrap();
+            let from = other.capability(host, &ENTITY_FLUIDS, None).unwrap();
+            assert_eq!(
+                host.transaction(|host, tx| move_resources(host, &from, &tank, |_| true, 100, tx)),
+                Ok(100)
+            );
+            assert_eq!((from.amount(host, 0), tank.amount(host, 0)), (500, 100));
+            let abort: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(
+                    move_resources(host, &from, &tank, |_| true, 100, tx),
+                    Ok(100)
+                );
+                Err(())
+            });
+            assert!(abort.is_err());
+            assert_eq!((from.amount(host, 0), tank.amount(host, 0)), (500, 100));
+        });
+    }
+
+    #[test]
     fn an_insert_stops_at_the_room_the_limit_and_the_offer() {
         let b = buffer(1000, 100, 50);
         assert_eq!(insert_amount(&b, 0, 40), 40);

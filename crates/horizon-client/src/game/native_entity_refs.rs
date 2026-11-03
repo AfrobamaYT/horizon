@@ -803,7 +803,25 @@ pub(super) mod tests {
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
+            let motion = horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
+            )
+            .unwrap();
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
+            let guest_living = game.native_living(player.entity).unwrap();
+            let host: &dyn horizon_client::mod_api::Host = game;
+            assert_eq!(
+                guest_living.attribute_base(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(
+                guest_living.attribute_value(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(guest_living.max_health(host), Some(20.0));
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
             // Body and saddle are stored on a guest like on a mob.
             let living = game.native_living(player.entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
@@ -1001,6 +1019,29 @@ pub(super) mod tests {
             };
             assert_eq!(joined(game, false), (1, true, true, true));
             assert_eq!(joined(game, true), (0, false, false, true));
+            // A remote guest can mount through the same handle path as the acting player.
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                21,
+                kind,
+                horizon_core::geometry::Vec3::ZERO,
+                0.0,
+            ));
+            let guest = game.native_entity(12).unwrap();
+            let vehicle = game.native_entity(21).unwrap();
+            assert!(game.native_entity_start_riding(guest, vehicle, true));
+            assert_eq!(game.command_guest(12).unwrap().vehicle, Some(21));
+            assert!(game.native_entity_stop_riding(guest));
+            assert_eq!(game.command_guest(12).unwrap().vehicle, None);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest_mut(12)
+                .unwrap()
+                .dimension = "minecraft:the_nether".into();
+            assert!(!game.native_entity_start_riding(guest, vehicle, true));
+            assert!(!game.native_entity_start_riding(vehicle, guest, true));
             let _ = std::fs::remove_dir_all(root);
         });
     }
