@@ -11,6 +11,7 @@ use super::{Dim, Game, commands::execute, lan::LanHost};
 // Their old home, for mixin code that names them here.
 pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
+    command::{ArgType, Dispatcher},
     items::ItemStack,
     lan::{data::component_nbt, guest::Guest},
     mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
@@ -19,7 +20,7 @@ use horizon_client::{
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use serde_json::{Map, Value, json};
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 /// A sidebar a server mod shows one player (`native_sidebar`): its title and
 /// up to 15 lines, top first, each a text on the left and, where the score's
@@ -36,19 +37,41 @@ pub(crate) struct NativeSidebar {
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
 
 /// The brigadier parser of an argument kind, and its properties.
-fn parser(kind: &str) -> Option<(&'static str, Value)> {
+fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
     Some(match kind {
-        "word" => ("brigadier:string", json!({"type": "word"})),
-        "text" => ("brigadier:string", json!({"type": "greedy"})),
-        "integer" => ("brigadier:integer", Value::Null),
-        "number" => ("brigadier:double", Value::Null),
-        "boolean" => ("brigadier:bool", Value::Null),
+        "word" => ("brigadier:string", json!({"type": "word"}), ArgType::Word),
+        "text" => (
+            "brigadier:string",
+            json!({"type": "greedy"}),
+            ArgType::Greedy,
+        ),
+        "integer" => (
+            "brigadier:integer",
+            Value::Null,
+            ArgType::Integer {
+                min: i32::MIN,
+                max: i32::MAX,
+            },
+        ),
+        "number" => (
+            "brigadier:double",
+            Value::Null,
+            ArgType::Double {
+                min: f64::MIN,
+                max: f64::MAX,
+            },
+        ),
+        "boolean" => ("brigadier:bool", Value::Null, ArgType::Bool),
         "player" => (
             "minecraft:entity",
             json!({"amount": "single", "type": "players"}),
+            ArgType::Entity {
+                single: true,
+                players: true,
+            },
         ),
-        "item" => ("minecraft:item_stack", Value::Null),
-        "block_pos" => ("minecraft:block_pos", Value::Null),
+        "item" => ("minecraft:item_stack", Value::Null, ArgType::Item),
+        "block_pos" => ("minecraft:block_pos", Value::Null, ArgType::BlockPos),
         _ => return None,
     })
 }
@@ -91,7 +114,7 @@ fn usage_nodes(usage: &str) -> Result<Vec<(String, Value, bool)>, String> {
         if optional_seen && !optional {
             return Err(format!("`{usage}`: `{word}` follows an optional argument"));
         }
-        let Some((parser, properties)) = parser(kind) else {
+        let Some((parser, properties, _)) = parser(kind) else {
             return Err(format!("`{usage}`: unknown kind `{kind}`"));
         };
         optional_seen |= optional;
@@ -198,6 +221,49 @@ fn finish(children: &mut Value) {
         } else if let Some(c) = object.get_mut("children") {
             finish(c);
         }
+    }
+}
+
+/// Add the already validated native report tree to the server's dispatcher.
+fn register_dispatcher(dispatcher: &mut Dispatcher, tree: &Value) {
+    fn add(dispatcher: &mut Dispatcher, parent: usize, children: &Map<String, Value>) {
+        for (name, node) in children {
+            let id = if node["type"] == "literal" {
+                dispatcher.literal(parent, name)
+            } else {
+                let ty = [
+                    "word",
+                    "text",
+                    "integer",
+                    "number",
+                    "boolean",
+                    "player",
+                    "item",
+                    "block_pos",
+                ]
+                .into_iter()
+                .filter_map(parser)
+                .find_map(|(id, properties, ty)| {
+                    (node["parser"] == id && node["properties"] == properties).then_some(ty)
+                })
+                .expect("native command tree contains registered parsers");
+                dispatcher.argument(parent, name, ty)
+            };
+            let level = node["permissions"]["permission"]["level"]
+                .as_str()
+                .and_then(|level| LEVELS.iter().position(|known| *known == level))
+                .unwrap_or(0) as u8;
+            dispatcher.requires(id, level);
+            if node["executable"] == true {
+                dispatcher.executes(id, "native_mod_command");
+            }
+            if let Some(children) = node["children"].as_object() {
+                add(dispatcher, id, children);
+            }
+        }
+    }
+    if let Some(children) = tree["children"].as_object() {
+        add(dispatcher, 0, children);
     }
 }
 
@@ -1094,6 +1160,12 @@ fn system_chat(line: &Text) -> C {
     })
 }
 
+/// Native command metadata and the server dispatcher containing their parsed usages.
+pub(super) struct NativeCommands {
+    levels: HashMap<String, u8>,
+    pub(super) dispatcher: Option<Arc<Dispatcher>>,
+}
+
 /// Where the game calls the server hook points.
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
@@ -1104,13 +1176,24 @@ impl Game<'_> {
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let (tree, levels, problems) =
-            command_tree(&commands, |name| host.hub.vanilla_command(name));
+        let vanilla = horizon_client::command::vanilla::game_dispatcher_with_features(
+            &self.level.enabled_features,
+        );
+        let (tree, levels, problems) = command_tree(&commands, |name| {
+            host.hub.vanilla_command(name) || vanilla.find(name).is_some()
+        });
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
+        let dispatcher = if levels.is_empty() {
+            None
+        } else {
+            let mut dispatcher = vanilla.clone();
+            register_dispatcher(&mut dispatcher, &tree);
+            Some(Arc::new(dispatcher))
+        };
         host.hub.set_mod_commands(0, tree);
-        host.native_commands = Some(levels);
+        host.native_commands = Some(NativeCommands { levels, dispatcher });
     }
 
     /// Asks the mods what root commands each player's tree keeps
@@ -1160,7 +1243,25 @@ impl Game<'_> {
     /// slash), when a mod registered it.
     pub(super) fn native_command_level(host: &LanHost, line: &str) -> Option<u8> {
         let name = line.split(' ').next().unwrap_or_default();
-        host.native_commands.as_ref()?.get(name).copied()
+        host.native_commands.as_ref()?.levels.get(name).copied()
+    }
+
+    /// Parse a registered command using the source's permission before dispatching it.
+    fn native_command_valid(&mut self, line: &str, permission: u8) -> bool {
+        let dispatcher = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.native_commands.as_ref())
+            .and_then(|commands| commands.dispatcher.clone())
+            .expect("registered native commands have a dispatcher");
+        let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
+        let parse = dispatcher.parse(line, &self.ui.registries);
+        self.ui.registries.permission = previous;
+        if let Err(error) = parse.executable() {
+            self.syntax_failure(&error, line);
+            return false;
+        }
+        true
     }
 
     /// A guest's command for the mods, inside their swap
@@ -1186,6 +1287,9 @@ impl Game<'_> {
             yaw: g.yaw,
             pitch: g.pitch,
         };
+        if !self.native_command_valid(line, permission) {
+            return true;
+        }
         let mut ran = false;
         self.native_perform_command(&player, line, &mut ran);
         if !ran {
@@ -1210,6 +1314,9 @@ impl Game<'_> {
         };
         if Self::native_command_level(host, line).is_none() {
             return false;
+        }
+        if !self.native_command_valid(line, 4) {
+            return true;
         }
         let mut ran = false;
         self.native_perform_console_command(line, &mut ran);
@@ -1444,6 +1551,63 @@ mod tests {
         assert!(c["pay"].get("permissions").is_none());
         assert_eq!(levels["eco"], 3);
         assert_eq!(levels["pay"], 0);
+    }
+
+    #[test]
+    fn native_usages_parse_with_their_permissions_in_the_server_dispatcher() {
+        let (tree, _, problems) = tree(&[
+            NativeCommand::new("warp [name:word]"),
+            NativeCommand::op("warp set <amount:integer>", 2),
+            NativeCommand::new("toggle <enabled:boolean>"),
+        ]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree);
+        let mut registries = horizon_client::command::Registries::default();
+        assert!(dispatcher.parse("warp", &registries).executable().is_ok());
+        assert!(
+            dispatcher
+                .parse("warp home", &registries)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            dispatcher
+                .parse("warp set 7", &registries)
+                .executable()
+                .is_err()
+        );
+        registries.permission = 2;
+        assert!(
+            dispatcher
+                .parse("warp set 7", &registries)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            dispatcher
+                .parse("warp set nope", &registries)
+                .executable()
+                .is_err()
+        );
+        assert!(
+            dispatcher
+                .parse("warp set", &registries)
+                .executable()
+                .is_err()
+        );
+        assert!(
+            dispatcher
+                .parse("toggle true", &registries)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            dispatcher
+                .parse("toggle maybe", &registries)
+                .executable()
+                .is_err()
+        );
     }
 
     #[test]
