@@ -28,8 +28,8 @@ use horizon_client::mod_api::{
     WorldPhase,
 };
 use horizon_client::mod_api::{
-    AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LegacyRandom, LevelRef,
-    LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState, Suggestion,
+    AttachmentResult, Attachments, BlockHit, BonemealSource, GameRuleValue, Holder, LegacyRandom,
+    LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState, Suggestion,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -5739,6 +5739,40 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// `BonemealEvent`: bone meal from `stack` used on the block `state` at
+    /// `pos` (`BoneMealItem.growCrop`), by `player` or, when it is `None`, by
+    /// a dispenser or a villager. `valid_bonemeal_target` is the block's
+    /// `isValidBonemealTarget`. Cancel skips vanilla's growth, the block's
+    /// own bone meal Parts and the meal's use: `growCrop` then answers
+    /// `successful` (`setSuccessful`), which is `false` unless a mod sets it.
+    /// Fired on both sides; changes to `stack` stay.
+    pub(super) fn native_bonemeal(
+        &mut self,
+        dimension: LevelDimension,
+        player: Option<u128>,
+        player_entity_id: Option<i32>,
+        pos: BlockPos,
+        state: BlockStateId,
+        source: BonemealSource,
+        stack: &mut ItemStack,
+        valid_bonemeal_target: bool,
+        successful: &mut bool,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_bonemeal(
+            mod_api::HostSide::of(self),
+            dimension,
+            player,
+            player_entity_id,
+            pos,
+            state,
+            source,
+            stack,
+            valid_bonemeal_target,
+            successful,
+            canceled,
+        );
+    }
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
     /// about to break `blocks`: `ServerExplosion.explode` with its `toBlow`,
     /// before any block is hit. Take out the positions to spare; they keep
@@ -8347,6 +8381,44 @@ pub(super) enum BlockClickAnswer {
 
 /// Where the game calls the hook points.
 impl Game<'_> {
+    /// `BonemealEvent` for bone meal from `stack` on `pos`, used by the
+    /// acting player (`by_player`) or by a dispenser or a villager:
+    /// `Some(successful)` when a mod canceled it, the answer `growCrop`
+    /// gives in vanilla's place. The caller keeps what the mods did to
+    /// `stack`.
+    pub(super) fn bonemeal(
+        &mut self,
+        pos: BlockPos,
+        by_player: bool,
+        stack: &mut ItemStack,
+    ) -> Option<bool> {
+        if !mod_api::listened(mod_api::HookId::Bonemeal) {
+            return None;
+        }
+        let client = self.remote.is_some();
+        let valid = self.with_level(|b, level, _| b.is_valid_bonemeal_target(level, pos, client));
+        let state = self.world.block(pos.x, pos.y, pos.z);
+        let (player, player_entity_id) = if by_player {
+            let (uuid, entity) = self.native_clicker();
+            (Some(uuid), Some(entity))
+        } else {
+            (None, None)
+        };
+        let (mut successful, mut canceled) = (false, false);
+        self.native_bonemeal(
+            self.dim.level(),
+            player,
+            player_entity_id,
+            pos,
+            state,
+            BonemealSource::Interaction,
+            stack,
+            valid,
+            &mut successful,
+            &mut canceled,
+        );
+        canceled.then_some(successful)
+    }
     /// The player clicking, as the block-use hooks name them: the acting
     /// player's UUID and entity id on a server, this client's own player on
     /// a client.
