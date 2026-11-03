@@ -1930,6 +1930,92 @@ impl BlockHit {
     }
 }
 
+/// The game's read-only native backend, as [`Host::backend`] hands it out.
+///
+/// The backend is reached only through [`Host::backend`] and
+/// `Host::backend_mut`, which return opaque `BackendRef`/`BackendMutRef`
+/// values that only `mod_api` can build or open. A foreign [`Host`] gets
+/// `None` by default, and forwarding a real host's value adds nothing beyond
+/// calling with the real host. A handle asked on a host without a backend
+/// answers its typed refusal (`None` or `false`).
+///
+/// Opening one is reserved for this API:
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::{Backend, BackendRef};
+/// fn reach(backend: BackendRef<'_>) { let _: &dyn Backend = backend.open(); }
+/// ```
+///
+/// So is reading the backend it holds:
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::BackendRef;
+/// fn reach(backend: BackendRef<'_>) { let _ = backend.inner; }
+/// ```
+///
+/// And building one:
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::BackendRef;
+/// fn build() { let _ = BackendRef::of; }
+/// ```
+#[doc(hidden)]
+pub struct BackendRef<'a> {
+    inner: &'a dyn Backend,
+}
+
+/// The game's mutable native backend, as `Host::backend_mut` hands it out;
+/// the same opaque rule as [`BackendRef`], and a wrapper exposes no backend
+/// method of its own:
+///
+/// ```compile_fail
+/// use horizon_client::mod_api::BackendMutRef;
+/// fn reach(backend: BackendMutRef<'_>) { backend.set_loaded(false); }
+/// ```
+#[doc(hidden)]
+pub struct BackendMutRef<'a> {
+    inner: &'a mut dyn BackendMut,
+}
+
+impl<'a> BackendRef<'a> {
+    /// Wraps a read backend; only the generated game impl and this module's
+    /// test doubles build a wrapper, always around themselves.
+    pub(crate) fn of(inner: &'a dyn Backend) -> Self {
+        Self { inner }
+    }
+
+    /// The backend inside; visible only inside `mod_api`, which the
+    /// generated handle code and the capability tables are part of.
+    fn open(self) -> &'a dyn Backend {
+        self.inner
+    }
+}
+
+impl<'a> BackendMutRef<'a> {
+    /// Wraps a write backend; only the generated game impl and this module's
+    /// test doubles build a wrapper, always around themselves.
+    pub(crate) fn of(inner: &'a mut dyn BackendMut) -> Self {
+        Self { inner }
+    }
+
+    /// The backend inside; visible only inside `mod_api`.
+    fn open(self) -> &'a mut dyn BackendMut {
+        self.inner
+    }
+}
+
+/// The read backend behind `host`, or `None` where the host has none; the
+/// caller answers its typed refusal instead of running on.
+pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
+    host.backend().map(|wrapper| wrapper.open())
+}
+
+/// The write backend behind `host`, or `None` where the host has none; the
+/// caller answers its typed refusal instead of running on.
+pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn Host) -> Option<&mut dyn BackendMut> {
+    host.backend_mut().map(|wrapper| wrapper.open())
+}
+
 /// A player's right click on a block, for `right_click_block`
 /// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
 /// `useItemOn` starts, on the clicking client and on the server.
@@ -2002,6 +2088,8 @@ mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
 pub use generated_host::Host;
+#[doc(hidden)]
+pub use generated_host::{Backend, BackendMut};
 
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
@@ -2152,13 +2240,19 @@ mod tests {
         lines: Vec<Text>,
     }
 
+    impl Backend for Reader {
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
+        }
+    }
+
     impl Host for Reader {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
                 .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
-        }
-        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
-            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {
