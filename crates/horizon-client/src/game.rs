@@ -16907,17 +16907,19 @@ impl Game<'_> {
         self.streaming
             .extra
             .extend(waiting.into_iter().map(|chunk| (chunk, 0)));
-        let mut step = self.streaming.begin_plan_update(&mut self.world);
-        let plan = loop {
-            match step {
-                horizon_client::streaming::PlanStep::Ready(plan) => break plan,
-                horizon_client::streaming::PlanStep::Save { chunk, resume } => {
-                    self.native_late_full_chunk_snapshot(&chunk);
-                    self.streaming.save_finished(chunk);
-                    step = self.streaming.resume_plan_update(&mut self.world, resume);
+        let plan = horizon_client::spans::time("streaming_plan", || {
+            let mut step = self.streaming.begin_plan_update(&mut self.world);
+            loop {
+                match step {
+                    horizon_client::streaming::PlanStep::Ready(plan) => break plan,
+                    horizon_client::streaming::PlanStep::Save { chunk, resume } => {
+                        self.native_late_full_chunk_snapshot(&chunk);
+                        self.streaming.save_finished(chunk);
+                        step = self.streaming.resume_plan_update(&mut self.world, resume);
+                    }
                 }
             }
-        };
+        });
         let (commit, protos) = self.streaming.prepare_commit(&mut self.world, plan);
         self.native_proto_snapshots(&protos);
         self.streaming.submit_protos(protos);

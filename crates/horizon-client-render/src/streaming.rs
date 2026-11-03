@@ -509,6 +509,7 @@ pub struct PlanResume {
     sweep: bool,
     uploads: Vec<((i32, i32, i32), SectionMesh)>,
     stale: Vec<((i32, i32, i32), SectionMesh)>,
+    deferred: std::vec::IntoIter<Done>,
     received: VecDeque<Done>,
 }
 
@@ -1701,16 +1702,15 @@ impl Streaming {
         self.scan_age = if sweep { 0 } else { self.scan_age + 1 };
         self.requeue();
         self.relight_edits(world);
-        let mut received = self.shared.done.take();
-        for done in std::mem::take(&mut self.deferred).into_iter().rev() {
-            received.push_front(done);
-        }
+        let deferred = std::mem::take(&mut self.deferred).into_iter();
+        let received = self.shared.done.take();
         self.resume_plan_update(
             world,
             PlanResume {
                 sweep,
                 uploads: Vec::new(),
                 stale: Vec::new(),
+                deferred,
                 received,
             },
         )
@@ -1718,7 +1718,7 @@ impl Streaming {
 
     /// Resume processing the same batch after the caller saves a late column.
     pub fn resume_plan_update(&mut self, world: &mut World, mut resume: PlanResume) -> PlanStep {
-        while let Some(done) = resume.received.pop_front() {
+        while let Some(done) = resume.deferred.next().or_else(|| resume.received.pop_front()) {
             match done {
                 Done::Proto(x, z, proto, decorated) => {
                     self.generation_scan.exhausted = false;
