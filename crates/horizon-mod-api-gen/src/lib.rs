@@ -564,6 +564,19 @@ fn catalog_hooks(
         if !seen.insert(name.to_owned()) {
             return Err(format!("duplicate hook {name}"));
         }
+        for key in ["neoforge", "fabric", "paper"] {
+            if let Some(value) = hook.get(key) {
+                let valid = value.is_string()
+                    || value
+                        .as_array()
+                        .is_some_and(|values| values.iter().all(serde_json::Value::is_string));
+                if !valid {
+                    return Err(format!(
+                        "hook {name}: {key} must be a string or list of strings"
+                    ));
+                }
+            }
+        }
     }
     Ok(hooks)
 }
@@ -1314,6 +1327,29 @@ mod tests {
     }
 
     #[test]
+    fn counterpart_metadata_accepts_strings_lists_and_absence() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("mod-api-counterparts-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("tools/native-hook-fragments")).unwrap();
+        let catalog = serde_json::json!({"hooks": [
+            {"name": "one", "fabric": "Event.ONE", "neoforge": "OneEvent"},
+            {"name": "two", "fabric": ["Event.TWO", "Event.THREE"], "paper": "SomeEvent"},
+            {"name": "none"}
+        ]});
+        assert_eq!(super::catalog_hooks(&root, &catalog).unwrap().len(), 3);
+        for key in ["fabric", "neoforge", "paper"] {
+            let invalid = serde_json::json!({"hooks": [{"name": "bad", key: ["ok", 4]}]});
+            assert!(
+                super::catalog_hooks(&root, &invalid)
+                    .unwrap_err()
+                    .contains(key)
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn public_ref_structs_define_receivers_without_registration() {
         let types = super::api_types(
             "pub struct BlockEntityRef; pub struct HTTPRequestRef;
@@ -1638,6 +1674,23 @@ mod tests {
         for input in &inputs {
             copy(&real.join(input), &root.join(input));
         }
+        let catalog_path = root.join("native-hooks.json");
+        let original_catalog = std::fs::read_to_string(&catalog_path).unwrap();
+        let without_counterparts = super::sources(&root, super::FillMode::Require)
+            .unwrap()
+            .hooks;
+        let mut with_counterparts: Value = serde_json::from_str(&original_catalog).unwrap();
+        let first = &mut with_counterparts["hooks"][0];
+        first["fabric"] = serde_json::json!(["Example.ONE", "Example.TWO"]);
+        first["paper"] = serde_json::json!("ExampleEvent");
+        std::fs::write(&catalog_path, with_counterparts.to_string()).unwrap();
+        assert_eq!(
+            super::sources(&root, super::FillMode::Require)
+                .unwrap()
+                .hooks,
+            without_counterparts
+        );
+        std::fs::write(&catalog_path, original_catalog).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
         let call = "mod_api::dispatch_item_damaged(self, mod_api::mods(), player, name, item, amount, cancel);";
