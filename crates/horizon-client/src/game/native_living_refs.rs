@@ -25,11 +25,14 @@ fn player_slot(
     selected: usize,
     armor: &[Option<ItemStack>; 4],
     offhand: &Option<ItemStack>,
+    body_saddle: &[Option<ItemStack>; 2],
     slot: EquipmentSlot,
 ) -> Option<ItemStack> {
     match slot {
         EquipmentSlot::MainHand => inventory.get(selected).cloned().flatten(),
         EquipmentSlot::OffHand => offhand.clone(),
+        EquipmentSlot::Body => body_saddle[0].clone(),
+        EquipmentSlot::Saddle => body_saddle[1].clone(),
         _ => armor[armor_index(slot)?].clone(),
     }
 }
@@ -121,8 +124,9 @@ impl Game<'_> {
 
     /// The stack in `slot` (`LivingEntity.getItemBySlot`). Players, guests,
     /// mobs and armor stands store main hand, off hand, head, chest, legs and
-    /// feet. All mobs also store body and saddle. Dragon equipment and player
-    /// or armor-stand body and saddle storage are not yet modeled. None means
+    /// feet. Players, guests and mobs also store body and saddle. Dragon
+    /// equipment and armor-stand body and saddle storage are not yet
+    /// modeled. None means
     /// empty, unsupported or stale. API @API:living_refs@.
     pub(super) fn native_living_equipment(
         &self,
@@ -135,11 +139,19 @@ impl Game<'_> {
                 self.selected,
                 &self.armor,
                 &self.offhand,
+                &self.body_saddle,
                 slot,
             ),
             Target::Guest(conn) => {
                 let g = self.command_guest(conn)?;
-                player_slot(&g.inventory, g.selected, &g.armor, &g.offhand, slot)
+                player_slot(
+                    &g.inventory,
+                    g.selected,
+                    &g.armor,
+                    &g.offhand,
+                    &g.body_saddle,
+                    slot,
+                )
             }
             Target::Mob(id) => {
                 self.mobs.iter().find(|m| m.id == id)?.equipment_stacks()[slot as usize].clone()
@@ -169,9 +181,9 @@ impl Game<'_> {
     }
     /// Puts `stack` in `slot` (`LivingEntity.setItemSlot`); None, air or a
     /// zero count empties it. Players, guests, mobs and armor stands store
-    /// main hand, off hand, head, chest, legs and feet. All mobs also store
-    /// body and saddle. Dragon equipment and player or armor-stand body and
-    /// saddle storage are not yet modeled. False means unsupported or stale.
+    /// main hand, off hand, head, chest, legs and feet. Players, guests and
+    /// mobs also store body and saddle. Dragon equipment and armor-stand body
+    /// and saddle storage are not yet modeled. False means unsupported or stale.
     /// This is a direct write: it takes effect and is final immediately, even
     /// inside `host.transaction`. Any equip/unequip event and equip sound also
     /// happen immediately. API @API:living_refs@.
@@ -446,6 +458,43 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_host_players_body_and_saddle_are_slots_and_saved_in_equipment() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let owner = Owner::Entity(Target::Player);
+            let mut body = ItemStack::new("minecraft:diamond_horse_armor", 1);
+            body.damage = 4;
+            let saddle = ItemStack::new("minecraft:saddle", 1);
+            for (name, stack) in [("armor.body", &body), ("saddle", &saddle)] {
+                let slots = game.slots_named(&owner, name);
+                assert_eq!(slots.len(), 1, "{name} is one slot");
+                assert!(game.slot_set(&slots[0], Some(stack.clone())));
+            }
+            assert_eq!(game.body_saddle, [Some(body.clone()), Some(saddle.clone())]);
+            game.sync_level();
+            let tag = game.level.player_tag();
+            let equipment = tag.get("equipment").unwrap();
+            assert!(equipment.get("body").is_some() && equipment.get("saddle").is_some());
+            let mut read = horizon_client::save::Level::default();
+            read.read_player(&tag);
+            let saved = |slot| {
+                read.inventory
+                    .iter()
+                    .find(|i| i.0 == slot)
+                    .map(|i| i.1.clone())
+            };
+            assert_eq!(
+                saved(horizon_client::save::BODY_SLOT).as_deref(),
+                Some("minecraft:diamond_horse_armor")
+            );
+            assert_eq!(
+                saved(horizon_client::save::SADDLE_SLOT).as_deref(),
+                Some("minecraft:saddle")
+            );
+        });
+    }
+
+    #[test]
     fn air_and_zero_count_are_empty_on_write() {
         assert!(equipment_stack(Some(ItemStack::new("minecraft:air", 1))).is_none());
         assert!(equipment_stack(Some(ItemStack::new("minecraft:stone", 0))).is_none());
@@ -463,7 +512,9 @@ mod tests {
             stack("minecraft:iron_boots"),
         ];
         let offhand = stack("minecraft:shield");
-        let at = |slot| player_slot(&inventory, 1, &armor, &offhand, slot).map(|s| s.item);
+        let body_saddle = [None, stack("minecraft:saddle")];
+        let at =
+            |slot| player_slot(&inventory, 1, &armor, &offhand, &body_saddle, slot).map(|s| s.item);
         assert_eq!(
             at(EquipmentSlot::MainHand).as_deref(),
             Some("minecraft:dirt")
@@ -482,6 +533,10 @@ mod tests {
         );
         assert_eq!(at(EquipmentSlot::Chest), None);
         assert_eq!(at(EquipmentSlot::Body), None);
+        assert_eq!(
+            at(EquipmentSlot::Saddle).as_deref(),
+            Some("minecraft:saddle")
+        );
     }
 
     #[test]

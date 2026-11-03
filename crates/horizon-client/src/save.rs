@@ -270,6 +270,20 @@ pub fn downgraded_from(world: &Path) -> Option<String> {
 }
 /// `LevelStorageAccess.checkForLowDiskSpace`: under 64 MiB usable.
 pub const LOW_DISK_SPACE: u64 = 67_108_864;
+
+/// The `PlayerData::inventory` slots of `EquipmentSlot.BODY` and `SADDLE`.
+/// Vanilla saves them in the `equipment` compound with the armor and off hand.
+pub const BODY_SLOT: u8 = 151;
+pub const SADDLE_SLOT: u8 = 152;
+
+/// 0 for the body slot, 1 for the saddle slot, None for any other slot.
+pub fn body_saddle_index(slot: u8) -> Option<usize> {
+    match slot {
+        BODY_SLOT => Some(0),
+        SADDLE_SLOT => Some(1),
+        _ => None,
+    }
+}
 /// `LevelStorageAccess.estimateDiskSpace`: the usable bytes of the disk holding `dir`
 /// (`FileStore.getUsableSpace`), `u64::MAX` when it cannot be asked.
 pub fn estimate_disk_space(dir: &Path) -> u64 {
@@ -3643,7 +3657,8 @@ pub struct Level {
     pub absorption: f32,
     pub food: i32,
     pub saturation: f32,
-    /// (slot, item, count, damage): 0..36 inventory, 100..103 armor (feet..head), 150 offhand.
+    /// (slot, item, count, damage): 0..36 inventory, 100..103 armor (feet..head), 150 offhand,
+    /// 151 body and 152 saddle (`BODY_SLOT`).
     pub inventory: Vec<(u8, String, u32, u32)>,
     /// Extra item components of `inventory` entries, by slot.
     pub inventory_components: HashMap<u8, Box<crate::item_data::StackData>>,
@@ -4027,6 +4042,8 @@ impl Level {
                 ("chest", 102),
                 ("head", 103),
                 ("offhand", 150),
+                ("body", BODY_SLOT),
+                ("saddle", SADDLE_SLOT),
             ] {
                 if let Some(stack) = eq.get(name).and_then(item_from_nbt) {
                     inventory.retain(|(s, ..)| *s != slot);
@@ -4095,7 +4112,7 @@ impl Level {
                 damage: *damage,
                 extra,
             };
-            match slot {
+            match *slot {
                 0..=35 => {
                     let mut entries = vec![("Slot", Tag::Byte(*slot as i8))];
                     entries.extend(encode_item(&stack));
@@ -4106,6 +4123,8 @@ impl Level {
                 102 => equipment.push(("chest", item_to_nbt(&stack))),
                 103 => equipment.push(("head", item_to_nbt(&stack))),
                 150 => equipment.push(("offhand", item_to_nbt(&stack))),
+                BODY_SLOT => equipment.push(("body", item_to_nbt(&stack))),
+                SADDLE_SLOT => equipment.push(("saddle", item_to_nbt(&stack))),
                 _ => {}
             }
         }

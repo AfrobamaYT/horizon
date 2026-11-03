@@ -2799,6 +2799,10 @@ struct Game<'a> {
     armor: [Option<ItemStack>; 4],
     /// The off hand (Inventory slot 40, saved as slot 150; menu slot 504 here).
     offhand: Option<ItemStack>,
+    /// The body and saddle slots (`EquipmentSlot.BODY`, `SADDLE`; Inventory
+    /// slots 41 and 42, saved as 151 and 152). Nothing in the game reads them
+    /// yet; they are kept for mods and saves.
+    body_saddle: [Option<ItemStack>; 2],
     /// `ItemStack.popTime` of the nine hotbar stacks, then the off hand: set to 5
     /// when a slot gains items, counted down each tick.
     hotbar_pop: [u8; 10],
@@ -4063,6 +4067,7 @@ impl Game<'_> {
             stacks.extend(self.inventory.iter_mut().filter_map(Option::take));
             stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
             stacks.extend(self.offhand.take());
+            stacks.extend(self.body_saddle.iter_mut().filter_map(Option::take));
             stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
             self.apply_equipment();
         }
@@ -12432,6 +12437,7 @@ impl Game<'_> {
         let mut inventory = vec![None; 36];
         self.armor = [None, None, None, None];
         self.offhand = None;
+        self.body_saddle = [None, None];
         self.ender_items = if level.ender_items.len() == 27 {
             level.ender_items.clone()
         } else {
@@ -12448,6 +12454,10 @@ impl Game<'_> {
                 self.armor[usize::from(103 - slot)] = Some(stack);
             } else if *slot == 150 {
                 self.offhand = Some(stack);
+            } else if let Some(cell) = horizon_client::save::body_saddle_index(*slot)
+                .and_then(|i| self.body_saddle.get_mut(i))
+            {
+                *cell = Some(stack);
             } else if let Some(cell) = inventory.get_mut(usize::from(*slot)) {
                 *cell = Some(stack);
             }
@@ -15426,6 +15436,7 @@ impl Game<'_> {
                     self.inventory.fill(None);
                     self.armor.fill(None);
                     self.offhand = None;
+                    self.body_saddle.fill(None);
                     self.craft_grid[..4].fill(None);
                     self.player_equipment_changed(&before);
                     self.apply_equipment();
@@ -15571,6 +15582,17 @@ impl Game<'_> {
                 .push((150, s.item.to_string(), s.count, s.damage));
             if let Some(extra) = s.extra.clone() {
                 level.inventory_components.insert(150, extra);
+            }
+        }
+        for (i, s) in self.body_saddle.iter().enumerate() {
+            if let Some(s) = s {
+                let slot = horizon_client::save::BODY_SLOT + i as u8;
+                level
+                    .inventory
+                    .push((slot, s.item.to_string(), s.count, s.damage));
+                if let Some(extra) = s.extra.clone() {
+                    level.inventory_components.insert(slot, extra);
+                }
             }
         }
         // Vanilla stores armor in slots 100 (feet) to 103 (head).
@@ -19295,6 +19317,7 @@ impl<'a> Game<'a> {
             title: None,
             armor: [None, None, None, None],
             offhand: None,
+            body_saddle: [None, None],
             hotbar_pop: [0; 10],
             hand: Hand::Main,
             shield_cooldown: 0,

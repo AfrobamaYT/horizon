@@ -20,6 +20,8 @@ pub(in crate::game) enum Slot {
     /// `armor[0..4]` (head, chest, legs, feet).
     Armor(usize),
     Offhand,
+    /// The player's body (0) or saddle (1) equipment slot.
+    BodySaddle(usize),
     Ender(usize),
     /// A mob's equipment by name (`mainhand`, `offhand`, `head`, ...).
     Mob(u32, &'static str),
@@ -138,6 +140,11 @@ impl Game<'_> {
                 if matches_name(name, "weapon.offhand") {
                     add(Slot::Offhand);
                 }
+                for (i, n) in ["armor.body", "saddle"].into_iter().enumerate() {
+                    if matches_name(name, n) {
+                        add(Slot::BodySaddle(i));
+                    }
+                }
                 for i in 0..27 {
                     if matches_name(name, &format!("enderchest.{i}")) {
                         add(Slot::Ender(i));
@@ -210,6 +217,7 @@ impl Game<'_> {
             Slot::MainHand => self.inventory.get(self.selected).cloned().flatten(),
             Slot::Armor(i) => self.armor.get(*i).cloned().flatten(),
             Slot::Offhand => self.offhand.clone(),
+            Slot::BodySaddle(i) => self.body_saddle.get(*i).cloned().flatten(),
             Slot::Ender(i) => self.ender_items.get(*i).cloned().flatten(),
             Slot::Mob(id, key) => {
                 let m = self.mobs.iter().find(|m| m.id == *id)?;
@@ -270,6 +278,13 @@ impl Game<'_> {
                 self.player_on_equip("offhand", old.as_ref(), stack.as_ref());
                 true
             }
+            Slot::BodySaddle(i) => match self.body_saddle.get_mut(*i) {
+                Some(slot) => {
+                    *slot = stack;
+                    true
+                }
+                None => false,
+            },
             Slot::Ender(i) => match self.ender_items.get_mut(*i) {
                 Some(slot) => {
                     *slot = stack;

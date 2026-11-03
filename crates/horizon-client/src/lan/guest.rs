@@ -285,6 +285,8 @@ pub struct Guest {
     pub inventory: Vec<Option<ItemStack>>,
     pub armor: [Option<ItemStack>; 4],
     pub offhand: Option<ItemStack>,
+    /// `EquipmentSlot.BODY` and `SADDLE`, kept and saved like `Game::body_saddle`.
+    pub body_saddle: [Option<ItemStack>; 2],
     pub selected: usize,
     pub carried: Option<ItemStack>,
     /// The inventory menu's crafting grid (2x2) and its result
@@ -570,6 +572,7 @@ impl Guest {
             inventory: vec![None; 36],
             armor: [None, None, None, None],
             offhand: None,
+            body_saddle: [None, None],
             selected: 0,
             carried: None,
             craft_grid: Default::default(),
