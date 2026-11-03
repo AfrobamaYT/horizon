@@ -218,6 +218,7 @@ mod native_entity_moves;
 mod native_entity_refs;
 mod native_entity_remove;
 mod native_entity_riding;
+mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
@@ -3247,6 +3248,8 @@ struct Game<'a> {
     /// Their entity id, which the hub (often taken out of `lan` while they
     /// act) would otherwise have to be asked for.
     lan_acting_entity: Option<u32>,
+    /// Whether the player currently swapped into the game is connectionless.
+    lan_acting_fake: bool,
     /// Command feedback to forward to a guest.
     chat_capture: Option<Vec<horizon_client::text::Text>>,
     /// Packets for the guest acting now, sent once its action returns.
@@ -14901,6 +14904,7 @@ impl Game<'_> {
             p.velocity = Vec3::ZERO;
             p.pitch = 0.0;
             p.teleported = true;
+            p.teleported_delta = [false; 3];
         }
         self.pitch = 0.0;
         if self.lan_acting.is_none() {
@@ -19513,6 +19517,7 @@ impl<'a> Game<'a> {
             tnt_refused: None,
             lan_acting_permission: None,
             lan_acting_entity: None,
+            lan_acting_fake: false,
             chat_capture: None,
             admin_feedback: Vec::new(),
             console_broadcast: None,
@@ -22197,7 +22202,7 @@ mod tests {
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
         mod_api::install_parts(&mods).unwrap();
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
             game.reload_world_tables();
@@ -22248,7 +22253,7 @@ mod tests {
             "right-click-observer",
             Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone())),
         )]);
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world

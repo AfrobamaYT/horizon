@@ -55,6 +55,9 @@ pub(super) struct NativeSound {
     pub source: i32,
     pub volume: f32,
     pub pitch: f32,
+    /// The connection of a player who doesn't hear it, as
+    /// `Level.playSound(except, ...)`.
+    pub except: Option<u32>,
 }
 
 /// Mob-system state owned by the game.
@@ -5110,6 +5113,7 @@ impl Game<'_> {
                         pl.velocity = Vec3::ZERO;
                         pl.fall_distance = 0.0;
                         pl.teleported = true;
+                        pl.teleported_delta = [false; 3];
                     }
                     self.previous_position = to;
                     if damage > 0.0 {
