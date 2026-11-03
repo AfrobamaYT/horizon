@@ -121,14 +121,24 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                         events.push(MobEvent::BreakBlock {
                             pos: [x, y, z],
                             drop: true,
+                            by: Some(m.id),
                         });
                         destroyed = true;
                     }
                 }
             }
         }
-        if !destroyed && m.on_ground {
-            m.ai.jumping = true;
+        if m.on_ground {
+            if crate::native_client_hooks::has_mods() {
+                // The jump follows only when the game broke no leaves.
+                events.push(MobEvent::IfBroke {
+                    mob: m.id,
+                    effects: Vec::new(),
+                    otherwise: vec![MobEvent::Jump { mob: m.id }],
+                });
+            } else if !destroyed {
+                m.ai.jumping = true;
+            }
         }
     }
     // Entity.checkInsideBlocks -> CropBlock.entityInside: a ravager walking
@@ -154,6 +164,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                         events.push(MobEvent::BreakBlock {
                             pos: [x, y, z],
                             drop: true,
+                            by: None,
                         });
                     }
                 }

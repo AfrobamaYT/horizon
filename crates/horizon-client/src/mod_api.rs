@@ -63,6 +63,18 @@ use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
 
+/// One armor slot of an `ArmorHurtEvent`: the piece in `slot`, the durability
+/// damage vanilla works out for it (`damage`, `max(1, hit / 4)`) and the damage it
+/// takes (`new_damage`, starts equal; a mod may change it, below 1 for none; the
+/// game casts it to a whole number as vanilla does).
+#[derive(Clone, Debug)]
+pub struct NativeArmorHurt {
+    pub slot: EquipmentSlot,
+    pub stack: ItemStack,
+    pub damage: f32,
+    pub new_damage: f32,
+}
+
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 pub struct NativeCamera {
@@ -146,8 +158,9 @@ pub struct NativeLootDrops<'a> {
     /// sheep, a mooshroom, a snow golem or a bogged, a brush on an armadillo or
     /// a suspicious block, shears carving a pumpkin, picking sweet berries or
     /// cave vines, a hit taking an item frame or its item, or untying a lead
-    /// or cutting it with shears. `player` names them; `block` or `entity` says
-    /// what dropped them. API 100. A mob that a player killed while
+    /// or cutting it with shears. `player` names them, or is `None` when a
+    /// dispenser's shears sheared a mooshroom; `block` or `entity` says what
+    /// dropped them. API 100. A mob that a player killed while
     /// leashed drops its lead on its next tick as a call of its own (`entity`
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.
@@ -783,6 +796,39 @@ pub enum NativeChatVisibility {
     Full,
     System,
     Hidden,
+}
+
+/// `PermissionLevel`: how much a player may do, as `op-permission-level` and
+/// the operator list name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativePermissionLevel {
+    /// 0: every player.
+    All,
+    /// 1: moderators.
+    Moderators,
+    /// 2: game masters.
+    Gamemasters,
+    /// 3: admins.
+    Admins,
+    /// 4: owners.
+    Owners,
+}
+
+impl NativePermissionLevel {
+    /// The level a list entry's number names; out of range keeps to 0 or 4.
+    pub fn from_level(level: i32) -> Self {
+        match level {
+            i32::MIN..=0 => Self::All,
+            1 => Self::Moderators,
+            2 => Self::Gamemasters,
+            3 => Self::Admins,
+            _ => Self::Owners,
+        }
+    }
+    /// The level as the list stores it, 0 to 4.
+    pub fn level(self) -> u8 {
+        self as u8
+    }
 }
 
 /// `HumanoidArm`: a player's main hand.
@@ -1629,6 +1675,48 @@ mod tests {
                 Flow::Continue
             }
         }
+    }
+
+    #[test]
+    fn conversion_post_reports_both_entities_once() {
+        struct Observer(Arc<Mutex<Vec<(u32, String, u32, String)>>>);
+        impl Hooks for Observer {
+            fn living_conversion_post(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut LivingConversionPostEvent<'_>,
+            ) {
+                self.0.lock().unwrap().push((
+                    event.entity,
+                    event.kind.to_owned(),
+                    event.converted,
+                    event.converted_kind.to_owned(),
+                ));
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        dispatch_living_conversion_post(
+            &mut host,
+            &mods,
+            12,
+            "minecraft:pig",
+            13,
+            "minecraft:zombified_piglin",
+        );
+        assert_eq!(
+            *observed.lock().unwrap(),
+            [(
+                12,
+                "minecraft:pig".into(),
+                13,
+                "minecraft:zombified_piglin".into()
+            )]
+        );
     }
 
     #[test]
