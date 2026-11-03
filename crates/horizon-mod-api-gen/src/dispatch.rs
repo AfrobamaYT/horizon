@@ -196,12 +196,7 @@ pub(super) fn emit(
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
         let event = fresh_name("event", &mut used);
-        let event_type = format!(
-            "{}Event",
-            name.split('_')
-                .map(|word| word[..1].to_uppercase() + &word[1..])
-                .collect::<String>()
-        );
+        let event_type = format!("{}Event", hook_id(name));
         let hook_id = event_type.strip_suffix("Event").unwrap();
         if is_render {
             render_hook_ids.push_str(&format!("{hook_id},\n"));

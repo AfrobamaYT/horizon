@@ -609,6 +609,42 @@ impl std::ops::Deref for CatalogHook {
     }
 }
 
+fn hook_id(name: &str) -> String {
+    name.split('_')
+        .map(|word| word[..1].to_uppercase() + &word[1..])
+        .collect()
+}
+
+/// One generated hook name and its variant in the gameplay or render trait.
+pub struct HookName {
+    /// Method on the hook trait.
+    pub method: String,
+    /// Corresponding hook-id variant.
+    pub variant: String,
+    /// Whether this hook belongs to the render trait.
+    pub render: bool,
+}
+
+/// Read the catalog's names using the same mapping as dispatch generation.
+pub fn hook_names(root: &Path) -> Result<Vec<HookName>, String> {
+    let catalog: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    catalog_hooks(root, &catalog)?
+        .into_iter()
+        .map(|hook| {
+            let name = hook["name"].as_str().ok_or("hook name missing")?;
+            let target = hook["target"].as_str().ok_or("target missing")?;
+            Ok(HookName {
+                method: name.to_owned(),
+                variant: hook_id(name),
+                render: target.starts_with("horizon_client_render::"),
+            })
+        })
+        .collect()
+}
+
 fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
     let mut hooks = catalog["hooks"]
         .as_array()
