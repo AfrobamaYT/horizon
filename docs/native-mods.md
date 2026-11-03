@@ -2440,6 +2440,12 @@ a dimension.
   `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
   place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
   client only.
+- `player.stop_sound(host, sound, source)` sends `StopSoundCommand`'s packet to that player (`None` for any sound or
+  source), `player.play_sound(host, sound, source, volume, pitch)` plays a sound for them only at their position, and
+  `entity.play_bound_sound(host, sound, source, volume, pitch)` plays one that follows the entity for the players in
+  range, as `Level.playSound(null, entity, ...)` does. `/stopsound` and `/playsound` send through the same code. They
+  return false for a stale handle or a player who isn't online. Looping, fading and a handle to a playing sound need
+  client handles.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2456,8 +2462,7 @@ a dimension.
 
 `level.set_block(host, pos, state, flags)` and `level.destroy_block(host, pos, drop)` change the level in place. Both return false for a stale handle, client, parked level, unloaded chunk or out-of-height position; parked writes wait for a safe level swap. `NativeBlockUpdateFlags` combines supported vanilla update flags with `|`. Skipping block-entity side effects suppresses container-content drops when replacing a chest; without it, the contents spill. Horizon sends all block changes to clients regardless of client-update flags.
 
-Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
-(`entity`, `level`, `block_entity`) also becomes a method of that handle.
+A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 
 ### Mobs drawn by a mod
 
@@ -3251,6 +3256,33 @@ abort does not undo them. This differs from writes through journaled capability 
 `ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
 `Capabilities.Item.ENTITY`), read and written like any other place.
 Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
+
+#### A mod's own capability
+
+A mod can define a capability of its own, as Mekanism defines chemicals: a resource type and a key, published from
+its `[api]` package ([Dependencies between trait mods](#dependencies-between-trait-mods)) for other mods to use.
+
+```rust
+// chem-api's [api] package
+#[derive(Clone, PartialEq)]
+pub struct Chemical(pub String);
+pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> = CapabilityKey::new("chem_api:chemical");
+```
+
+A mod that names it under `[dependencies]` builds against the same `Chemical` and `CHEMICALS`, so its providers,
+`r.block_entity_capability(&chem_api::CHEMICALS, "chem_pipe:vat", …)`, answer the same capability, and
+`level.capability(host, &chem_api::CHEMICALS, pos, side)` finds either mod's handler. `move_resources` moves a
+chemical as it moves items, in the caller's transaction. The game has no answer of its own for a mod's key, so only
+the mods' providers do, and a lookup with none registered costs one table check. A handler that keeps its amount in
+its block entity's saved data (`BlockEntityRef::merge_data`) is covered by the game's journal, so an aborted
+transaction puts it back. `ItemCapabilityKey::new` and `EntityCapabilityKey::new` define item and entity
+capabilities the same way.
+
+A key is known by its name, which must be namespaced (`chem_api:chemical`), and a name has one handler type. Two
+mods that each declare their own `Chemical` under one name, rather than sharing the defining mod's, would never see
+each other's handlers. So the game refuses that at startup, naming both mods and both types, as NeoForge's
+`CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
+namespace. Both checks run once, when the mods register.
 
 ### Testing a trait mod
 

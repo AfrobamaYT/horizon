@@ -11,8 +11,8 @@
     }
   ],
   "helpers": [
-    {"name": "item_container_slots", "side": "both", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_slots", "mod_api": {}},
-    {"name": "item_container_insert", "side": "both", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_insert", "mod_api": {}},
-    {"name": "item_container_extract", "side": "both", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_extract", "mod_api": {}}
+    {"name": "item_container_slots", "backend": true, "side": "both", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_slots", "mod_api": {}},
+    {"name": "item_container_insert", "backend": true, "side": "both", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_insert", "mod_api": {}},
+    {"name": "item_container_extract", "backend": true, "side": "both", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_extract", "mod_api": {}}
   ]
 }

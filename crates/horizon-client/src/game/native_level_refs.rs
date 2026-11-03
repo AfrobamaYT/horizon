@@ -92,7 +92,8 @@ impl Game<'_> {
     }
     /// Whether `pos` is inside the world's height and its chunk is loaded
     /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
-    /// read or write there finds the world.
+    /// read or write there finds the world. False on a client or for a stale
+    /// handle: the position is not loaded here.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_world(level).is_some_and(|w| {
             w.shape.contains_y(pos[1]) && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
