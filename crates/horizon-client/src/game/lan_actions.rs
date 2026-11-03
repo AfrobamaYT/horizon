@@ -359,11 +359,11 @@ impl Game<'_> {
     pub(super) fn enter_guest(&mut self, conn: u32) -> Option<GuestSwap> {
         let host = self.lan.as_mut()?;
         // An active guest's record holds an outer player's state, not theirs.
-        if self.lan_guest_turns.contains(&conn) {
+        if self.lan_guest_swaps.contains(&conn) {
             return None;
         }
         let i = host.hub.guests.iter().position(|g| g.conn == conn)?;
-        self.lan_guest_turns.push(conn);
+        self.lan_guest_swaps.push(conn);
         // `ServerPlayer.permissions()`: the guest's own command level for its
         // turn, so game-master checks see it (not the host's).
         let permission = std::mem::replace(
@@ -576,7 +576,6 @@ impl Game<'_> {
         let death_cause = std::mem::replace(&mut self.ui.death_cause, play.death_cause.take());
         let [x, y, z] = g.known_movement;
         let known_movement = std::mem::replace(&mut self.known_movement, Vec3::new(x, y, z));
-        self.lan_guest_swaps.push(conn);
         let acting = (
             self.lan_acting.replace(conn),
             self.lan_acting_name.replace(g.name.clone()),
@@ -886,8 +885,6 @@ impl Game<'_> {
                 );
             }
         }
-        debug_assert_eq!(self.lan_guest_swaps.last(), Some(&conn));
-        self.lan_guest_swaps.pop();
         (
             self.lan_acting,
             self.lan_acting_name,
@@ -1116,6 +1113,8 @@ impl Game<'_> {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
         host.play.insert(conn, play);
+        let finished = self.lan_guest_swaps.pop();
+        debug_assert_eq!(finished, Some(conn));
         for event in turn_events {
             match event {
                 MotionEvent::Health(horizon_client::health::HealthEvent::DamageBroadcast {
@@ -1156,8 +1155,6 @@ impl Game<'_> {
         }
         // The turn's teleports are in the hub now: the mods hear them.
         self.flush_teleport_notes();
-        let finished = self.lan_guest_turns.pop();
-        debug_assert_eq!(finished, Some(conn));
     }
 
     /// `ServerLevel.broadcastDamageEvent` for a guest that took an unblocked hit.

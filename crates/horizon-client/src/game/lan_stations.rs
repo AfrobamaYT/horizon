@@ -6,7 +6,6 @@
 //! the inventory when the menu closes (`AbstractContainerMenu.clearContainer`).
 use super::{
     Game,
-    lan::LanHost,
     lan_crafting::input,
     stations::{Kind as StationKind, Station},
 };

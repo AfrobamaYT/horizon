@@ -9280,10 +9280,7 @@ impl Game<'_> {
             self.native_player_logged_out(player, &name);
         }
         // No tick follows to send what they said.
-        if let Some(mut host) = self.lan.take() {
-            self.flush_native_net(&mut host);
-            self.lan = Some(host);
-        }
+        self.flush_native_net();
     }
     /// The mobs from index `from` on are new in the world.
     pub(super) fn native_mobs_joined(&mut self, from: usize, natural: bool) {

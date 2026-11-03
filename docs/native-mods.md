@@ -2211,9 +2211,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   points)`, points given to any player as touching an orb gives them: Mending repairs their damaged items first, the
   rest goes to their experience, with the level-up sound; and `native_give_levels(uuid, levels)`, levels added or,
   negative, taken off (`Player.giveExperienceLevels`, as the anvil and the enchanting table charge; below 0 the level
-  and points are 0; no level-up sound). Both return false for a player not here, dead, or swapped out by another
-  player's hook, and where the server's player list is busy (some world ticks hold it): give first, and cancel the orb
-  only when the give returned true. A merged orb is worth `value` × `count`.
+  and points are 0; no level-up sound). Both return false for a player not here or dead. A hook can address another
+  guest, but cannot re-enter a guest already active in an outer nested turn (A → B → A); that call returns false without
+  changing either player. Give first, and cancel the orb only when the give returned true. A merged orb is worth
+  `value` × `count`.
 - **`native_player_totem(player, name)`**: a totem of undying saved a player whose hurt would have killed them, on a server
   (`checkTotemDeathProtection`), heard just before it is used up. Listen only: the health state machine decides before a
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `native_acting_player`, `native_tell` and the
