@@ -1520,7 +1520,7 @@ mod tests {
         std::fs::write(&catalog_path, original_catalog).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
-        let call = "mod_api::dispatch_item_damaged(self, mod_api::mods(), player, name, item, amount, cancel);";
+        let call = "mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
         let unfinished = shipped.replace(call, "let _ = (player, name, item, amount);");
         std::fs::write(&hooks, &unfinished).unwrap();

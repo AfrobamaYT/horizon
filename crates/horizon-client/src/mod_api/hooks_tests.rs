@@ -16,13 +16,7 @@ fn movement_input_writes_back_all_fields() {
     let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Movement)];
     install(mods.into());
     let (mut forward, mut strafe, mut jump, mut sneak) = (1.0, 0.0, false, false);
-    dispatch_movement_input(
-        &TestHost,
-        &mut forward,
-        &mut strafe,
-        &mut jump,
-        &mut sneak,
-    );
+    dispatch_movement_input(&TestHost, &mut forward, &mut strafe, &mut jump, &mut sneak);
     assert_eq!((forward, strafe, jump, sneak), (-0.5, 0.25, true, true));
 }
 
