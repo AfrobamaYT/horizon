@@ -2254,8 +2254,13 @@ impl Game<'_> {
         let range = distance.max(2) + 3;
         (x - center.0).abs() <= range && (z - center.1).abs() <= range
     }
-    /// The columns a moved or resized storage no longer holds.
-    fn drop_remote_chunks_out_of_range(&mut self, center: (i32, i32), distance: i32) {
+    /// The columns a moved or resized storage no longer holds. Returns the
+    /// positions it freed (`forget_remote_columns`).
+    fn drop_remote_chunks_out_of_range(
+        &mut self,
+        center: (i32, i32),
+        distance: i32,
+    ) -> Vec<(i32, i32)> {
         let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
             .world
             .chunks
@@ -2263,23 +2268,37 @@ impl Game<'_> {
             .copied()
             .filter(|&(x, z)| !Self::chunk_inside_remote_range(center, distance, x, z))
             .collect();
-        self.forget_remote_columns(&mut gone, true);
+        self.forget_remote_columns(&mut gone, true)
     }
-    fn forget_all_remote_columns(&mut self) {
+    /// Every column goes with the client level. Returns the positions it
+    /// freed (`forget_remote_columns`).
+    fn forget_all_remote_columns(&mut self) -> Vec<(i32, i32)> {
         let mut gone = self.world.chunks.keys().copied().collect();
-        self.forget_remote_columns(&mut gone, false);
+        self.forget_remote_columns(&mut gone, false)
     }
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
     /// entities, each store once for all of them. When the level stays open,
-    /// far terrain keeps their last state (`server_terrain`).
+    /// far terrain keeps their last state (`server_terrain`). Returns the
+    /// positions it freed, in `gone`'s order: only those still resident,
+    /// so a later forget of the same positions frees nothing.
     fn forget_remote_columns(
         &mut self,
         gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
         keep_terrain: bool,
-    ) {
+    ) -> Vec<(i32, i32)> {
         if gone.is_empty() {
-            return;
+            return Vec::new();
+        }
+        // The client chunk seam: one unload per column still resident, with
+        // its data still there, before `take_remote_columns` frees it.
+        let freed_at: Vec<(i32, i32)> = gone
+            .iter()
+            .filter(|&&(x, z)| self.world.chunks.contains_key(&(x, z)))
+            .copied()
+            .collect();
+        for &(x, z) in &freed_at {
+            self.client_chunk_unload(x, z);
         }
         let freed =
             horizon_client::streaming::Streaming::take_remote_columns(&mut self.world, gone);
@@ -2304,6 +2323,7 @@ impl Game<'_> {
             });
         }
         gone.clear();
+        freed_at
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
     /// packet's type, loads the tag (`loadWithComponents`); an empty tag
@@ -10754,6 +10774,68 @@ mod tests {
             game.forget_all_remote_columns();
             assert!(game.world.chunks.is_empty());
             assert!(game.world.block_entities.is_empty());
+        });
+    }
+
+    /// The client chunk seam (game/remote_chunks.rs) across every free
+    /// route, as the freed set each route returns: a forget packet, the
+    /// eager centre-move drop (a cache-centre packet), the radius-shrink
+    /// drop (a cache-radius packet) and the client level going. One freed
+    /// entry per column, in the order the routes free them, and a repeat
+    /// forget for an already-freed column frees nothing: adopting a column
+    /// is a chunk packet's doing (`remote_chunk`), not the streaming
+    /// level's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn every_free_route_returns_the_columns_it_freed_once() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+
+        with_game(|game| {
+            for x in [0, 1] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+            }
+            // A forget packet frees its column once; the same forget again,
+            // for a column already freed, frees nothing.
+            let mut gone = [(0, 0)].into_iter().collect();
+            assert_eq!(game.forget_remote_columns(&mut gone, true), [(0, 0)]);
+            let mut gone = [(0, 0)].into_iter().collect();
+            assert!(game.forget_remote_columns(&mut gone, true).is_empty());
+            for x in [7, 13] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+            }
+            // The centre move to (15, 0) at radius 10 frees (1, 0) only.
+            assert_eq!(game.drop_remote_chunks_out_of_range((15, 0), 10), [(1, 0)]);
+            // Shrinking the radius to 2 frees (7, 0) only.
+            assert_eq!(game.drop_remote_chunks_out_of_range((15, 0), 2), [(7, 0)]);
+            // The client level going frees what is left.
+            assert_eq!(game.forget_all_remote_columns(), [(13, 0)]);
+            assert!(game.world.chunks.is_empty());
+            assert!(game.world.block_entities.is_empty());
+        });
+    }
+
+    /// The seam sits at the packet level: streaming adopting, replacing or
+    /// re-sending a column keeps it resident — a re-sent position loads
+    /// again (`remote_chunk`), never an unload and a load — so a forget
+    /// returns exactly it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn streaming_adoption_and_resend_stay_resident_until_the_forget() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+
+        with_game(|game| {
+            game.streaming
+                .insert_remote(&mut game.world, Chunk::empty(0, 0));
+            // A re-send of a resident, lit column takes replace_remote.
+            game.streaming
+                .replace_remote(&mut game.world, Chunk::empty(0, 0));
+            assert!(game.world.chunks.contains_key(&(0, 0)));
+            let mut gone = [(0, 0)].into_iter().collect();
+            assert_eq!(game.forget_remote_columns(&mut gone, true), [(0, 0)]);
         });
     }
 

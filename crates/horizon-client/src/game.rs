@@ -327,6 +327,7 @@ mod sculk;
 mod sculk_fixture;
 mod server_links;
 mod server_packs;
+mod server_reload;
 mod server_travel;
 mod shader_packs;
 mod shelf;
@@ -3131,6 +3132,8 @@ struct Game<'a> {
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
     remote: Option<remote::Remote>,
+    /// The client chunk seam's listener (game/remote_chunks.rs): `None`
+    /// until the client side of `chunk_load`/`chunk_unload` is wired.
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
@@ -12426,8 +12429,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        self.fns = Default::default();
-        let stack = self.reload_datapacks(false, &level.enabled_features);
+        let stack = self.reload_datapacks(false, &level.enabled_features)?;
         self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
