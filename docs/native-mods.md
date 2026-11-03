@@ -680,19 +680,10 @@ API 53 adds `native_entity_leave_level(dimension, entity, kind)`, an entity leav
 `EntityLeaveLevelEvent`, vanilla's `onTrackingEnd`): removed for any reason or its chunk unloading, not the entities
 still loaded when the server stops. It only hears. It tells item entities, experience orbs and mobs (`kind` is the mob type) so far; check `kind`.
 
-API 54 adds fluid tanks on a mod block's block entity, and the fluid helpers that read and change them, in millibuckets (a
-bucket is a thousand). `native_block_entity_fluids` declares the tanks, as `native_block_entity_container` declares the slots: each tank's capacity, the
+API 54 adds fluid tanks on a mod block's block entity, in millibuckets (a bucket is a thousand). `native_block_entity_fluids` declares the tanks, as `native_block_entity_container` declares the slots: each tank's capacity, the
 tanks each face reaches, and which a fill may reach and a drain may take; the tanks' contents live in the entity's saved compound under
-`fluids`, so they survive restarts, and the block's own tick reads them there. `native_fluid_tanks` reads them through a side, `native_fluid_insert`
-fills (first into tanks holding the same fluid, then into empty ones) and answers what did not fit, `native_fluid_extract` drains and answers what it
-took; both also work a cauldron, which gives and takes whole thirds of a bucket and never more than was asked (less than its top third gives nothing), a lava one only whole, and powder snow none, as it is no fluid. Water and lava
-(`minecraft:water`, `minecraft:lava`) are the fluids; a tank holds one at a time.
-
-API 55 adds moving a block's fluids to another block. `native_move_fluids(dimension, from, from_face, to, to_face, max)`
-moves up to `max` millibuckets between two blocks, one fluid, and what the target won't take goes back into the
-source, past the fill sides' leave: the source's tanks just gave the fluid up, so they have the room, and a
-cauldron levels back up by the thirds it gave, which a drain hands out whole. None where `native_fluid_tanks`
-is none at the source, where nothing drainable is, where the target holds no fluids, and within one block.
+`fluids`, so they survive restarts, and the block's own tick reads them there. Other blocks and mods reach them, and a
+cauldron's, through the [`FLUIDS` capability](#a-blocks-fluids).
 
 API 56 adds what the mob effects of a content mod ([mods.md](mods.md)) do, named after vanilla's `MobEffect` methods,
 or NeoForge's event where it has one. On the server, each tick a player or a mob has one,
@@ -3115,6 +3106,8 @@ host.transaction(|host, tx| {
 })
 ```
 
+#### A block's fluids
+
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
 fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
@@ -3128,8 +3121,6 @@ one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFlui
 nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
 whole, then the source really gives with that request and the target is filled with exactly what came out. A
 handler whose real calls answer as its simulations never loses fluid and is never warned.
-`native_fluid_insert`, `native_fluid_extract`, `native_fluid_tanks` and `native_move_fluids` use a mod's handler
-where one is registered; they name a fluid by its id, so they leave fluids with components alone.
 
 A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
 mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
@@ -3309,7 +3300,7 @@ The following documented `Game` helpers are not in the trait yet:
   `set_display`, `sidebar`, `experience_orbs`,
   `item_entities`, `player`, `panel_recipes`, `recipes`, `component`,
   `set_component`, `remove_component`, `spawn_falling_block`, `explode`,
-  `fluid_tanks` and `container_slots` use gameplay-private types.
+  `container_slots` uses gameplay-private types.
 - `with_mod_block_entity` and `trigger_criterion` are generic or take
   `impl Trait`, so their signatures cannot be called through `dyn Host`.
 
