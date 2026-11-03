@@ -135,8 +135,8 @@ impl Game<'_> {
     /// what it can't put back.
     pub(super) fn native_drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
         if self.places_simulated() && stack.count > 0 {
-            // `Block.popResource`'s default pickup delay.
-            self.spawn_item(stack, pos.map(|p| f64::from(p) + 0.5), [0.0; 3], 10);
+            // `Block.popResource`'s default pickup delay, at the root commit.
+            self.after_commit(super::transactions::After::Drop(pos, stack));
         }
     }
 }

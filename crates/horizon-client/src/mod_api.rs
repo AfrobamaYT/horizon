@@ -6,6 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
+pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
@@ -23,7 +24,8 @@ pub use crate::game::{
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
-    RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
+    BlockSpriteArrays, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent,
+    wgpu,
 };
 pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
@@ -31,6 +33,7 @@ pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
 pub use crate::menu::StackedOnOther;
 pub use crate::merchant::MerchantOffer;
+pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
@@ -553,6 +556,57 @@ pub struct NativePlayerFood {
     pub exhaustion: f32,
 }
 
+/// Damage sources supported for a mod effect tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeEffectDamage {
+    /// Poison's magic damage.
+    Magic,
+    /// The Wither effect's damage.
+    Wither,
+}
+impl NativeEffectDamage {
+    pub(crate) fn mob_kind(self) -> crate::mobs::DamageKind {
+        match self {
+            Self::Magic => crate::mobs::DamageKind::Magic,
+            Self::Wither => crate::mobs::DamageKind::Wither,
+        }
+    }
+}
+
+/// A change requested by an effect tick, applied after its hooks return.
+#[doc(hidden)]
+pub enum EffectTickChange {
+    Heal(f32),
+    Hurt(NativeEffectDamage, f32),
+    AddExhaustion(f32),
+    Eat(i32, f32),
+}
+
+impl ApplyEffectTickEvent<'_> {
+    /// Queue `LivingEntity.heal` on the holder.
+    pub fn heal(&mut self, amount: f32) {
+        self.changes.push(EffectTickChange::Heal(amount));
+    }
+
+    /// Queue damage with a supported source.
+    pub fn hurt(&mut self, damage_type: NativeEffectDamage, amount: f32) {
+        self.changes
+            .push(EffectTickChange::Hurt(damage_type, amount));
+    }
+
+    /// Queue food exhaustion; a non-player holder ignores it.
+    pub fn add_exhaustion(&mut self, amount: f32) {
+        self.changes.push(EffectTickChange::AddExhaustion(amount));
+    }
+
+    /// Queue `FoodData.eat`; a non-player holder ignores it.
+    pub fn eat(&mut self, nutrition: i32, saturation_modifier: f32) {
+        self.changes
+            .push(EffectTickChange::Eat(nutrition, saturation_modifier));
+    }
+}
+
 /// A player's server-side abilities.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
@@ -763,6 +817,29 @@ pub enum Flow {
     Cancel,
 }
 
+/// Where a block use clicked, as vanilla's `BlockHitResult` says it. Fields
+/// may be added: build one with [`BlockHit::new`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct BlockHit {
+    /// The point clicked, in world coordinates (`getLocation`).
+    pub point: [f64; 3],
+    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`), the same
+    /// as the event's `face`.
+    pub face: [i32; 3],
+    /// The ray started inside the block's shape (`isInside`).
+    pub inside: bool,
+}
+impl BlockHit {
+    pub const fn new(point: [f64; 3], face: [i32; 3], inside: bool) -> Self {
+        Self {
+            point,
+            face,
+            inside,
+        }
+    }
+}
+
 mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
@@ -852,6 +929,7 @@ pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
+mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
@@ -1050,7 +1128,20 @@ mod tests {
                 lines: Vec::new(),
             };
             let mut claimed = false;
-            dispatch_use_item_on(&mut host, &mods, &stack, [1, 2, 3], [0, 1, 0], &mut claimed);
+            let (pos, face) = ([1, 2, 3], [0, 1, 0]);
+            let hit = top_hit();
+            dispatch_use_item_on(
+                &mut host,
+                &mods,
+                &stack,
+                pos,
+                face,
+                Hand::Main,
+                hit,
+                7,
+                41,
+                &mut claimed,
+            );
             assert_eq!(claimed, expected, "{block}");
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
@@ -1116,7 +1207,93 @@ mod tests {
             lines: Vec::new(),
         };
         let mut claimed = false;
-        dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+        let (pos, face) = ([0; 3], [0, 1, 0]);
+        dispatch_use_item_on(
+            &mut host,
+            &mods,
+            &stick(),
+            pos,
+            face,
+            Hand::Main,
+            top_hit(),
+            7,
+            41,
+            &mut claimed,
+        );
+    }
+
+    /// The top of the block at the origin, clicked in its middle.
+    fn top_hit() -> BlockHit {
+        BlockHit::new([0.5, 1.0, 0.5], [0, 1, 0], false)
+    }
+
+    /// Takes a click with the off hand on a block's top half.
+    struct OffHandTop;
+
+    impl Hooks for OffHandTop {
+        fn use_item_on(&self, _: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+            assert_eq!((event.player, event.player_entity_id), (7, 41));
+            assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
+            Flow::Continue
+        }
+
+        fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+            let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
+            if event.hand == Hand::Off
+                && top_half
+                && event.player == 7
+                && event.player_entity_id == 41
+                && !event.hit.inside
+            {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    #[test]
+    fn a_block_use_hears_the_hand_the_hit_and_the_player() {
+        mark_game_thread();
+        let mods = [Box::new(OffHandTop) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut claimed = false;
+        dispatch_use_item_on(
+            &mut host,
+            &mods,
+            &stick(),
+            [0; 3],
+            [0, 1, 0],
+            Hand::Off,
+            top_hit(),
+            7,
+            41,
+            &mut claimed,
+        );
+        assert!(!claimed);
+        let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
+        for (hand, hit, expected) in [
+            (Hand::Off, top_hit(), true),
+            (Hand::Main, top_hit(), false),
+            (Hand::Off, low, false),
+        ] {
+            let mut canceled = false;
+            dispatch_right_click_block(
+                &mut host,
+                &mods,
+                [0; 3],
+                hit.face,
+                hand,
+                hit,
+                7,
+                41,
+                &mut canceled,
+            );
+            assert_eq!(canceled, expected, "{hand:?} {hit:?}");
+        }
     }
 
     /// Cancels every brew and leaves its own slots; records what it saw.

@@ -110,12 +110,9 @@ impl Game<'_> {
             species,
             columns: mount_columns(m),
             saddle: m.saddle_item(),
-            armor: m
-                .extra
-                .body
-                .as_deref()
-                .filter(|_| show_armor)
-                .map(|i| ItemStack::new(i, 1)),
+            armor: show_armor
+                .then(|| m.equipment_stacks()[6].clone())
+                .flatten(),
             items,
             show_saddle: shows_saddle(species),
             show_armor,
@@ -251,8 +248,7 @@ impl Game<'_> {
     ) {
         let m = &self.mobs[index];
         let species = m.species();
-        let body =
-            shows_body(species).then(|| m.extra.body.as_deref().map(|i| ItemStack::new(i, 1)));
+        let body = shows_body(species).then(|| m.equipment_stacks()[6].clone());
         let mut items = m.extra.items.clone();
         items.resize(mount_columns(m) * 3, None);
         (m.saddle_item(), body, items)
@@ -291,7 +287,7 @@ impl Game<'_> {
         let m = &mut self.mobs[index];
         m.set_saddle(saddle);
         if let Some(body) = body {
-            m.extra.body = body.map(|a| a.item);
+            m.extra.set_body_stack(body);
         }
         let mut items = items;
         let keep = m.extra.items.len().max(CHEST_SIZE);

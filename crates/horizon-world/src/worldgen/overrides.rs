@@ -70,8 +70,8 @@ pub enum PackFile {
 }
 
 /// A level's build range (`LevelHeightAccessor`: `min_y`, `height`) and the
-/// rest of its dimension type the game reads: `logical_height` and
-/// `has_skylight`.
+/// rest of its dimension type the game reads: `logical_height`,
+/// `has_skylight` and `has_ceiling`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LevelHeight {
     pub min_y: i32,
@@ -84,6 +84,7 @@ impl LevelHeight {
     /// The vanilla dimension types'.
     pub fn vanilla(dimension_type: &str) -> Option<Self> {
         let (min_y, height, logical_height, has_skylight, has_ceiling) = match dimension_type {
+            // overworld_caves builds like the Overworld but has a ceiling.
             "minecraft:overworld" => (-64, 384, 384, true, false),
             "minecraft:overworld_caves" => (-64, 384, 384, true, true),
             "minecraft:the_nether" => (0, 256, 128, false, true),
@@ -116,6 +117,8 @@ impl LevelHeight {
             height,
             logical_height,
             has_skylight: v["has_skylight"].as_bool().unwrap_or(true),
+            // The codec requires has_ceiling; a type the packs leave it out
+            // of gets the open-sky default.
             has_ceiling: v["has_ceiling"].as_bool().unwrap_or(false),
         })
     }
@@ -420,13 +423,26 @@ mod tests {
         let mut o = WorldgenOverrides::default();
         let overworld = o.level_height("minecraft:overworld");
         assert_eq!(overworld, LevelHeight::vanilla("minecraft:overworld"));
-        assert!(
-            LevelHeight::vanilla("minecraft:overworld_caves")
-                .unwrap()
-                .has_ceiling
-        );
         let nether = o.level_height("minecraft:the_nether").unwrap();
-        assert_eq!((nether.logical_height, nether.has_skylight), (128, false));
+        assert_eq!(
+            (
+                nether.logical_height,
+                nether.has_skylight,
+                nether.has_ceiling
+            ),
+            (128, false, true)
+        );
+        // overworld_caves builds like the Overworld but has a ceiling.
+        let caves = LevelHeight::vanilla("minecraft:overworld_caves").unwrap();
+        assert_eq!(
+            (
+                caves.min_y,
+                caves.height,
+                caves.has_skylight,
+                caves.has_ceiling
+            ),
+            (-64, 384, true, true)
+        );
         o.set(
             DIMENSION_TYPES,
             "minecraft:overworld",
@@ -459,6 +475,15 @@ mod tests {
             o.set(DIMENSION_TYPES, "minecraft:overworld", bad.into());
             assert_eq!(o.level_height("minecraft:overworld"), None, "{bad}");
         }
+        // The codec requires has_ceiling: a type without it keeps the pack's
+        // fields and the open-sky default.
+        o.set(
+            DIMENSION_TYPES,
+            "minecraft:overworld",
+            r#"{"min_y":-64,"height":384,"logical_height":384,"has_skylight":true}"#.into(),
+        );
+        let open = o.level_height("minecraft:overworld").unwrap();
+        assert!((open.height, open.has_skylight, open.has_ceiling) == (384, true, false));
     }
 
     #[test]

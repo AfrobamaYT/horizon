@@ -1359,6 +1359,12 @@ impl Menu {
         self.containers[s.container][s.index].as_ref()
     }
 
+    /// Load an existing container slot without applying insertion limits.
+    pub fn load_slot(&mut self, i: usize, stack: Option<ItemStack>) {
+        let slot = self.slots[i];
+        self.containers[slot.container][slot.index] = stack;
+    }
+
     /// Sets a slot as a test fixture does (`Slot.set`).
     pub fn set_slot(&mut self, env: &Env, i: usize, stack: Option<ItemStack>) {
         if self.kind == Kind::Lectern {
