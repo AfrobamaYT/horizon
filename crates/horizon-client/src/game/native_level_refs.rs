@@ -49,7 +49,7 @@ impl Game<'_> {
     ) -> Option<horizon_world::registry::BlockStateId> {
         let world = self.native_level_world(level)?;
         let [x, y, z] = pos;
-        let inside = (world.bottom_y()..world.top_y()).contains(&y);
+        let inside = world.shape.contains_y(y);
         (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
     }
     /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
@@ -93,8 +93,7 @@ impl Game<'_> {
     /// read or write there finds the world. API @API:level_reads@.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_world(level).is_some_and(|w| {
-            (w.bottom_y()..w.top_y()).contains(&pos[1])
-                && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
+            w.shape.contains_y(pos[1]) && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
         })
     }
     /// The lowest block `y` and the height of the level

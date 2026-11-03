@@ -760,10 +760,8 @@ impl Game<'_> {
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }
-        // AdvancementRewards.grant
-        if a.rewards.experience > 0 {
-            self.give_experience_points(a.rewards.experience, false);
-        }
+        // AdvancementRewards.grant: giveExperiencePoints runs even for 0.
+        self.give_experience_points(a.rewards.experience);
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
         let rewards: Vec<String> = a
             .rewards
