@@ -6303,16 +6303,18 @@ impl Game<'_> {
         // but on a server a spectator's use on a block opens the block's
         // menu (ServerPlayerGameMode.useItemOn).
         if self.spectator() {
-            if matches!(self.guest_use, Some(GuestUse::OnBlock(_)))
+            if let Some(GuestUse::OnBlock(hand)) = self.guest_use
                 && let Some(hit) = self.pick()
             {
-                let held = self.held().cloned();
-                if matches!(
-                    self.right_click_block(&hit, self.hand, held.as_ref()),
-                    native_hooks::BlockClickAnswer::Go { .. }
-                ) {
-                    self.spectator_open_menu(hit.pos);
-                }
+                self.with_hand(hand, |game| {
+                    let held = game.held().cloned();
+                    if matches!(
+                        game.right_click_block(&hit, hand, held.as_ref()),
+                        native_hooks::BlockClickAnswer::Go { .. }
+                    ) {
+                        game.spectator_open_menu(hit.pos);
+                    }
+                });
             }
             return Ok(None);
         }
@@ -21963,6 +21965,69 @@ fn debug_crosshair_drawn(
 mod tests {
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn right_click_block_controls_cauldron_use() {
+        use horizon_client::mod_api::{
+            self, Flow, Hooks, Host, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        struct Observer(Arc<AtomicBool>);
+        impl Hooks for Observer {
+            fn right_click_block(
+                &self,
+                _: &mut dyn Host,
+                event: &mut RightClickBlockEvent<'_>,
+            ) -> Flow {
+                *event.use_block = if self.0.load(Ordering::SeqCst) {
+                    NativeTriState::True
+                } else {
+                    NativeTriState::False
+                };
+                *event.use_item = NativeTriState::False;
+                Flow::Continue
+            }
+        }
+        let allowed = Arc::new(AtomicBool::new(false));
+        let mods: mod_api::Mods =
+            Arc::from(vec![Box::new(Observer(allowed.clone())) as Box<dyn Hooks>]);
+        assert!(mod_api::MODS.set(mods).is_ok());
+        super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let empty = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cauldron")
+                .unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [0, 64, 0],
+                empty,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
+            let hit = Hit {
+                pos: [0, 64, 0],
+                face: [0, 1, 0],
+                point: [0.5, 65.0, 0.5],
+                inside: false,
+            };
+            game.use_hand(Some(&hit)).unwrap();
+            assert_eq!(game.world.block(0, 64, 0), empty);
+            allowed.store(true, Ordering::SeqCst);
+            game.use_hand(Some(&hit)).unwrap();
+            assert_ne!(game.world.block(0, 64, 0), empty);
+        });
+    }
 
     #[test]
     fn tool_transform_keeps_hoe_and_shovel_results_with_scrape_particle() {
