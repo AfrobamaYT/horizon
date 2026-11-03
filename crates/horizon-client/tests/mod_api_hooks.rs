@@ -5,7 +5,7 @@ use horizon_client::mod_api::{ClientHost, Hooks, InputKeyEvent, ModEntry, winit}
 struct Keys;
 
 impl Hooks for Keys {
-    fn input_key(&self, _host: &dyn ClientHost, event: &mut InputKeyEvent<'_>) {
+    fn input_key(&self, _host: &mut dyn ClientHost, event: &mut InputKeyEvent<'_>) {
         let _: &winit::event::KeyEvent = event.event;
     }
 }

@@ -1328,6 +1328,18 @@ mod tests {
             host_param(&read, Some(false), false),
             param("&dyn Host", "&*self")
         );
+        let client = super::CatalogHook {
+            entry: game.entry.clone(),
+            side: super::HelperSide::Client,
+        };
+        assert_eq!(
+            host_param(&client, Some(false), false),
+            param("&dyn ClientHost", "&*self")
+        );
+        assert_eq!(
+            host_param(&client, Some(true), false),
+            param("&mut dyn ClientHost", "self")
+        );
         let client_read = super::CatalogHook {
             entry: read.entry.clone(),
             side: super::HelperSide::Client,

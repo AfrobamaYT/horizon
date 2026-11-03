@@ -2051,6 +2051,17 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 
 /// The logical side on which a hook is executing.
 ///
+/// A mutable client hook can use client services:
+/// ```
+/// use horizon_client::mod_api::{ClientHost, Hooks, InputKeyEvent};
+/// struct ScreenMod;
+/// impl Hooks for ScreenMod {
+///     fn input_key(&self, host: &mut dyn ClientHost, _: &mut InputKeyEvent<'_>) {
+///         host.mod_screen_open("example");
+///     }
+/// }
+/// ```
+///
 /// A read-only hook receives only the base host, which cannot be used for a
 /// server or client operation, or opened as a backend by a mod:
 /// ```compile_fail

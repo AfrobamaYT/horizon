@@ -47,6 +47,7 @@ pub(super) fn host_param(
                     ("&dyn Host", "&*self")
                 }
                 HelperSide::Server => ("&mut dyn ServerHost", "self"),
+                HelperSide::Client if mutable => ("&mut dyn ClientHost", "self"),
                 HelperSide::Client => ("&dyn ClientHost", "&*self"),
                 HelperSide::Both => ("HostSide", "HostSide::of(self)"),
             };

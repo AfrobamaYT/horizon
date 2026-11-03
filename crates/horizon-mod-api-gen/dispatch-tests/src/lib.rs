@@ -472,7 +472,7 @@ mod tests {
         ) {
             *event.result = None;
         }
-        fn mouse_button_pre(&self, _: &dyn ClientHost, _: &mut MouseButtonPreEvent) -> Flow {
+        fn mouse_button_pre(&self, _: &mut dyn ClientHost, _: &mut MouseButtonPreEvent) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
