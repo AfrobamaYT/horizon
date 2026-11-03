@@ -959,6 +959,6 @@
   "Others look like plain players to you. Also in the game's Horizon settings.": "其他玩家在你看来就是普通玩家。游戏的 Horizon 设置里也有此选项。",
   "Show other players' auras and trails": "显示其他玩家的光环和拖尾",
   "Off by default. Also in the game's Horizon settings.": "默认关闭。游戏的 Horizon 设置里也有此选项。",
-  "This game source does not support named native mod entries. Update Horizon and rebuild the mods against this game.": "此游戏源码不支持具名的原生模组条目。请更新 Horizon 并针对该游戏重新构建模组。",
+  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "此游戏源码没有可读取的原生入口模板。请更新 Horizon 并针对该游戏重新构建模组。",
   "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "原生构建 {version} 的 native-mods.json 记录缺失或无效。请基于已安装的 Horizon 版本重新构建。"
 }

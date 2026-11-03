@@ -2849,6 +2849,11 @@ another mod's hook object is not exposed.
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
 
+The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
+The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
+construction, the allocator and the canonical game identity. Source without this template is refused
+before staging trait mods: update the game first.
+
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
 and in the server thread's log line, with the bundle's `[mod] id`. Each entry passed to
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
