@@ -156,15 +156,13 @@ impl Game<'_> {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
-        let Some(mut host) = self.lan.take() else { return; };
-        self.as_guest_messaged(&mut host, conn, |game| {
+        self.as_guest_messaged(conn, |game| {
             if allowed {
                 game.apply_cart_command(p.entity as u32, p.command, p.track_output);
             } else {
                 game.system_message(Text::translate("advMode.notAllowed", &[]));
             }
         });
-        self.lan = Some(host);
     }
     /// What `handleSetCommandMinecart` does once the player may edit: the
     /// command (which resets the success count), output tracking, the cleared

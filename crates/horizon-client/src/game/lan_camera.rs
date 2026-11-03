@@ -153,11 +153,9 @@ impl Game<'_> {
         {
             return;
         }
-        let Some(mut host) = self.lan.take() else { return; };
-        let in_range = self.as_guest(&mut host, conn, |g| {
+        let in_range = self.as_guest(conn, |g| {
             g.within_entity_interaction_range(&bounds, 3.0)
         });
-        self.lan = Some(host);
         if in_range != Some(true) {
             return;
         }

@@ -87,14 +87,14 @@ impl Game<'_> {
         items: Vec<Option<ItemStack>>,
     ) -> Option<i32> {
         let conn = self.native_conn(uuid)?;
-        let mut host = self.lan.take()?;
         // ServerPlayer.openMenu closes the menu that was open.
-        self.guest_close_all(&mut host, conn);
-        let window =
-            host.hub
-                .open_native_menu(conn, rows, component_nbt(&title.component()), items);
-        self.lan = Some(host);
-        window
+        self.guest_close_all(conn);
+        self.lan.as_mut()?.hub.open_native_menu(
+            conn,
+            rows,
+            component_nbt(&title.component()),
+            items,
+        )
     }
     /// Closes the player's native menu (a `native_menu_closed` follows).
     pub(super) fn native_close_menu(&mut self, uuid: u128) {
@@ -254,13 +254,12 @@ impl Game<'_> {
     /// the guest has no body to swap in.
     fn player_hook(&mut self, conn: u32, f: impl FnOnce(&mut Self)) {
         let mut f = Some(f);
-        if self.lan_acting != Some(conn) && let Some(mut host) = self.lan.take() {
-            self.as_guest(&mut host, conn, |g| {
+        if self.lan_acting != Some(conn) {
+            self.as_guest(conn, |g| {
                 if let Some(f) = f.take() {
                     f(g);
                 }
             });
-            self.lan = Some(host);
         }
         if let Some(f) = f {
             f(self);

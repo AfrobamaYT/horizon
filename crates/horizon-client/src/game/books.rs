@@ -3,7 +3,7 @@
 //! pixels, 1024 characters, 100 pages), signing it into a written book,
 //! reading written books, and lecterns (placing a book, turning its pages
 //! with a redstone pulse, the comparator output and taking the book).
-use super::{Game, lan::LanHost, screen_info};
+use super::{Game, screen_info};
 use horizon_client::{
     containers::{BlockEntity, Lectern},
     first_person::Hand,
@@ -356,10 +356,7 @@ impl Game<'_> {
         } else {
             36 + p.slot as usize
         };
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
-        let cancelled = self.as_guest(&mut host, conn, |g| {
+        let cancelled = self.as_guest(conn, |g| {
             let mut cancel = false;
             let writable = g
                 .stack_in(p.slot as usize)
@@ -381,7 +378,6 @@ impl Game<'_> {
             g.write_book(p.slot as usize, p.pages, p.title);
             false
         });
-        self.lan = Some(host);
         // A cancelled edit leaves the client's own copy of the book: forget
         // what was sent so the next broadcast resends the server's stack.
         if cancelled == Some(true)

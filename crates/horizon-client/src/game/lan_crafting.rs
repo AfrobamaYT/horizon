@@ -4,7 +4,7 @@
 //! guest's inventory, with vanilla's packets: OpenScreen, container clicks
 //! and their corrections, and the grid back into the inventory when the menu
 //! closes (`AbstractContainerMenu.clearContainer`).
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_client::{
     containers::BlockEntity,
     furnace::FurnaceCooking,
@@ -189,8 +189,7 @@ impl Game<'_> {
         let guest = &host.hub.guests[gi];
         let (conn, uuid, entity_id) = (guest.conn, guest.uuid, guest.entity_id);
         if !brewed.is_empty() || !brewed_potion_takes.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for stack in &brewed_potion_takes {
                     g.native_player_brewed_potion(uuid, entity_id, stack);
                 }
@@ -198,35 +197,28 @@ impl Game<'_> {
                     g.trigger_brewed_potion(stack);
                 }
             });
-            self.lan = Some(host);
         }
         if !crafted.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for (recipe, ingredients) in &crafted {
                     g.trigger_recipe_crafted(recipe, ingredients);
                 }
             });
-            self.lan = Some(host);
         }
         if !item_crafted.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 let player = g.native_acting_id();
                 for (recipe, stack) in &item_crafted {
                     g.native_item_crafted(player, recipe, stack);
                 }
             });
-            self.lan = Some(host);
         }
         if !equipped.is_empty() {
-            let mut host = self.lan.take()?;
-            self.as_guest(&mut host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for (slot, stack) in equipped {
                     g.player_equipped(slot, stack.as_ref());
                 }
             });
-            self.lan = Some(host);
         }
         self.drop_guest_items(gi, dropped);
         Some(result)
@@ -237,27 +229,23 @@ impl Game<'_> {
     /// `native_prepare_item_craft` as a click has it, kept by the guest and their menu. The
     /// client hears it with the tick's inventory sync.
     pub(super) fn guest_craft_result(&mut self, uuid: u128) {
-        let Some(mut host) = self.lan.take() else {
+        let Some(g) = self.lan.as_ref().and_then(|host| {
+            host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid)
+        }) else {
             return;
         };
-        if let Some(g) = host
-            .hub
-            .guests
-            .iter_mut()
-            .find(|g| g.placed && g.uuid == uuid)
+        let (conn, name) = (g.conn, g.name.clone());
+        let mut result = self.recipes().find(&g.craft_grid, 2).map(|(_, stack)| stack);
+        self.native_prepare_item_craft(uuid, &name, None, &mut result);
+        let env = self.menu_env();
+        if let Some(host) = self.lan.as_mut()
+            && let Some(g) = host.hub.guest_mut(conn)
         {
-            let mut result = self
-                .recipes()
-                .find(&g.craft_grid, 2)
-                .map(|(_, stack)| stack);
-            self.native_prepare_item_craft(uuid, &g.name, None, &mut result);
             g.craft_result.clone_from(&result);
-            let play = host.play.get_mut(&g.conn);
-            if let Some(menu) = play.and_then(|p| p.crafting.inventory.as_mut()) {
-                menu.set_slot(&self.menu_env(), 0, result);
+            if let Some(menu) = host.play.get_mut(&conn).and_then(|p| p.crafting.inventory.as_mut()) {
+                menu.set_slot(&env, 0, result);
             }
         }
-        self.lan = Some(host);
     }
 
     /// A click on the guest's inventory menu (window 0): `InventoryMenu`,
