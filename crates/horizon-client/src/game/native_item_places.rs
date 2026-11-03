@@ -82,6 +82,18 @@ impl Game<'_> {
     /// How many slots the inventory of entity `entity` in the level in place has, as
     /// `entity_slots` reaches them: none for an entity without one, and on a client.
     pub(super) fn native_entity_container_size(&self, entity: u32) -> Option<usize> {
+        self.native_entity_automation_size(entity).or_else(|| {
+            let m = self
+                .mobs
+                .iter()
+                .find(|m| m.id == entity && m.extra.chested)?;
+            Some(super::mount_menu::mount_columns(m) * 3)
+        })
+    }
+    /// How many slots the container entity `entity` of the level in place shows automation
+    /// (`EntitySelector.CONTAINER_ENTITY_SELECTOR`: chest and hopper minecarts, chest boats; a
+    /// chested mount is not one): none for any other entity, and on a client.
+    pub(super) fn native_entity_automation_size(&self, entity: u32) -> Option<usize> {
         if self.remote.is_some() {
             return None;
         }
@@ -89,14 +101,8 @@ impl Game<'_> {
             let container = matches!(c.kind, CartKind::Chest | CartKind::Hopper);
             return container.then_some(c.items.len());
         }
-        if let Some(b) = self.boats.iter().find(|b| b.id == entity) {
-            return b.chest.then_some(b.items.len());
-        }
-        let m = self
-            .mobs
-            .iter()
-            .find(|m| m.id == entity && m.extra.chested)?;
-        Some(super::mount_menu::mount_columns(m) * 3)
+        let b = self.boats.iter().find(|b| b.id == entity)?;
+        b.chest.then_some(b.items.len())
     }
     /// `EntityType.is(TagKey)`: whether `entity_type` (`minecraft:player`) is in the entity
     /// type tag `tag` (`minecraft:cannot_be_pushed_onto_boats`).
@@ -339,8 +345,9 @@ mod tests {
     use horizon_client::{
         items::ItemStack,
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-        mod_api::{ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef},
+        mod_api::{ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef},
     };
+    use horizon_core::geometry::Direction;
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
@@ -1248,6 +1255,256 @@ mod tests {
             let host: &mut dyn ServerHost = game;
             let plain = host.entity(501).unwrap();
             assert!(plain.capability(host, &ENTITY_ITEMS, ()).is_none());
+        });
+    }
+    /// A mod's `ENTITY_AUTOMATION` handler: one slot of up to 64 items, with the sides it was
+    /// asked for.
+    #[derive(Clone, Default)]
+    struct Bin {
+        held: Arc<std::sync::Mutex<Option<(String, u32)>>>,
+        sides: Arc<std::sync::Mutex<Vec<Option<Direction>>>>,
+    }
+
+    impl horizon_client::mod_api::ResourceHandler<ItemResource> for Bin {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
+            1
+        }
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
+            let held = self.held.lock().unwrap();
+            held.as_ref()
+                .map(|(item, _)| ItemResource::of(&ItemStack::new(item, 1)))
+        }
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
+            self.held.lock().unwrap().as_ref().map_or(0, |(_, n)| *n)
+        }
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
+            64
+        }
+        fn insert(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &horizon_client::mod_api::Transaction,
+            _: usize,
+            resource: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            let item = resource.to_stack(1).item.to_string();
+            let mut held = self.held.lock().unwrap();
+            match held.as_mut() {
+                Some((have, n)) if *have == item => {
+                    let went = amount.min(64 - *n);
+                    *n += went;
+                    went
+                }
+                Some(_) => 0,
+                None => {
+                    let went = amount.min(64);
+                    *held = Some((item, went));
+                    went
+                }
+            }
+        }
+        fn extract(
+            &self,
+            _: &mut dyn ServerHost,
+            _: &horizon_client::mod_api::Transaction,
+            _: usize,
+            resource: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            let item = resource.to_stack(1).item.to_string();
+            let mut held = self.held.lock().unwrap();
+            let Some((_, n)) = held.as_mut().filter(|(have, _)| *have == item) else {
+                return 0;
+            };
+            let came = amount.min(*n);
+            *n -= came;
+            if *n == 0 {
+                *held = None;
+            }
+            came
+        }
+    }
+
+    /// Runs `test` with a mod answering `ENTITY_AUTOMATION` for pigs with `bin`.
+    fn with_bin_pigs(bin: &Bin, test: impl FnOnce(&mut super::Game<'_>)) {
+        use horizon_client::mod_api::{self, Hooks, ModEntry, Mods, Registrar};
+        struct Pigs(Bin);
+        #[mod_api::__subscriptions]
+        impl Hooks for Pigs {
+            fn register(&self, r: &mut Registrar) {
+                let bin = self.0.clone();
+                r.entity_capability(&ENTITY_AUTOMATION, "minecraft:pig", move |_, _, side| {
+                    bin.sides.lock().unwrap().push(side);
+                    Some(Box::new(bin.clone()))
+                });
+            }
+        }
+        let mods: Mods = vec![ModEntry::new("pigs", Box::new(Pigs(bin.clone())))].into();
+        horizon_client::mod_api::install_parts(&mods).unwrap();
+        horizon_client::mod_api::testing::with_mods(mods, || with_game(test));
+    }
+
+    /// A hopper at (0, 64, 0) facing `facing` holding `stack`, in an otherwise empty world.
+    fn hopper_with(game: &mut super::Game<'_>, facing: &str, stack: Option<ItemStack>) {
+        use horizon_client::chunk::Chunk;
+        game.options.dedicated = Some(Vec::new());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        let base = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:hopper")
+            .unwrap();
+        let state = game.with_props(base, &[("facing", facing)]).unwrap();
+        game.world.set(0, 64, 0, state).unwrap();
+        let mut slots = vec![None; 5];
+        slots[0] = stack;
+        game.world
+            .block_entities
+            .insert((0, 64, 0), BlockEntity::Chest(slots));
+    }
+
+    fn pig(game: &mut super::Game<'_>, id: u32, y: f64) {
+        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            id,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, y, 0.5),
+            0.0,
+        ));
+    }
+
+    fn hopper_slot(game: &super::Game<'_>) -> Option<ItemStack> {
+        match game.world.block_entities.get(&(0, 64, 0)) {
+            Some(BlockEntity::Chest(slots)) => slots[0].clone(),
+            _ => panic!("the hopper is gone"),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hopper_pushes_into_a_mod_entity_below_it_through_the_side_it_faces() {
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
+            pig(game, 700, 63.0);
+            game.hopper_try_move_items((0, 64, 0));
+            assert_eq!(
+                *bin.held.lock().unwrap(),
+                Some(("minecraft:stick".into(), 1))
+            );
+            assert_eq!(
+                hopper_slot(game),
+                Some(ItemStack::new("minecraft:stick", 2))
+            );
+            // The hopper reaches the pig from above: its top.
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hopper_pulls_from_a_mod_entity_above_it_through_its_bottom() {
+        let bin = Bin::default();
+        *bin.held.lock().unwrap() = Some(("minecraft:stick".into(), 5));
+        with_bin_pigs(&bin, |game| {
+            hopper_with(game, "down", None);
+            pig(game, 700, 65.0);
+            game.hopper_try_move_items((0, 64, 0));
+            assert_eq!(
+                hopper_slot(game),
+                Some(ItemStack::new("minecraft:stick", 1))
+            );
+            assert_eq!(
+                *bin.held.lock().unwrap(),
+                Some(("minecraft:stick".into(), 4))
+            );
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Down)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_hopper_still_fills_a_chest_minecart_and_a_player_is_not_reached() {
+        use super::super::minecarts::{CartKind, Minecart};
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            open_to_lan(game);
+            hopper_with(game, "down", Some(ItemStack::new("minecraft:stick", 3)));
+            let position = horizon_core::geometry::Vec3::new(0.5, 63.0, 0.5);
+            game.carts
+                .push(Minecart::new(500, CartKind::Chest, position));
+            // A guest standing in the same cell, and no pig anywhere.
+            let mut player = guest(1);
+            player.position = [0.5, 63.0, 0.5];
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let host: &mut dyn ServerHost = game;
+            let player = host.entity(20).unwrap();
+            assert!(
+                player
+                    .capability(host, &ENTITY_AUTOMATION, Some(Direction::Up))
+                    .is_none()
+            );
+            game.hopper_try_move_items((0, 64, 0));
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:stick", 1))
+            );
+            assert_eq!(
+                hopper_slot(game),
+                Some(ItemStack::new("minecraft:stick", 2))
+            );
+            assert!(bin.held.lock().unwrap().is_none());
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_dropper_puts_into_a_mod_entity_in_front_of_it() {
+        use horizon_client::chunk::Chunk;
+        let bin = Bin::default();
+        with_bin_pigs(&bin, |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let base = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:dropper")
+                .unwrap();
+            let dropper = game.with_props(base, &[("facing", "down")]).unwrap();
+            game.world.set(0, 64, 0, dropper).unwrap();
+            let mut slots = vec![None; 9];
+            slots[4] = Some(ItemStack::new("minecraft:stick", 2));
+            game.world
+                .block_entities
+                .insert((0, 64, 0), BlockEntity::Chest(slots));
+            pig(game, 700, 63.0);
+            let dropped = game.dropped.len();
+            game.dispense_from(horizon_core::position::BlockPos::new(0, 64, 0), dropper)
+                .unwrap();
+            assert_eq!(
+                *bin.held.lock().unwrap(),
+                Some(("minecraft:stick".into(), 1))
+            );
+            assert_eq!(game.dropped.len(), dropped);
+            match game.world.block_entities.get(&(0, 64, 0)) {
+                Some(BlockEntity::Chest(slots)) => {
+                    assert_eq!(slots[4], Some(ItemStack::new("minecraft:stick", 1)));
+                }
+                _ => panic!("the dropper is gone"),
+            }
+            let sides = bin.sides.lock().unwrap();
+            assert!(!sides.is_empty());
+            assert!(sides.iter().all(|side| *side == Some(Direction::Up)));
         });
     }
 }

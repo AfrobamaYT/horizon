@@ -48,6 +48,23 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
         handler: PhantomData,
     };
 
+/// An entity's items as automation reaches them, as NeoForge 26.3's
+/// `Capabilities.Item.ENTITY_AUTOMATION`, asked for the side of the entity a hopper reaches it
+/// from. The game answers it for a chest or hopper minecart and a chest boat, the container
+/// entities `EntitySelector.CONTAINER_ENTITY_SELECTOR` picks, with the slots [`ENTITY_ITEMS`]
+/// gives them; a player and a chested mount are not reached by automation.
+pub const ENTITY_AUTOMATION: EntityCapabilityKey<
+    dyn ResourceHandler<ItemResource>,
+    Option<Direction>,
+> = EntityCapabilityKey {
+    name: "horizon:entity_automation",
+    default: Some(|host, entity, _| {
+        let size = backend_of(host)?.entity_automation_size(entity.id())?;
+        Some(Box::new(ContainerItems { entity, size }))
+    }),
+    handler: PhantomData,
+};
+
 /// An entity's energy, as NeoForge 26.3's `Capabilities.Energy.ENTITY`, asked for the side of
 /// the entity a lookup reaches it from, or none for no particular side. Vanilla has no entity
 /// that holds energy, so only mods answer it.
@@ -63,8 +80,8 @@ pub const ENTITY_FLUIDS: EntityCapabilityKey<
 
 impl EntityRef {
     /// `key`'s handler for this entity (`Entity.getCapability`), its providers given `context`
-    /// (`()` for [`ENTITY_ITEMS`], the side asked about for [`ENTITY_ENERGY`] and
-    /// [`ENTITY_FLUIDS`]): the first provider to answer, of those mods registered for its type
+    /// (`()` for [`ENTITY_ITEMS`], the side asked about for [`ENTITY_AUTOMATION`],
+    /// [`ENTITY_ENERGY`] and [`ENTITY_FLUIDS`]): the first provider to answer, of those mods registered for its type
     /// `before_game`, the game's own, and the mods' others, each in registration order. None for
     /// a stale handle and for an entity outside the level in place: no provider is asked for one.
     pub fn capability<T: ?Sized + 'static, C: Copy + 'static>(
