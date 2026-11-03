@@ -38,7 +38,9 @@ fn panel_receives_only_named_nonrepeat_presses() {
     assert_eq!(game.calls, ["key.keyboard.a"]);
 }
 """.replace("METHOD", actual)
-        with tempfile.TemporaryDirectory() as folder:
+        target = ROOT / "target"
+        target.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=target) as folder:
             src, exe = Path(folder) / "panel.rs", Path(folder) / "panel.exe"
             src.write_text(fixture, encoding="utf-8")
             subprocess.run(["rustc", "--edition=2024", "--test", str(src), "-o", str(exe)], check=True)
@@ -101,7 +103,9 @@ fn all_actions_consumption_and_window_gates() {
     assert!(game.observed.is_empty());
 }
 """.replace("METHOD", actual)
-        with tempfile.TemporaryDirectory() as folder:
+        target = ROOT / "target"
+        target.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=target) as folder:
             src, exe = Path(folder) / "key.rs", Path(folder) / "key.exe"
             src.write_text(fixture, encoding="utf-8")
             subprocess.run(["rustc", "--edition=2024", "--test", str(src), "-o", str(exe)], check=True)
