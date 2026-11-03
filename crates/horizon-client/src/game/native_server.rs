@@ -392,13 +392,8 @@ impl Game<'_> {
         {
             return None;
         }
-        if let Some(g) = host
-            .hub
-            .guests
-            .iter()
-            .find(|g| g.uuid == uuid && g.dimension == level.dimension())
-        {
-            return (g.name == name).then_some(PlayerRef {
+        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid) {
+            return (g.name == name && g.dimension == level.dimension()).then_some(PlayerRef {
                 entity: crate::mod_api::EntityRef::new(epoch, g.entity_id as u32),
                 uuid,
             });
