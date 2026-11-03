@@ -939,6 +939,32 @@ mod tests {
     }
 
     #[test]
+    fn player_turn_mods_receive_identity_and_chain_changes() {
+        struct Turn;
+        impl Hooks for Turn {
+            fn calculate_player_turn(
+                &self,
+                _host: &dyn Host,
+                event: &mut CalculatePlayerTurnEvent,
+            ) {
+                assert_eq!((event.player_entity_id, event.player_uuid), (42, 123));
+                event.mouse_sensitivity *= 2.0;
+                event.cinematic_camera_enabled = !event.cinematic_camera_enabled;
+            }
+        }
+        let host = Reader {
+            block: "",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Turn), Box::new(Turn)];
+        let mut sensitivity = 0.25;
+        let mut cinematic = false;
+        dispatch_calculate_player_turn(&host, &mods, 42, 123, &mut sensitivity, &mut cinematic);
+        assert_eq!(sensitivity, 1.0);
+        assert!(!cinematic);
+    }
+
+    #[test]
     fn a_test_host_implements_only_what_its_hook_calls() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
