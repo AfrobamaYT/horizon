@@ -1064,6 +1064,18 @@ pub(super) mod tests {
             let replacement = game.native_fake_player(level, 1234, "machine").unwrap();
             assert_ne!(made, replacement);
             let mut host = game.lan.take().unwrap();
+            let saved_root = game.world_root.clone();
+            let scratch = std::env::current_dir()
+                .unwrap()
+                .join("target/fake-player-save-test");
+            let _ = std::fs::remove_dir_all(&scratch);
+            game.world_root = scratch.clone();
+            let i = host.hub.guests.iter().position(|g| g.uuid == 1234).unwrap();
+            let mut actor = host.hub.guests.remove(i);
+            game.save_guest(&host, &mut actor);
+            host.hub.guests.insert(i, actor);
+            assert!(!scratch.exists());
+            game.world_root = saved_root;
             let conn = host
                 .hub
                 .guests
@@ -1078,6 +1090,19 @@ pub(super) mod tests {
             .unwrap();
             game.lan = Some(host);
             assert!(game.native_player_remove_fake(replacement));
+            let overworld_actor = game.native_fake_player(level, 2345, "parked").unwrap();
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            assert!(game.native_fake_player(level, 3456, "other").is_none());
+            assert!(game.native_fake_player(nether, 2345, "parked").is_none());
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            assert!(game.native_player_remove_fake(overworld_actor));
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
@@ -1305,7 +1330,28 @@ pub(super) mod tests {
                     address: ([127, 0, 0, 1], 1).into(),
                 })))
                 .unwrap();
-            game.tick_lan_packets();
+            struct Logout(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+            impl crate::mod_api::Hooks for Logout {
+                fn player_logged_out(
+                    &self,
+                    _: &mut dyn crate::mod_api::Host,
+                    _: &mut crate::mod_api::PlayerLoggedOutEvent<'_>,
+                ) {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            let logouts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+                "logout-test",
+                Box::new(Logout(logouts.clone())),
+            )]
+            .into();
+            crate::mod_api::testing::with_mods(mods, || {
+                game.native_player_logged_out(0, "control");
+                assert_eq!(logouts.swap(0, std::sync::atomic::Ordering::Relaxed), 1);
+                game.tick_lan_packets();
+                assert_eq!(logouts.load(std::sync::atomic::Ordering::Relaxed), 0);
+            });
             assert_eq!(game.native_player_is_fake(fake), None);
             let matching: Vec<_> = game
                 .lan
@@ -1318,6 +1364,14 @@ pub(super) mod tests {
                 .collect();
             assert_eq!(matching.len(), 1);
             assert!(matching[0].participates_online());
+            let old = game.native_fake_player(level, 6789, "reopen").unwrap();
+            game.native_lifecycle_world_closed();
+            game.native_lifecycle_open_started();
+            let reopened = game.native_level(game.dim.id()).unwrap();
+            assert_ne!(level.epoch(), reopened.epoch());
+            assert_eq!(game.native_player_is_fake(old), None);
+            let fresh = game.native_fake_player(reopened, 6789, "reopen").unwrap();
+            assert_ne!(fresh, old);
         });
     }
 
