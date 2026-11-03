@@ -888,8 +888,9 @@ use horizon_client::mod_api::{
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, BlockHit, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
-    NativeBlockRim, NativeColoredLight, NativeLootDrops, NativeMinimap, NativeMod,
-    NativePanelEvent, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
+    NativeMinimap, NativeMod, NativePanelEvent, NativeScreen, NativeScreenView, NativeStack,
+    NativeZoom,
 };
 use horizon_client::{
     atlas_sources::qualified,
@@ -5655,6 +5656,32 @@ impl Game<'_> {
         mod_api::dispatch_entity_tame(self, mod_api::mods(), entity, kind, owner);
     }
 
+    /// The player `tamer` (UUID) and `tamer_entity_id` is about to tame the
+    /// mob `entity` of `kind` (`AnimalTameEvent`): its taming roll succeeded
+    /// (a wolf's bone, a cat's fish, a parrot's seeds or a nautilus's food;
+    /// a horse, donkey, mule or llama the player rides). Set `cancel` for the
+    /// attempt to fail instead, as a failed roll does: smoke for a pet, and
+    /// a horse bucks its rider off. Before `entity_tame`. Server-side.
+    /// @API:animal_tame@.
+    pub(super) fn native_animal_tame(
+        &mut self,
+        tamer: u128,
+        tamer_entity_id: i32,
+        entity: u32,
+        kind: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_animal_tame(
+            self,
+            mod_api::mods(),
+            tamer,
+            tamer_entity_id,
+            entity,
+            kind,
+            cancel,
+        );
+    }
+
     /// Two mobs completed a breeding action. `child` is absent when vanilla
     /// lays an egg instead of creating a baby. 213.
     pub(super) fn native_entity_breed(&mut self, parent: u32, partner: u32, child: Option<u32>) {
@@ -5744,6 +5771,85 @@ impl Game<'_> {
         craft: &horizon_client::menu::AnvilCraft,
     ) {
         mod_api::dispatch_anvil_craft_post(self, mod_api::mods(), player, name, pos, craft);
+    }
+    /// An anvil at `pos` made vanilla's result with a left input, for
+    /// `player` (UUID) and `player_entity_id` (`AnvilUpdateEvent`, after
+    /// `AnvilMenu.createResult`), whenever an input or the name changed:
+    /// `update` holds the inputs (the right one may be empty, for a rename),
+    /// the rename text and vanilla's result, and its `output`, `xp_cost`
+    /// and `material_cost` start at vanilla's for the mods to change; set
+    /// `cancel` for no result. Before `prepare_anvil`. Both sides: the
+    /// server's menu, and a server's client menu with the local player.
+    /// @API:anvil_update@.
+    pub(super) fn native_anvil_update(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        update: &mut horizon_client::menu::AnvilUpdate,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_anvil_update(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            update,
+            cancel,
+        );
+    }
+    /// A grindstone at `pos` made its result after its inputs changed, for
+    /// the server player `player` (UUID) and `player_entity_id`
+    /// (`GrindstoneEvent.OnPlaceItem`, in `GrindstoneMenu.createResult`):
+    /// `place` holds the inputs and no output. Set its `output` to replace
+    /// vanilla's result, and with it `xp` (0 or more) for what taking it
+    /// gives; set `cancel` for no result. Before `prepare_grindstone`.
+    /// Server-side. @API:grindstone_place@.
+    pub(super) fn native_grindstone_place(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        place: &mut horizon_client::menu::GrindstonePlace,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_grindstone_place(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            place,
+            cancel,
+        );
+    }
+    /// The server player `player` (UUID) and `player_entity_id` took a
+    /// grindstone's result at `pos` (`GrindstoneEvent.OnTakeItem`, in its
+    /// result slot's `onTake`): `take` holds the inputs, the experience (-1
+    /// for vanilla's, or what `grindstone_place` set) and what the inputs
+    /// hold afterwards (empty). Set `xp` (0 or more) to give that much
+    /// experience, `new_top` and `new_bottom` to leave items in the inputs.
+    /// Set `cancel` to skip the rest of `onTake`: the result is still taken,
+    /// but no experience, no sound, and the inputs stay. Server-side.
+    /// @API:grindstone_take@.
+    pub(super) fn native_grindstone_take(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        pos: [i32; 3],
+        take: &mut horizon_client::menu::GrindstoneTake,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_grindstone_take(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            pos,
+            take,
+            cancel,
+        );
     }
     /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. 289.
     pub(super) fn native_prepare_grindstone(
@@ -6199,6 +6305,48 @@ impl Game<'_> {
     /// `item` is the projectile's held item. 346.
     pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
         mod_api::dispatch_player_launch_projectile(self, mod_api::mods(), player, name, item);
+    }
+    /// A server explosion is about to happen (`ExplosionEvent.Start`, in
+    /// `ServerLevel.explode` before `ServerExplosion.explode`): every one,
+    /// TNT, creepers, beds and anchors, fireballs, withers, end crystals and
+    /// wind bursts. Set `cancel` and nothing of it happens: no blocks, no
+    /// damage or knockback, no sound, particles or game event. Before
+    /// `explosion_prime`, which a cancel skips. Server-side.
+    /// @API:explosion_start@.
+    pub(super) fn native_explosion_start(
+        &mut self,
+        explosion: &NativeExplosionStart<'_>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_explosion_start(self, mod_api::mods(), explosion, cancel);
+    }
+    /// A server player `player` (UUID) and `player_entity_id` reeled in a
+    /// catch (`ItemFishedEvent`, in `FishingHook.retrieve` after the fishing
+    /// loot rolled): `fished` holds the bobber and the items, and
+    /// `rod_damage` the damage the rod takes (vanilla's 1, or 2 with the
+    /// bobber on the ground), which the mods may set (`damageRodBy`, not
+    /// negative). Set `cancel` and the player receives nothing: no items,
+    /// experience or statistic, and no `fishing_rod_hooked` trigger; the
+    /// bobber is gone and the rod
+    /// still takes `rod_damage`. After `player_fish`'s reel-in. Server-side.
+    /// @API:item_fished@.
+    pub(super) fn native_item_fished(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        fished: &NativeItemFished<'_>,
+        rod_damage: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_item_fished(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            fished,
+            rod_damage,
+            cancel,
+        );
     }
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
@@ -9388,6 +9536,34 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
 
 /// Where the game calls the hook points.
 impl Game<'_> {
+    /// `AnimalTameEvent` for the mob at `index`, whose taming roll by the
+    /// player `tamer` (`tamer_entity_id`) succeeded: true when a mod cancels
+    /// it, and the taming fails.
+    pub(super) fn animal_tame_cancelled(
+        &mut self,
+        index: usize,
+        tamer: u128,
+        tamer_entity_id: i32,
+    ) -> bool {
+        if mod_api::mods().is_empty() {
+            return false;
+        }
+        let m = &self.mobs[index];
+        let (entity, kind) = (m.id, mob_kind(m));
+        let mut cancel = false;
+        self.native_animal_tame(tamer, tamer_entity_id, entity, &kind, &mut cancel);
+        cancel
+    }
+    /// `entity_tame` for the pet at `index`, just tamed by its owner.
+    pub(super) fn pet_tamed(&mut self, index: usize) {
+        let m = &self.mobs[index];
+        let (entity, kind) = (m.id, mob_kind(m));
+        let owner = m
+            .extra
+            .owner
+            .map(horizon_client::lan::playerdata::ints_uuid);
+        self.native_entity_tame(entity, &kind, owner);
+    }
     /// The acting player as the hook points name one: the guest whose turn
     /// it is, else the host.
     pub(super) fn native_acting_id(&mut self) -> u128 {

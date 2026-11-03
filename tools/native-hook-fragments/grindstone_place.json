@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "grindstone_place",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_grindstone_place",
+      "neoforge": "GrindstoneEvent.OnPlaceItem",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a cancellable grindstone result question (`native_grindstone_place`).",
+  "doc_summary": "`native_grindstone_place(player, player_entity_id, pos, place, cancel)`, in `GrindstoneMenu.createResult` after the inputs change. `place` (`GrindstonePlace`) holds the inputs and no output: set `output` (and `xp`, 0 or more, for what taking it gives) to replace vanilla's result, or `cancel` for none. Before `prepare_grindstone`. Server-side. Bundles need \"hooks\": @API:grindstone_place@."
+}
