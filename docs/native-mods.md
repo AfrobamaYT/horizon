@@ -940,6 +940,74 @@ there is no per-particle code hook.
   foliage and water tints, asked for every biome when a mod calls `native_refresh_biome_colors()`, which rebuilds the
   loaded terrain with them.
 
+### Server data reload listeners
+
+Trait mods implement `Hooks::add_server_reload_listeners` (server only), the counterpart of
+NeoForge 26.3's `AddServerReloadListenersEvent`. Registration runs on world open, `/reload`
+and `/datapack` changes, after pack selection. Register an `Arc<impl ServerReloadListener>`
+with a unique listener ID and a directory prefix such as `my_mod:machines/`. The listener's
+`ServerReloadContext` lists resource IDs and reads their bytes, including a mod's packaged
+`data/my_mod/machines/` files and later selected datapack overrides. It cannot read assets,
+files outside the prefix, or filesystem paths. Prefixes must be nonempty namespaced directory
+paths ending in `/`, with no empty, `.` or `..` components. Other namespaces are allowed.
+
+The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
+`SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
+changing live state and returns `ServerReloadApply::new(move || { /* publish parsed state */ })`.
+All listeners prepare before **any** apply runs. Do not read another listener's new published
+state in prepare: dependencies order both phases but do not remove this barrier. Publication
+cannot fail. Any preparation, registration or ordering error drops all pending applies and
+keeps the old mod data and vanilla function library. The error names the owner mod, listener
+and, for file errors, resource ID; world open fails, and `/reload` reports the failure. A failed
+`/datapack` change also preserves the selected packs on disk.
+
+`event.listeners.add_dependency(first, second)` orders named listeners. Both names must
+already be registered; unknown names fail immediately, and cycles fail after registration.
+`VanillaServerListeners::FUNCTIONS` names Horizon's function-library listener; `FIRST` and
+`LAST` are ordering boundaries. Mod listeners run after vanilla by default, in registration
+order; an explicit dependency before `FUNCTIONS` works without a false cycle. Use these
+constants rather than depending on their string values. The read-only `get_registry`,
+`get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
+objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
+context or retained-listener lookup here.
+
+```rust,ignore
+use std::sync::{Arc, RwLock};
+use horizon_client::mod_api::{
+    AddServerReloadListenersEvent, Hooks, Identifier, ServerReloadApply,
+    ServerReloadContext, ServerReloadError, ServerReloadListener,
+};
+
+struct MachineData(Arc<RwLock<serde_json::Value>>);
+impl ServerReloadListener for MachineData {
+    fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
+        let id = Identifier::parse("my_mod:machines/press.json").unwrap();
+        let next = match context.read(&id) {
+            Some(bytes) => serde_json::from_slice(bytes)
+                .map_err(|error| ServerReloadError::new(id, error))?,
+            None => serde_json::Value::Null,
+        };
+        let live = self.0.clone();
+        Ok(ServerReloadApply::new(move || *live.write().unwrap() = next))
+    }
+}
+struct MyMod(Arc<MachineData>);
+impl Hooks for MyMod {
+    fn add_server_reload_listeners(&self, event: &mut AddServerReloadListenersEvent<'_>) {
+        event.listeners.add_listener(
+            Identifier::parse("my_mod:machines").unwrap(),
+            Identifier::parse("my_mod:machines/").unwrap(),
+            self.0.clone(),
+        ).unwrap();
+    }
+}
+```
+
+Reload work only: graph ordering, listing selected files, reading the winning bytes and one
+boxed apply closure per listener. No new work or filesystem reads run on the tick path.
+The existing post-success server-data notice below is a different moment, not a second
+reload registration path.
+
 - `native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it.
 
 - `native_compute_fov(partial, camera, degrees)` receives the computed world FOV after settings, ordinary FOV effects and zoom, before projection/Nausea. `camera` is its world position and `partial` the interpolation fraction. Mods can narrow or widen the angle; only finite values in 1..=179 degrees are accepted, otherwise the original computed angle is used. It runs for world rendering and near-plane overlays, not just once per frame. Hand/HUD FOV and the title panorama keep their existing paths.

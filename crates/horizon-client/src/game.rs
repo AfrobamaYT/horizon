@@ -134,6 +134,7 @@ mod foxes;
 mod frames;
 mod friends;
 mod functions;
+mod server_reload;
 mod game_mode;
 mod game_tests;
 mod gamemode_switcher;
@@ -12410,8 +12411,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        self.fns = Default::default();
-        let stack = self.reload_datapacks(false, &level.enabled_features);
+        let stack = self.reload_datapacks(false, &level.enabled_features)?;
         self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "add_server_reload_listeners",
+      "side": "server",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_add_server_reload_listeners",
+      "neoforge": "AddServerReloadListenersEvent",
+      "mod_api": {
+        "contract": "listen",
+        "owner": "listeners"
+      }
+    }
+  ]
+}

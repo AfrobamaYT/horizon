@@ -5,6 +5,15 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
+mod reload_order;
+pub(crate) mod server_reload;
+pub use horizon_world::identifier::Identifier;
+pub use reload_order::ReloadOrderError;
+pub use server_reload::{
+    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
+    ServerReloadListeners, VanillaServerListeners,
+};
+
 pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
@@ -1863,10 +1872,12 @@ fn entered_registration<'a>(mods: &'a [ModEntry], hook: &'static str) -> Entered
     }
 }
 
-fn entered(
-    hook_id: generated::HookId,
-    hook: &'static str,
-) -> impl Iterator<Item = &'static dyn Hooks> {
+struct EnteredMod {
+    id: &'static str,
+    hooks: &'static dyn Hooks,
+}
+
+fn entered(hook_id: generated::HookId, hook: &'static str) -> impl Iterator<Item = EnteredMod> {
     installed().into_iter().flat_map(move |installed| {
         let mut crash_guard = None;
         let mut subscriber_guard = None;
@@ -1886,7 +1897,10 @@ fn entered(
                     installed.types[index],
                 ));
                 crash_guard = Some(mark_mod(entry.id, hook));
-                hooks
+                EnteredMod {
+                    id: entry.id,
+                    hooks,
+                }
             })
     })
 }
