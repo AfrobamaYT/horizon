@@ -2,8 +2,14 @@
 //! player's slots, hands and cursor, and item entities. Mods read and write them through
 //! `place_stack` and `set_place_stack`, which come here for these places; a block entity's slots,
 //! a stack inside an item and a mod's own places go through their handlers.
+use super::transactions::After;
 use super::{Game, minecarts::CartKind, powder_snow::HeldSlot, shield::OFFHAND_SLOT};
-use horizon_client::{cauldron, first_person::Hand, items::ItemStack, mod_api::ItemPlace};
+use horizon_client::{
+    cauldron,
+    first_person::Hand,
+    items::ItemStack,
+    mod_api::{ItemPlace, Transaction},
+};
 
 /// The player a place belongs to, if a player's.
 fn place_player(place: &ItemPlace) -> Option<u128> {
@@ -98,15 +104,17 @@ impl Game<'_> {
     /// there: from a player's hand it goes as `ItemUtils.createFilledResult` puts a filled
     /// bucket (in creative the hand is kept); from a player's other places it goes into their
     /// inventory, else is dropped as `Player.drop(stack, false)`; from an item entity of more
-    /// than one, it's dropped by it. These never refuse, so `simulate` only asks whether the
-    /// place is there. The player's screen follows with the tick's sync.
+    /// than one, it's dropped by it at the root commit. These never refuse where the place is
+    /// there. All in transaction `tx`, which keeps each place as it was. The player's screen
+    /// follows with the tick's sync.
     pub(super) fn native_set_game_stack(
         &mut self,
         place: &ItemPlace,
         stack: ItemStack,
         one_by_one: bool,
-        simulate: bool,
+        tx: &Transaction,
     ) -> bool {
+        let _ = tx;
         if !self.places_simulated() {
             return false;
         }
@@ -114,29 +122,22 @@ impl Game<'_> {
             let Some(e) = self.dropped.iter().find(|e| e.id == *id) else {
                 return false;
             };
-            if simulate {
-                return true;
-            }
-            let dimension = self.dim.id();
             if !one_by_one || e.stack.count <= 1 {
-                return self.native_set_item_entity(dimension, *id, stack);
+                return self.journal_set_item_entity(*id, stack);
             }
             let at = [e.position.x, e.position.y, e.position.z];
             let kept = ItemStack {
                 count: e.stack.count - 1,
                 ..e.stack.clone()
             };
-            if !self.native_set_item_entity(dimension, *id, kept) {
-                return false;
-            }
-            // `Block.popResource`'s default pickup delay.
+            self.journal_set_item_entity(*id, kept);
             if stack.count > 0 {
-                self.spawn_item(stack, at, [0.0; 3], 10);
+                self.after_commit(After::Spawn(at, stack));
             }
             return true;
         }
         if let ItemPlace::EntitySlot { entity, slot } = place {
-            return self.set_entity_slot(*entity, *slot, stack, one_by_one, simulate);
+            return self.set_entity_slot(*entity, *slot, stack, one_by_one);
         }
         let Some(player) = place_player(place) else {
             return false;
@@ -144,7 +145,7 @@ impl Game<'_> {
         let mut written = false;
         self.native_as_player(player, |g| {
             written = g.player_place(place).is_some();
-            if !written || simulate {
+            if !written {
                 return;
             }
             g.journal_player(player);
@@ -187,13 +188,12 @@ impl Game<'_> {
         slot: usize,
         stack: ItemStack,
         one_by_one: bool,
-        simulate: bool,
     ) -> bool {
         let Some((slots, _)) = self.entity_slots(entity) else {
             return false;
         };
-        if slot >= slots.len() || simulate {
-            return slot < slots.len();
+        if slot >= slots.len() {
+            return false;
         }
         self.journal_entity(entity);
         let Some((slots, at)) = self.entity_slots(entity) else {
@@ -233,7 +233,7 @@ impl Game<'_> {
             }
         }
         let pos = at.map(|p| p.floor() as i32);
-        self.after_commit(super::transactions::After::Drop(pos, rest));
+        self.after_commit(After::Drop(pos, rest));
         true
     }
     /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up
@@ -241,7 +241,7 @@ impl Game<'_> {
     pub(super) fn native_drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
         if self.places_simulated() && stack.count > 0 {
             // `Block.popResource`'s default pickup delay, at the root commit.
-            self.after_commit(super::transactions::After::Drop(pos, stack));
+            self.after_commit(After::Drop(pos, stack));
         }
     }
 }
