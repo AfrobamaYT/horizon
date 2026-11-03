@@ -882,7 +882,9 @@ impl Content {
                 !s.split_once(':')
                     .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty())
             }) {
-                return Err(format!("{name}: sprite is an atlas sprite id (namespace:path)"));
+                return Err(format!(
+                    "{name}: sprite is an atlas sprite id (namespace:path)"
+                ));
             }
             self.fluids.push(FluidLook {
                 id: fluid,
