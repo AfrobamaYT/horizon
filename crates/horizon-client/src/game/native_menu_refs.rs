@@ -114,6 +114,18 @@ impl Game<'_> {
                 _ => None,
             };
         };
+        // A block menu whose block entities no longer show its slots (a chest's, over a
+        // furnace set in its place) backs none of them, the player's included, until the close
+        // pass ends it (`Container.stillValid`).
+        let level = self.native_level(&guest.dimension)?;
+        let world = self.native_level_world(level)?;
+        if open
+            .slots
+            .block_slots(world)
+            .is_some_and(|n| n != open.size)
+        {
+            return None;
+        }
         if slot >= open.size {
             return match slot - open.size {
                 n @ 0..=26 => Some(MenuSlotBacking::Player(n + 9)),
@@ -121,8 +133,6 @@ impl Game<'_> {
                 _ => None,
             };
         }
-        let level = self.native_level(&guest.dimension)?;
-        let world = self.native_level_world(level)?;
         Some(match open.slots.backing(world, slot)? {
             SlotBacking::Block(pos, n) if pos.1 == VEHICLE_KEY_Y => MenuSlotBacking::Entity {
                 entity: EntityRef::new(level.epoch(), pos.2 as u32),
@@ -180,10 +190,11 @@ impl Game<'_> {
 
     /// The menu engine's model of `menu`, holding slot `slot`, for its slots' rules: the
     /// inventory menu, a furnace's, brewing stand's, crafter's or content mod's menu over its
-    /// block entity, a shulker box's, or a plain container of the menu's size.
+    /// block entity, a shulker box's, or a plain container of the menu's size. None for a slot
+    /// with no backing (`native_menu_slot_backing`), and for one the model hasn't.
     fn native_menu_rules(&self, menu: MenuRef, slot: usize) -> Option<Box<Menu>> {
+        self.native_menu_slot_backing(menu, slot)?;
         let guest = self.native_menu_guest(menu)?;
-        (slot < self.native_menu_slot_count(menu)?).then_some(())?;
         let (kind, disabled) = match &guest.menu {
             None => (Kind::Inventory, None),
             Some(open) => {
@@ -213,6 +224,7 @@ impl Game<'_> {
             }
         };
         let mut rules = Box::new(Menu::new(kind));
+        (slot < rules.slot_count()).then_some(())?;
         load_player(&mut rules, guest);
         for (k, off) in disabled.iter().flatten().enumerate() {
             rules.data[k] = i32::from(*off);

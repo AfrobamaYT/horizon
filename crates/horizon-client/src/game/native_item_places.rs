@@ -709,6 +709,63 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn a_chests_menu_over_the_furnace_set_in_its_place_reaches_none_of_its_slots() {
+        use horizon_client::{chunk::Chunk, lan::menu::Slots, mod_api::NativeBlockUpdateFlags};
+        with_game(|game| {
+            open_to_lan(game);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let state = |game: &super::Game<'_>, name| {
+                game.pack.assets.registry.default_state(name).unwrap()
+            };
+            let (chest, furnace) = (
+                state(game, "minecraft:chest"),
+                state(game, "minecraft:furnace"),
+            );
+            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            assert!(game.native_level_set_block(level, [0, 64, 0], chest, flags));
+            let mut player = guest(1);
+            player.inventory[8] = Some(ItemStack::new("minecraft:stick", 4));
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let title = horizon_world::nbt::Tag::String("chest".into());
+            game.lan.as_mut().unwrap().hub.open_container(
+                1,
+                "minecraft:generic_9x3",
+                title,
+                (0, 64, 0),
+                Slots::Block((0, 64, 0)),
+                vec![None; 27],
+            );
+            let menu = menu_of(game);
+            assert!(game.native_level_set_block(level, [0, 64, 0], furnace, flags));
+            // Until the close pass, the menu still has the chest's 63 slots: 0 was the chest's
+            // first, 62 is the last of the hotbar, past a furnace menu's 39.
+            let (first, hotbar) = (
+                ItemPlace::MenuSlot { menu, slot: 0 },
+                ItemPlace::MenuSlot { menu, slot: 62 },
+            );
+            let stick = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            for place in [&first, &hotbar] {
+                assert_eq!(write(game, place, "minecraft:stick", 1, true), 0);
+                assert_eq!(write(game, place, "minecraft:stick", -1, true), 0);
+                let host: &mut dyn Host = game;
+                let swapped =
+                    host.transaction(|host, tx| Ok::<_, ()>(place.exchange(host, tx, &stick, 1)));
+                assert_eq!(swapped, Ok(0));
+            }
+            let g = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(g.inventory[8], Some(ItemStack::new("minecraft:stick", 4)));
+            let Some(BlockEntity::Furnace(f)) = game.world.block_entities.get(&(0, 64, 0)) else {
+                panic!("no furnace")
+            };
+            assert!(f.items.iter().all(Option::is_none));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn an_armour_slot_and_the_craft_result_take_only_what_the_inventory_menu_lets_them() {
         with_game(|game| {
             open_to_lan(game);
