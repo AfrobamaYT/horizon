@@ -52,6 +52,9 @@ impl Game<'_> {
         if !mod_sound_ok(sound, at, source.index(), volume, pitch) {
             return None;
         }
+        // `Level.playSound` draws `soundSeedGenerator.nextLong` at the call;
+        // without a host nothing can be sent, as the flush already did.
+        let seed = self.lan.as_ref()?.hub.next_sound_seed();
         self.creatures.lan_sounds.push(NativeSound {
             dimension,
             sound: sound.to_owned(),
@@ -59,6 +62,7 @@ impl Game<'_> {
             source: source.index() as i32,
             volume,
             pitch,
+            seed,
             except,
             entity: None,
         });

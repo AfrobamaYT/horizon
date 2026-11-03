@@ -2,20 +2,23 @@
 //! answer a capability, such as [`ENTITY_ITEMS`], beside the game's own (NeoForge's
 //! `Capabilities.Item.ENTITY`). A player's inventory is the game's own answer for a player.
 use super::{
-    Capability, ComponentId, EntityProvider, EntityRef, Host, ItemPlace, ItemResource,
-    PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, ServerHost, Tag, Transaction, backend_of,
+    Capability, ComponentId, Direction, EnergyHandler, EntityProvider, EntityRef, FluidResource,
+    Host, ItemPlace, ItemResource, PREVENT_ARMOR_CHANGE, ProvidedBy, ResourceHandler, ServerHost,
+    Tag, Transaction, backend_of,
 };
 use std::marker::PhantomData;
 
-/// An entity capability: its name, the handler trait `T` it answers with, and the game's own
-/// provider, if the game has one.
-pub struct EntityCapabilityKey<T: ?Sized + 'static> {
+/// An entity capability: its name, the handler trait `T` it answers with, the context `C` a
+/// lookup passes its providers (NeoForge's `EntityCapability<T, C>`: `()` where NeoForge's is
+/// `Void`, the side asked about where it is `@Nullable Direction`), and the game's own provider,
+/// if the game has one.
+pub struct EntityCapabilityKey<T: ?Sized + 'static, C: 'static = ()> {
     pub name: &'static str,
-    default: Option<fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>>>,
-    handler: PhantomData<fn() -> Box<T>>,
+    default: Option<fn(&mut dyn ServerHost, EntityRef, C) -> Option<Box<T>>>,
+    handler: PhantomData<fn(C) -> Box<T>>,
 }
 
-impl<T: ?Sized + 'static> EntityCapabilityKey<T> {
+impl<T: ?Sized + 'static, C: 'static> EntityCapabilityKey<T, C> {
     /// A mod's own entity capability, answered only by the providers registered for it.
     pub const fn new(name: &'static str) -> Self {
         Self {
@@ -34,7 +37,7 @@ impl<T: ?Sized + 'static> EntityCapabilityKey<T> {
 pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
     EntityCapabilityKey {
         name: "horizon:entity_items",
-        default: Some(|host, entity| {
+        default: Some(|host, entity, ()| {
             if entity.kind(host)? != "minecraft:player" {
                 let size = backend_of(host)?.entity_container_size(entity.id())?;
                 return Some(Box::new(ContainerItems { entity, size }));
@@ -45,15 +48,30 @@ pub const ENTITY_ITEMS: EntityCapabilityKey<dyn ResourceHandler<ItemResource>> =
         handler: PhantomData,
     };
 
+/// An entity's energy, as NeoForge 26.3's `Capabilities.Energy.ENTITY`, asked for the side of
+/// the entity a lookup reaches it from, or none for no particular side. Vanilla has no entity
+/// that holds energy, so only mods answer it.
+pub const ENTITY_ENERGY: EntityCapabilityKey<dyn EnergyHandler, Option<Direction>> =
+    EntityCapabilityKey::new("horizon:entity_energy");
+/// An entity's fluids, as NeoForge 26.3's `Capabilities.Fluid.ENTITY`, asked for the side of
+/// the entity a lookup reaches it from, or none for no particular side. Vanilla has no entity
+/// that holds a fluid, so only mods answer it.
+pub const ENTITY_FLUIDS: EntityCapabilityKey<
+    dyn ResourceHandler<FluidResource>,
+    Option<Direction>,
+> = EntityCapabilityKey::new("horizon:entity_fluids");
+
 impl EntityRef {
-    /// `key`'s handler for this entity (`Entity.getCapability`): the first provider to answer, of
-    /// those mods registered for its type `before_game`, the game's own, and the mods' others,
-    /// each in registration order. None for a stale handle and for an entity outside the level
-    /// in place: no provider is asked for one.
-    pub fn capability<T: ?Sized + 'static>(
+    /// `key`'s handler for this entity (`Entity.getCapability`), its providers given `context`
+    /// (`()` for [`ENTITY_ITEMS`], the side asked about for [`ENTITY_ENERGY`] and
+    /// [`ENTITY_FLUIDS`]): the first provider to answer, of those mods registered for its type
+    /// `before_game`, the game's own, and the mods' others, each in registration order. None for
+    /// a stale handle and for an entity outside the level in place: no provider is asked for one.
+    pub fn capability<T: ?Sized + 'static, C: Copy + 'static>(
         self,
         host: &mut dyn ServerHost,
-        key: &EntityCapabilityKey<T>,
+        key: &EntityCapabilityKey<T, C>,
+        context: C,
     ) -> Option<Capability<T>> {
         if !self.level(host)?.in_place(host) {
             return None;
@@ -61,12 +79,12 @@ impl EntityRef {
         let mut game = None;
         let parts = super::providers(ProvidedBy::Entity, key.name, host, |host| self.kind(host));
         super::answered(
-            super::ask_providers::<EntityProvider<T>, T>(
+            super::ask_providers::<EntityProvider<T, C>, T>(
                 parts,
                 host,
-                |provider, host| provider(host, self),
+                |provider, host| provider(host, self, context),
                 |host| {
-                    game = key.default.and_then(|default| default(host, self));
+                    game = key.default.and_then(|default| default(host, self, context));
                     game.is_some()
                 },
             ),

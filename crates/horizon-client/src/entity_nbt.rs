@@ -1143,14 +1143,7 @@ pub fn mob_to_nbt(
         }) {
             equipment[head] = Some(crate::mobs::raider::ominous_banner());
         }
-        match equipment.write() {
-            Some(tag) => {
-                map.insert("equipment".into(), tag);
-            }
-            None => {
-                map.remove(&"equipment".into());
-            }
-        }
+        equipment.store(map);
     }
     tag
 }
@@ -1174,7 +1167,7 @@ fn put_attributes(map: &mut Compound, m: &Mob, a: &crate::mobs::finalize::Attrib
                     Op::AddMultipliedTotal => "add_multiplied_total",
                 };
                 Tag::compound([
-                    ("id", string(x.id)),
+                    ("id", string(&x.id)),
                     ("amount", Tag::Double(x.amount.to_bits())),
                     ("operation", string(op)),
                 ])
@@ -1475,8 +1468,7 @@ pub fn mob_from_nbt(
             let effect = crate::brewing::namespaced(def.id);
             let duration = number(e.get("duration")).unwrap_or(0) as i32;
             let amplifier = number(e.get("amplifier")).unwrap_or(0) as i32;
-            m.extra.effects.retain(|x| x.0 != effect);
-            m.extra.effects.push((effect, duration, amplifier));
+            m.load_effect(effect, duration, amplifier);
             // Details.CODEC: `show_particles` defaults to true.
             m.extra.hidden_effects.retain(|h| *h != effect);
             if number(e.get("show_particles")) == Some(0) {
@@ -2949,18 +2941,9 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
         fall_distance: 0.0,
     };
     let mut tag = base.tag(raw);
-    let equipment: Vec<(&str, Tag)> = ArmorStand::SLOTS
-        .iter()
-        .zip(&a.equipment)
-        .filter_map(|(slot, stack)| Some((*slot, item_to_nbt(stack.as_ref()?))))
-        .collect();
     // `equipment` is saved only when something is worn, `Marker` only when set.
-    if equipment.is_empty() {
-        if let Tag::Compound(map) = &mut tag {
-            map.remove(&"equipment".into());
-        }
-    } else {
-        put(&mut tag, "equipment", Tag::compound(equipment));
+    if let Tag::Compound(map) = &mut tag {
+        a.equipment.store(map);
     }
     put(&mut tag, "DisabledSlots", Tag::Int(a.disabled_slots));
     for (key, value) in [
@@ -3037,9 +3020,7 @@ pub fn armor_stand_from_nbt(tag: &Tag, id: u32) -> Option<ArmorStand> {
     a.custom_name = tag.get("CustomName").map(name_text);
     a.name_visible = flag(tag, "CustomNameVisible");
     if let Some(eq) = tag.get("equipment") {
-        for (i, slot) in ArmorStand::SLOTS.iter().enumerate() {
-            a.equipment[i] = eq.get(slot).and_then(item_from_nbt);
-        }
+        a.equipment = horizon_items::equipment::Equipment::read(eq);
     }
     a.small = flag(tag, "Small");
     a.show_arms = flag(tag, "ShowArms");

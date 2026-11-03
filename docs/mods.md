@@ -5,7 +5,7 @@ Two kinds of mod run in Horizon:
 | Kind | File | What it is | Where it runs |
 |---|---|---|---|
 | **Content mod** | `.hmod` | Data and assets: blocks, items, recipes, loot, tags, models, textures, structures. No code. | Read when the game starts |
-| **Native mod** | `.hmod` | A [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) bundle: Rust that changes the game's own source before it is compiled. | In a game the launcher builds for the player ([native-mods.md](native-mods.md)) |
+| **Native mod** | `.hmod` | A flat Rust project using the typed hook API, with optional raw injections. | In a game the launcher builds for the player ([native-mods.md](native-mods.md)) |
 
 Fabric and NeoForge jars do **not** run as they are: their code calls and patches Minecraft's Java classes, and
 Horizon has none. What carries over is the data and assets inside a jar ([modpacks.md](modpacks.md)).
@@ -40,13 +40,15 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the template. `--template native [--horizon <commit>]` writes a native trait
-  mod's bundle instead: `horizon-mixin.toml` (pinned to that Horizon commit, else unpinned) and an `[api]` crate with
-  one hook, built with `horizon-launcher native-build <path> --trust-native-code`
+- `new <path> [--name "Name"]` writes the content template. `--template native --horizon <commit>` writes
+  a flat trait mod instead: `horizon-mod.toml` with `[native]` pinned to that exact commit, root `Cargo.toml`
+  and `src/lib.rs`, and empty `assets/` and `data/` directories. Its root `impl Hooks` uses
+  `#[mod_api::horizon_mod]`. Compile it with `horizon-launcher native-build <path> --trust-native-code`
   ([native-mods.md](native-mods.md#trait-mods-draft)). Any other `--template` is refused.
-- `build` packs `horizon-mod.toml`, `assets/` and `data/` into `target/horizon-mod/<id>.hmod`, with the same checks
-  the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code requires a native mod) and a
-  manifest without capability `registries`.
+- `build` packs the checked project into `target/horizon-mod/<id>.hmod`: `horizon-mod.toml`, `assets/`,
+  `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
+  checks as the game; it does not compile code. Code requires both `Cargo.toml` and `[native]`; inconsistent
+  declarations and a manifest without capability `registries` are refused.
 - `run` builds, then starts `horizon-client` (on `PATH`, or `--game PATH`, or `HORIZON_CLIENT`) with
   `--dev-mod target/horizon-mod/<id>.hmod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
@@ -69,8 +71,12 @@ capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
 ```
 
-Unknown keys are refused, so a typo is an error, not a silently ignored permission. Content manifests
-use only `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
+Unknown keys are refused, so a typo is an error, not a silently ignored permission. The shared manifest
+uses exactly `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
+Code mods add `[native]` for exact build pins and optional raw injections; their id and version still come only
+from this manifest, not Cargo metadata ([Native mods](native-mods.md#a-bundle)). Nonempty `[dependencies]`
+is supported only for code mods. Both kinds may include a fixed-name `icon.png` at the top level, with no
+manifest key: a valid square PNG, at most 512 × 512 pixels and 256 KiB encoded ([Mod files](api/mod-files.md)).
 Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
 installed through a modpack. Code is never silently skipped.
 
@@ -466,10 +472,11 @@ radius. `kernel_size` 0 is none.
 
 ## Native mods
 
-Behaviour that needs code (a new key, a HUD, a tool that changes how mining works) is a native mod. It is a bundle of
-a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game. Start from
-[horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template). How the launcher builds
-one, what it pins and why it is not sandboxed: [native-mods.md](native-mods.md).
+Behaviour that needs code (a new key, a HUD, a tool that changes how mining works) is a native mod.
+It is one flat Rust project with `horizon-mod.toml`, `Cargo.toml` and `src/`, beside its `assets/` and `data/`.
+Start with `cargo horizon-mod new my_mod --template native --horizon <commit>` and implement the typed hooks;
+raw injections are a rare escape hatch. How the launcher builds one, what it pins and why it is not sandboxed:
+[native-mods.md](native-mods.md).
 The typed hook API is generated automatically at build time, in debug and release builds alike; its generated
 Rust files are build output, not files to regenerate or commit. Engine contributors adding a hook only run
 `cargo run -p xtask -- mod-api` to fill its hand-written placeholder body
@@ -477,8 +484,12 @@ Rust files are build output, not files to regenerate or commit. Engine contribut
 
 A native mod's config files go in the game's shared `config/` folder, beside `options.txt` (on a dedicated server,
 beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its own file names, such as
-`config/<mod id>.json`. It asks for the folder with `Game::native_config_dir()`, which needs no
-game, so it works from any hook, and makes the folder when missing. Settings kept with `native_set_setting` are in `horizon-mods/.horizon-mod-data/<id>/`.
+`config/<mod id>.json`. It asks for the folder with `Game::native_config_dir()` , which needs no
+game, so it works from any hook, and makes the folder when missing. A mod that lists its files with
+`native_register_configs` gets them read for it, written from their defaults when missing, and handed over again
+when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `ModConfigEvent`), and a world can
+keep its own server config in `serverconfig/` ([native-mods.md](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
+8c838a6b381b93150deaeed2057acd1
 
 ## Publish your mod
 
