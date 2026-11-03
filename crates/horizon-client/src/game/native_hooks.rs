@@ -194,22 +194,6 @@ pub(super) use horizon_world::level::flags;
 #[allow(dead_code)]
 pub(crate) const NATIVE_HOOKS_API: u32 = 359;
 
-impl Game<'_> {
-    /// The item cloned from a block on the server. A part may answer with an
-    /// item, or leave `stack` empty to use the game's answer.
-    pub(super) fn native_clone_item_stack(
-        &self,
-        dimension: LevelDimension,
-        pos: BlockPos,
-        block: &str,
-        state: BlockStateId,
-        include_data: bool,
-        stack: &mut Option<ItemStack>,
-    ) {
-        mod_api::dispatch_clone_item_stack(self, dimension, pos, block, state, include_data, stack);
-    }
-}
-
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
@@ -5578,6 +5562,23 @@ impl Game<'_> {
         used: &mut bool,
     ) {
         mod_api::dispatch_release_using(self, stack, entity, time_left, used);
+    }
+    /// `BlockBehaviour.getCloneItemStack`, asked by
+    /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
+    /// is true for a creative player picking with Ctrl. Leave `stack` unset to
+    /// keep the game's item. Creative breaking, such as a beehive's
+    /// `playerWillDestroy`, does not ask this query. Server-side.
+    #[inline(always)]
+    pub(super) fn native_clone_item_stack(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        block: &str,
+        state: BlockStateId,
+        include_data: bool,
+        stack: &mut Option<ItemStack>,
+    ) {
+        mod_api::dispatch_clone_item_stack(self, dimension, pos, block, state, include_data, stack);
     }
     /// A player breaks the block `state` at `pos`, once the game allowed it
     /// (the held item can break blocks, the debug stick didn't take the

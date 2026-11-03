@@ -2744,20 +2744,17 @@ impl Game<'_> {
                     }
                     let include_data = g.creative && p.include_data;
                     let stack = g.picked_stack(p.pos, include_data);
-                    if !crate::mod_api::mods().is_empty() {
-                        let state = g.world.block(p.pos[0], p.pos[1], p.pos[2]);
-                        let mut replacement = None;
-                        g.native_clone_item_stack(
-                            g.dim.level(),
-                            horizon_core::position::BlockPos::new(p.pos[0], p.pos[1], p.pos[2]),
-                            &g.res.facts().get(state).name,
-                            state,
-                            include_data,
-                            &mut replacement,
-                        );
-                        return replacement.or(stack);
-                    }
-                    stack
+                    let state = g.world.block(p.pos[0], p.pos[1], p.pos[2]);
+                    let mut replacement = None;
+                    g.native_clone_item_stack(
+                        g.dim.level(),
+                        horizon_core::position::BlockPos::new(p.pos[0], p.pos[1], p.pos[2]),
+                        &g.res.facts().get(state).name,
+                        state,
+                        include_data,
+                        &mut replacement,
+                    );
+                    replacement.or(stack)
                 });
             }
             // handlePickItemFromEntity.

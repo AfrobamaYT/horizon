@@ -3046,11 +3046,9 @@ naming the thing it is about, has a method on that scope's trait: `BlockPart`, `
 thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
-`BlockPart::clone_item_stack` may replace a block's picked item on the server. It receives the
-level, position, block state and `include_data`; return `None` to leave the game's answer unchanged.
-`include_data` is true when a creative player picks with Ctrl, and the part may read block entity
-data through the handles before constructing its item. The query runs only when a block is picked,
-not on a tick.
+`BlockPart::clone_item_stack` answers on the server when a player picks the block. It receives the
+level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
+`None` to keep the game's item.
 
 A block entity part names its block entity type and the blocks that hold one, as vanilla's
 `BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
