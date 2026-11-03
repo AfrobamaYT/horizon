@@ -497,7 +497,7 @@ mod tests {
                 host.container_insert(on([0, 64, 0], None), 1, sticks(3), tx);
                 Err::<(), ()>(())
             });
-            let water = host.fluid_tank_extract(on([2, 64, 0], None), 0, 1000, false);
+            let water = host.fluid_tank_extract(on([2, 64, 0], None), 0, 1000, tx);
             assert_eq!(water.map(|w| w.amount), Some(1000));
             Err(())
         });
@@ -518,7 +518,7 @@ mod tests {
                 host.container_insert(on([0, 64, 0], None), 1, sticks(3), tx);
                 Err::<(), ()>(())
             });
-            host.fluid_tank_extract(on([2, 64, 0], None), 0, 1000, false);
+            host.fluid_tank_extract(on([2, 64, 0], None), 0, 1000, tx);
             Ok(())
         });
         assert_eq!(done, Ok(()));
@@ -573,8 +573,8 @@ mod tests {
         };
         let before = queues(&game);
         let host: &mut dyn Host = &mut game;
-        let _ = host.transaction(|host, _| {
-            host.fluid_tank_extract(on([2, 64, 0], None), 0, 1000, false);
+        let _ = host.transaction(|host, tx| {
+            host.fluid_tank_extract(on([2, 64, 0], None), 0, 1000, tx);
             Err::<(), ()>(())
         });
         assert_eq!(game.world.block(2, 64, 0), full);
