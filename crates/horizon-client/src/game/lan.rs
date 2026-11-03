@@ -1822,6 +1822,9 @@ impl Game<'_> {
                     bound,
                     name,
                 } => {
+                    let Some(host) = self.lan.as_ref() else {
+                        return;
+                    };
                     let Some(id) = host
                         .hub
                         .guests
@@ -1838,10 +1841,7 @@ impl Game<'_> {
                     let original = Text::literal(raw.clone());
                     let mut text = original.clone();
                     let mut cancel = false;
-                    self.lan = Some(host);
                     self.native_server_chat(id, sender, &name, &raw, &mut text, &mut cancel);
-                    // A hook's command can close the hub.
-                    host = self.lan.take()?;
                     // Canceled, NeoForge returns before `detectRateSpam`.
                     if cancel {
                         continue;
@@ -1855,13 +1855,19 @@ impl Game<'_> {
                         line = format!("<{name}> {}", text.plain());
                     }
                     let mut chat = Vec::new();
+                    let Some(host) = self.lan.as_mut() else {
+                        return;
+                    };
                     host.hub.broadcast_chat(&message, &bound, line, &mut chat);
                     for event in chat {
                         self.lan_log_event(event);
                     }
-                    self.lan_player_chatted(&mut host, sender, &raw);
+                    self.lan_player_chatted(sender, &raw);
                 }
                 HostEvent::ChatSessionStarted(update) => {
+                    let Some(host) = self.lan.as_mut() else {
+                        return;
+                    };
                     host.hub.broadcast(&C::PlayerInfoUpdate(*update));
                 }
                 HostEvent::Joined(conn) => {
