@@ -1,5 +1,5 @@
 # The #[ignore]d library tests tools/ci/ignored_tests.py expects to fail on main, one per line:
-#   PACKAGE TEST REFERENCE [flaky|harness]
+#   PACKAGE TEST REFERENCE [flaky|harness] [# note]
 # REFERENCE is the issue or PR that tracks it. A listed test that passes fails the job until its line is
 # removed, so this list only shrinks; `flaky` lets one pass. `harness` marks a parity harness's own step:
 # its harness runs it with the environment it needs, and the job skips it.
@@ -13,6 +13,7 @@ horizon-client-lib mobs::villager_brain::farming_tests::vanilla_farming_classifi
 horizon-client-render packs::cache::tests::benchmark_real_resource_root HORIZON_OVERLAY_BENCH_VANILLA harness
 
 # Known failures on main.
+horizon-client game::server_reload::tests::server_reload_registration_failure_stops_world_open_and_quiet_mods_are_pruned #335 # crosses #366: the quiet fixture mod declares no subscriptions, fixed in the reload lane
 horizon-client game::native_guest_turn_tests::another_guest_follows_a_vehicle_teleported_during_a_turn horizon-rust/horizon#8383
 horizon-client-lib mobs::cem::tests::names_reach_horizons_models horizon-rust/horizon#8426
 # Load starvation: the far-decoration worker runs at idle priority against a fixed 30 s deadline, so it passes on
