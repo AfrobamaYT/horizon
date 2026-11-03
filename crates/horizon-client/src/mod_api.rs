@@ -260,6 +260,7 @@ impl NativeItemDrop {
 /// statistics: what the stat's key names (a block, an item, an entity type,
 /// or a `minecraft:custom` stat).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeStatType {
     /// `minecraft:mined`, keyed by block.
     Mined,
@@ -816,6 +817,7 @@ impl DragonRef {
 
 /// An ender dragon phase (`EnderDragonPhase`), in vanilla's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeDragonPhase {
     HoldingPattern,
     StrafePlayer,
@@ -929,6 +931,7 @@ impl MerchantRef {
 
 /// Which `Display` subclass an entity is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeDisplayKind {
     Block,
     Item,
@@ -954,6 +957,7 @@ impl NativeDisplayKind {
 
 /// `Display.BillboardConstraints`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeBillboard {
     Fixed,
     Vertical,
@@ -981,6 +985,7 @@ impl NativeBillboard {
 
 /// `ItemDisplayContext`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeItemDisplayContext {
     None,
     ThirdPersonLeftHand,
@@ -1031,6 +1036,7 @@ impl NativeItemDisplayContext {
 
 /// `Display.TextDisplay.Align`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeTextAlignment {
     Center,
     Left,
@@ -1070,6 +1076,7 @@ impl NativeTransformation {
 
 /// `ProjectileDeflection`: how `ProjectileRef::deflect` turns a projectile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeDeflection {
     /// `REVERSE`: backwards at `-power / 2` of the speed, turned about 180
     /// degrees by a random amount.
@@ -1082,6 +1089,7 @@ pub enum NativeDeflection {
 
 /// `AbstractArrow.Pickup`: who may pick an arrow up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeArrowPickup {
     Disallowed,
     Allowed,
@@ -1106,6 +1114,7 @@ impl MinecartRef {
 
 /// Which minecart an entity is: one per vanilla `AbstractMinecart` subclass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeMinecartKind {
     /// `Minecart`.
     Rideable,
@@ -1177,6 +1186,7 @@ impl RaidRef {
 
 /// Where a raid stands (`Raid.RaidStatus`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NativeRaidStatus {
     /// Waiting or fighting (`ONGOING`).
     Ongoing,
@@ -1223,6 +1233,7 @@ pub enum ChunkStatus {
 /// What an explosion a mod sets off does to blocks
 /// (`Level.ExplosionInteraction`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeExplosionInteraction {
     /// Blocks stay; entities are hurt and pushed (`NONE`).
     None,
@@ -1237,6 +1248,7 @@ pub enum NativeExplosionInteraction {
 /// is the group a client's sound options control: an entity's is
 /// `Entity.getSoundSource`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeSoundSource {
     Master,
     Music,
@@ -1263,6 +1275,7 @@ impl NativeSoundSource {
 
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeBlockShapeKind {
     /// Selection outline (`BlockState.getShape`).
     Outline,
@@ -1272,6 +1285,7 @@ pub enum NativeBlockShapeKind {
 
 /// `ChatVisiblity`: which chat a client shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeChatVisibility {
     Full,
     System,
@@ -1281,6 +1295,7 @@ pub enum NativeChatVisibility {
 /// `PermissionLevel`: how much a player may do, as `op-permission-level` and
 /// the operator list name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum NativePermissionLevel {
     /// 0: every player.
     All,
@@ -1313,6 +1328,7 @@ impl NativePermissionLevel {
 
 /// `HumanoidArm`: a player's main hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeMainHand {
     Left,
     Right,
@@ -1320,6 +1336,7 @@ pub enum NativeMainHand {
 
 /// `ParticleStatus`: how many particles a client shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeParticleStatus {
     All,
     Decreased,
@@ -1397,6 +1414,7 @@ pub enum NativeSupportType {
 /// that destroy it. The unloading and dimension-change reasons belong to the
 /// game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeRemovalReason {
     /// `KILLED`: a mob's effects that act on removal run.
     Killed,
@@ -1539,6 +1557,7 @@ pub struct BossBarRef {
 
 /// `BossEvent.BossBarColor`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BossBarColor {
     Pink,
     Blue,
@@ -1581,6 +1600,7 @@ impl BossBarColor {
 
 /// `BossEvent.BossBarOverlay`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BossBarOverlay {
     Progress,
     Notched6,
@@ -1668,6 +1688,7 @@ impl NativeEffectDamage {
 
 /// A change requested by an effect tick, applied after its hooks return.
 #[doc(hidden)]
+#[non_exhaustive]
 pub enum EffectTickChange {
     Heal(f32),
     Hurt(NativeEffectDamage, f32),
@@ -1805,6 +1826,7 @@ pub struct GameRuleActor<'a> {
 
 /// How a criterion's advancement progress changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeProgressType {
     Grant,
     Revoke,
@@ -2026,6 +2048,7 @@ impl<'a> Iterator for Entered<'a> {
 
 /// Whether a mod claims a cancellable hook.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Flow {
     /// Later mods and the game continue.
     Continue,
