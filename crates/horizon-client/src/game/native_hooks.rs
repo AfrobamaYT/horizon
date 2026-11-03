@@ -6059,7 +6059,7 @@ impl Game<'_> {
     }
 
     /// A server lightning bolt is about to be created. `cause` is `weather`,
-    /// `trident` or `command`; `player` is the responsible player when known.
+    /// `trident`, `command` or `mod` (a native mod's `strike_lightning`); `player` is the responsible player when known.
     /// Set `cancel` to prevent the bolt and its effects. 236.
     pub(super) fn native_lightning_strike(
         &mut self,
