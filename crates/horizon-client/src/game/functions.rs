@@ -783,7 +783,7 @@ impl Game<'_> {
         let known = |g: &Self, n: &str| {
             n == "vanilla"
                 || FEATURE_PACKS.iter().any(|(p, _)| *p == n)
-                || g.fns.packs.iter().any(|p| &p.id == n)
+                || g.fns.packs.iter().any(|p| p.id == n)
         };
         match id {
             "datapack.create" => self.create_pack(ctx),
@@ -904,7 +904,18 @@ impl Game<'_> {
     /// tables with the functions.
     fn apply_pack_change(&mut self) {
         self.save_datapack_settings();
-        self.reload_datapacks(true, &self.level.enabled_features.clone());
+        // One resolve for the store and the tables, as `/reload`'s is: the
+        // timers already in memory stay, and none come back from disk
+        // (`ServerFunctionManager` keeps its queue over a pack change).
+        let stack = pack_stack(
+            &self.world_root,
+            &self.options.resources,
+            self.cmds.vanilla_disabled,
+            &self.level.enabled_features,
+        );
+        self.rebuild_store(&stack);
+        self.fns.load_pending = true;
+        self.reload_world_tables(&stack);
     }
 
     // ---- predicates -------------------------------------------------------------------
@@ -1012,6 +1023,19 @@ mod tests {
             assert_eq!(game.score.board.score("times", "loaded").unwrap().value, 1);
             assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
             assert!(game.stations().recipe_index.contains("test:sample"));
+
+            // Changing packs must not reload an old timer from disk.
+            game.fns.schedule.push(Scheduled {
+                id: "test:start".into(),
+                time: 1000,
+                seq: 1,
+            });
+            game.save_schedule();
+            game.fns.schedule.clear();
+            assert!(game.run_command("datapack disable \"file/test\""));
+            assert!(game.fns.schedule.is_empty());
+            assert!(game.run_command("datapack enable \"file/test\""));
+            assert!(game.fns.schedule.is_empty());
 
             // World-open selection and completions must both use the incoming
             // level's flags, even while `self.level` is still the old level.
