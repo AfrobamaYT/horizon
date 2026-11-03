@@ -805,7 +805,7 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     let list: Vec<String> = mods
         .iter()
         .map(|b| (b, &b.native().horizon))
-        .filter(|(_, r)| !r.is_empty() && *r != revision)
+        .filter(|(_, r)| *r != revision)
         .map(|(b, r)| format!("{} → {}", b.manifest.id, &r[..r.len().min(7)]))
         .collect();
     (!list.is_empty()).then(|| {
@@ -2649,17 +2649,13 @@ mod tests {
 
     #[test]
     fn mods_made_for_different_revisions_build_on_the_newest() {
-        let pinned = |id: &str, horizon: Option<&str>, mixins: Option<&str>| {
-            let mut manifest =
-                horizon_mods::manifest::Manifest::parse(&project_manifest(id, "1", A, B)).unwrap();
-            let native = manifest.native.as_mut().unwrap();
-            native.horizon = horizon.unwrap_or_default().into();
-            native.mixins = mixins.unwrap_or_default().into();
-            Bundle {
-                manifest,
-                dir: PathBuf::new(),
-                injections: Vec::new(),
-            }
+        let pinned = |id: &str, horizon: &str, mixins: &str| Bundle {
+            manifest: horizon_mods::manifest::Manifest::parse(&project_manifest(
+                id, "1", horizon, mixins,
+            ))
+            .unwrap(),
+            dir: PathBuf::new(),
+            injections: Vec::new(),
         };
         let c = "c".repeat(40);
         // a is the oldest commit, then b, then c.
@@ -2673,15 +2669,15 @@ mod tests {
         };
         let never = || -> Result<String, String> { panic!("a pin wins") };
         fn horizon(b: &Bundle) -> Option<&String> {
-            Some(&b.native().horizon).filter(|pin| !pin.is_empty())
+            Some(&b.native().horizon)
         }
         fn mixins(b: &Bundle) -> Option<&String> {
-            Some(&b.native().mixins).filter(|pin| !pin.is_empty())
+            Some(&b.native().mixins)
         }
         let split = [
-            pinned("veinminer", Some(B), Some(&c)),
-            pinned("lookat", Some(A), Some(A)),
-            pinned("zoom", None, None),
+            pinned("veinminer", B, &c),
+            pinned("lookat", A, A),
+            pinned("zoom", B, &c),
         ];
         assert_eq!(
             newest(&split, "Horizon", horizon, never, None, date).unwrap(),
@@ -2692,14 +2688,14 @@ mod tests {
             newest(&split, "horizon-mixins", mixins, never, Some(B), date).unwrap(),
             c
         );
-        let older = [pinned("a", None, Some(A)), pinned("b", None, Some(B))];
+        let older = [pinned("a", A, A), pinned("b", B, B)];
         assert_eq!(
             newest(&older, "horizon-mixins", mixins, never, Some(&c), date).unwrap(),
             c
         );
         // One pin, or the same one everywhere: that pin, and no date is asked for.
         let no_date = |_: &str| -> Result<String, String> { panic!("no date needed") };
-        let same = [pinned("a", Some(A), None), pinned("b", Some(A), None)];
+        let same = [pinned("a", A, A), pinned("b", A, A)];
         assert_eq!(
             newest(&same, "Horizon", horizon, never, None, no_date).unwrap(),
             A
