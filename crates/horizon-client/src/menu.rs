@@ -1732,9 +1732,7 @@ impl Menu {
                     o.satisfied_by(env.items, a, b) || o.satisfied_by(env.items, b, a)
                 }),
             Role::Armor(_) | Role::MountEquip(_) => match self.slot(s) {
-                Some(stack) => {
-                    self.creative || stack.enchantment_level("minecraft:binding_curse") == 0
-                }
+                Some(stack) => self.creative || !env.enchantments.prevents_armor_change(stack),
                 None => true,
             },
             _ => true,
