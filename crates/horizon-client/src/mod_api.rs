@@ -2135,12 +2135,6 @@ impl HostSide<'_> {
 }
 
 impl LevelSide<'_> {
-    fn host(&self) -> &dyn LevelHost {
-        match self {
-            Self::Server(host) | Self::Client(host) => *host,
-        }
-    }
-
     fn reborrow(&mut self) -> LevelSide<'_> {
         match self {
             Self::Server(host) => LevelSide::Server(*host),
@@ -2233,11 +2227,16 @@ pub use generated_host::{ClientHost, Host, HostSide, LevelSide, ServerHost};
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
 
-impl AttachmentHost for dyn Host + '_ {
-    fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError> {
-        Host::attachments(self, holder)
-    }
+macro_rules! host_attachment_host {
+    ($($host:ident),+) => { $(
+        impl AttachmentHost for dyn $host + '_ {
+            fn attachments(&mut self, holder: Holder) -> Result<&mut Attachments, AttachmentError> {
+                Host::attachments(self, holder)
+            }
+        }
+    )+ };
 }
+host_attachment_host!(Host, ServerHost, ClientHost);
 
 /// Read-only level services, like vanilla's `LevelReader`.
 ///

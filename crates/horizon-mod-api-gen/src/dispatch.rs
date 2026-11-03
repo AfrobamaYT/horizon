@@ -181,12 +181,13 @@ pub(super) fn emit(
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
                         };
-                        let level = if hook.side == HelperSide::Both {
-                            format!("{level}.host()")
+                        if hook.side == HelperSide::Both {
+                            format!(
+                                "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
+                            )
                         } else {
-                            level.to_owned()
-                        };
-                        format!("{table}(|| {level}.state_block({key}))")
+                            format!("{table}(|| {level}.state_block({key}))")
+                        }
                     }
                     "& ItemStack" => format!("{table}(|| Some(&*{key}.item))"),
                     "& str" => format!("{table}(|| Some({key}))"),

@@ -162,11 +162,6 @@ mod tests {
                 Self::Client(host) => LevelSide::Client(*host),
             }
         }
-        fn host(&self) -> &dyn LevelHost {
-            match self {
-                Self::Server(host) | Self::Client(host) => *host,
-            }
-        }
     }
     trait RenderHooks {}
     struct TestHost;
