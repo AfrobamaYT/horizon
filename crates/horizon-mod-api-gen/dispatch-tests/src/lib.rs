@@ -174,6 +174,9 @@ mod tests {
                 pub struct GrindstonePlace;
                 pub struct GrindstoneTake;
             }
+            pub mod mod_chunk_tickets {
+                pub struct TicketValidation;
+            }
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
             }

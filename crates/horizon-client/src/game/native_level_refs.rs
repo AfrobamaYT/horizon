@@ -99,6 +99,22 @@ impl Game<'_> {
         };
         streaming.set_forced(x, z, forced)
     }
+    /// The mods validate the chunk tickets `dim`'s level just loaded, and the
+    /// ones they remove stop forcing their chunks. Nothing is built while no
+    /// mod listens or the level holds no ticket.
+    pub(super) fn validate_mod_chunk_tickets(&mut self, dim: super::Dim) {
+        if !horizon_client::mod_api::listened(horizon_client::mod_api::HookId::ChunkTicketsValidate)
+            || self.streaming.mod_tickets().is_empty()
+        {
+            return;
+        }
+        let loaded = self.streaming.mod_tickets().to_save().cloned().collect();
+        let mut validation = horizon_client::mod_chunk_tickets::TicketValidation::new(loaded);
+        self.native_chunk_tickets_validate(dim.id(), &mut validation);
+        for ticket in validation.into_removed() {
+            self.streaming.set_mod_forced(ticket, false);
+        }
+    }
     /// The calling mod's chunk ticket for `owner` on `chunk`
     /// (`TicketController.forceChunk`): true when the mod's tickets changed.
     /// A chunk stays forced, entity ticking and saved, and its level keeps
@@ -503,6 +519,109 @@ mod tests {
             assert!(game.native_chunk_set_forced(chunk, true));
             assert_eq!(query_result(game, "forceload query"), Some(1));
             assert_eq!(query_result(game, "forceload query 48 48"), Some(1));
+        });
+    }
+
+    use horizon_client::mod_api::{ChunkTicketsValidateEvent, Hooks, Host, ModEntry};
+    use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
+
+    /// Removes the block at [1, 64, 1] from the tickets it is shown.
+    struct Prune;
+    impl Hooks for Prune {
+        fn chunk_tickets_validate(&self, _: &mut dyn Host, e: &mut ChunkTicketsValidateEvent<'_>) {
+            e.validation.remove_block_tickets([1, 64, 1]);
+        }
+    }
+    /// Subscribes to nothing.
+    struct Idle;
+    impl Hooks for Idle {}
+
+    fn saved(mod_id: &str, pos: [i32; 3], chunk: (i32, i32)) -> ModTicket {
+        ModTicket {
+            mod_id: mod_id.into(),
+            owner: TicketOwner::Block(pos),
+            chunk,
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn validation_drops_a_removed_ticket_and_leaves_the_rest() {
+        let mods: horizon_client::mod_api::Mods = vec![
+            ModEntry::new("machines", Box::new(Prune)),
+            ModEntry::new("idle", Box::new(Idle)),
+        ]
+        .into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let tickets = vec![
+                    saved("machines", [1, 64, 1], (7, 7)),
+                    saved("machines", [9, 64, 9], (8, 8)),
+                    saved("idle", [1, 64, 1], (9, 9)),
+                ];
+                game.streaming
+                    .load_forced(Default::default(), tickets, |_| true);
+                assert!(game.streaming.forced.contains(&(7, 7)));
+                game.validate_mod_chunk_tickets(game.dim);
+                assert!(!game.streaming.forced.contains(&(7, 7)), "removed");
+                assert!(game.streaming.forced.contains(&(8, 8)));
+                assert!(
+                    game.streaming.forced.contains(&(9, 9)),
+                    "idle keeps its own"
+                );
+                game.save_chunk_tickets().unwrap();
+                let file = game.save.load_mod_tickets();
+                assert_eq!(file.len(), 2);
+                assert!(!file.iter().any(|t| t.chunk == (7, 7)));
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn validation_runs_when_a_parked_level_opens_and_not_without_a_listener() {
+        let mods: horizon_client::mod_api::Mods = vec![
+            ModEntry::new("machines", Box::new(Prune)),
+            ModEntry::new("idle", Box::new(Idle)),
+        ]
+        .into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let other = if game.dim == Dim::Nether {
+                    Dim::End
+                } else {
+                    Dim::Nether
+                };
+                let world =
+                    std::env::temp_dir().join(format!("horizon-validate-{}", std::process::id()));
+                game.world_root = world.clone();
+                let root = horizon_client::save::dimension_dir(&world, other.id());
+                let save = horizon_client::save::SaveDir::new(root, other.shape());
+                let mut tickets = horizon_client::mod_chunk_tickets::ModTickets::default();
+                tickets.insert(saved("machines", [1, 64, 1], (7, 7)));
+                tickets.insert(saved("machines", [9, 64, 9], (8, 8)));
+                save.save_mod_tickets(&tickets).unwrap();
+                let back = game.dim;
+                game.enter_level(None, other).unwrap();
+                game.enter_level(None, back).unwrap();
+                let parked = game.levels.parked_streaming_of(other.id()).unwrap();
+                assert!(!parked.forced.contains(&(7, 7)));
+                assert!(parked.forced.contains(&(8, 8)));
+                assert!(game.levels_to_tick().contains(&other));
+                let _ = std::fs::remove_dir_all(&world);
+            });
+        });
+        // No mod listens: the tickets stay as loaded.
+        let mods: horizon_client::mod_api::Mods =
+            vec![ModEntry::new("idle", Box::new(Idle))].into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let tickets = vec![saved("idle", [1, 64, 1], (7, 7))];
+                game.streaming
+                    .load_forced(Default::default(), tickets, |_| true);
+                game.validate_mod_chunk_tickets(game.dim);
+                assert!(game.streaming.forced.contains(&(7, 7)));
+            });
         });
     }
 }

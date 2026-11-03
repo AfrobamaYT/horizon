@@ -725,6 +725,7 @@ impl Game<'_> {
         }
         self.levels.heard_open.push(dim);
         self.native_level_load(dim.id());
+        self.validate_mod_chunk_tickets(dim);
     }
 
     /// The mods hear `dim`'s level close (`LevelEvent.Unload`), once for

@@ -70,6 +70,10 @@ impl ModTickets {
     pub fn chunks(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
         self.per_chunk.keys().copied()
     }
+    /// Whether no mod holds a ticket.
+    pub fn is_empty(&self) -> bool {
+        self.held.is_empty()
+    }
     /// The tickets mod `mod_id` holds, in order.
     pub fn of_mod<'a>(&'a self, mod_id: &'a str) -> impl Iterator<Item = &'a ModTicket> {
         self.held.iter().filter(move |t| t.mod_id == mod_id)
@@ -77,6 +81,89 @@ impl ModTickets {
     /// Every ticket to save.
     pub fn to_save(&self) -> impl Iterator<Item = &ModTicket> {
         self.held.iter()
+    }
+}
+
+/// The tickets a level loaded, as `chunk_tickets_validate` hands them out
+/// (NeoForge's `TicketHelper`): each mod sees and removes only its own,
+/// block owners and entity owners apart.
+#[derive(Debug, Default)]
+pub struct TicketValidation {
+    loaded: Vec<ModTicket>,
+    removed: Vec<ModTicket>,
+}
+
+impl TicketValidation {
+    /// The tickets of a level, all mods'.
+    pub fn new(loaded: Vec<ModTicket>) -> Self {
+        Self {
+            loaded,
+            removed: Vec::new(),
+        }
+    }
+    /// The tickets removed so far, to release.
+    pub fn into_removed(self) -> Vec<ModTicket> {
+        self.removed
+    }
+    /// The calling mod's block tickets: each block position and the chunks it
+    /// holds (`TicketHelper.getBlockTickets`), in position order.
+    pub fn block_tickets(&self) -> Vec<([i32; 3], Vec<[i32; 2]>)> {
+        let mut grouped = std::collections::BTreeMap::<[i32; 3], Vec<[i32; 2]>>::new();
+        for (owner, chunk) in self.own() {
+            if let TicketOwner::Block(pos) = owner {
+                grouped.entry(pos).or_default().push(chunk);
+            }
+        }
+        grouped.into_iter().collect()
+    }
+    /// The calling mod's entity tickets: each entity UUID and the chunks it
+    /// holds (`TicketHelper.getEntityTickets`), in UUID order.
+    pub fn entity_tickets(&self) -> Vec<(u128, Vec<[i32; 2]>)> {
+        let mut grouped = std::collections::BTreeMap::<u128, Vec<[i32; 2]>>::new();
+        for (owner, chunk) in self.own() {
+            if let TicketOwner::Entity(uuid) = owner {
+                grouped.entry(uuid).or_default().push(chunk);
+            }
+        }
+        grouped.into_iter().collect()
+    }
+    /// Remove every ticket the block holds (`removeAllTickets(BlockPos)`):
+    /// how many went.
+    pub fn remove_block_tickets(&mut self, pos: [i32; 3]) -> usize {
+        self.remove(TicketOwner::Block(pos), None)
+    }
+    /// Remove every ticket the entity holds (`removeAllTickets(UUID)`).
+    pub fn remove_entity_tickets(&mut self, uuid: u128) -> usize {
+        self.remove(TicketOwner::Entity(uuid), None)
+    }
+    /// Remove the block's ticket on one chunk (`removeTicket(BlockPos, ...)`):
+    /// whether it held one.
+    pub fn remove_block_ticket(&mut self, pos: [i32; 3], chunk: [i32; 2]) -> bool {
+        self.remove(TicketOwner::Block(pos), Some(chunk)) > 0
+    }
+    /// Remove the entity's ticket on one chunk (`removeTicket(UUID, ...)`).
+    pub fn remove_entity_ticket(&mut self, uuid: u128, chunk: [i32; 2]) -> bool {
+        self.remove(TicketOwner::Entity(uuid), Some(chunk)) > 0
+    }
+    fn own(&self) -> impl Iterator<Item = (TicketOwner, [i32; 2])> + '_ {
+        let me = crate::crash::current_native_mod();
+        self.loaded
+            .iter()
+            .filter(move |t| me == Some(t.mod_id.as_str()))
+            .map(|t| (t.owner, [t.chunk.0, t.chunk.1]))
+    }
+    fn remove(&mut self, owner: TicketOwner, chunk: Option<[i32; 2]>) -> usize {
+        let Some(me) = crate::crash::current_native_mod() else {
+            return 0;
+        };
+        let (gone, kept): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.loaded).into_iter().partition(|t| {
+                t.mod_id == me && t.owner == owner && chunk.is_none_or(|[x, z]| t.chunk == (x, z))
+            });
+        self.loaded = kept;
+        let count = gone.len();
+        self.removed.extend(gone);
+        count
     }
 }
 
@@ -121,5 +208,36 @@ mod tests {
         assert!(tickets.holds((4, 4)));
         assert!(!tickets.holds((8, 8)));
         assert_eq!(tickets.to_save().count(), 1);
+    }
+
+    fn in_mod(id: &'static str) -> crate::crash::NativeModGuard {
+        crate::crash::enter_native_mod(crate::crash::NativeModCall {
+            id,
+            hook: "test",
+            part: None,
+        })
+    }
+
+    #[test]
+    fn validation_shows_and_removes_only_the_callers_tickets() {
+        let (block, entity) = (TicketOwner::Block([1, 2, 3]), TicketOwner::Entity(9));
+        let mut v = TicketValidation::new(vec![
+            ticket("m", block, (0, 0)),
+            ticket("m", block, (0, 1)),
+            ticket("m", entity, (5, 5)),
+            ticket("n", block, (0, 0)),
+        ]);
+        assert!(v.block_tickets().is_empty(), "no caller, no tickets");
+        let guard = in_mod("m");
+        assert_eq!(v.block_tickets(), vec![([1, 2, 3], vec![[0, 0], [0, 1]])]);
+        assert_eq!(v.entity_tickets(), vec![(9, vec![[5, 5]])]);
+        assert!(v.remove_block_ticket([1, 2, 3], [0, 1]));
+        assert!(!v.remove_block_ticket([1, 2, 3], [0, 1]));
+        assert_eq!(v.remove_entity_tickets(9), 1);
+        assert_eq!(v.remove_block_tickets([1, 2, 3]), 1);
+        drop(guard);
+        let _guard = in_mod("n");
+        assert_eq!(v.remove_block_tickets([1, 2, 3]), 1, "its own, not m's");
+        assert_eq!(v.into_removed().len(), 4);
     }
 }
