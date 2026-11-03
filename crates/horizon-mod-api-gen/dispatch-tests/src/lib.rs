@@ -41,6 +41,7 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
+        pub(super) struct FeatureFlags<'a>(pub &'a ());
         pub(super) struct GameRuleActor<'a>(pub(super) &'a str);
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
@@ -63,6 +64,10 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct BlockHit;
         pub(super) struct NativeBlockClick<'a>(pub &'a ());
+        #[derive(Clone, Copy)]
+        pub(super) enum BonemealSource {
+            Interaction,
+        }
         pub(super) struct NativeTriState;
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
@@ -137,6 +142,7 @@ mod tests {
             Owners,
         }
         pub(super) struct NativeLifecycleContext;
+        pub(super) struct RegistrationContext<'a>(pub &'a str);
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]
@@ -392,6 +398,32 @@ mod tests {
     ) -> impl Iterator<Item = &'a P> {
         parts.iter().copied()
     }
+    #[test]
+    fn registration_context_reaches_collectors_in_order_without_a_game_host() {
+        struct Registration(&'static str);
+        #[mod_api::__subscriptions]
+        impl Hooks for Registration {
+            fn component_types(
+                &self,
+                context: &RegistrationContext<'_>,
+                event: &mut ComponentTypesEvent<'_>,
+            ) {
+                assert_eq!(context.0, "bootstrap");
+                event.types.push(self.0.into());
+            }
+        }
+        install(
+            vec![
+                ModEntry::new("first", Box::new(Registration("first:component"))),
+                ModEntry::new("second", Box::new(Registration("second:component"))),
+            ]
+            .into(),
+        );
+        let mut types = Vec::new();
+        dispatch_component_types(&RegistrationContext("bootstrap"), &mut types);
+        assert_eq!(types, ["first:component", "second:component"]);
+    }
+
     #[test]
     fn cfg_disabled_hooks_are_not_subscribed_and_cfg_attr_stays() {
         struct Gated;
