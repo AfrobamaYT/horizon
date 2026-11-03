@@ -2235,20 +2235,9 @@ impl Goal for Breed {
         );
         self.love_time += 1;
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
-            // Llama.getBreedOffspring and finalizeSpawnChildFromBreeding's
-            // experience, from the parent's random. When the game asks
-            // BabyEntitySpawnEvent the experience waits for its answer.
-            let llama = super::llama::is_llama(m.species()).then(|| {
-                let o = super::llama::breed_offspring(m, &p);
-                if !cx.w.ask_mods {
-                    let xp = 1 + m.random.next_int_bound(7).unwrap_or(0);
-                    cx.events.push(MobEvent::Experience {
-                        at: [m.position.x, m.position.y, m.position.z],
-                        amount: xp as u32,
-                    });
-                }
-                Box::new(o)
-            });
+            // The game awards experience after the breeding event is decided.
+            let llama = super::llama::is_llama(m.species())
+                .then(|| Box::new(super::llama::breed_offspring(m, &p)));
             m.extra.in_love = 0;
             m.extra.age = 6000;
             // TurtleBreedGoal.breed: the mother carries an egg, not a baby.

@@ -2651,6 +2651,11 @@ impl PlayerView {
         self.effects.contains(&effect)
     }
 }
+/// `Animal.finalizeSpawnChildFromBreeding`: draw only when mob drops are enabled.
+pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
+    mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
+}
+
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     pub world: &'a World,

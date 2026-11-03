@@ -3077,11 +3077,20 @@ impl Game<'_> {
             m.extra.egg_time = life;
         }
     }
-    /// `Animal.finalizeSpawnChildFromBreeding`'s experience orb: only when the
-    /// `mob_drops` game rule is on.
+    /// `Animal.finalizeSpawnChildFromBreeding`'s single experience orb.
     fn spawn_breeding_orb(&mut self, at: [f64; 3], amount: u32) {
-        if self.ui.rules.bool("mob_drops") {
-            self.add_orb(at, amount);
+        self.add_orb(at, amount);
+    }
+    /// Draw and award breeding XP from the actual parent after the rule check.
+    fn award_breeding_experience(&mut self, parent: u32, at: [f64; 3]) {
+        let mob_drops = self.ui.rules.bool("mob_drops");
+        if let Some(amount) = self
+            .mobs
+            .iter_mut()
+            .find(|m| m.id == parent)
+            .and_then(|m| horizon_client::mobs::breeding_experience(m, mob_drops))
+        {
+            self.spawn_breeding_orb(at, amount);
         }
     }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
@@ -3218,14 +3227,8 @@ impl Game<'_> {
         // TurtleBreedGoal.breed: the goal gave the mother her egg; only the
         // experience is left, and only with mob loot on.
         if matches!(p.species(), Species::Turtle | Species::Frog) {
-            // One `new ExperienceOrb` of 1 to 7 from the mother's random (not
-            // split up as `ExperienceOrb.award` does).
-            if self.ui.rules.bool("mob_drops")
-                && let Some(m) = self.mobs.iter_mut().find(|m| m.id == parent)
-            {
-                let xp = 1 + m.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.add_orb([p.position.x, p.position.y, p.position.z], xp);
-            }
+            // One `new ExperienceOrb`, not split as `ExperienceOrb.award` does.
+            self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
             return;
         }
         // (Mooshroom draws its own coin in getOffspringVariant.)
@@ -3310,17 +3313,10 @@ impl Game<'_> {
                 };
                 child.extra.screaming = parent_screams || self.world.random.next_double() < 0.02;
             }
-            // A llama's baby was drawn in the parent's tick, with the
-            // experience unless BabyEntitySpawnEvent was asked first.
+            // A llama's baby was drawn in the parent's tick.
             if let Some(o) = llama {
                 horizon_client::mobs::llama::apply_offspring(child, &o);
-                if self.asks_mods()
-                    && self.ui.rules.bool("mob_drops")
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == parent)
-                {
-                    let xp = 1 + m.random.next_int_bound(7).unwrap_or(0) as u32;
-                    self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
-                }
+                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             if horizon_client::mobs::equine::is_equine(p.species()) {
@@ -3350,8 +3346,7 @@ impl Game<'_> {
                     };
                 }
                 self.world.random = r;
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             if p.species() == Species::Cat {
@@ -3377,8 +3372,7 @@ impl Game<'_> {
                         c.extra.color = mixed;
                     }
                 }
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             if p.species() == Species::Wolf {
@@ -3405,23 +3399,20 @@ impl Game<'_> {
                         c.extra.color = mixed;
                     }
                 }
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             // Panda.getBreedOffspring: genes from both parents.
             if p.species() == Species::Panda {
                 horizon_client::mobs::panda::inherit(child, &p, q.as_ref().unwrap_or(&p));
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             // Axolotl.getBreedOffspring: the drawn variant, and the baby is persistent.
             if let Some(variant) = axolotl {
                 child.extra.variant = variant;
                 child.persistent = true;
-                let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-                self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
                 return;
             }
             // Nautilus.getBreedOffspring: a tame parent's baby is tame too.
@@ -3456,9 +3447,10 @@ impl Game<'_> {
                     c.extra.color = mixed;
                 }
             }
+        } else {
+            return;
         }
-        let xp = 1 + self.world.random.next_int_bound(7).unwrap_or(0) as u32;
-        self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+        self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
     }
     /// `MobEffectUtil.addEffectToPlayersAround` for an elder guardian:
     /// mining fatigue III for five minutes unless a stronger or longer one

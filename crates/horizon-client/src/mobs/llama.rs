@@ -325,10 +325,29 @@ mod tests {
         assert!(fives > 0 && fives < 200);
     }
     #[test]
-    fn a_server_with_mods_leaves_the_breeding_experience_to_the_game() {
-        // Animal.finalizeSpawnChildFromBreeding draws the experience after
-        // BabyEntitySpawnEvent, so with mods to ask the breed goal leaves it
-        // to the game; without, the goal draws it with the baby.
+    fn breeding_experience_uses_only_the_parent_random_when_drops_are_enabled() {
+        super::super::world::with_test_world(&[], |_, types| {
+            for kind in ["minecraft:llama", "minecraft:horse", "minecraft:cow"] {
+                let mut parent = Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                );
+                parent.random = LegacyRandom::new(0);
+                assert_eq!(super::super::breeding_experience(&mut parent, false), None);
+                assert_eq!(parent.random.state(), 25_214_903_917);
+                assert_eq!(
+                    super::super::breeding_experience(&mut parent, true),
+                    Some(6)
+                );
+                assert_eq!(parent.random.state(), 205_749_139_540_596);
+            }
+        });
+    }
+    #[test]
+    fn breeding_experience_always_waits_for_the_game() {
+        // The game decides the event and gamerule before drawing experience.
         let mut kind = None;
         super::super::world::with_test_world(&[], |_, types| {
             kind = Some(std::sync::Arc::new(types.types["minecraft:llama"].clone()));
@@ -376,7 +395,7 @@ mod tests {
                 let experience = events
                     .iter()
                     .any(|e| matches!(e, MobEvent::Experience { .. }));
-                assert_eq!(experience, !ask_mods, "asking mods: {ask_mods}");
+                assert!(!experience, "asking mods: {ask_mods}");
             }
         });
     }
