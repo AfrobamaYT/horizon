@@ -10945,7 +10945,13 @@ mod tests {
     #[test]
     fn hook_points_stay_hookable() {
         let source = include_str!("native_hooks.rs");
-        let code = source.split("#[cfg(test)]").next().unwrap_or_default();
+        let code = source
+            .split("\nmod tests {")
+            .next()
+            .unwrap()
+            .trim_end()
+            .strip_suffix("#[cfg(test)]")
+            .expect("the tests module has its cfg");
         assert!(code.contains("\npub(crate) const NATIVE_HOOKS_API: u32 = "));
         let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
         for line in lines {
