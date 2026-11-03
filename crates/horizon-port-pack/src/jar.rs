@@ -155,6 +155,7 @@ fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>),
 
 /// A main-section attribute of `META-INF/MANIFEST.MF`.
 fn manifest_value(manifest: &str, key: &str) -> Option<String> {
+    let manifest = manifest.replace("\r\n", "\n").replace('\r', "\n");
     let mut value: Option<String> = None;
     for line in manifest.lines().take_while(|line| !line.is_empty()) {
         if let Some(continuation) = line.strip_prefix(' ') {
@@ -517,6 +518,17 @@ mod tests {
         );
         assert_eq!(read_identity(&folded.0).unwrap().version, "1.2-snapshot");
         assert_eq!(read(&folded.0).unwrap().version, "1.2-snapshot");
+        let lone_cr = synthetic_jar(
+            "cr-version",
+            &[
+                ("META-INF/neoforge.mods.toml", metadata),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\rImplementation-Version: 2.3-\r build\r\rName: file\rImplementation-Version: wrong\r",
+                ),
+            ],
+        );
+        assert_eq!(read_identity(&lone_cr.0).unwrap().version, "2.3-build");
         let named = synthetic_jar(
             "named-section-only",
             &[
