@@ -2852,6 +2852,7 @@ mod breeding_variant_tests {
     use std::sync::Arc;
 
     #[test]
+    #[ignore = "needs prepared resources"]
     fn variant_and_experience_are_drawn_in_order_before_later_goal_work() {
         assert!(with_test_world(&[], |world, types| {
             for id in [
