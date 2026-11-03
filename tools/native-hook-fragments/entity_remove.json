@@ -2,12 +2,12 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "entity_discard",
+      "name": "entity_discard", "side": "server",
       "target": "horizon_client::game::native_entity_remove::Game<'_>::native_entity_discard",
       "receiver": "entity"
     },
     {
-      "name": "entity_remove",
+      "name": "entity_remove", "side": "server",
       "target": "horizon_client::game::native_entity_remove::Game<'_>::native_entity_remove",
       "receiver": "entity"
     }
