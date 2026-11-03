@@ -2417,6 +2417,22 @@ a dimension.
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
   which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
+- `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
+  trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types), a trident a player
+  threw or a firework rocket; `projectile.entity()` goes back. A player's trident and a rocket have an owner and a
+  deflection only: `pickup`, `base_damage` and `critical` read None and their setters return false, and a player's
+  trident always has a player owner (`set_owner` or `deflect` with none or a mob returns false). `owner(host)` resolves the owner to a current `EntityRef` (None when gone
+  or in another level) and `set_owner(host, owner)` takes a player or mob (`Projectile.setOwner`; false for another
+  kind). `deflect(host, deflection, by, new_owner, by_attack, power)` is `Projectile.deflect`: `NativeDeflection::Reverse`
+  draws one float for the turn from the projectile's own random (`Entity.random`, never the level's), `AimDeflect`
+  and `MomentumDeflect` use the look or the known speed (last tick's move, `Entity.getKnownSpeed`) of `by` and do
+  nothing without it; the new owner is set and a fireball's or wind charge's acceleration power becomes 0.1 by an
+  attack, else halves. A wind charge refuses for its first five ticks (`WindCharge.noDeflectTicks`): false, with no
+  change and no draw. `set_owner` on an arrow also allows pickup for a player owner (`AbstractArrow.setOwner`);
+  `deflect` does not (vanilla's `EntityReference` overload). Arrows (and a mob's trident for
+  `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
+  `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
+  server-only as in vanilla.
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.
