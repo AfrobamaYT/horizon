@@ -201,6 +201,7 @@ mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
 mod native_block_entity_refs;
+mod native_block_states;
 mod native_claimed_items;
 mod native_components;
 mod native_criteria;
@@ -214,6 +215,7 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
+mod native_item_places;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
@@ -4007,6 +4009,19 @@ impl Game<'_> {
         let player = self.native_acting_id();
         self.native_item_dropped(player, &thrown.item, thrown.count);
         self.throw_from_eyes(thrown, eye, true);
+    }
+    /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
+    /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
+    pub(super) fn drop_plain(&mut self, stack: ItemStack) {
+        if stack.count == 0 {
+            return;
+        }
+        // LivingEntity.drop swings the main hand for every drop (`PREDICTED` only keeps the
+        // swing from being sent back to the player who made it).
+        self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
+        if let Some(eye) = self.eye_position() {
+            self.throw_from_eyes(stack, eye, false);
+        }
     }
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
     /// along the view direction. `thrown_from_hand` (`drop(stack, true)`, the
@@ -9542,6 +9557,7 @@ impl Game<'_> {
             None => game_of.iter().position(|x| *x == Some(g)),
         };
         let mut menu = Menu::new(kind);
+        menu.brewed_potion_hook = !crate::mod_api::mods().is_empty();
         if matches!(kind, Kind::Mount(_)) {
             menu.mount = self.mount_menu_entity();
         }
@@ -9719,6 +9735,7 @@ impl Game<'_> {
         }
         let crafted = std::mem::take(&mut menu.crafted);
         let brewed = std::mem::take(&mut menu.brewed);
+        let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let equipped = std::mem::take(&mut menu.equipped);
         for (i, stack) in after.into_iter().enumerate() {
             if let Some(g) = game_of[i] {
@@ -9730,6 +9747,12 @@ impl Game<'_> {
             self.offhand = menu.player_item(40).cloned();
         }
         if !predicting {
+            if !brewed_potion_takes.is_empty() {
+                let (player, entity_id) = (self.native_acting_id(), self.own_entity_id());
+                for stack in &brewed_potion_takes {
+                    self.native_player_brewed_potion(player, entity_id, stack);
+                }
+            }
             for stack in dropped {
                 self.player_drop(stack);
             }
@@ -12624,36 +12647,6 @@ impl Game<'_> {
     /// `CauldronInteractions` for the held item aimed at a cauldron.
     fn use_on_cauldron(&mut self, pos: [i32; 3]) -> Result<bool> {
         use horizon_client::cauldron::{self, Outcome};
-        struct Hand<'g, 'a>(&'g mut Game<'a>);
-        impl cauldron::Player for Hand<'_, '_> {
-            fn creative(&self) -> bool {
-                self.0.creative
-            }
-            fn hand(&mut self) -> &mut Option<ItemStack> {
-                self.0.held_mut()
-            }
-            fn add(&mut self, stack: &mut ItemStack) -> bool {
-                let before = stack.count;
-                match self.0.give(stack.clone()) {
-                    None => stack.count = 0,
-                    Some(rest) => stack.count = rest.count,
-                }
-                stack.count < before
-            }
-            fn contains(&self, stack: &ItemStack) -> bool {
-                self.0
-                    .inventory
-                    .iter()
-                    .flatten()
-                    .any(|have| have.same_item_same_components(stack))
-            }
-            fn drop_stack(&mut self, stack: ItemStack) {
-                if let Some(eye) = self.0.eye_position() {
-                    // ItemUtils.createFilledResult: `player.drop(stack, false)`.
-                    self.0.throw_from_eyes(stack, eye, false);
-                }
-            }
-        }
         let registry = self.pack.assets.registry;
         let Some((state, under_water)) = self.cauldron_at(pos) else {
             return Ok(false);
@@ -12666,7 +12659,9 @@ impl Game<'_> {
             return Ok(false);
         }
         let removes_dye = cauldron::removes_dye(self.items(), &held.item);
-        let result = cauldron::interact(&state, under_water, removes_dye, &mut Hand(self));
+        let slot = self.held_slot();
+        let mut hand = powder_snow::HeldSlot { game: self, slot };
+        let result = cauldron::interact(&state, under_water, removes_dye, &mut hand);
         if result.outcome == Outcome::Pass {
             return Ok(false);
         }
@@ -18125,7 +18120,15 @@ impl Game<'_> {
                     }
                     horizon_client::ram_limit::frame();
                     self.limit_frame();
-                    self.pause = self.pauses_game();
+                    let paused = self.pauses_game();
+                    if paused != self.pause {
+                        let mut cancel = false;
+                        self.native_client_pause_change_pre(paused, &mut cancel);
+                        if !cancel {
+                            self.pause = paused;
+                            self.native_client_pause_change_post(paused);
+                        }
+                    }
                     if let Some(server) = &self.integrated {
                         server.set_paused(self.pause);
                         server.set_distances(
