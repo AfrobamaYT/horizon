@@ -166,6 +166,7 @@ fn another_guests_services_work_during_a_turn() {
 
     with_guests(|game| {
         game.build_registries();
+        game.level.player_uuid = Some([0, 0, 0, 12]);
         let mut tree = adv::Tree::default();
         tree.list.push(adv::Advancement {
             id: "turns:probe".into(),
@@ -219,6 +220,9 @@ fn another_guests_services_work_during_a_turn() {
             assert!(game.native_trigger_criterion(12, "turns:probe", |_| true));
             assert!(game.native_run_command("give guest13 minecraft:diamond 2"));
             assert!(game.native_run_command("give @a[name=guest13] minecraft:diamond 1"));
+            assert!(game.native_run_command(
+                "execute as 00000000-0000-0000-0000-00000000000d run give @s minecraft:diamond 1"
+            ));
             assert!(game.native_run_command("give guest12 minecraft:apple 1"));
             assert_eq!(
                 game.inventory[0],
@@ -230,6 +234,12 @@ fn another_guests_services_work_during_a_turn() {
                 assert!(!game.native_trigger_criterion(12, "turns:probe", |_| true));
                 assert!(!game.native_run_command("give guest12 minecraft:dirt 1"));
                 assert!(!game.native_run_command("give @a[name=guest12] minecraft:dirt 1"));
+                let inventory = game.inventory.clone();
+                // An empty execute fork succeeds, but must not touch acting B.
+                assert!(game.native_run_command(
+                    "execute as 00000000-0000-0000-0000-00000000000c run give @s minecraft:dirt 1"
+                ));
+                assert_eq!(game.inventory, inventory);
                 // The native-only filter is restored, including after failure:
                 // ordinary names, UUIDs and selectors still see the outer guest.
                 for selector in [
@@ -271,7 +281,7 @@ fn another_guests_services_work_during_a_turn() {
         let b = host.hub.guest(13).unwrap();
         assert!(b.advancements.has("turns:probe", "seen"));
         assert_eq!(b.ender_items[0], Some(stone));
-        assert_eq!(b.inventory[0], Some(ItemStack::new("minecraft:diamond", 3)));
+        assert_eq!(b.inventory[0], Some(ItemStack::new("minecraft:diamond", 4)));
     });
 }
 
