@@ -246,7 +246,7 @@ pub fn swallowable(m: &Mob, item: &str) -> bool {
     m.kind.tempt.iter().any(|t| t == item)
 }
 pub fn has_body(m: &Mob) -> bool {
-    m.extra.body().is_some()
+    m.extra.body_id().is_some()
 }
 
 #[cfg(test)]

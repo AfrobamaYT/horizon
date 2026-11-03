@@ -279,12 +279,12 @@ mod tests {
         source.extra.set_body_stack(Some(armor));
         let mut zombie = mob(2, "minecraft:zombie_villager");
         convert_to_zombie_villager(&source, &mut zombie);
-        assert_eq!(zombie.extra.body().as_deref(), Some("minecraft:wolf_armor"));
+        assert_eq!(zombie.extra.body_id(), Some("minecraft:wolf_armor"));
         assert_eq!(zombie.extra.body_damage(), 7);
         assert_eq!(zombie.extra.body_stack(), source.extra.body_stack());
         let mut cured = mob(3, "minecraft:villager");
         convert_to_villager(&zombie, &mut cured);
-        assert_eq!(cured.extra.body().as_deref(), Some("minecraft:wolf_armor"));
+        assert_eq!(cured.extra.body_id(), Some("minecraft:wolf_armor"));
         assert_eq!(cured.extra.body_damage(), 7);
         assert_eq!(cured.extra.body_stack(), source.extra.body_stack());
     }

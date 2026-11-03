@@ -892,7 +892,7 @@ impl Game<'_> {
                     "temper": m.extra.variant3,
                     "chested": m.extra.chested,
                     "head": m.extra.head.as_deref(),
-                    "body": m.extra.body().as_deref(),
+                    "body": m.extra.body_id(),
                     "warden": horizon_client::mobs::warden::describe(m),
                 });
                 // Set apart from the json! above, which would otherwise pass
@@ -5979,7 +5979,7 @@ impl Game<'_> {
                 if item == "minecraft:shears"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.body().is_some()
+                    && m.extra.body_id().is_some()
                     && !sneaking =>
             {
                 armor_drop = m.equipment_stacks()[6].clone();
@@ -6006,7 +6006,7 @@ impl Game<'_> {
                 if item == "minecraft:wolf_armor"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.body().is_none()
+                    && m.extra.body_id().is_none()
                     && !m.is_baby() =>
             {
                 let mut body = ItemStack::new(item.as_str(), 1);
@@ -6023,7 +6023,7 @@ impl Game<'_> {
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
                     && m.extra.sitting
-                    && m.extra.body().is_some()
+                    && m.extra.body_id().is_some()
                     && m.extra.body_damage() > 0 =>
             {
                 m.extra.set_body_damage(

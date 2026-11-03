@@ -243,7 +243,7 @@ impl Game<'_> {
         } else if item.ends_with("_horse_armor")
             && species == Species::Horse
             && tamed
-            && m.extra.body().is_none()
+            && m.extra.body_id().is_none()
         {
             m.extra
                 .set_body_stack(held.map(|s| ItemStack { count: 1, ..s }));

@@ -1164,12 +1164,6 @@ pub struct Extra {
 }
 impl Extra {
     /// The body item id (`getItemBySlot(BODY)`).
-    pub fn body(&self) -> Option<Arc<str>> {
-        self.equipment
-            .get(horizon_items::equipment::BODY)
-            .map(|s| s.item.clone())
-    }
-    /// The body item id as a string.
     pub fn body_id(&self) -> Option<&str> {
         self.body_stack().map(|s| &*s.item)
     }
@@ -3251,7 +3245,7 @@ impl Mob {
         // llama, camel, the skeleton and zombie horses — wear nothing.
         if let Some(damage) = armor_hit
             && self.species() == Species::Horse
-            && self.extra.body().is_some()
+            && self.extra.body_id().is_some()
         {
             self.outbox.push(MobEvent::ArmorHurt {
                 mob: self.id,

@@ -270,7 +270,7 @@ impl Game<'_> {
         } else {
             body.as_ref()
                 .and_then(Option::as_ref)
-                .filter(|_| m.extra.body().is_none())
+                .filter(|_| m.extra.body_id().is_none())
         };
         let sound = if saddle_put_on && nautilus::is_nautilus(m.species()) {
             // AbstractNautilus.getEquipSound: its own saddle sounds.

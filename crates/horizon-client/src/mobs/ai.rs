@@ -1174,16 +1174,16 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    ![
-        &m.extra.head,
-        &m.extra.chest,
-        &m.extra.legs,
-        &m.extra.feet,
-        &m.extra.body(),
+    [
+        m.extra.head.as_deref(),
+        m.extra.chest.as_deref(),
+        m.extra.legs.as_deref(),
+        m.extra.feet.as_deref(),
+        m.extra.body_id(),
     ]
     .into_iter()
     .flatten()
-    .any(|item| immune.is_some_and(|t| t.contains(&**item)))
+    .any(|item| immune.is_some_and(|t| t.contains(item)))
 }
 /// `Mob.playAmbientSound` on demand: a spawn egg or a mob bucket just placed `m`.
 pub fn ambient_sound(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {

@@ -133,7 +133,7 @@ impl Game<'_> {
         }
         if item == "minecraft:shears" && sulfur_cube::has_body(m) {
             // shear: out comes the block, and nothing is swallowed for 5 s.
-            let sheared = self.mobs[index].extra.body();
+            let sheared = self.mobs[index].extra.body_stack().map(|s| s.item.clone());
             self.eject_sulfur_block(index);
             self.mobs[index].extra.ints[3] = sulfur_cube::PICKUP_TIMER;
             self.sulfur_sound(index, "entity.sulfur_cube.eject");
@@ -151,7 +151,7 @@ impl Game<'_> {
         }
         if sulfur_cube::swallowable(m, item) {
             // equipItem: not the same block again; the old one comes out.
-            if m.extra.body().as_deref() == Some(item) {
+            if m.extra.body_id() == Some(item) {
                 return false;
             }
             self.eject_sulfur_block(index);

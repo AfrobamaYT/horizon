@@ -190,7 +190,7 @@ mod tests {
                 Some(crate::mobs::leash::Holder::Knot([3, 71, -3]))
             );
             assert_eq!(st.extra.mount, Some(7));
-            assert_eq!(st.extra.body().as_deref(), Some("minecraft:wolf_armor"));
+            assert_eq!(st.extra.body_id(), Some("minecraft:wolf_armor"));
             assert_eq!(st.extra.body_damage(), 7);
             assert_eq!(st.equipment_stacks()[1], Some(offhand));
             assert_eq!(st.extra.body_stack(), s.extra.body_stack());
@@ -209,7 +209,7 @@ mod tests {
             assert!(
                 bare.extra.main_hand.is_none()
                     && bare.extra.chest.is_none()
-                    && bare.extra.body().is_none()
+                    && bare.extra.body_id().is_none()
             );
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));
         });

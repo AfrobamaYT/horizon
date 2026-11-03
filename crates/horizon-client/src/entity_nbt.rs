@@ -3495,10 +3495,7 @@ mod tests {
             ),
         ]);
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
-        assert_eq!(
-            m.extra.body().as_deref(),
-            Some("minecraft:diamond_horse_armor")
-        );
+        assert_eq!(m.extra.body_id(), Some("minecraft:diamond_horse_armor"));
         assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
         let saved = mob_to_nbt(&m, [0; 4], Some(&raw), None);
         let eq = saved.get("equipment").unwrap();
@@ -3547,7 +3544,7 @@ mod tests {
             ),
         ]);
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
-        assert_eq!(m.extra.body().as_deref(), Some("minecraft:wolf_armor"));
+        assert_eq!(m.extra.body_id(), Some("minecraft:wolf_armor"));
         assert_eq!(m.extra.body_damage(), 9);
         assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
     }
@@ -5964,10 +5961,7 @@ mod held_item_name_tests {
         let raw = mob_to_nbt(&horse, [1, 2, 3, 4], None, None);
         let mut horse = mob_from_nbt(&raw, &types, 2, None).unwrap();
         assert_eq!(horse.extra.head.as_deref(), Some("minecraft:iron_helmet"));
-        assert_eq!(
-            horse.extra.body().as_deref(),
-            Some("minecraft:diamond_horse_armor")
-        );
+        assert_eq!(horse.extra.body_id(), Some("minecraft:diamond_horse_armor"));
         assert_eq!(horse.equipment_stacks()[6], Some(armor.clone()));
         let mut chances = [0.0; 8];
         chances[drops::SLOTS.iter().position(|s| *s == "head").unwrap()] = 2.0;
