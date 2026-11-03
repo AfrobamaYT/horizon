@@ -5729,6 +5729,20 @@ impl Game<'_> {
     pub(super) fn native_level_load(&mut self, dimension: &str) {
         mod_api::dispatch_level_load(self, dimension);
     }
+    /// `dimension`'s level has loaded its saved chunk tickets (NeoForge's
+    /// `LoadingValidationCallback.validateTickets`), before its first tick and
+    /// after `native_level_load`, once for each open. `validation` holds the
+    /// calling mod's tickets, block owners and entity owners apart; a mod
+    /// removes the ones that no longer hold (a machine that is gone), and
+    /// they stop forcing their chunks. Asked only while a mod holds tickets
+    /// in the level. Server-side.
+    pub(super) fn native_chunk_tickets_validate(
+        &mut self,
+        dimension: &str,
+        validation: &mut horizon_client::mod_chunk_tickets::TicketValidation,
+    ) {
+        mod_api::dispatch_chunk_tickets_validate(self, dimension, validation);
+    }
     /// `dimension`'s level closed (NeoForge's `LevelEvent.Unload`, posted after
     /// `level.close()` in `MinecraftServer.stopServer`), after its last save:
     /// drop what the mod kept for it. A level other than the Overworld closes

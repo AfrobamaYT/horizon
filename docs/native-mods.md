@@ -2480,6 +2480,16 @@ the server entity and level reads available on a client.
   Tickets are saved in `data/horizon/mod_chunk_tickets.dat`, never in vanilla's `chunk_tickets.dat`; when a world loads,
   the tickets of a mod that isn't installed are discarded. There is no non-ticking ticket. Outside a mod's hook, and for a
   stale handle or a chunk past the world's bounds, the calls return `false` or `None`.
+- `chunk_tickets_validate` (NeoForge's `LoadingValidationCallback.validateTickets`, server) fires once for each level
+  that opens, after `level_load`, before its first tick; it is told only while the level's save held mod tickets, and
+  only to mods that implement it. It is asked about the tickets read from the save when the level loaded, before they
+  take hold: a ticket a mod adds in `level_load` is not among them and is never removed by it. The tickets that
+  survive then force their chunks. `event.validation` shows the calling mod's own tickets:
+  `block_tickets()` gives each block position with the chunks it holds, `entity_tickets()` each entity UUID with its
+  chunks. `remove_block_tickets(pos)` and `remove_entity_tickets(uuid)` remove everything an owner holds (and return how
+  many), `remove_block_ticket(pos, chunk)` and `remove_entity_ticket(uuid, chunk)` one ticket. A removed ticket never
+  forces its chunk and is left out of the next save. Every call acts as the calling mod: it cannot see or remove another
+  mod's tickets or removals.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
