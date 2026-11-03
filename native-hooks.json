@@ -597,14 +597,6 @@
       }
     },
     {
-      "name": "key",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_key",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "command",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_command",
