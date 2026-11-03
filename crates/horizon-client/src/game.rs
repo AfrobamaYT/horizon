@@ -4948,7 +4948,14 @@ impl Game<'_> {
                     .filter(|&(_, spectator)| game_mode::loads_chunks(rule, spectator))
                     .map(|(chunk, _)| chunk)
                     .collect(),
-                forced: self.streaming.forced.iter().copied().collect(),
+                // The chunks that tick: a loaded-only ticket (`ticking` false) holds none.
+                forced: self
+                    .streaming
+                    .forced
+                    .iter()
+                    .filter(|chunk| !self.streaming.non_ticking.contains(chunk))
+                    .copied()
+                    .collect(),
                 // Filled from the `PORTAL` tickets by `update`.
                 portal: Vec::new(),
                 view_distance: self.settings.render_distance.clamp(2, 32),

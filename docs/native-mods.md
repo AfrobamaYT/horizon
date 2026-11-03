@@ -2394,13 +2394,16 @@ a dimension.
   blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
   `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
   is the world's own state: it is saved with the level and stays until `/forceload remove`.
-- `chunk.set_mod_forced(host, owner, forced)` (NeoForge's `TicketController.forceChunk`, one implicit controller per mod)
-  holds or releases a chunk for the calling mod and returns whether its tickets changed. `owner` is a `NativeTicketOwner`,
+- `chunk.set_mod_forced(host, owner, forced, ticking)` (NeoForge's `TicketController.forceChunk`, one implicit controller
+  per mod) holds or releases a chunk for the calling mod and returns whether its tickets changed. `owner` is a `NativeTicketOwner`,
   `Block([x, y, z])` or `Entity(uuid)`. A ticket is scoped by mod, owner and chunk, so two owners in one chunk release
-  separately; the chunk stays loaded, entity ticking and saved, and its level keeps ticking, while any ticket or
-  `/forceload` holds it. `level.mod_forced_chunks(host)` lists the calling mod's tickets as `(owner, [x, z])`.
+  separately; the chunk stays loaded and saved, and its level keeps ticking, while any ticket or `/forceload` holds it.
+  It is entity ticking while `/forceload` or a ticket with `ticking` holds it; a chunk held only by `ticking: false`
+  tickets is kept loaded and does not tick. An owner holds the two kinds on one chunk apart, and a loaded-only chunk
+  loads with its neighbours as a ticking one does. `level.mod_forced_chunks(host)` lists the calling mod's tickets as
+  `(owner, [x, z], ticking)`.
   Tickets are saved in `data/horizon/mod_chunk_tickets.dat`, never in vanilla's `chunk_tickets.dat`; when a world loads,
-  the tickets of a mod that isn't installed are discarded. There is no non-ticking ticket. Outside a mod's hook, and for a
+  the tickets of a mod that isn't installed are discarded. Outside a mod's hook, and for a
   stale handle or a chunk past the world's bounds, the calls return `false` or `None`.
 - `chunk_tickets_validate` (NeoForge's `LoadingValidationCallback.validateTickets`, server) fires once for each level
   that opens, after its saved tickets load and `level_load`, before its first tick; it is told only while a mod holds

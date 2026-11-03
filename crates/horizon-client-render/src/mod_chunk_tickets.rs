@@ -20,13 +20,17 @@ pub struct ModTicket {
     pub mod_id: String,
     pub owner: TicketOwner,
     pub chunk: (i32, i32),
+    /// Whether the chunk ticks entities (`forceChunk`'s `ticking`) or is only
+    /// kept loaded. One owner holds the two kinds apart.
+    pub ticking: bool,
 }
 
 /// The tickets of one level.
 #[derive(Debug, Default)]
 pub struct ModTickets {
     held: BTreeSet<ModTicket>,
-    per_chunk: HashMap<(i32, i32), u32>,
+    /// Per chunk: how many tickets hold it, and how many of those tick.
+    per_chunk: HashMap<(i32, i32), (u32, u32)>,
 }
 
 impl ModTickets {
@@ -44,19 +48,22 @@ impl ModTickets {
     }
     /// Hold `ticket`: true when it was new.
     pub fn insert(&mut self, ticket: ModTicket) -> bool {
-        let chunk = ticket.chunk;
+        let (chunk, ticking) = (ticket.chunk, ticket.ticking);
         let new = self.held.insert(ticket);
         if new {
-            *self.per_chunk.entry(chunk).or_default() += 1;
+            let counts = self.per_chunk.entry(chunk).or_default();
+            counts.0 += 1;
+            counts.1 += u32::from(ticking);
         }
         new
     }
     /// Release `ticket`: true when it was held.
     pub fn remove(&mut self, ticket: &ModTicket) -> bool {
         let held = self.held.remove(ticket);
-        if held && let Some(count) = self.per_chunk.get_mut(&ticket.chunk) {
-            *count -= 1;
-            if *count == 0 {
+        if held && let Some(counts) = self.per_chunk.get_mut(&ticket.chunk) {
+            counts.0 -= 1;
+            counts.1 -= u32::from(ticket.ticking);
+            if counts.0 == 0 {
                 self.per_chunk.remove(&ticket.chunk);
             }
         }
@@ -65,6 +72,12 @@ impl ModTickets {
     /// Whether any mod holds `chunk`.
     pub fn holds(&self, chunk: (i32, i32)) -> bool {
         self.per_chunk.contains_key(&chunk)
+    }
+    /// Whether a ticket that ticks holds `chunk`.
+    pub fn ticks(&self, chunk: (i32, i32)) -> bool {
+        self.per_chunk
+            .get(&chunk)
+            .is_some_and(|counts| counts.1 > 0)
     }
     /// The chunks any mod holds.
     pub fn chunks(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
@@ -176,6 +189,7 @@ mod tests {
             mod_id: mod_id.into(),
             owner,
             chunk,
+            ticking: true,
         }
     }
 
@@ -196,6 +210,25 @@ mod tests {
         assert!(tickets.remove(&ticket("n", a, (0, 0))));
         assert!(!tickets.holds((0, 0)));
         assert_eq!(tickets.chunks().count(), 0);
+    }
+
+    #[test]
+    fn a_ticking_ticket_makes_the_chunk_tick_while_any_holds_it() {
+        let mut tickets = ModTickets::default();
+        let owner = TicketOwner::Entity(1);
+        let quiet = ModTicket {
+            ticking: false,
+            ..ticket("m", owner, (2, 2))
+        };
+        assert!(tickets.insert(quiet.clone()));
+        assert!(tickets.holds((2, 2)) && !tickets.ticks((2, 2)));
+        // The same owner holds both kinds apart.
+        assert!(tickets.insert(ticket("m", owner, (2, 2))));
+        assert!(tickets.ticks((2, 2)));
+        assert!(tickets.remove(&ticket("m", owner, (2, 2))));
+        assert!(tickets.holds((2, 2)) && !tickets.ticks((2, 2)));
+        assert!(tickets.remove(&quiet));
+        assert!(!tickets.holds((2, 2)));
     }
 
     #[test]
