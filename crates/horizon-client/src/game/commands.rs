@@ -2636,7 +2636,7 @@ impl Game<'_> {
         let table = save::text(tag.get("LootTable"));
         let rolled = match (table, entity) {
             (Some(table), BlockEntity::Chest(slots)) if slots.iter().all(Option::is_none) => {
-                let loot = structure_blocks::loot_data(&self.options.resources, &self.pack_files());
+                let loot = self.server_loot.clone();
                 let at = Vec3::new(f64::from(key.0), f64::from(key.1), f64::from(key.2));
                 let biome = self.biome_name_at(at).unwrap_or_default();
                 Some(structure_blocks::roll_container(

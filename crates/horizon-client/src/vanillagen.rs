@@ -39,7 +39,7 @@ pub struct VanillaTerrain {
     /// Generator biome index -> client biome table index.
     biome_map: Vec<u16>,
     /// Loot tables for generated containers.
-    loot: Option<Arc<horizon_world::loot::LootData>>,
+    loot: std::sync::RwLock<Option<Arc<horizon_world::loot::LootData>>>,
     structure_mobs: Arc<StructureMobFinalizer>,
     /// A worker for structure queries from the game thread.
     query: std::sync::Mutex<Option<GeneratorWorker>>,
@@ -117,6 +117,11 @@ fn add_default_block_entities(kinds: &[Option<&str>], out: &mut Chunk, raw: &mut
 }
 
 impl VanillaTerrain {
+    /// Publish the server loot snapshot for newly generated containers.
+    pub fn set_loot(&self, loot: Option<Arc<horizon_world::loot::LootData>>) {
+        *self.loot.write().unwrap_or_else(|e| e.into_inner()) = loot;
+    }
+
     /// A mod's sign takes its template's block entity, whatever its name: a
     /// feature that places one leaves it with text to edit.
     pub fn add_mod_signs(&mut self, facts: &crate::blocks::BlockFacts) {
@@ -313,7 +318,7 @@ impl VanillaTerrain {
         Ok(Self {
             generator,
             biome_map,
-            loot,
+            loot: std::sync::RwLock::new(loot),
             structure_mobs: Arc::new(StructureMobFinalizer::new(
                 dir.parent().unwrap_or(dir).to_owned(),
                 dimension,
@@ -841,7 +846,8 @@ impl ChunkGenerator for VanillaTerrain {
         if chunk.block_entities.is_empty() {
             return Vec::new();
         }
-        let (made, _rolled) = crate::structure_blocks::block_entities(chunk, self.loot.as_deref());
+        let loot = self.loot.read().unwrap_or_else(|e| e.into_inner());
+        let (made, _rolled) = crate::structure_blocks::block_entities(chunk, loot.as_deref());
         made.into_iter()
             .filter(|((x, y, z), _)| writes.iter().any(|(p, _)| *p == [*x, *y, *z]))
             .collect()
@@ -1040,8 +1046,13 @@ impl ChunkGenerator for VanillaTerrain {
             VanillaProto::Failed(x, z) => return Chunk::with_layout(x, z, self.layout()),
         };
         let mut out = self.column(&chunk);
-        let (block_entities, rolled_loot) =
-            crate::structure_blocks::block_entities(&chunk, self.loot.as_deref());
+        let (block_entities, rolled_loot) = crate::structure_blocks::block_entities(
+            &chunk,
+            self.loot
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_deref(),
+        );
         out.block_entities = block_entities;
         // The block entities Horizon does not model (decorated pots with their
         // sherds and loot table) stay as placed, like a

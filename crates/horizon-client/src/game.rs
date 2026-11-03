@@ -8,9 +8,10 @@
 /// which borrows stay disjoint from.
 macro_rules! world_items {
     ($s:ident) => {
-        match &$s.world_tables {
-            Some(t) => &t.items,
-            None => $s.res.items(),
+        match (&$s.server_items, &$s.world_tables) {
+            (Some(items), _) => items,
+            (None, Some(t)) => &t.items,
+            (None, None) => $s.res.items(),
         }
     };
 }
@@ -2843,6 +2844,9 @@ struct Game<'a> {
     /// The world's data packs' content tables, when it has packs (`None`
     /// keeps `Resources.rest`'s own in use).
     world_tables: Option<WorldTables>,
+    /// Server-owned loot and item snapshots, independent of client preloads.
+    server_loot: Option<Arc<horizon_world::loot::LootData>>,
+    server_items: Option<Items>,
     /// The world is superflat (`ServerLevel.isFlat`, for every dimension).
     world_flat: bool,
     /// The world is the Debug preset (`Level.isDebug`, for every dimension): its blocks
@@ -4668,10 +4672,7 @@ impl Game<'_> {
             loot: if self.remote.is_some() {
                 None
             } else {
-                horizon_client::structure_blocks::loot_data(
-                    &self.options.resources,
-                    &pack_files(&self.world_tables),
-                )
+                self.server_loot.clone()
             },
             registry: self.pack.assets.registry,
             rules,
@@ -12313,10 +12314,8 @@ impl Game<'_> {
         }
         // Warm the loot data with this world's packs before chunks decode
         // (`save::roll_loaded_loot` reads the cached copy).
-        let _ = horizon_client::structure_blocks::world_loot_data(
-            &self.options.resources,
-            &pack_files(&self.world_tables),
-        );
+        self.load_server_loot();
+        save.set_loot(self.server_loot.clone());
         // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
         // its chunks and players are.
         self.native_server_data_loaded(false);
@@ -12660,6 +12659,8 @@ impl Game<'_> {
             return self.leave_server(None);
         }
         // The save screen has finished every write before releasing storage.
+        self.server_loot = None;
+        self.server_items = None;
         self.session_lock = None;
         self.world_icon = None;
         horizon_client::crash::clear_detail("World");
@@ -19372,6 +19373,8 @@ impl<'a> Game<'a> {
             rcon_source: false,
             server_lists: None,
             world_tables: None,
+            server_loot: None,
+            server_items: None,
             cmds: Default::default(),
             ui: chat::UiState::new(),
             combat: Default::default(),
@@ -19693,10 +19696,7 @@ impl Game<'_> {
     /// The content tables the world plays with: its data packs' over the
     /// game's own when it has packs, `Resources.rest`'s own otherwise.
     fn items(&self) -> &Items {
-        match &self.world_tables {
-            Some(t) => &t.items,
-            None => self.res.items(),
-        }
+        world_items!(self)
     }
     fn recipes(&self) -> &Recipes {
         match &self.world_tables {
@@ -19786,6 +19786,37 @@ impl Game<'_> {
             data_maps,
         })
     }
+    /// Build and publish one server snapshot for this world load or reload.
+    fn load_server_loot(&mut self) {
+        self.server_items = None;
+        let overlay = pack_files(&self.world_tables);
+        let loot = if horizon_client::mod_api::mods().is_empty() {
+            horizon_client::structure_blocks::world_loot_data(&self.options.resources, &overlay)
+        } else {
+            match horizon_world::loot::LootData::load(&self.options.resources, &overlay) {
+                Ok(mut loot) => {
+                    loot.apply_native_table_loads();
+                    Some(Arc::new(loot))
+                }
+                Err(e) => {
+                    log::warn!("Horizon: server loot tables unavailable: {e}");
+                    None
+                }
+            }
+        };
+        if !horizon_client::mod_api::mods().is_empty()
+            && let Some(loot) = &loot
+        {
+            let mut items = self.items().clone();
+            items.set_loot_tables(loot.tables().clone());
+            self.server_items = Some(items);
+        }
+        if let Some(terrain) = self.end.locator() {
+            terrain.set_loot(loot.clone());
+        }
+        self.server_loot = loot;
+    }
+
     /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
     /// that attach parts to a block or item it doesn't have are an error.
     pub(super) fn resolve_parts(&self) -> Result<()> {
@@ -19813,6 +19844,9 @@ impl Game<'_> {
         }
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
+        self.load_server_loot();
+        self.save.set_loot(self.server_loot.clone());
+        self.levels.set_loot(self.server_loot.clone());
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players

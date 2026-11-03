@@ -1388,6 +1388,7 @@
       "name": "loot_table_load",
       "version": 1,
       "target": "horizon_world::loot::native_loot_table_load",
+      "side": "server",
       "mod_api": {
         "contract": "collect",
         "out": "table"
