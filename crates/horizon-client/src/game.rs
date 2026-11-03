@@ -14701,20 +14701,9 @@ impl Game<'_> {
             let moved = self
                 .respawn_config
                 .is_none_or(|c| (c.dim, c.pos) != (config.dim, config.pos));
-            let mut cancel = false;
-            if moved
-                && let (Some(player), Some(name)) =
-                    (self.lan_acting_uuid, self.lan_acting_name.clone())
-            {
-                self.native_player_spawn_point_set(
-                    player,
-                    &name,
-                    self.dim.id(),
-                    head,
-                    "bed",
-                    &mut cancel,
-                );
-            }
+            // `canSetSpawn` calls the setter every time, the same bed too (it
+            // refreshes the angle).
+            let cancel = self.spawn_point_change(self.dim, head, false);
             if !cancel {
                 self.respawn_config = Some(config);
                 if moved {
@@ -21614,6 +21603,7 @@ pub fn run_with() -> Result<()> {
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
+    let _ = horizon_client::health::USE_TOTEM.set(native_hooks::use_totem);
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
     horizon_threads::put_helpers_behind();
