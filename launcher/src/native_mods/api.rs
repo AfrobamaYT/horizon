@@ -3,15 +3,6 @@ use super::Bundle;
 use std::fs;
 use std::path::Path;
 
-/// Match horizon-mixins crate IDs before using them as folder names.
-pub(super) fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 100
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
-
 pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     text.parse().map_err(|e| format!("{}: {e}", path.display()))

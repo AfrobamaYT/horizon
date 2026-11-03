@@ -31,6 +31,7 @@ mod home;
 mod home_tabs;
 mod import_page;
 mod instance_icons;
+mod mod_icons;
 mod instance_mods;
 mod instances_page;
 mod internet;

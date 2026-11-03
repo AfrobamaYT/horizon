@@ -12,7 +12,6 @@
 use crate::backend;
 use crate::browser::java;
 use crate::native_mods::{self, Bundle, INSTALLED};
-use horizon_mods::index::native as format;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
