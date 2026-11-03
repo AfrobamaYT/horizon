@@ -415,7 +415,7 @@ mod tests {
         chunk::Chunk,
         items::ItemStack,
         mod_api::{
-            BlockSide, FLUIDS, FluidStack, Host, ITEMS, ItemResource, NativeAuthority,
+            BlockSide, FLUIDS, FluidStack, ITEMS, ItemResource, NativeAuthority,
             NativeBlockUpdateFlags, Transaction,
         },
     };
@@ -905,9 +905,7 @@ mod mod_capability_tests {
     use horizon_client::chunk::Chunk;
     use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
     use horizon_client::mod_api::part_tests::{CHEMICALS, ChemTank, Chemical, game_thread};
-    use horizon_client::mod_api::{
-        BlockSide, Host, HostTransaction, ResourceHandler, move_resources,
-    };
+    use horizon_client::mod_api::{BlockSide, HostTransaction, ResourceHandler, move_resources};
     use horizon_world::nbt::{Compound, Tag};
     use std::sync::Arc;
 

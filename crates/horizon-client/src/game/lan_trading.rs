@@ -804,7 +804,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trade_hook_fired_by_a_real_select_cannot_write_the_open_trade() {
-        use horizon_client::mod_api::{self, Hooks, Host, TradeSelectEvent};
+        use horizon_client::mod_api::{self, Hooks, TradeSelectEvent};
         struct Observer(Seen);
         impl Hooks for Observer {
             fn trade_select(

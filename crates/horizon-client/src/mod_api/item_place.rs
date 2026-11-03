@@ -10,8 +10,8 @@
 //! answering more than it was asked is a mod bug, named once, and the write aborts.
 use super::HostTransaction;
 use super::{
-    Capability, Direction, ENTITY_ITEMS, Hand, Host, ITEMS, ItemResource, ItemStack, LevelRef,
-    MenuRef, MenuSlotBacking, ResourceHandler, Transaction, backend_mut_of, backend_of,
+    Capability, Direction, ENTITY_ITEMS, Hand, ITEMS, ItemResource, ItemStack, LevelRef, MenuRef,
+    MenuSlotBacking, ResourceHandler, Transaction, backend_mut_of, backend_of,
 };
 use std::{collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
 

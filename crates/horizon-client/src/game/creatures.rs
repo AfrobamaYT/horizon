@@ -7963,7 +7963,7 @@ mod breeding_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn breeding_announces_the_orb_before_the_lower_id_child() {
-        use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks, Host};
+        use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks};
         use std::sync::{
             Arc, Mutex,
             atomic::{AtomicBool, Ordering},
@@ -7976,7 +7976,7 @@ mod breeding_tests {
         impl Hooks for Observer {
             fn baby_entity_spawn(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn crate::mod_api::ServerHost,
                 _: &mut BabyEntitySpawnEvent<'_>,
             ) -> Flow {
                 if self.cancel.load(Ordering::SeqCst) {
@@ -7987,7 +7987,7 @@ mod breeding_tests {
             }
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn crate::mod_api::ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 self.joins
@@ -8541,7 +8541,7 @@ mod living_drops_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
-        use horizon_client::mod_api::{Flow, Hooks, Host, LivingDropsEvent};
+        use horizon_client::mod_api::{Flow, Hooks, LivingDropsEvent};
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, Ordering},

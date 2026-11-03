@@ -773,7 +773,13 @@ impl GameLevel<'_> {
         state: BlockStateId,
         valid: &mut Option<bool>,
     ) {
-        mod_api::dispatch_is_valid_bonemeal_target(self, dimension, pos, state, valid);
+        mod_api::dispatch_is_valid_bonemeal_target(
+            super::mod_api_host::level_side(self),
+            dimension,
+            pos,
+            state,
+            valid,
+        );
     }
 
     /// `BonemealableBlock.isBonemealSuccess` for a block that answered

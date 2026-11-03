@@ -2049,8 +2049,6 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
     host.backend().map(|wrapper| wrapper.open())
 }
 
-/// The write backend behind `host`, or `None` where the host has none; the
-/// caller answers its typed refusal instead of running on.
 /// The logical side on which a hook is executing.
 ///
 /// A read-only hook receives only the base host, which cannot be used for a
@@ -2073,13 +2071,6 @@ pub(in crate::mod_api) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 /// use horizon_client::mod_api::{Host, ServerHost};
 /// fn read(host: &dyn Host) { let _ = host.downcast_ref::<dyn ServerHost>(); }
 /// ```
-pub enum HostSide<'a> {
-    /// The logical server.
-    Server(&'a mut dyn ServerHost),
-    /// The logical client.
-    Client(&'a mut dyn ClientHost),
-}
-
 impl HostSide<'_> {
     fn reborrow(&mut self) -> HostSide<'_> {
         match self {
@@ -2089,6 +2080,23 @@ impl HostSide<'_> {
     }
 }
 
+impl LevelSide<'_> {
+    fn host(&self) -> &dyn LevelHost {
+        match self {
+            Self::Server(host) | Self::Client(host) => *host,
+        }
+    }
+
+    fn reborrow(&mut self) -> LevelSide<'_> {
+        match self {
+            Self::Server(host) => LevelSide::Server(*host),
+            Self::Client(host) => LevelSide::Client(*host),
+        }
+    }
+}
+
+/// The write backend behind `host`, or `None` where the host has none; the
+/// caller answers its typed refusal instead of running on.
 pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
 }
@@ -2166,7 +2174,7 @@ mod generated_host {
 }
 #[doc(hidden)]
 pub use generated_host::{Backend, BackendMut};
-pub use generated_host::{ClientHost, Host, ServerHost};
+pub use generated_host::{ClientHost, Host, HostSide, LevelSide, ServerHost};
 
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
@@ -2178,11 +2186,29 @@ impl AttachmentHost for dyn Host + '_ {
 }
 
 /// Read-only level services, like vanilla's `LevelReader`.
+///
+/// A level host cannot be used as a game host:
+/// ```compile_fail
+/// use horizon_client::mod_api::{Host, LevelHost};
+/// fn game(_: &dyn Host) {}
+/// fn level(host: &dyn LevelHost) { game(host); }
+/// ```
+/// ```compile_fail
+/// use horizon_client::mod_api::{ClientHost, LevelHost, ServerHost};
+/// fn server(_: &mut dyn ServerHost) {}
+/// fn client(_: &dyn ClientHost) {}
+/// fn level(host: &mut dyn LevelHost) { server(host); client(host); }
+/// ```
+/// A client-side level cannot write:
+/// ```compile_fail
+/// use horizon_client::mod_api::LevelSide;
+/// fn write(side: LevelSide<'_>) {
+///     if let LevelSide::Client(level) = side { level.set_block_property([0, 0, 0], "a", "b", 0); }
+/// }
+/// ```
 pub trait LevelHost {
     /// Read a block through `LevelAccess::block_state`.
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
-    /// `Level.isClientSide`, through `LevelAccess::is_client_side`.
-    fn is_client_side(&self) -> bool;
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
     /// unknown state.
     fn state_block(&self, state: BlockStateId) -> Option<&str>;

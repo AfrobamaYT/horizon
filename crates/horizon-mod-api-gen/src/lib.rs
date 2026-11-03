@@ -1271,7 +1271,7 @@ mod tests {
     fn level_hosts_match_receiver_mutability() {
         let level = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
-            side: super::HelperSide::Both,
+            side: super::HelperSide::Server,
         };
         let game = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
@@ -1302,6 +1302,14 @@ mod tests {
             param("&mut dyn LevelWriteHost", ticks)
         );
         assert_eq!(host_param(&level, None, false), None);
+        let level_both = super::CatalogHook {
+            entry: level.entry.clone(),
+            side: super::HelperSide::Both,
+        };
+        assert_eq!(
+            host_param(&level_both, Some(false), false),
+            param("LevelSide", "super::mod_api_host::level_side(self)")
+        );
         assert_eq!(
             host_param(&game, Some(true), false),
             param("HostSide", "HostSide::of(self)")

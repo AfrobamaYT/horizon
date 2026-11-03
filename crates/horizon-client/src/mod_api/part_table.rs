@@ -1893,9 +1893,6 @@ pub(crate) mod tests {
         fn block_state(&self, _: [i32; 3]) -> BlockStateId {
             unimplemented!()
         }
-        fn is_client_side(&self) -> bool {
-            false
-        }
         fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
             None
         }

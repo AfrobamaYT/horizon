@@ -193,7 +193,7 @@ mod tests {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
         use horizon_client::fast_hash::FxHashMap;
-        use horizon_client::mod_api::{ENERGY, Host, NativeBlockUpdateFlags, move_energy};
+        use horizon_client::mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
         use horizon_core::geometry::Direction;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());

@@ -338,7 +338,7 @@ mod tests {
     use horizon_client::{
         items::ItemStack,
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-        mod_api::{ENTITY_ITEMS, Host, ItemPlace, ItemResource, MenuRef},
+        mod_api::{ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef},
     };
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};

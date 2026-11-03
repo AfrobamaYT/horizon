@@ -663,7 +663,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn item_model_property_is_asked_only_while_a_mod_answers() {
-        use crate::mod_api::{self, HookId, Hooks, Host, ItemModelPropertyEvent, ModEntry};
+        use crate::mod_api::{self, HookId, Hooks, ItemModelPropertyEvent, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -673,7 +673,11 @@ mod tests {
         impl Hooks for Quiet {}
         struct Charged(Arc<AtomicUsize>);
         impl Hooks for Charged {
-            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+            fn item_model_property(
+                &self,
+                _: &dyn crate::mod_api::ClientHost,
+                event: &mut ItemModelPropertyEvent<'_>,
+            ) {
                 self.0.fetch_add(1, Ordering::Relaxed);
                 event.value = event.property == "example:charged";
             }

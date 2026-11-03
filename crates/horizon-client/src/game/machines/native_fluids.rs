@@ -481,7 +481,7 @@ mod tests {
     fn a_cauldron_move_the_target_takes_part_of_gives_the_whole_levels_that_fit() {
         use super::super::super::native_entity_refs::tests::with_game;
         use horizon_client::chunk::Chunk;
-        use horizon_client::mod_api::{FLUIDS, Host, NativeBlockUpdateFlags, move_resources};
+        use horizon_client::mod_api::{FLUIDS, NativeBlockUpdateFlags, move_resources};
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world

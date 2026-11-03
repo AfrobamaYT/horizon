@@ -112,6 +112,11 @@ pub(super) fn emit(
             && args.iter().any(|(name, ty)| {
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
             });
+        if is_level && hook.side == HelperSide::Both && (receiver_mut == Some(true) || ticks) {
+            return Err(format!(
+                "{name}: a both-side level hook takes the read kind until a client level seam exists"
+            ));
+        }
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
@@ -188,7 +193,11 @@ pub(super) fn emit(
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
                         };
-                        format!("{level}.state_block({key})")
+                        if hook.side == HelperSide::Both {
+                            format!("{level}.host().state_block({key})")
+                        } else {
+                            format!("{level}.state_block({key})")
+                        }
                     }
                     "& ItemStack" => format!("Some(&*{key}.item)"),
                     "& str" => format!("Some({key})"),
@@ -223,7 +232,7 @@ pub(super) fn emit(
         let mut call_args = Vec::new();
         if let Some((name, param)) = &host {
             trait_params.push(format!("{name}: {}", param.ty));
-            let by_side = param.ty == "HostSide";
+            let by_side = param.ty == "HostSide" || param.ty == "LevelSide";
             dispatch_params.push(format!(
                 "{}{name}: {}",
                 if by_side { "mut " } else { "" },

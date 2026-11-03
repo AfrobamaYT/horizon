@@ -280,7 +280,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn an_orb_awarded_in_a_merge_hook_is_merged_by_a_later_scan() {
-        use crate::mod_api::{self, ExperienceOrbMergeEvent, Flow, Hooks, Host};
+        use crate::mod_api::{self, ExperienceOrbMergeEvent, Flow, Hooks};
         use horizon_client::entities::ExperienceOrb;
         use horizon_core::geometry::Vec3;
 

@@ -371,9 +371,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn joins_follow_insertion_order_and_canceled_entities_never_leave() {
-        use crate::mod_api::{
-            self, EntityJoinLevelEvent, EntityLeaveLevelEvent, Flow, Hooks, Host,
-        };
+        use crate::mod_api::{self, EntityJoinLevelEvent, EntityLeaveLevelEvent, Flow, Hooks};
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
         use std::sync::{Arc, Mutex};

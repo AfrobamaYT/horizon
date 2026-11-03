@@ -2,7 +2,7 @@
 //! `Capabilities.Fluid.BLOCK`, a [`ResourceHandler`] of [`FluidResource`]s as
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
 use super::{
-    BlockSide, CapabilityKey, Host, ItemCapabilityKey, ItemPlace, ItemResource, ItemStack,
+    BlockSide, CapabilityKey, ItemCapabilityKey, ItemPlace, ItemResource, ItemStack,
     ResourceHandler, Transaction,
 };
 use crate::item_data::StackData;

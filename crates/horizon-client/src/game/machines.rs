@@ -12,7 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, BlockSide, Capability, Host, ItemResource, ResourceHandler},
+    mod_api::{self, BlockSide, Capability, ItemResource, ResourceHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};

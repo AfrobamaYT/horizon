@@ -303,7 +303,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -396,7 +396,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world

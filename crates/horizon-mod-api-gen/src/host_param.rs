@@ -31,6 +31,12 @@ pub(super) fn host_param(
                 call,
             };
         }
+        if hook.side == HelperSide::Both {
+            return HostParam {
+                ty: "LevelSide".into(),
+                call: "super::mod_api_host::level_side(self)",
+            };
+        }
         let kind = if is_level {
             match (mutable, ticks) {
                 (true, true) => "LevelWriteHost",

@@ -2,9 +2,7 @@
 //! `Capabilities.Energy.BLOCK`, an [`EnergyHandler`]: an amount and a capacity, with no resource,
 //! written only inside a transaction.
 use super::resource::{Ends, move_once};
-use super::{
-    BlockSide, Capability, CapabilityKey, Host, ItemCapabilityKey, Overanswered, Transaction,
-};
+use super::{BlockSide, Capability, CapabilityKey, ItemCapabilityKey, Overanswered, Transaction};
 use std::marker::PhantomData;
 
 /// A block's energy (NeoForge's `EnergyHandler`): stateless, given the host, and written only in
