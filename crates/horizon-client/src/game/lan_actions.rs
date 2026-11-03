@@ -1203,12 +1203,11 @@ impl Game<'_> {
     /// was open closes.
     pub(super) fn guest_may_open(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         kind: &str,
         pos: Option<[i32; 3]>,
     ) -> bool {
-        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+        let Some((uuid, name)) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)).map(|g| (g.uuid, g.name.clone())) else {
             return true;
         };
         let mut cancel = false;
@@ -1218,7 +1217,9 @@ impl Game<'_> {
         if self.lan_acting == Some(conn) {
             hook(self);
         } else {
-            self.as_guest(host, conn, hook);
+            let Some(mut host) = self.lan.take() else { return true; };
+            self.as_guest(&mut host, conn, hook);
+            self.lan = Some(host);
         }
         !cancel
     }
@@ -2905,7 +2906,8 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn drop_guest_items(&mut self, host: &LanHost, gi: usize, stacks: Vec<ItemStack>) {
+    pub(super) fn drop_guest_items(&mut self, gi: usize, stacks: Vec<ItemStack>) {
+        let Some(host) = self.lan.as_ref() else { return; };
         let g = &host.hub.guests[gi];
         let eye = [
             g.position[0],
