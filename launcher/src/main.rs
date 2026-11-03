@@ -38,6 +38,7 @@ mod instance_icons;
 mod instance_mods;
 mod instances_page;
 mod internet;
+mod jar_launch;
 mod language_page;
 mod launch_page;
 mod line_edit;
@@ -450,11 +451,15 @@ impl Launcher {
             this.theme = this.settings_theme(window);
             cx.notify();
         });
+        let window_handle = window.window_handle();
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
                 .timer(Duration::from_millis(80))
                 .await;
-            if this.update(cx, |this, cx| this.drain(cx)).is_err() {
+            if this
+                .update(cx, |this, cx| this.drain(window_handle, cx))
+                .is_err()
+            {
                 break;
             }
         })
@@ -941,7 +946,7 @@ impl Launcher {
         });
     }
 
-    fn drain(&mut self, cx: &mut Context<Self>) {
+    fn drain(&mut self, window: gpui::AnyWindowHandle, cx: &mut Context<Self>) {
         let mut changed = false;
         self.perf.tick();
         match self.bench.as_mut().map(|b| b.tick(&self.perf)) {
@@ -1128,16 +1133,26 @@ impl Launcher {
                         cmd.envs(self.client_vars.iter().map(|(k, v)| (k, v)));
                         let launch = instance.map(|i| i.launch).unwrap_or_default();
                         horizon_launcher::launch::limit_memory(&mut cmd, &launch);
-                        let cmd = horizon_launcher::launch::wrap(cmd, &launch);
-                        self.client_home = cmd.get_current_dir().map(|d| d.to_path_buf());
-                        match backend::spawn(Job::Client, cmd, self.tx.clone()) {
-                            Ok(r) => {
-                                self.client = Some(r);
-                                self.client_run = run.map(|id| (id, Instant::now()));
-                                self.step_aside(cx);
+                        self.starting_client = Some(tag);
+                        jar_launch::client(cmd, launch, run, self.tx.clone());
+                    }
+                }
+                Msg::JarConsent { jars, reply } => jar_launch::consent(window, jars, reply, cx),
+                Msg::JarClient { run, prepared } => {
+                    self.starting_client = None;
+                    match *prepared {
+                        Ok(cmd) => {
+                            self.client_home = cmd.get_current_dir().map(|d| d.to_path_buf());
+                            match backend::spawn(Job::Client, cmd, self.tx.clone()) {
+                                Ok(r) => {
+                                    self.client = Some(r);
+                                    self.client_run = run.map(|id| (id, Instant::now()));
+                                    self.step_aside(cx);
+                                }
+                                Err(e) => self.client_error = Some(e),
                             }
-                            Err(e) => self.client_error = Some(e),
                         }
+                        Err(e) => self.client_error = Some(e),
                     }
                 }
                 Msg::Progress(tag, p) => {

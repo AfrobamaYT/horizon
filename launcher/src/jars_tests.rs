@@ -48,6 +48,37 @@ fn manifest(jars: Vec<JarRef>) -> horizon_mods::manifest::Manifest {
     manifest
 }
 
+fn package(root: &Path, id: &str, jars: Vec<JarRef>, native: bool) -> PathBuf {
+    let path = root.join(id);
+    fs::create_dir_all(&path).unwrap();
+    let mut text =
+        format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n");
+    if native {
+        text.push_str(&format!(
+            "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        ));
+        fs::create_dir_all(path.join("src")).unwrap();
+        fs::write(
+            path.join("Cargo.toml"),
+            "[package]\nname='not_the_mod_identity'\nversion='9.9.9'\n",
+        )
+        .unwrap();
+        fs::write(path.join("src/lib.rs"), "pub fn hooks() {}\n").unwrap();
+    }
+    for jar in jars {
+        text.push_str(&format!(
+            "[[jar]]\nid='{}'\nversion='{}'\nsha512='{}'\n",
+            jar.id(),
+            jar.version(),
+            jar.sha512()
+        ));
+    }
+    fs::write(path.join("horizon-mod.toml"), text).unwrap();
+    path
+}
+
 #[test]
 fn conflicting_metadata_for_one_exact_hash_is_refused_across_mods() {
     let (jar, _) = source(b"shared");
@@ -184,4 +215,113 @@ fn declined_consent_and_missing_or_failed_lookup_never_download() {
         assert!(reason.contains(expected));
     }
     assert!(!home.0.join("jars").exists());
+}
+
+#[test]
+fn final_launch_combines_only_enabled_content_dev_and_adjacent_native_candidates() {
+    use horizon_mods::mod_list::{DIR, FILE, NATIVE_DIR};
+    use std::process::Command;
+    let root = Scratch::new();
+    let game = root.0.join("game");
+    let bin = root.0.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let program = bin.join("horizon-client");
+    fs::write(&program, b"synthetic executable placeholder: never run").unwrap();
+    let (shared, shared_bytes) = source(b"shared");
+    let (dev, dev_bytes) = source(b"dev");
+    let (excluded, _) = source(b"must not fetch");
+    package(&game.join(DIR), "plain", vec![shared.clone()], false);
+    package(&game.join(NATIVE_DIR), "other", vec![shared.clone()], false);
+    package(&game.join(DIR), "disabled", vec![excluded.clone()], false);
+    package(&game.join(NATIVE_DIR), "next_build", vec![excluded], true);
+    package(&bin.join(NATIVE_DIR), "built", vec![shared.clone()], true);
+    let dev_path = package(&root.0.join("external"), "dev", vec![dev.clone()], false);
+    fs::write(
+        game.join(FILE),
+        "mod.plain:true\nmod.other:true\nmod.disabled:false\nmod.next_build:true\n",
+    )
+    .unwrap();
+    fs::write(
+        bin.join(horizon_mods::selection::BUILD_INFO),
+        r#"{"mods":[{"id":"next_build"}]}"#,
+    )
+    .unwrap();
+    let mut command = Command::new(&program);
+    command
+        .current_dir(&root.0)
+        .env("HORIZON_HOME", root.0.join("wrong-cache"))
+        .args(["--game-dir", "game", "--home", "cache", "--dev-mod"])
+        .arg(dev_path);
+    let error = prepare_launch(
+        &mut command,
+        &Default::default(),
+        Permission::headless(false),
+    )
+    .unwrap_err();
+    let LaunchError::Prepare(PrepareError::Refused { missing }) = error else {
+        panic!("expected typed refusal for just the active data candidates");
+    };
+    let hashes: std::collections::BTreeSet<_> = missing.iter().map(|m| m.jar.sha512()).collect();
+    assert_eq!(
+        hashes,
+        [shared.sha512(), dev.sha512()].into_iter().collect()
+    );
+    for jar in &missing {
+        assert_eq!(
+            jar.path,
+            root.0
+                .join("cache/jars")
+                .join(format!("{}.jar", jar.jar.sha512()))
+        );
+    }
+    fs::create_dir_all(root.0.join("cache/jars")).unwrap();
+    for (jar, bytes) in [(&shared, shared_bytes), (&dev, dev_bytes)] {
+        fs::write(
+            root.0
+                .join("cache/jars")
+                .join(format!("{}.jar", jar.sha512())),
+            bytes,
+        )
+        .unwrap();
+    }
+    prepare_launch(
+        &mut command,
+        &Default::default(),
+        Permission::headless(false),
+    )
+    .unwrap();
+    assert!(!root.0.join("wrong-cache").exists());
+    assert_eq!(fs::read_dir(root.0.join("cache/jars")).unwrap().count(), 2);
+
+    // Dedicated remainder and the wrapper's final environment use the very same cache policy.
+    let mut server = Command::new(&program);
+    server
+        .current_dir(&game)
+        .env("HORIZON_HOME", root.0.join("wrong-cache"))
+        .args(["--dedicated", "--nogui"]);
+    let mut launch = crate::launch::Launch::default();
+    launch.env.insert(
+        "HORIZON_HOME".into(),
+        root.0.join("cache").to_str().unwrap().into(),
+    );
+    prepare_launch(&mut server, &launch, Permission::headless(false)).unwrap();
+}
+
+#[test]
+fn information_requests_do_not_read_packages_or_create_a_cache() {
+    let root = Scratch::new();
+    for flag in ["--help", "-h", "--launch-api"] {
+        let mut command = std::process::Command::new(root.0.join("not-installed"));
+        command
+            .current_dir(&root.0)
+            .env("HORIZON_HOME", root.0.join("cache"))
+            .args([flag, "--missing-value"]);
+        prepare_launch(
+            &mut command,
+            &Default::default(),
+            Permission::headless(false),
+        )
+        .unwrap();
+        assert!(!root.0.join("cache").exists());
+    }
 }

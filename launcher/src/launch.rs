@@ -533,8 +533,13 @@ pub fn wrap(cmd: Command, launch: &Launch) -> Command {
         };
     }
     out.envs(switch_env(launch, &found));
-    out.envs(&launch.env);
+    apply_environment(&mut out, launch);
     out
+}
+
+/// Apply the final instance environment before either selection or process wrapping.
+pub fn apply_environment(command: &mut Command, launch: &Launch) {
+    command.envs(&launch.env);
 }
 
 #[cfg(test)]
