@@ -401,8 +401,20 @@ mod tests {
             native_render_needs(&mut needs);
         }
         let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
+        // With no subscriber left, dispatch returns after its count check.
+        let renderers: Box<[&'static dyn RenderHooks]> = (0..9)
+            .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
+            .collect();
+        install_for_test(renderers);
+        native_render_needs(&mut RenderNeeds::default()); // Prune all nine once.
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut needs = RenderNeeds::default();
+            native_render_needs(&mut needs);
+        }
+        let empty = start.elapsed().as_nanos() as f64 / f64::from(iterations);
         println!(
-            "render_needs dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns per call ({iterations} iterations)"
+            "render_needs dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns, pruned-empty {empty:.2} ns per call ({iterations} iterations)"
         );
     }
 
