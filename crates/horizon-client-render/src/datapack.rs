@@ -40,7 +40,7 @@ impl DataPack {
     /// The files of `data/<namespace>/<kind>/` for each kind, in the order
     /// `list("data/")` gives them. A folder pack walks only those folders:
     /// the built-in pack holds about 10,000 other data files.
-    fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
+    pub fn list_kinds(&self, kinds: &[&str]) -> Vec<String> {
         debug_assert!(kinds.is_sorted(), "kinds in walk order");
         let Source::Dir(root) = &self.source else {
             return self.list("data/");
