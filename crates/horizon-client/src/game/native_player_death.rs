@@ -115,31 +115,29 @@ mod tests {
         with_game(|game| {
             let player = add_guest(game);
             // Never died.
-            assert_eq!(game.native_player_last_death_location(player), None);
+            assert_eq!(player.last_death_location(&*game), None);
 
             // A death records the level and block (`ServerPlayer.die`).
             let overworld = game.native_level("minecraft:overworld").unwrap();
             let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
             guest.last_death = Some(("minecraft:overworld".into(), [4, 70, -9]));
             assert_eq!(
-                game.native_player_last_death_location(player),
+                player.last_death_location(&*game),
                 Some((overworld, [4, 70, -9]))
             );
 
             // The setter stores it, and None forgets it.
-            assert!(
-                game.native_player_set_last_death_location(player, Some((overworld, [1, 2, 3])))
-            );
+            assert!(player.set_last_death_location(game, Some((overworld, [1, 2, 3]))));
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guests[0].last_death,
                 Some(("minecraft:overworld".into(), [1, 2, 3]))
             );
             assert_eq!(
-                game.native_player_last_death_location(player),
+                player.last_death_location(&*game),
                 Some((overworld, [1, 2, 3]))
             );
-            assert!(game.native_player_set_last_death_location(player, None));
-            assert_eq!(game.native_player_last_death_location(player), None);
+            assert!(player.set_last_death_location(game, None));
+            assert_eq!(player.last_death_location(&*game), None);
 
             // A player who is not online here, and a handle of another
             // player's id, read nothing.
@@ -150,10 +148,10 @@ mod tests {
             );
             game.lan.as_mut().unwrap().hub.guests[0].last_death =
                 Some(("minecraft:overworld".into(), [1, 2, 3]));
-            assert_eq!(game.native_player_last_death_location(stale), None);
-            assert!(!game.native_player_set_last_death_location(stale, None));
+            assert_eq!(stale.last_death_location(&*game), None);
+            assert!(!stale.set_last_death_location(game, None));
             game.lan.as_mut().unwrap().hub.guests[0].placed = false;
-            assert_eq!(game.native_player_last_death_location(player), None);
+            assert_eq!(player.last_death_location(&*game), None);
             game.lan.as_mut().unwrap().hub.guests[0].placed = true;
 
             // A level handle of an earlier open is refused, and nothing is
@@ -163,14 +161,43 @@ mod tests {
             let player = game.native_player_ref(123).unwrap();
             let fresh = game.native_level("minecraft:overworld").unwrap();
             game.lan.as_mut().unwrap().hub.guests[0].last_death = None;
-            assert!(
-                !game.native_player_set_last_death_location(player, Some((overworld, [7, 8, 9])))
-            );
+            assert!(!player.set_last_death_location(game, Some((overworld, [7, 8, 9]))));
             assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].last_death, None);
-            assert!(game.native_player_set_last_death_location(player, Some((fresh, [7, 8, 9]))));
+            assert!(player.set_last_death_location(game, Some((fresh, [7, 8, 9]))));
+            assert_eq!(player.last_death_location(&*game), Some((fresh, [7, 8, 9])));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_acting_players_location_reads_and_writes_through_their_turn() {
+        with_game(|game| {
+            let player = add_guest(game);
+            let overworld = game.native_level("minecraft:overworld").unwrap();
+            game.lan.as_mut().unwrap().hub.guests[0].last_death =
+                Some(("minecraft:overworld".into(), [4, 70, -9]));
+            // During the guest's turn the list is out, yet the acting player
+            // resolves, and the record is the one swapped into the level.
+            let mut host = game.lan.take().unwrap();
+            let seen = game
+                .as_guest(&mut host, 1, |game| {
+                    let before = player.last_death_location(&*game);
+                    let set = player.set_last_death_location(game, Some((overworld, [1, 2, 3])));
+                    (before, set, player.last_death_location(&*game))
+                })
+                .unwrap();
+            game.lan = Some(host);
             assert_eq!(
-                game.native_player_last_death_location(player),
-                Some((fresh, [7, 8, 9]))
+                seen,
+                (
+                    Some((overworld, [4, 70, -9])),
+                    true,
+                    Some((overworld, [1, 2, 3]))
+                )
+            );
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0].last_death,
+                Some(("minecraft:overworld".into(), [1, 2, 3]))
             );
         });
     }
