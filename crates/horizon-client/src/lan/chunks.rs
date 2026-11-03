@@ -100,8 +100,7 @@ pub struct ChunkEncoder {
     coder: Arc<SectionCoder>,
     /// Block entity type id per state (-1 for none).
     entity_types: Vec<i32>,
-    /// Whether the state is a mod block's: its type is the block's own, and
-    /// it has a block entity only when the mod made one.
+    /// A native state's declared type, sent only for a matching instance.
     mod_entities: Vec<Option<Arc<str>>>,
     /// The mods' update tags (`native_block_entity_update_tag`).
     pub mod_update_tag: Option<ModUpdateTag>,
@@ -1498,11 +1497,10 @@ mod tests {
             (
                 Arc::<str>::from(n),
                 false,
-                Some(crate::blocks::SignForm {
+                (n == "test:press").then_some(crate::blocks::SignForm {
                     hanging: false,
                     wall: false,
-                })
-                .filter(|_| n == "test:press"),
+                }),
             )
         });
         let mut encoder = ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types));
