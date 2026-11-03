@@ -8909,8 +8909,10 @@ impl Game<'_> {
     /// The open mod screen's tooltip under the cursor (`native_screen_tooltip`).
     pub(super) fn draw_native_screen_tooltip(&mut self, batch: &mut HudBatch) {
         // Over no item: an empty slot still gets the mod's hint (which fuel it takes).
+        // A carried stack hides only slot tooltips, as AbstractContainerScreen's;
+        // the screen's other parts keep theirs, as a vanilla widget's tooltip does.
         let slot = self.slot_at(batch, self.cursor.0, self.cursor.1);
-        if self.carried.is_some() || slot.is_some_and(|i| self.slot_view(i).is_some()) {
+        if slot.is_some_and(|i| self.slot_view(i).is_some()) {
             return;
         }
         let Some((block, data, at)) = self.native_screen_at() else {

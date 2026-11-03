@@ -21,7 +21,7 @@ A client mod supplies its own namespaced `minecraft:condition` property by imple
 `Hooks::item_model_property`. This hook is the registration: match your property name, answer
 through `value`, and leave other names untouched. The resolver calls it when choosing a branch,
 not when loading resources. It defaults to false without a provider and skips dispatch entirely
-when no trait mods are loaded. Vanilla properties do not enter the hook.
+once no loaded mod overrides it. Vanilla properties do not enter the hook.
 
 ```rust,ignore
 fn item_model_property(
@@ -2378,8 +2378,9 @@ a dimension.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
-  preserve complete stacks for all mob slots.
+  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
+  `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
+  renders or sends them. Armor stands store the six armor and hand slots, and the dragon none yet.
 - `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened
   by mining fatigue, unless one is under way and past its first half (it returns whether one started). The players around
   see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing the hand asked for. Mobs and
