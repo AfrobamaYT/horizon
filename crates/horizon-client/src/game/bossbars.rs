@@ -29,7 +29,19 @@ pub(super) struct BossState {
 }
 
 impl BossState {
-    fn add_bar(&mut self, id: &str, name: Comp) -> bool {
+    /// What a viewer was last sent for a bar: progress, color, overlay and
+    /// the darken, music and fog flags.
+    #[cfg(test)]
+    pub(super) fn sent_state(
+        &self,
+        viewer: u128,
+        bar: u128,
+    ) -> Option<(f32, i32, i32, bool, bool, bool)> {
+        let o = self.sent.get(&viewer)?.get(&bar)?;
+        Some((o.progress, o.color, o.overlay, o.darken, o.music, o.fog))
+    }
+
+    pub(super) fn add_bar(&mut self, id: &str, name: Comp) -> bool {
         if !self.bars.add(id, name) {
             return false;
         }
@@ -39,7 +51,7 @@ impl BossState {
         true
     }
 
-    fn remove_bar(&mut self, id: &str) {
+    pub(super) fn remove_bar(&mut self, id: &str) {
         self.bars.remove(id);
         if let Ok(key) = Identifier::parse(id) {
             self.listing.remove(&key);
@@ -62,7 +74,7 @@ impl BossState {
         }
     }
 
-    fn listed_bars(&self) -> Vec<&bossbar::BossBar> {
+    pub(super) fn listed_bars(&self) -> Vec<&bossbar::BossBar> {
         let mut bars: Vec<_> = self
             .listing
             .entries()
@@ -151,9 +163,23 @@ impl Game<'_> {
     pub(super) fn cmd_bossbar(&mut self, id: &str, ctx: &Context) -> R<i32> {
         self.load_bossbars();
         let result = self.bossbar_command(id, ctx);
+        self.bossbars_changed();
+        result
+    }
+    /// The bars changed: refresh the command suggestions and tell the viewers.
+    pub(super) fn bossbars_changed(&mut self) {
         self.ui.registries.bossbars = self.bosses.bars.ids();
         self.publish_boss_bars();
-        result
+    }
+    /// `CustomBossEvents.create`: a new bar with a UUID drawn from the level's
+    /// random. None if the id is taken.
+    pub(super) fn add_custom_bossbar(&mut self, id: &str, name: Comp) -> Option<u128> {
+        if !self.bosses.add_bar(id, name) {
+            return None;
+        }
+        let uuid = insecure_uuid(&mut self.world.random);
+        self.bosses.bars.get_mut(id)?.uuid = uuid;
+        Some(uuid)
     }
     fn bossbar_command(&mut self, id: &str, ctx: &Context) -> R<i32> {
         match id {
@@ -163,11 +189,7 @@ impl Game<'_> {
                     return Err(err("commands.bossbar.create.failed", &[&bar]));
                 }
                 let name = self.component_json(ctx, "name")?;
-                self.bosses.add_bar(&bar, name);
-                if let Some(b) = self.bosses.bars.get_mut(&bar) {
-                    // CustomBossEvents.create: Mth.createInsecureUUID(level.random).
-                    b.uuid = insecure_uuid(&mut self.world.random);
-                }
+                self.add_custom_bossbar(&bar, name);
                 let shown = self
                     .bosses
                     .bars

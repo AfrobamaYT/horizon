@@ -1027,6 +1027,95 @@ impl GameMode {
     }
 }
 
+/// A custom boss bar (vanilla's `CustomBossEvent`, the `/bossbar` ones) of an
+/// open server world. It holds the world's epoch and the bar's UUID, so a bar
+/// that was removed (even if its id was added again) or a handle from an
+/// earlier open reads as `None` and changes nothing. Mob and raid bars are not
+/// custom boss events and have no handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BossBarRef {
+    pub(crate) epoch: NativeWorldEpoch,
+    pub(crate) uuid: u128,
+}
+
+/// `BossEvent.BossBarColor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarColor {
+    Pink,
+    Blue,
+    Red,
+    Green,
+    Yellow,
+    Purple,
+    White,
+}
+
+impl BossBarColor {
+    /// Every color, in ordinal order.
+    pub const ALL: [Self; 7] = [
+        Self::Pink,
+        Self::Blue,
+        Self::Red,
+        Self::Green,
+        Self::Yellow,
+        Self::Purple,
+        Self::White,
+    ];
+    /// `BossBarColor.getName`: `pink`, `blue`, `red`, `green`, `yellow`,
+    /// `purple` or `white`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pink => "pink",
+            Self::Blue => "blue",
+            Self::Red => "red",
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Purple => "purple",
+            Self::White => "white",
+        }
+    }
+    /// The color with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|color| color.name() == name)
+    }
+}
+
+/// `BossEvent.BossBarOverlay`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarOverlay {
+    Progress,
+    Notched6,
+    Notched10,
+    Notched12,
+    Notched20,
+}
+
+impl BossBarOverlay {
+    /// Every overlay, in ordinal order.
+    pub const ALL: [Self; 5] = [
+        Self::Progress,
+        Self::Notched6,
+        Self::Notched10,
+        Self::Notched12,
+        Self::Notched20,
+    ];
+    /// `BossBarOverlay.getName`: `progress`, `notched_6`, `notched_10`,
+    /// `notched_12` or `notched_20`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Progress => "progress",
+            Self::Notched6 => "notched_6",
+            Self::Notched10 => "notched_10",
+            Self::Notched12 => "notched_12",
+            Self::Notched20 => "notched_20",
+        }
+    }
+    /// The overlay with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|overlay| overlay.name() == name)
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {

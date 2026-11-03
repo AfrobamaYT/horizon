@@ -205,6 +205,7 @@ pub mod native_block_entity_draw;
 mod native_block_entity_refs;
 mod native_block_sprites;
 mod native_block_states;
+mod native_boss_bar_refs;
 mod native_chunk_save;
 mod native_claimed_items;
 mod native_components;

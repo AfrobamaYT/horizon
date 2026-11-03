@@ -1,0 +1,442 @@
+//! Custom boss bar handles for native server mods: the `/bossbar` store.
+use super::Game;
+use horizon_client::{
+    bossbar::BossBar,
+    lan::playerdata::{ints_uuid, uuid_ints},
+    mod_api::{BossBarColor, BossBarOverlay, BossBarRef, PlayerRef},
+    scoreboard::comp_text,
+    text::Text,
+};
+use horizon_world::identifier::Identifier;
+
+impl Game<'_> {
+    fn boss_bar_state(&self, bar: BossBarRef) -> Option<&BossBar> {
+        if self.remote.is_some() || self.native_lifecycle.epoch() != Some(bar.epoch) {
+            return None;
+        }
+        self.bosses.bars.bars.iter().find(|b| b.uuid == bar.uuid)
+    }
+
+    fn boss_bar_edit(&mut self, bar: BossBarRef, edit: impl FnOnce(&mut BossBar)) -> bool {
+        if self.boss_bar_state(bar).is_none() {
+            return false;
+        }
+        if let Some(state) = self
+            .bosses
+            .bars
+            .bars
+            .iter_mut()
+            .find(|b| b.uuid == bar.uuid)
+        {
+            edit(state);
+        }
+        self.bossbars_changed();
+        true
+    }
+
+    fn boss_bar_handle(&self, bar: &BossBar) -> Option<BossBarRef> {
+        Some(BossBarRef {
+            epoch: self.native_lifecycle.epoch()?,
+            uuid: bar.uuid,
+        })
+    }
+
+    /// An existing custom boss bar by id (`minecraft:` when no namespace), or
+    /// None. The bars load with the world's first tick. Boss bars of mobs and
+    /// raids are not custom boss events.
+    pub(super) fn native_boss_bar(&self, id: &str) -> Option<BossBarRef> {
+        let id = Identifier::parse(id).ok()?;
+        let id = format!("{}:{}", id.namespace(), id.path());
+        self.boss_bar_handle(self.boss_bar_state_by_id(&id)?)
+    }
+
+    fn boss_bar_state_by_id(&self, id: &str) -> Option<&BossBar> {
+        if self.remote.is_some() {
+            return None;
+        }
+        self.bosses.bars.get(id)
+    }
+
+    /// Every custom boss bar, in the order `/bossbar list` shows them.
+    pub(super) fn native_boss_bars(&self) -> Vec<BossBarRef> {
+        if self.remote.is_some() {
+            return Vec::new();
+        }
+        self.bosses
+            .listed_bars()
+            .into_iter()
+            .filter_map(|bar| self.boss_bar_handle(bar))
+            .collect()
+    }
+
+    /// `/bossbar add`: a new bar, visible, white, `progress`, at 0 of 100, with
+    /// nobody added. None if the id is taken or invalid, or outside a server.
+    pub(super) fn native_create_boss_bar(&mut self, id: &str, name: Text) -> Option<BossBarRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let id = Identifier::parse(id).ok()?;
+        let id = format!("{}:{}", id.namespace(), id.path());
+        if self.remote.is_some() {
+            return None;
+        }
+        self.load_bossbars();
+        let uuid = self.add_custom_bossbar(&id, name.component())?;
+        self.bossbars_changed();
+        Some(BossBarRef { epoch, uuid })
+    }
+
+    /// The bar's id (`CustomBossEvent.customId`), or None for a stale handle.
+    pub(super) fn native_boss_bar_id(&self, bar: BossBarRef) -> Option<String> {
+        self.boss_bar_state(bar).map(|b| b.id.clone())
+    }
+
+    /// `BossEvent.getName`.
+    pub(super) fn native_boss_bar_name(&self, bar: BossBarRef) -> Option<Text> {
+        self.boss_bar_state(bar).map(|b| comp_text(&b.name))
+    }
+
+    /// `ServerBossEvent.setName`: viewers are sent the new name.
+    pub(super) fn native_boss_bar_set_name(&mut self, bar: BossBarRef, name: Text) -> bool {
+        self.boss_bar_edit(bar, |b| b.name = name.component())
+    }
+
+    /// `BossEvent.getColor`.
+    pub(super) fn native_boss_bar_color(&self, bar: BossBarRef) -> Option<BossBarColor> {
+        let b = self.boss_bar_state(bar)?;
+        Some(BossBarColor::from_name(&b.color).unwrap_or(BossBarColor::White))
+    }
+
+    /// `ServerBossEvent.setColor`.
+    pub(super) fn native_boss_bar_set_color(
+        &mut self,
+        bar: BossBarRef,
+        color: BossBarColor,
+    ) -> bool {
+        self.boss_bar_edit(bar, |b| b.color = color.name().to_owned())
+    }
+
+    /// `BossEvent.getOverlay`.
+    pub(super) fn native_boss_bar_overlay(&self, bar: BossBarRef) -> Option<BossBarOverlay> {
+        let b = self.boss_bar_state(bar)?;
+        Some(BossBarOverlay::from_name(&b.style).unwrap_or(BossBarOverlay::Progress))
+    }
+
+    /// `ServerBossEvent.setOverlay`.
+    pub(super) fn native_boss_bar_set_overlay(
+        &mut self,
+        bar: BossBarRef,
+        overlay: BossBarOverlay,
+    ) -> bool {
+        self.boss_bar_edit(bar, |b| b.style = overlay.name().to_owned())
+    }
+
+    /// `BossEvent.shouldDarkenScreen`.
+    pub(super) fn native_boss_bar_darken_screen(&self, bar: BossBarRef) -> Option<bool> {
+        self.boss_bar_state(bar).map(|b| b.darken)
+    }
+
+    /// `ServerBossEvent.setDarkenScreen`.
+    pub(super) fn native_boss_bar_set_darken_screen(
+        &mut self,
+        bar: BossBarRef,
+        darken: bool,
+    ) -> bool {
+        self.boss_bar_edit(bar, |b| b.darken = darken)
+    }
+
+    /// `BossEvent.shouldPlayBossMusic`.
+    pub(super) fn native_boss_bar_play_boss_music(&self, bar: BossBarRef) -> Option<bool> {
+        self.boss_bar_state(bar).map(|b| b.music)
+    }
+
+    /// `ServerBossEvent.setPlayBossMusic`.
+    pub(super) fn native_boss_bar_set_play_boss_music(
+        &mut self,
+        bar: BossBarRef,
+        music: bool,
+    ) -> bool {
+        self.boss_bar_edit(bar, |b| b.music = music)
+    }
+
+    /// `BossEvent.shouldCreateWorldFog`.
+    pub(super) fn native_boss_bar_create_world_fog(&self, bar: BossBarRef) -> Option<bool> {
+        self.boss_bar_state(bar).map(|b| b.fog)
+    }
+
+    /// `ServerBossEvent.setCreateWorldFog`.
+    pub(super) fn native_boss_bar_set_create_world_fog(
+        &mut self,
+        bar: BossBarRef,
+        fog: bool,
+    ) -> bool {
+        self.boss_bar_edit(bar, |b| b.fog = fog)
+    }
+
+    /// `CustomBossEvent.value`.
+    pub(super) fn native_boss_bar_value(&self, bar: BossBarRef) -> Option<i32> {
+        self.boss_bar_state(bar).map(|b| b.value)
+    }
+
+    /// `CustomBossEvent.setValue`, kept from 0 to the bar's maximum as
+    /// `execute store result bossbar ... value` does.
+    pub(super) fn native_boss_bar_set_value(&mut self, bar: BossBarRef, value: i32) -> bool {
+        let Some(id) = self.native_boss_bar_id(bar) else {
+            return false;
+        };
+        self.set_bossbar_value(&id, true, value);
+        true
+    }
+
+    /// `CustomBossEvent.max`.
+    pub(super) fn native_boss_bar_max(&self, bar: BossBarRef) -> Option<i32> {
+        self.boss_bar_state(bar).map(|b| b.max)
+    }
+
+    /// `CustomBossEvent.setMax`, at least 1 as `/bossbar set max` takes it; the
+    /// value is lowered to fit.
+    pub(super) fn native_boss_bar_set_max(&mut self, bar: BossBarRef, max: i32) -> bool {
+        let Some(id) = self.native_boss_bar_id(bar) else {
+            return false;
+        };
+        self.set_bossbar_value(&id, false, max);
+        true
+    }
+
+    /// `ServerBossEvent.isVisible`.
+    pub(super) fn native_boss_bar_visible(&self, bar: BossBarRef) -> Option<bool> {
+        self.boss_bar_state(bar).map(|b| b.visible)
+    }
+
+    /// `ServerBossEvent.setVisible`: a hidden bar is taken off its players'
+    /// screens and keeps them.
+    pub(super) fn native_boss_bar_set_visible(&mut self, bar: BossBarRef, visible: bool) -> bool {
+        self.boss_bar_edit(bar, |b| b.visible = visible)
+    }
+
+    /// `ServerBossEvent.getPlayers`: the bar's players who are online.
+    pub(super) fn native_boss_bar_players(&self, bar: BossBarRef) -> Option<Vec<PlayerRef>> {
+        let b = self.boss_bar_state(bar)?;
+        Some(
+            b.players
+                .iter()
+                .filter_map(|ints| self.native_player_ref(ints_uuid(*ints)))
+                .collect(),
+        )
+    }
+
+    /// `CustomBossEvent.addPlayer`. False for a stale bar or an offline or
+    /// stale player. The bar is kept for the player across sessions.
+    pub(super) fn native_boss_bar_add_player(
+        &mut self,
+        bar: BossBarRef,
+        player: PlayerRef,
+    ) -> bool {
+        if self.native_player_ref(player.uuid()) != Some(player) {
+            return false;
+        }
+        let ints = uuid_ints(player.uuid());
+        self.boss_bar_edit(bar, |b| {
+            if !b.players.contains(&ints) {
+                b.players.push(ints);
+            }
+        })
+    }
+
+    /// `CustomBossEvent.removePlayer`.
+    pub(super) fn native_boss_bar_remove_player(
+        &mut self,
+        bar: BossBarRef,
+        player: PlayerRef,
+    ) -> bool {
+        let ints = uuid_ints(player.uuid());
+        self.boss_bar_edit(bar, |b| b.players.retain(|p| *p != ints))
+    }
+
+    /// `/bossbar remove` (`CustomBossEvents.remove`): the bar's viewers lose it
+    /// and its handle goes stale.
+    pub(super) fn native_boss_bar_remove(&mut self, bar: BossBarRef) -> bool {
+        let Some(id) = self.native_boss_bar_id(bar) else {
+            return false;
+        };
+        self.bosses.remove_bar(&id);
+        self.bossbars_changed();
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
+    use super::*;
+    use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+    use horizon_protocol::packets::configuration::ClientInformation;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicI32, AtomicUsize},
+    };
+
+    fn guest(uuid: u128, conn: u32) -> Guest {
+        let (tx, _) = std::sync::mpsc::channel();
+        let mut g = Guest::new(
+            Joined {
+                conn,
+                uuid,
+                name: format!("guest{conn}"),
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+            },
+            conn as i32,
+            [0.0; 3],
+            10,
+        );
+        g.placed = true;
+        g
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn handles_create_update_list_and_go_stale_like_bossbar_commands() {
+        with_game(|game| {
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 4,
+                simulation_distance: 4,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 10,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            let mut net = NetConfig::lan(0, "test".into(), 10);
+            net.listen = false;
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.guests.push(guest(123, 1));
+            hub.guests.push(guest(456, 2));
+            let (a, b) = (
+                game.native_player_ref(123).unwrap(),
+                game.native_player_ref(456).unwrap(),
+            );
+            assert!(game.native_boss_bar("mod:bar").is_none());
+            assert!(
+                game.native_create_boss_bar("not a valid id", Text::literal("x"))
+                    .is_none()
+            );
+            let bar = game
+                .native_create_boss_bar("mod:bar", Text::literal("Hi"))
+                .unwrap();
+            assert!(
+                game.native_create_boss_bar("mod:bar", Text::literal("Again"))
+                    .is_none()
+            );
+            assert_eq!(game.native_boss_bar("mod:bar"), Some(bar));
+            assert_eq!(game.native_boss_bars(), vec![bar]);
+            assert_eq!(bar.id(game).as_deref(), Some("mod:bar"));
+            assert_eq!(bar.name(game).unwrap().plain(), "Hi");
+            assert_eq!(bar.color(game), Some(BossBarColor::White));
+            assert_eq!(bar.overlay(game), Some(BossBarOverlay::Progress));
+            assert_eq!(bar.visible(game), Some(true));
+            assert_eq!((bar.value(game), bar.max(game)), (Some(0), Some(100)));
+            assert_eq!(bar.players(game), Some(vec![]));
+
+            // Nobody sees it until a player is added.
+            let seen =
+                |game: &Game<'_>, uuid: u128| game.bosses.sent_state(uuid, bar_uuid(game, bar));
+            assert_eq!(seen(game, 123), None);
+            assert!(bar.add_player(game, a));
+            assert!(bar.add_player(game, a));
+            assert_eq!(bar.players(game), Some(vec![a]));
+            assert_eq!(seen(game, 123), Some((0.0, 6, 0, false, false, false)));
+            assert_eq!(seen(game, 456), None);
+
+            assert!(bar.set_name(game, Text::literal("Boss")));
+            assert!(bar.set_color(game, BossBarColor::Red));
+            assert!(bar.set_overlay(game, BossBarOverlay::Notched10));
+            assert!(bar.set_darken_screen(game, true));
+            assert!(bar.set_play_boss_music(game, true));
+            assert!(bar.set_create_world_fog(game, true));
+            assert!(bar.set_max(game, 50));
+            assert!(bar.set_value(game, 25));
+            assert_eq!(bar.name(game).unwrap().plain(), "Boss");
+            assert_eq!(bar.color(game), Some(BossBarColor::Red));
+            assert_eq!(bar.overlay(game), Some(BossBarOverlay::Notched10));
+            assert_eq!(
+                (
+                    bar.darken_screen(game),
+                    bar.play_boss_music(game),
+                    bar.create_world_fog(game)
+                ),
+                (Some(true), Some(true), Some(true))
+            );
+            assert_eq!((bar.value(game), bar.max(game)), (Some(25), Some(50)));
+            assert_eq!(seen(game, 123), Some((0.5, 2, 2, true, true, true)));
+
+            // Value stays within 0..=max and max within 1.. as the store path clamps.
+            assert!(bar.set_value(game, 999));
+            assert_eq!(bar.value(game), Some(50));
+            assert!(bar.set_max(game, 10));
+            assert_eq!(bar.value(game), Some(10));
+            assert!(bar.set_max(game, -4));
+            assert_eq!((bar.value(game), bar.max(game)), (Some(1), Some(1)));
+            assert!(bar.set_max(game, 100) && bar.set_value(game, 7));
+
+            // The command sees the mod's bar and the mod sees the command's changes.
+            game.ui.registries.permission = 4;
+            assert!(game.run_command("bossbar set mod:bar value 9"));
+            assert_eq!(bar.value(game), Some(9));
+            assert!(game.run_command("bossbar get mod:bar value"));
+            assert!(!game.run_command("bossbar add mod:bar \"dup\""));
+            assert!(game.run_command("bossbar set mod:bar players"));
+            assert_eq!(bar.players(game), Some(vec![]));
+            assert_eq!(seen(game, 123), None);
+
+            // Hidden bars keep their players but are not sent.
+            assert!(bar.add_player(game, b));
+            assert!(bar.set_visible(game, false));
+            assert_eq!(bar.visible(game), Some(false));
+            assert_eq!(seen(game, 456), None);
+            assert!(bar.set_visible(game, true));
+            assert!(seen(game, 456).is_some());
+            assert!(bar.remove_player(game, b));
+            assert_eq!(bar.players(game), Some(vec![]));
+
+            // Saved form.
+            let saved = game.bosses.bars.pack();
+            let loaded = horizon_client::bossbar::BossBars::unpack(&saved);
+            let kept = loaded.get("mod:bar").unwrap();
+            assert_eq!((kept.value, kept.max, kept.color.as_str()), (9, 100, "red"));
+
+            // Removal: the handle is stale, the id can be added again.
+            assert!(bar.remove(game));
+            assert!(!bar.remove(game));
+            assert_eq!(bar.id(game), None);
+            assert!(!bar.set_value(game, 3));
+            assert!(!bar.add_player(game, a));
+            assert!(game.native_boss_bar("mod:bar").is_none());
+            let again = game
+                .native_create_boss_bar("mod:bar", Text::literal("New"))
+                .unwrap();
+            assert_ne!(again, bar);
+            assert_eq!(bar.name(game), None);
+            assert_eq!(again.name(game).unwrap().plain(), "New");
+            assert!(game.run_command("bossbar remove mod:bar"));
+            assert_eq!(again.id(game), None);
+        });
+    }
+
+    fn bar_uuid(game: &Game<'_>, bar: BossBarRef) -> u128 {
+        game.boss_bar_state(bar).unwrap().uuid
+    }
+}
