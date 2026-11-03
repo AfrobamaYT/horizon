@@ -2078,9 +2078,9 @@ pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn Host) -> Option<&mut dyn
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
-/// A player's right click on a block, for `right_click_block`
-/// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
-/// `useItemOn` starts, on the clicking client and on the server.
+/// A player's right click on a block, shared by the block's use behaviours
+/// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
+/// event hears it once per hand on the clicking client and on the server.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct NativeBlockClick<'a> {

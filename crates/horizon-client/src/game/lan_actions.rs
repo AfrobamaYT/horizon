@@ -5765,7 +5765,6 @@ mod tests {
                 // reaches useWithoutItem, which toggles this lever on the main hand.
                 use crate::first_person::Hand;
                 use std::sync::atomic::Ordering::SeqCst;
-                game.resolve_parts().unwrap();
                 let lever = game
                     .pack
                     .assets
@@ -5773,12 +5772,12 @@ mod tests {
                     .default_state("minecraft:lever")
                     .unwrap();
                 let hit = super::super::Hit {
-                    pos: [0, 64, 0],
+                    pos: [0, 64, 4],
                     face: [0, 1, 0],
-                    point: [0.5, 65.0, 0.5],
+                    point: [0.5, 65.0, 4.5],
                     inside: false,
                 };
-                game.world.set(0, 64, 0, lever).unwrap();
+                game.world.set(0, 64, 4, lever).unwrap();
                 game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
                 for (answer, item_uses, powered, swings) in [
                     (Answer::Success, 0, false, 1),
@@ -5795,16 +5794,16 @@ mod tests {
                     assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
                     assert_eq!(game.swings_started - before, swings);
                     assert_eq!(user.item_uses.load(SeqCst), item_uses);
-                    assert_eq!(game.world.block(0, 64, 0) != lever, powered);
+                    assert_eq!(game.world.block(0, 64, 4) != lever, powered);
                 }
                 let calls = user.clicks.lock().unwrap().len();
-                game.world.set(0, 64, 0, stone).unwrap();
+                game.world.set(0, 64, 4, stone).unwrap();
                 assert!(game.use_hand(Some(&hit)).unwrap());
                 assert_eq!(user.item_uses.load(SeqCst), 3);
                 assert_eq!(user.clicks.lock().unwrap().len(), calls);
 
                 // The real guest packet follows the same path, with the guest's UUID.
-                game.world.set(0, 64, 0, lever).unwrap();
+                game.world.set(0, 64, 4, lever).unwrap();
                 host.hub.guests[0].inventory[0] = Some(ItemStack::new("minecraft:stick", 1));
                 *user.answer.lock().unwrap() = Answer::Success;
                 game.lan_guest_packet(
@@ -5822,8 +5821,8 @@ mod tests {
                 );
                 assert_eq!(user.clicks.lock().unwrap().last(), Some(&(12, Hand::Main)));
                 assert_eq!(user.item_uses.load(SeqCst), 3);
-                assert_eq!(game.world.block(0, 64, 0), lever);
-                game.world.set(0, 64, 0, stone).unwrap();
+                assert_eq!(game.world.block(0, 64, 4), lever);
+                game.world.set(0, 64, 4, stone).unwrap();
 
                 game.lan_guest_packet(
                     &mut host,
