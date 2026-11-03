@@ -1045,6 +1045,21 @@ pub(super) mod tests {
                     .any(|(chunk, _)| *chunk == (100, 0))
             );
             game.lan = Some(host);
+            game.next_entity = 100;
+            game.lan.as_ref().unwrap().hub.lan.shared.next_id();
+            game.lan.as_ref().unwrap().hub.lan.shared.next_id();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let made = game.native_fake_player(level, 1234, "machine").unwrap();
+            assert_eq!(game.native_fake_player(level, 1234, "machine"), Some(made));
+            assert!(game.native_fake_player(level, 1234, "other").is_none());
+            assert!(game.native_fake_player(level, 1, "real").is_none());
+            assert_eq!(game.native_player_is_fake(made), Some(true));
+            assert!(game.native_player_remove_fake(made));
+            assert!(!game.native_player_remove_fake(made));
+            assert_eq!(game.native_player_is_fake(made), None);
+            let replacement = game.native_fake_player(level, 1234, "machine").unwrap();
+            assert_ne!(made, replacement);
+            assert!(game.native_player_remove_fake(replacement));
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);

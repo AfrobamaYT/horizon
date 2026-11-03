@@ -1949,6 +1949,10 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Left(mut guest) => {
+                    if !guest.participates_online() {
+                        self.cleanup_fake_player(&mut host, &guest);
+                        continue;
+                    }
                     // The menu they had open closes, in the level they were in
                     // (`ServerPlayer.disconnect` -> `doCloseContainer`).
                     if guest.placed {

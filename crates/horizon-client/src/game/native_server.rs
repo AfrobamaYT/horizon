@@ -9,6 +9,7 @@
 //! server thread's), never on a client's.
 use super::{Dim, Game, commands::execute, lan::LanHost};
 // Their old home, for mixin code that names them here.
+use horizon_client::mod_api::LevelRef;
 pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     command::{ArgType, Dispatcher},
@@ -364,7 +365,7 @@ impl Game<'_> {
     /// Create or retrieve a connectionless player for the level currently in place.
     pub(super) fn native_fake_player(
         &mut self,
-        level: crate::mod_api::LevelRef,
+        level: LevelRef,
         uuid: u128,
         name: &str,
     ) -> Option<PlayerRef> {
@@ -417,6 +418,62 @@ impl Game<'_> {
             entity: crate::mod_api::EntityRef::new(epoch, id),
             uuid,
         })
+    }
+
+    /// Discard state belonging to an already removed connectionless guest.
+    pub(super) fn cleanup_fake_player(&mut self, host: &mut super::lan::LanHost, guest: &Guest) {
+        host.play.remove(&guest.conn);
+        host.poses.remove(&guest.conn);
+        host.sleep_ignored.remove(&guest.uuid);
+        host.waypoint_dead.remove(&guest.uuid);
+        host.mob_players.retain(|_, conn| *conn != guest.conn);
+        self.destroying.remove(&guest.entity_id);
+        self.guest_combat.remove(&guest.conn);
+        self.guest_attachments.remove(&guest.uuid);
+    }
+
+    /// Remove a fake without treating it as a disconnect or saving it.
+    pub(super) fn native_player_remove_fake(&mut self, player: PlayerRef) -> bool {
+        if self.native_lifecycle.epoch() != Some(player.entity.epoch())
+            || !self.lan_guest_swaps.is_empty()
+        {
+            return false;
+        }
+        let Some(mut host) = self.lan.take() else {
+            return false;
+        };
+        let index = host.hub.guests.iter().position(|g| {
+            !g.participates_online()
+                && g.uuid == player.uuid
+                && g.entity_id as u32 == player.entity.id()
+        });
+        let removed = if let Some(index) = index {
+            let guest = host.hub.guests.remove(index);
+            self.cleanup_fake_player(&mut host, &guest);
+            true
+        } else {
+            false
+        };
+        self.lan = Some(host);
+        removed
+    }
+
+    /// Drop the fake players belonging to a level as it closes.
+    pub(super) fn remove_level_fake_players(&mut self, dimension: &str) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        let mut i = 0;
+        while i < host.hub.guests.len() {
+            let g = &host.hub.guests[i];
+            if !g.participates_online() && g.dimension == dimension {
+                let guest = host.hub.guests.remove(i);
+                self.cleanup_fake_player(&mut host, &guest);
+            } else {
+                i += 1;
+            }
+        }
+        self.lan = Some(host);
     }
 
     /// Whether a live player handle names a connectionless actor.

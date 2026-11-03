@@ -1768,6 +1768,13 @@ impl Hub {
         for event in self.lan.poll() {
             match event {
                 NetEvent::Joined(j) => {
+                    if let Some(i) = self
+                        .guests
+                        .iter()
+                        .position(|g| g.uuid == j.uuid && !g.participates_online())
+                    {
+                        events.push(HostEvent::Left(Box::new(self.guests.remove(i))));
+                    }
                     let conn = self.admit(*j, ctx);
                     events.push(HostEvent::Joined(conn));
                 }
