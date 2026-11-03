@@ -103,8 +103,8 @@ the catalog, not a global API number, source comments or documentation histories
   (`native_menu_clicked`, `native_menu_closed`), and trades on them between the players'
   [`ENTITY_ITEMS`](#an-entitys-items) handlers in one transaction ([Server menus](#server-menus)).
 
-- Item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
-  lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip.
+- Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
+  the name and before the components' lines, never for a tooltip the stack hides.
 
 - Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
@@ -2393,7 +2393,7 @@ place; `native_server_tick` does not define one, so name the dimension and expec
   `no_ai`, `invisible`, `silent`, `invulnerable` and `no_gravity` flags; its default is a plain mob. The mob is finalized as a natural spawn
   is, and kept when its chunk unloads. Nothing is spawned outside `/summon`'s bounds, in a chunk that isn't loaded, or a monster on peaceful.
 - `native_mob(dimension, id)` and `native_mobs(dimension)` read the living mobs: id, dimension, kind, position, yaw, health and maximum health.
-- `native_set_mob_health(dimension, id, health)` changes a mob's health, and answers false for no such mob or a value that isn't finite or above 0.
+- A mob's health is set with `living.set_health(host, health)` on its `LivingRef`.
 - `native_kill_mob(dimension, id)` kills as `/kill` does, with its loot. `EntityRef::discard` removes an entity without death or loot.
 - While the game ticks its mobs they are out of the level: from a hook inside that tick, a spawned mob joins after the tick, and the others
   read as gone.
@@ -2597,6 +2597,15 @@ the server entity and level reads available on a client.
   (Paper's `Entity#isDead` is its inverse; a dying mob, mid death animation, is not alive). During a nested
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
+- `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
+  range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
+  or change a dead entity's health without running the death pipeline.
+  `living.heal(host, amount)` is `LivingEntity.heal`, through the `living_heal` hook: a signed amount changes
+  health only when current health is above zero. Both write players, guests
+  (in their own turn) and mobs, and answer false for armor stands and the dragon.
+  `living.last_attacker(host)` is `LivingEntity.getLastHurtByMob`: who last hurt the entity, within a hundred
+  ticks of the hurt, as an `EntityRef` of the current open; `None` once the window has passed or the attacker
+  is gone, and for armor stands, the dragon and clients.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -3205,10 +3214,12 @@ impl Hooks for MyMod {
 ```
 
 A hook whose catalog entry has a `scope` (`block`, `block_entity`, `item`, `menu`) and a `key`, the argument
-naming the thing it is about, has a method on that scope's trait: `BlockPart`, `BlockEntityPart` (a
-`BlockPart` too), `ItemPart` and `MenuPart`, with the same signature as on `Hooks`. The game asks every mod's
-`Hooks` method first, then the parts attached to that thing, in dispatch order, through the hook's contract: a
-`Cancel` or a replacement from a mod skips the parts. A part's kind is its type: the same kind twice on one
+naming the thing it is about, is a method on that scope's trait only: `BlockPart`, `BlockEntityPart` (a
+`BlockPart` too), `ItemPart` and `MenuPart`, as vanilla's and NeoForge's `Block` and `Item` methods are. It has
+no `Hooks` method: a thing without parts is never asked, and the game asks the parts attached to it in dispatch
+order, through the hook's contract, so a `Cancel` or a replacement skips the parts after it. Where NeoForge fires
+a bus event at that moment, the event is a hook of its own on `Hooks`, asked first for every thing, and its cancel
+skips the parts: a mod reacting to its own blocks uses a part, one reacting to every block the event. A part's kind is its type: the same kind twice on one
 thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
