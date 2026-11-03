@@ -366,28 +366,31 @@ pub(super) fn spawn_loader(
                 &settings.mods.enabled,
                 &dev_mods,
             )
-            .unwrap_or_else(|error| {
+            .or_else(|error| {
                 pack_error = Some(error.to_string());
                 mods::content_root(&vanilla_root, &settings.mods.enabled, &dev_mods)
             });
-            let result = load_resources(
-                root,
-                world.as_deref(),
-                &vanilla_root,
-                &settings,
-                started,
-                true,
-                false,
-                &progress,
-                &mut |gui, root| {
-                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
-                },
-            )
-            .map(|mut loaded| {
-                loaded.pack_error = loaded.pack_error.or(pack_error);
-                loaded
-            })
-            .map_err(|error| error.to_string());
+            let result = root
+                .and_then(|root| {
+                    load_resources(
+                        root,
+                        world.as_deref(),
+                        &vanilla_root,
+                        &settings,
+                        started,
+                        true,
+                        false,
+                        &progress,
+                        &mut |gui, root| {
+                            let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
+                        },
+                    )
+                })
+                .map(|mut loaded| {
+                    loaded.pack_error = loaded.pack_error.or(pack_error);
+                    loaded
+                })
+                .map_err(|error| error.to_string());
             let _ = sender.send(LoaderMsg::Done(result));
         })?;
     Ok((receiver, handle))

@@ -137,6 +137,11 @@ pub(super) fn installed_controllers() -> &'static [ControllerInfo] {
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
+#[cfg(test)]
+thread_local! {
+    /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
+    static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
+}
 static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
 static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
 
@@ -145,6 +150,14 @@ thread_local! {
     static GAME_PARTS: RefCell<Option<Rc<Parts>>> = const { RefCell::new(None) };
     /// Whether a `Game` runs on this thread.
     static GAME_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+fn installed() -> Option<&'static Installed> {
+    #[cfg(test)]
+    if let Some(installed) = TEST_PARTS.get() {
+        return Some(installed);
+    }
+    INSTALLED.get()
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
@@ -166,7 +179,7 @@ impl std::ops::Deref for PartsRef {
 /// The parts hook `hook` asks: with no tag parts, the key parts every game shares; otherwise this
 /// thread's game's, or the key parts until its world opens.
 pub(crate) fn parts(hook: &'static str) -> PartsRef {
-    let Some(installed) = INSTALLED.get() else {
+    let Some(installed) = installed() else {
         return PartsRef::Shared(&NO_PARTS);
     };
     if let Some(parts) = GAME_PARTS.with_borrow(Option::clone) {
@@ -210,7 +223,7 @@ pub(crate) fn resolve_parts(
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
 ) -> Result<(), Vec<String>> {
-    let Some(installed) = INSTALLED.get() else {
+    let Some(installed) = installed() else {
         return Ok(());
     };
     let mut unknown: Vec<String> = unknown_keys(&installed.keys.blocks, known.block, "block")
@@ -379,7 +392,7 @@ pub(crate) fn providers<'h, S: AsRef<str>>(
     host: &'h dyn Host,
     id: impl FnOnce(&'h dyn Host) -> Option<S>,
 ) -> &'static [CapabilityPart] {
-    let table = INSTALLED.get().map(|installed| match by {
+    let table = installed().map(|installed| match by {
         ProvidedBy::BlockEntity => &installed.keys.capabilities,
         ProvidedBy::Item => &installed.keys.item_capabilities,
         ProvidedBy::Entity => &installed.keys.entity_capabilities,
@@ -469,7 +482,7 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
 
 /// The mod's provider of the item places named `provider`, with the mod's index.
 pub(crate) fn place_provider(provider: &str) -> Option<(&'static str, Arc<dyn PlaceProvider>)> {
-    let (owner, provider) = INSTALLED.get()?.keys.place_providers.get(provider)?;
+    let (owner, provider) = installed()?.keys.place_providers.get(provider)?;
     Some((*owner, provider.clone()))
 }
 
@@ -839,6 +852,9 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             controllers: registrar.controllers,
         }
     };
+    #[cfg(test)]
+    TEST_PARTS.set(Some(Box::leak(Box::new(installed))));
+    #[cfg(not(test))]
     if INSTALLED.set(installed).is_err() {
         log::warn!("Mod parts already installed; keeping the first table");
     }
@@ -2120,6 +2136,7 @@ pub(crate) mod tests {
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
                 super::super::install(mods.clone());
+                install_parts(&mods).unwrap();
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
                 resolved.wait();
@@ -2127,6 +2144,7 @@ pub(crate) mod tests {
             });
             let server = scope.spawn(|| {
                 super::super::install(mods.clone());
+                install_parts(&mods).unwrap();
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
                 resolved.wait();
