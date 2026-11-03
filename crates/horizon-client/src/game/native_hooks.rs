@@ -1889,16 +1889,12 @@ impl Game<'_> {
     pub(super) fn native_panel_event(&mut self, mod_id: &str, event: &NativePanelEvent) {
         mod_api::dispatch_panel_event(self, mod_id, event);
     }
-    /// Block `block` (`mymod:machine`) gets a block entity
-    /// (`EntityBlock.newBlockEntity`): set `entity` to its id and saved
-    /// compound when the block is yours and `entity` is none yet. It works on
-    /// any template: the engine removes the block entity when its block is
-    /// broken or replaced, no piston moves it, and a mod that draws it
-    /// (`native_block_entity_submit`) is asked for it.
+    /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`).
+    /// The declaration owns the type id; no answer starts with an empty compound.
     pub(super) fn native_block_entity(
         &mut self,
         block: &str,
-        entity: &mut Option<(String, Compound)>,
+        entity: &mut Option<Compound>,
     ) {
         mod_api::dispatch_block_entity(self, block, entity);
     }
@@ -8497,6 +8493,18 @@ impl Game<'_> {
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
     /// native mod's.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
+        if let Some(kind) = mod_api::block_entity_type_for(name) {
+            let mut nbt = None;
+            self.native_block_entity(name, &mut nbt);
+            return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                kind.id().to_owned(),
+                ModBlockEntityFields {
+                    nbt: nbt.unwrap_or_default(),
+                    ..Default::default()
+                },
+            ))));
+        }
+        // Undeclared content blocks retain their template's vanilla behaviour.
         // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
         if !name.starts_with("minecraft:")
             && let Some(state) = self.pack.assets.registry.default_state(name)
@@ -8510,16 +8518,7 @@ impl Game<'_> {
         if let Some(entity) = BlockEntity::for_block(name) {
             return Some(entity);
         }
-        let mut entity = None;
-        self.native_block_entity(name, &mut entity);
-        let (id, nbt) = entity?;
-        Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
-            id,
-            ModBlockEntityFields {
-                nbt,
-                ..Default::default()
-            },
-        ))))
+        None
     }
     /// The containers of the mod blocks' block entities, by block state
     /// (`native_block_entity_container`), checked.

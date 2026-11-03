@@ -114,6 +114,17 @@ struct TagParts {
 struct Installed {
     keys: Parts,
     tags: TagParts,
+    block_entity_types: Vec<super::BlockEntityTypeKey>,
+    block_entity_blocks: HashMap<Box<str>, usize>,
+}
+
+pub(crate) fn block_entity_type_for(block: &str) -> Option<&'static super::BlockEntityTypeKey> {
+    let installed = INSTALLED.get()?;
+    installed.block_entity_blocks.get(block).map(|&i| &installed.block_entity_types[i])
+}
+
+pub(crate) fn block_entity_types() -> &'static [super::BlockEntityTypeKey] {
+    INSTALLED.get().map_or(&[], |installed| &installed.block_entity_types)
 }
 
 static INSTALLED: OnceLock<Installed> = OnceLock::new();
@@ -453,6 +464,7 @@ pub struct Registrar {
     registered: usize,
     parts: Parts,
     tags: TagParts,
+    block_entity_types: Vec<super::BlockEntityTypeKey>,
     refused: Vec<String>,
 }
 
@@ -464,25 +476,48 @@ impl Registrar {
             registered: 0,
             parts: Parts::default(),
             tags: TagParts::default(),
+            block_entity_types: Vec::new(),
             refused: Vec::new(),
         }
+    }
+
+    /// Declare a block entity type in this mod's namespace.
+    pub fn block_entity_type(&mut self, id: &str) -> super::BlockEntityTypeBuilder<'_> {
+        super::BlockEntityTypeBuilder {
+            id: format!("{}:{id}", self.mod_id),
+            registrar: self,
+            blocks: Vec::new(),
+        }
+    }
+
+    pub(super) fn register_block_entity_type(
+        &mut self,
+        id: String,
+        blocks: Vec<String>,
+    ) -> super::BlockEntityTypeKey {
+        if self.block_entity_types.iter().any(|key| key.id() == id) {
+            self.refused.push(format!("duplicate block entity type {id}"));
+        }
+        let key = super::BlockEntityTypeKey(Arc::new(super::block_entity_type::BlockEntityType {
+            id,
+            blocks,
+        }));
+        self.block_entity_types.push(key.clone());
+        key
     }
 
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
     pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
         self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
     }
-    /// Attach `part` to the mod block entity type `kind` (the id a `block_entity` hook gives the
-    /// entity, `mymod:press`) and to `blocks`, the blocks that hold one. It answers the hooks
-    /// asked by the entity (`block_entity_tick`, `menu_button`), those asked by block
-    /// (`block_entity`, `screen`) and every block hook of those blocks.
-    pub fn block_entity_part<P: BlockEntityPart>(&mut self, kind: &str, blocks: &[&str], part: P) {
+    /// Attach a part to a block entity type and its valid blocks.
+    pub fn block_entity_part<P: BlockEntityPart>(&mut self, kind: &super::BlockEntityTypeKey, part: P) {
         let part = Arc::new(part);
-        if !self.attach::<P, dyn BlockEntityPart>(|p| &mut p.block_entity_kinds, kind, part.clone())
+        if !self.attach::<P, dyn BlockEntityPart>(|p| &mut p.block_entity_kinds, kind.id(), part.clone())
         {
             return;
         }
-        for block in blocks {
+        for block in &kind.0.blocks {
             // Every block entity part is a block part too, so a second one is found there.
             if self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, part.clone()) {
                 self.attach::<P, dyn BlockEntityPart>(
@@ -754,12 +789,25 @@ pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
             registrar.mod_index = index;
             hooks.register(&mut registrar);
         }
+        let mut block_entity_blocks = HashMap::new();
+        for (i, key) in registrar.block_entity_types.iter().enumerate() {
+            for block in &key.0.blocks {
+                if let Some(previous) = block_entity_blocks.insert(block.clone().into_boxed_str(), i) {
+                    registrar.refused.push(format!(
+                        "block {block} belongs to both {} and {}",
+                        registrar.block_entity_types[previous].id(), key.id()
+                    ));
+                }
+            }
+        }
         if !registrar.refused.is_empty() {
             return Err(registrar.refused);
         }
         Installed {
             keys: registrar.parts,
             tags: registrar.tags,
+            block_entity_types: registrar.block_entity_types,
+            block_entity_blocks,
         }
     } else {
         Installed::default()
@@ -800,7 +848,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// The block entity of type `test:press_entity`, held by block `test:press`: it ticks, and
+    /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
     impl BlockPart for Press {}
@@ -842,7 +890,8 @@ pub(crate) mod tests {
         fn register(&self, r: &mut Registrar) {
             r.block_part("test:gauge", Gauge);
             r.block_part_tag("test:gauged", TagGauge);
-            r.block_entity_part("test:press_entity", &["test:press"], Press);
+            let kind = r.block_entity_type("press_entity").blocks(&["test:press"]).build();
+            r.block_entity_part(&kind, Press);
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
             // block entity's are reached does: ahead of the game's.
             r.block_entity_capability_before_game(&ITEMS, "test:pipe", |_, at| {
@@ -3759,14 +3808,14 @@ pub(crate) mod tests {
         };
         // The ticker is asked by block: the type id is not a block.
         assert!(ticks("test:press"));
-        assert!(!ticks("test:press_entity"));
+        assert!(!ticks("doubler:press_entity"));
         let tick = |kind: &str| {
             let mut entity = ModBlockEntity::new(kind.into(), Default::default());
             dispatch_block_entity_tick(&mut NoHost, [0, 64, 0], &mut entity);
             entity.data.len()
         };
         // The tick is asked by the entity's type, which differs from its block's id.
-        assert_eq!(tick("test:press_entity"), 1);
+        assert_eq!(tick("doubler:press_entity"), 1);
         assert_eq!(tick("test:press"), 0);
     }
 
