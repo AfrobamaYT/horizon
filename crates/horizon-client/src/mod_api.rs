@@ -167,6 +167,37 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// An item that drops where a living entity died, before it is an item entity
+/// in the level (`living_drops`): what `ItemEntity`'s constructor was given.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct NativeItemDrop {
+    pub stack: ItemStack,
+    /// Where the item entity appears.
+    pub position: [f64; 3],
+    /// Its motion in blocks per tick, as vanilla's constructor drew it.
+    pub velocity: [f64; 3],
+    /// Ticks before a player may pick it up.
+    pub pickup_delay: u32,
+}
+
+impl NativeItemDrop {
+    /// A drop of `stack` at `position` with a `velocity` and `pickup_delay`.
+    pub fn new(
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        pickup_delay: u32,
+    ) -> Self {
+        Self {
+            stack,
+            position,
+            velocity,
+            pickup_delay,
+        }
+    }
+}
+
 /// A statistic type (`BuiltInRegistries.STAT_TYPE`), for a player's
 /// statistics: what the stat's key names (a block, an item, an entity type,
 /// or a `minecraft:custom` stat).
@@ -1060,6 +1091,95 @@ impl GameMode {
     }
 }
 
+/// A custom boss bar (vanilla's `CustomBossEvent`, the `/bossbar` ones) of an
+/// open server world. It holds the world's epoch and the bar's UUID, so a bar
+/// that was removed (even if its id was added again) or a handle from an
+/// earlier open reads as `None` and changes nothing. Mob and raid bars are not
+/// custom boss events and have no handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BossBarRef {
+    pub(crate) epoch: NativeWorldEpoch,
+    pub(crate) uuid: u128,
+}
+
+/// `BossEvent.BossBarColor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarColor {
+    Pink,
+    Blue,
+    Red,
+    Green,
+    Yellow,
+    Purple,
+    White,
+}
+
+impl BossBarColor {
+    /// Every color, in ordinal order.
+    pub const ALL: [Self; 7] = [
+        Self::Pink,
+        Self::Blue,
+        Self::Red,
+        Self::Green,
+        Self::Yellow,
+        Self::Purple,
+        Self::White,
+    ];
+    /// `BossBarColor.getName`: `pink`, `blue`, `red`, `green`, `yellow`,
+    /// `purple` or `white`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pink => "pink",
+            Self::Blue => "blue",
+            Self::Red => "red",
+            Self::Green => "green",
+            Self::Yellow => "yellow",
+            Self::Purple => "purple",
+            Self::White => "white",
+        }
+    }
+    /// The color with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|color| color.name() == name)
+    }
+}
+
+/// `BossEvent.BossBarOverlay`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BossBarOverlay {
+    Progress,
+    Notched6,
+    Notched10,
+    Notched12,
+    Notched20,
+}
+
+impl BossBarOverlay {
+    /// Every overlay, in ordinal order.
+    pub const ALL: [Self; 5] = [
+        Self::Progress,
+        Self::Notched6,
+        Self::Notched10,
+        Self::Notched12,
+        Self::Notched20,
+    ];
+    /// `BossBarOverlay.getName`: `progress`, `notched_6`, `notched_10`,
+    /// `notched_12` or `notched_20`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Progress => "progress",
+            Self::Notched6 => "notched_6",
+            Self::Notched10 => "notched_10",
+            Self::Notched12 => "notched_12",
+            Self::Notched20 => "notched_20",
+        }
+    }
+    /// The overlay with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|overlay| overlay.name() == name)
+    }
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
@@ -1658,14 +1778,14 @@ pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
 pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
+pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
 mod item_place;
 mod menu_slot;
 pub use menu_slot::MenuSlotBacking;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
-pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
+pub use resource::{ComponentId, ItemResource, Overanswered, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
