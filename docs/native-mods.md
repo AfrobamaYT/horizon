@@ -111,6 +111,15 @@ the catalog, not a global API number, source comments or documentation histories
   after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
   instead of the item's use.
 
+- A block's own item-use behaviour, on the server for every player: attach a `BlockPart` and implement
+  `use_item_on(host, event) -> Option<NativeInteractionResult>`. `event.state` keys the per-state table;
+  `event.click` carries the level, position, hit, hand, stack and player. `Some` replaces the template's
+  `Block.useItemOn`: `Success`/`SuccessServer` consume and swing, `Consume` consumes without swinging,
+  `Pass`/`Fail` let the item try its `useOn`, and `TryWithEmptyHand` tries the block's `useWithoutItem`
+  on the main hand only. `None` leaves the template in charge. This is the block's behaviour, not
+  NeoForge's separate `UseItemOnBlockEvent` broadcast interceptor. The earlier `right_click_block`
+  event still decides whether the block is used at all.
+
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims
@@ -3562,6 +3571,10 @@ The following catalog hooks are not in the trait:
 The client `tooltip_color` hook changes the background and top and bottom border gradient colours as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered; no texture hook is offered.
 
 # Camera and collision reads
+
+`ClientHost::is_paused()` reads the applied client pause state, not whether a pause
+screen is open. A multiplayer game continues running while its pause screen is open.
+The pause-change pre hook sees the old state; the post hook sees the new state.
 
 The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
 
