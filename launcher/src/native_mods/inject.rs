@@ -8,10 +8,14 @@ use std::{
 };
 
 /// Replace trait injections with ordinary mixin helpers, leaving ordinary injections unchanged.
-pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, String> {
+pub(super) fn prepare(
+    mods: &[Bundle],
+    source: &Path,
+    dispatch_order: &[Bundle],
+) -> Result<Vec<Injection>, String> {
     let mut result = Vec::new();
     let mut names = HashSet::new();
-    let owners: HashMap<_, _> = mods
+    let owners: HashMap<_, _> = dispatch_order
         .iter()
         .enumerate()
         .map(|(i, b)| (b.manifest.id.as_str(), i))
@@ -194,7 +198,7 @@ mod tests {
         for bundle in mods {
             super::super::package::tool_manifest(bundle)?;
         }
-        super::prepare(mods, source)
+        super::prepare(mods, source, mods)
     }
 
     fn compile_and_run(root: &Path, program: &str) {

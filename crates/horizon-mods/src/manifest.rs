@@ -406,7 +406,16 @@ impl Package {
             for (name, _) in crate::content::folder_files(path)? {
                 check_folder_file(path, &name)?;
             }
-            std::fs::read_to_string(path.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?
+            let mut text = String::new();
+            std::fs::File::open(path.join(MANIFEST))
+                .map_err(|e| format!("{MANIFEST}: {e}"))?
+                .take(MAX_MANIFEST + 1)
+                .read_to_string(&mut text)
+                .map_err(|e| format!("{MANIFEST}: {e}"))?;
+            if text.len() as u64 > MAX_MANIFEST {
+                return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
+            }
+            text
         } else {
             if !metadata.is_file() {
                 return Err(format!(

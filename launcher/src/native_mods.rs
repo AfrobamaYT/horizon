@@ -402,8 +402,7 @@ const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
 pub const INSTALLED: &str = "horizon-native-mods";
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
-/// Each `.hmod` is checked again as the registry checks it (Rust and TOML under
-/// `native/`, plus files under its `data/`, nothing run).
+/// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
 pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
     let out = root().join("installed.incoming");
     let _ = fs::remove_dir_all(&out);
@@ -529,8 +528,7 @@ impl Injection {
     }
 }
 
-/// The bundles in `folder`: the folder itself when it is one (a `horizon-mixin.toml`, or an
-/// unpacked `.hmod`: `horizon-native.json` and `native/`), else each of its subfolders that is.
+/// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
@@ -548,7 +546,7 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     }
     if found.is_empty() {
         return Err(format!(
-            "{} holds no native mod ({MANIFEST} or {NATIVE_MANIFEST}).",
+            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
             folder.display()
         ));
     }
@@ -1001,9 +999,8 @@ pub fn digest<'a>(files: impl Iterator<Item = (&'a str, &'a [u8])>) -> String {
     hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The digest of a bundle's files as the Mods page reads it (`native_status::enabled`): an
-/// unpacked `.hmod`'s whole folder, its `horizon-native.json` included, else the bundle's own
-/// folder. A build records it, so a build of the mods turned on reads as up to date.
+/// The selected flat files, in the same order as `native_status::enabled` hashes an archive.
+/// A build records this digest so an unchanged installed mod reads as up to date.
 fn source_digest(bundle: &Bundle) -> Option<String> {
     let paths = bundle_files(bundle);
     let read: Vec<_> = paths
@@ -1271,11 +1268,8 @@ fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
     cmd
 }
 
-/// Checks the mods' crates (`native-crates/`) against `source`'s `Cargo.lock`, Horizon's own.
-/// horizon-mixins already wrote them into `stage`'s lock (and refused a crate the lock lacks,
-/// `E_CRATE_DEPENDENCY`), leaving every other package as it was: this checks that again, a crate
-/// they name must be in Horizon's lock and every package downloaded exactly as there. Then the
-/// crates are fetched, so a feature turning on a dependency the lock lacks fails here, readably.
+/// Check staged crates against Horizon's own Cargo.lock before fetching dependencies.
+/// Their requested packages and every downloaded package must belong to that lock.
 fn lock_crates(
     rust: &Toolchain,
     source: &Path,
@@ -1305,8 +1299,7 @@ fn lock_crates(
 /// Builds the mods' post-build programs with the game's profile in `target`; each step and its
 /// program, in mod order. A bin's file name doesn't include its package, so two mods' bins of the
 /// same name (or one named like the game) are the same file in `target`: each program is copied
-/// to `programs/<step>/` as soon as it is built. horizon-mixins refuses such names too
-/// (`E_POST_BUILD`, horizon-mixins#8); this keeps a bundle built by an older one safe.
+/// to `programs/<step>/` as soon as it is built.
 fn post_build_programs(
     rust: &Toolchain,
     stage: &Path,
@@ -1428,7 +1421,7 @@ fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<Vec<Bundle>, String> {
     }
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
     let mut staged = Vec::new();
-    for bundle in mods {
+    for bundle in mods.iter().filter(|bundle| bundle.needs_mixins()) {
         let dir = to.join(&bundle.manifest.id);
         copy_bundle(bundle, &dir)?;
         let copied = Bundle {
@@ -1602,7 +1595,7 @@ fn pipeline(
                 let tool = tool(&rust, &mixins, &progress)?;
                 let mixin_input = real.join("mixins.incoming");
                 let tool_mods = stage_mixins(&ordered, &mixin_input)?;
-                let injections = inject::prepare(&tool_mods, &source)?;
+                let injections = inject::prepare(&tool_mods, &source, &ordered)?;
                 progress(Step::Mixins);
                 let result = run(
                     apply(&rust, &tool, &source, &mixin_input, &fresh),
@@ -2439,8 +2432,9 @@ mod tests {
         assert!(mods[0].needs_mixins() && mods[2].needs_mixins());
         let input = root.join("mixins");
         let tool_mods = stage_mixins(&mods, &input).unwrap();
-        let injections = inject::prepare(&tool_mods, &root).unwrap();
+        let injections = inject::prepare(&tool_mods, &root, &mods).unwrap();
         assert_eq!(injections.len(), 1);
+        assert!(!input.join("plain").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
         assert!(input
             .join("trait_injection/horizon-trait-injection-0.rs")

@@ -139,7 +139,7 @@ pub(super) fn wanted(
     Ok(out)
 }
 
-/// `(mod id, its crate's Cargo.toml)` under `native-crates/`, sorted.
+/// `(mod id, its crate's Cargo.toml)` under `native-api/`, sorted.
 fn manifests(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     let mut out = Vec::new();
     let read = |d: &Path| -> Result<Vec<PathBuf>, String> {
@@ -186,8 +186,8 @@ fn manifests(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     Ok(out)
 }
 
-/// Only a literal `../<crate-id>` may name another staged crate. Its directory and manifest must
-/// be ordinary entries in the same mod; never canonicalize a source path or follow a link.
+/// Only a declared `../<mod-id>` may name another staged mod's crate. Its directory and
+/// manifest must be ordinary entries; never canonicalize a source path or follow a link.
 fn validate_sibling_path(
     mod_id: &str,
     manifest: &Path,
@@ -365,7 +365,7 @@ pub(super) fn post_builds(stage: &Path) -> Result<Vec<PostBuild>, String> {
 }
 
 /// Whether `stage` has any mod's crate: a build with none skips the crate check, even when an
-/// earlier build left `native-crates/` behind (the stage keeps folders).
+/// earlier build left `native-api/` behind (the stage keeps folders).
 pub(super) fn any(stage: &Path) -> bool {
     let dir = stage.join(DIR);
     match fs::symlink_metadata(&dir) {
