@@ -4,6 +4,7 @@
       "name": "potential_spawns",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_potential_spawns",
       "side": "server",
+      "host": "read",
       "cancellable": true,
       "neoforge": "LevelEvent.PotentialSpawns",
       "mod_api": {
