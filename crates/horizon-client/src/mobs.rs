@@ -1167,7 +1167,7 @@ pub struct Extra {
     /// What the native mods last heard it hold and wear
     /// (`LivingEntity.lastEquipmentItems`, empty at first), by
     /// `EquipmentSlot` ordinal: see `Mob::equipment_stacks`.
-    pub equipment_heard: Option<Box<[Option<crate::items::ItemStack>; 8]>>,
+    pub equipment_heard: Option<Box<horizon_items::equipment::Equipment>>,
 }
 impl Extra {
     pub fn set_body_stack(&mut self, stack: Option<crate::items::ItemStack>) {
@@ -2252,7 +2252,7 @@ impl Mob {
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
-    pub fn equipment_stacks(&self) -> [Option<crate::items::ItemStack>; 8] {
+    pub fn equipment_stacks(&self) -> horizon_items::equipment::Equipment {
         use crate::items::ItemStack;
         let e = &self.extra;
         let offhand = finalize::stored_stack(self, finalize::OFFHAND);
@@ -2303,7 +2303,7 @@ impl Mob {
                 extra: None,
             }));
         }
-        out
+        out.into()
     }
     /// Remove and return the complete body stack.
     pub fn take_body_equipment(&mut self) -> Option<crate::items::ItemStack> {
