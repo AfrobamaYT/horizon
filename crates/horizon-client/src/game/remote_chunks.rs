@@ -253,6 +253,18 @@ pub(super) enum Next {
 }
 
 impl Game<'_> {
+    /// A chunk packet's column was adopted. The dispatch point for the
+    /// client side of `chunk_load` (the client chunk seam, milestone 8);
+    /// event dispatch is added separately.
+    pub(in crate::game) fn client_chunk_load(&mut self, _x: i32, _z: i32) {}
+
+    /// A resident column was freed, whichever route freed it — the last
+    /// event for it. The dispatch point for the client side of
+    /// `chunk_unload`; event dispatch is added separately.
+    pub(in crate::game) fn client_chunk_unload(&mut self, _x: i32, _z: i32) {}
+}
+
+impl Game<'_> {
     /// `handleLevelChunkWithLight`: the column replaces any loaded one, and
     /// its block entities load their update tags. `decoded` is the column the
     /// decoder made with `format`; another format since means decode again.
@@ -286,6 +298,9 @@ impl Game<'_> {
             }
         };
         let (x, z) = (p.x, p.z);
+        // The client chunk seam: one load per packet adoption, a re-sent
+        // position included (below). A biome packet takes neither path.
+        self.client_chunk_load(x, z);
         // A column sent again while it is resident (a bulk edit): only what changed is lit and meshed again.
         if self.world.chunks.contains_key(&(x, z)) {
             horizon_client::spans::time("replace_remote", || {

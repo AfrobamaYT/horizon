@@ -4,9 +4,16 @@
 //! `None` (or `false`) on a client, for a handle of an earlier open, or for a
 //! block in a chunk that isn't loaded.
 use super::Game;
-use horizon_client::mod_api::{ChunkRef, ChunkStatus, LevelRef};
+use horizon_client::mod_api::{ChunkRef, ChunkStatus, LevelRef, NativeTicketOwner};
+use horizon_client::mod_chunk_tickets::ModTicket;
 use horizon_client::{streaming::Streaming, world::World};
 use horizon_core::position::ChunkPos;
+
+/// Whether chunk `pos` lies inside the world (`/forceload`'s 30 million block bound).
+fn chunk_in_world(pos: [i32; 2]) -> bool {
+    const LIMIT: i32 = 30_000_000 >> 4;
+    pos.iter().all(|c| (-LIMIT..LIMIT).contains(c))
+}
 
 impl Game<'_> {
     /// The world a handle names now, or None for a stale or foreign one.
@@ -43,10 +50,8 @@ impl Game<'_> {
         level: LevelRef,
         pos: [i32; 2],
     ) -> Option<ChunkRef> {
-        const LIMIT: i32 = 30_000_000 >> 4;
         self.native_level_world(level)?;
-        let inside = pos.iter().all(|c| (-LIMIT..LIMIT).contains(c));
-        inside.then_some(ChunkRef::new(level, pos))
+        chunk_in_world(pos).then_some(ChunkRef::new(level, pos))
     }
     /// The streaming of the level a handle names now, or None for a stale or
     /// foreign one.
@@ -57,13 +62,13 @@ impl Game<'_> {
         }
         self.levels.parked_streaming_of(level.dimension())
     }
-    /// Whether the chunk is force-loaded (`ServerLevel.getForcedChunks`
-    /// holds it), loaded or not. None for a stale handle or on a client.
+    /// Whether `/forceload` holds the chunk (`ServerLevel.getForcedChunks`),
+    /// loaded or not; a mod's own ticket on it does not count. None for a stale handle or on a client.
     pub(super) fn native_chunk_forced(&self, chunk: ChunkRef) -> Option<bool> {
         let [x, z] = chunk.pos();
         Some(
             self.native_level_streaming(chunk.level())?
-                .forced
+                .commanded()
                 .contains(&(x, z)),
         )
     }
@@ -94,12 +99,90 @@ impl Game<'_> {
         };
         streaming.set_forced(x, z, forced)
     }
+    /// The mods validate the chunk tickets `dim`'s level loaded from its save,
+    /// and the survivors take hold. Tickets a mod added since the load (in
+    /// `level_load`, say) are not candidates. Nothing is built while no mod
+    /// listens.
+    pub(super) fn validate_mod_chunk_tickets(&mut self, dim: super::Dim) {
+        let loaded = self.streaming.take_loaded_tickets();
+        let loaded = if loaded.is_empty()
+            || !horizon_client::mod_api::listened(
+                horizon_client::mod_api::HookId::ChunkTicketsValidate,
+            ) {
+            loaded
+        } else {
+            let (mut validation, removals) =
+                horizon_client::mod_chunk_tickets::TicketValidation::new(loaded.clone());
+            self.native_chunk_tickets_validate(dim.id(), &mut validation);
+            let removed = removals.into_removed();
+            loaded
+                .into_iter()
+                .filter(|t| !removed.contains(t))
+                .collect()
+        };
+        for ticket in loaded {
+            self.streaming.set_mod_forced(ticket, true);
+        }
+    }
+    /// The calling mod's chunk ticket for `owner` on `chunk`
+    /// (`TicketController.forceChunk`): true when the mod's tickets changed.
+    /// A chunk stays forced, entity ticking and saved, and its level keeps
+    /// ticking, while any ticket or `/forceload` holds it. Tickets are
+    /// scoped by (mod, owner, chunk), so two owners in one chunk release
+    /// separately. They are saved in `data/horizon/mod_chunk_tickets.dat`;
+    /// when the world loads, those of a mod that isn't installed are discarded.
+    /// False outside a mod's hook, for a stale handle, on a client, for a
+    /// chunk outside the world and for a level the server has not opened.
+    pub(super) fn native_chunk_set_mod_forced(
+        &mut self,
+        chunk: ChunkRef,
+        owner: NativeTicketOwner,
+        forced: bool,
+    ) -> bool {
+        let Some(mod_id) = horizon_client::crash::current_native_mod() else {
+            return false;
+        };
+        if self.native_level_streaming(chunk.level()).is_none() || !chunk_in_world(chunk.pos()) {
+            return false;
+        }
+        let [x, z] = chunk.pos();
+        let ticket = ModTicket {
+            mod_id: mod_id.to_owned(),
+            owner,
+            chunk: (x, z),
+        };
+        let dimension = chunk.level().dimension();
+        let streaming = if dimension == self.dim.id() {
+            &mut self.streaming
+        } else if let Some(streaming) = self.levels.parked_streaming_of_mut(dimension) {
+            streaming
+        } else {
+            return false;
+        };
+        streaming.set_mod_forced(ticket, forced)
+    }
+    /// The calling mod's chunk tickets in the level, as (owner, chunk
+    /// position), in order. None for a stale handle, on a client and outside
+    /// a mod's hook.
+    pub(super) fn native_level_mod_forced_chunks(
+        &self,
+        level: LevelRef,
+    ) -> Option<Vec<(NativeTicketOwner, [i32; 2])>> {
+        let mod_id = horizon_client::crash::current_native_mod()?;
+        let tickets = self.native_level_streaming(level)?.mod_tickets();
+        Some(
+            tickets
+                .of_mod(mod_id)
+                .map(|t| (t.owner, [t.chunk.0, t.chunk.1]))
+                .collect(),
+        )
+    }
     /// The level's force-loaded chunks (`/forceload query`), sorted as
     /// the command lists them. None for a stale handle or on a client.
     pub(super) fn native_level_forced_chunks(&self, level: LevelRef) -> Option<Vec<[i32; 2]>> {
         let mut forced: Vec<(i32, i32)> = self
             .native_level_streaming(level)?
-            .forced
+            .commanded()
             .iter()
             .copied()
             .collect();
@@ -273,8 +356,8 @@ mod tests {
             assert!(!game.native_chunk_set_forced(chunk, true));
             // Opened, then parked.
             let back = game.dim;
-            game.enter_level(None, other).unwrap();
-            game.enter_level(None, back).unwrap();
+            game.enter_level(other).unwrap();
+            game.enter_level(back).unwrap();
             assert_eq!(game.native_chunk_forced(chunk), Some(false));
             assert!(game.native_chunk_set_forced(chunk, true));
             assert_eq!(game.native_level_forced_chunks(parked), Some(vec![[1, 1]]));
@@ -282,6 +365,305 @@ mod tests {
             assert!(game.levels_to_tick().contains(&other));
             assert!(game.native_chunk_set_forced(chunk, false));
             assert!(!game.levels_to_tick().contains(&other));
+        });
+    }
+
+    fn in_mod(id: &'static str) -> horizon_client::crash::NativeModGuard {
+        horizon_client::crash::enter_native_mod(horizon_client::crash::NativeModCall {
+            id,
+            hook: "test",
+            part: None,
+        })
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tickets_are_scoped_by_owner_and_share_the_forceload_store() {
+        use horizon_client::mod_api::NativeTicketOwner::{Block, Entity};
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            let chunk = game.native_level_chunk_ref(level, [5, 6]).unwrap();
+            let (a, b) = (Block([80, 64, 96]), Entity(7));
+            // Outside a mod's hook there is no caller to own a ticket.
+            assert!(!game.native_chunk_set_mod_forced(chunk, a, true));
+            let guard = in_mod("machines");
+            assert!(game.native_chunk_set_mod_forced(chunk, a, true));
+            assert!(!game.native_chunk_set_mod_forced(chunk, a, true), "held");
+            assert!(game.native_chunk_set_mod_forced(chunk, b, true));
+            assert!(game.streaming.forced.contains(&(5, 6)));
+            assert_eq!(
+                game.native_chunk_forced(chunk),
+                Some(false),
+                "not /forceload's"
+            );
+            assert_eq!(game.native_level_forced_chunks(level), Some(vec![]));
+            // Two owners in one chunk release separately.
+            assert!(game.native_chunk_set_mod_forced(chunk, a, false));
+            assert!(game.streaming.forced.contains(&(5, 6)));
+            assert_eq!(
+                game.native_level_mod_forced_chunks(level),
+                Some(vec![(b, [5, 6])])
+            );
+            // Another mod's tickets are not listed, and its release leaves ours.
+            drop(guard);
+            let guard = in_mod("other");
+            assert_eq!(game.native_level_mod_forced_chunks(level), Some(vec![]));
+            assert!(!game.native_chunk_set_mod_forced(chunk, b, false));
+            drop(guard);
+            // /forceload and a ticket on one chunk: the chunk stays until both go.
+            assert!(game.native_chunk_set_forced(chunk, true));
+            assert!(game.native_chunk_set_forced(chunk, false));
+            assert!(
+                game.streaming.forced.contains(&(5, 6)),
+                "the ticket holds it"
+            );
+            assert!(game.native_chunk_set_forced(chunk, true));
+            let _guard = in_mod("machines");
+            assert!(game.native_chunk_set_mod_forced(chunk, b, false));
+            assert!(
+                game.streaming.forced.contains(&(5, 6)),
+                "/forceload holds it"
+            );
+            game.streaming.clear_forced();
+            assert!(game.streaming.forced.is_empty());
+            // The world's bounds, as /forceload checks them.
+            let outside = horizon_client::mod_api::ChunkRef::new(level, [1_875_000, 0]);
+            assert!(!game.native_chunk_set_mod_forced(outside, a, true));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tickets_save_apart_from_vanillas_tickets_and_release_with_the_world() {
+        use horizon_client::mod_api::NativeTicketOwner::{Block, Entity};
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            let chunk = game.native_level_chunk_ref(level, [-9, 4]).unwrap();
+            let _guard = in_mod("machines");
+            assert!(game.native_chunk_set_mod_forced(chunk, Block([-140, 70, 70]), true));
+            assert!(game.native_chunk_set_mod_forced(chunk, Entity(u128::MAX - 3), true));
+            game.save_chunk_tickets().unwrap();
+            let vanilla = game.save.load_forced_chunks();
+            assert!(vanilla.is_empty(), "vanilla's file has no mod ticket");
+            // The world closes: its streaming goes, the next opening reads the file.
+            let reopen = |game: &mut super::super::Game<'_>, loaded: fn(&str) -> bool| {
+                game.streaming.load_forced(
+                    game.save.load_forced_chunks(),
+                    game.save.load_mod_tickets(),
+                    loaded,
+                );
+                game.validate_mod_chunk_tickets(game.dim);
+            };
+            reopen(game, |id| id == "machines");
+            assert_eq!(game.native_level_mod_forced_chunks(level).unwrap().len(), 2);
+            assert!(game.streaming.forced.contains(&(-9, 4)));
+            // Without the mod, its tickets are discarded: nothing is forced, and
+            // the next save drops them from the file.
+            reopen(game, |_| false);
+            assert!(game.streaming.forced.is_empty());
+            game.save_chunk_tickets().unwrap();
+            reopen(game, |id| id == "machines");
+            assert!(game.streaming.forced.is_empty());
+            assert!(game.save.load_mod_tickets().is_empty());
+            // Released tickets leave the file.
+            assert!(game.native_chunk_set_mod_forced(chunk, Block([-140, 70, 70]), true));
+            assert!(game.native_chunk_set_mod_forced(chunk, Block([-140, 70, 70]), false));
+            game.save_chunk_tickets().unwrap();
+            assert!(game.save.load_mod_tickets().is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_ticket_keeps_a_parked_level_active() {
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            let other = if game.dim == Dim::Nether {
+                Dim::End
+            } else {
+                Dim::Nether
+            };
+            let back = game.dim;
+            game.enter_level(other).unwrap();
+            game.enter_level(back).unwrap();
+            let parked = horizon_client::mod_api::LevelRef::new(level.epoch(), other.id());
+            let chunk = ChunkRef::new(parked, [2, 2]);
+            let _guard = in_mod("machines");
+            let owner = horizon_client::mod_api::NativeTicketOwner::Block([32, 64, 32]);
+            assert!(!game.levels_to_tick().contains(&other));
+            assert!(game.native_chunk_set_mod_forced(chunk, owner, true));
+            assert!(game.levels_to_tick().contains(&other));
+            assert!(game.native_chunk_set_mod_forced(chunk, owner, false));
+            assert!(!game.levels_to_tick().contains(&other));
+        });
+    }
+
+    /// The result `/forceload query` gives: the chunks listed, or 0 when it reports none.
+    fn query_result(game: &mut super::super::Game<'_>, command: &str) -> Option<i32> {
+        let d = horizon_client::command::vanilla::game_dispatcher_with_features(
+            &game.level.enabled_features,
+        );
+        let parse = d.parse(command, &game.ui.registries);
+        let (ctx, _) = parse.executable().ok()?;
+        let (ctx, root) = (ctx.clone(), parse.context.clone());
+        game.run_chain(&root, &ctx).ok()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn forceload_query_lists_only_command_tickets() {
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            let chunk = game.native_level_chunk_ref(level, [3, 3]).unwrap();
+            game.ui.registries.permission = 4;
+            let _guard = in_mod("machines");
+            let owner = horizon_client::mod_api::NativeTicketOwner::Block([48, 64, 48]);
+            assert!(game.native_chunk_set_mod_forced(chunk, owner, true));
+            assert!(game.streaming.forced.contains(&(3, 3)));
+            assert_eq!(query_result(game, "forceload query"), Some(0), "list form");
+            assert_eq!(
+                query_result(game, "forceload query 48 48"),
+                None,
+                "position form"
+            );
+            assert!(game.native_chunk_set_forced(chunk, true));
+            assert_eq!(query_result(game, "forceload query"), Some(1));
+            assert_eq!(query_result(game, "forceload query 48 48"), Some(1));
+        });
+    }
+
+    use horizon_client::mod_api::{ChunkTicketsValidateEvent, Hooks, ModEntry, ServerHost};
+    use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
+
+    /// Removes the block at [1, 64, 1] from the tickets it is shown.
+    struct Prune;
+    impl Hooks for Prune {
+        fn chunk_tickets_validate(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut ChunkTicketsValidateEvent<'_>,
+        ) {
+            e.validation.remove_block_tickets([1, 64, 1]);
+        }
+    }
+    /// Subscribes to nothing.
+    struct Idle;
+    impl Hooks for Idle {}
+
+    fn saved(mod_id: &str, pos: [i32; 3], chunk: (i32, i32)) -> ModTicket {
+        ModTicket {
+            mod_id: mod_id.into(),
+            owner: TicketOwner::Block(pos),
+            chunk,
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn validation_drops_a_removed_ticket_and_leaves_the_rest() {
+        let mods: horizon_client::mod_api::Mods = vec![
+            ModEntry::new("machines", Box::new(Prune)),
+            ModEntry::new("idle", Box::new(Idle)),
+        ]
+        .into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let tickets = vec![
+                    saved("machines", [1, 64, 1], (7, 7)),
+                    saved("machines", [9, 64, 9], (8, 8)),
+                    saved("idle", [1, 64, 1], (9, 9)),
+                ];
+                game.streaming
+                    .load_forced(Default::default(), tickets, |_| true);
+                assert!(
+                    game.streaming.forced.is_empty(),
+                    "loaded, not yet validated"
+                );
+                game.validate_mod_chunk_tickets(game.dim);
+                assert!(!game.streaming.forced.contains(&(7, 7)), "removed");
+                assert!(game.streaming.forced.contains(&(8, 8)));
+                assert!(
+                    game.streaming.forced.contains(&(9, 9)),
+                    "idle keeps its own"
+                );
+                game.save_chunk_tickets().unwrap();
+                let file = game.save.load_mod_tickets();
+                assert_eq!(file.len(), 2);
+                assert!(!file.iter().any(|t| t.chunk == (7, 7)));
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn validation_runs_when_a_parked_level_opens_and_not_without_a_listener() {
+        let mods: horizon_client::mod_api::Mods = vec![
+            ModEntry::new("machines", Box::new(Prune)),
+            ModEntry::new("idle", Box::new(Idle)),
+        ]
+        .into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let other = if game.dim == Dim::Nether {
+                    Dim::End
+                } else {
+                    Dim::Nether
+                };
+                let world =
+                    std::env::temp_dir().join(format!("horizon-validate-{}", std::process::id()));
+                game.world_root = world.clone();
+                let root = horizon_client::save::dimension_dir(&world, other.id());
+                let save = horizon_client::save::SaveDir::new(root, other.shape());
+                let mut tickets = horizon_client::mod_chunk_tickets::ModTickets::default();
+                tickets.insert(saved("machines", [1, 64, 1], (7, 7)));
+                tickets.insert(saved("machines", [9, 64, 9], (8, 8)));
+                save.save_mod_tickets(&tickets).unwrap();
+                let back = game.dim;
+                game.enter_level(other).unwrap();
+                game.enter_level(back).unwrap();
+                let parked = game.levels.parked_streaming_of(other.id()).unwrap();
+                assert!(!parked.forced.contains(&(7, 7)));
+                assert!(parked.forced.contains(&(8, 8)));
+                assert!(game.levels_to_tick().contains(&other));
+                let _ = std::fs::remove_dir_all(&world);
+            });
+        });
+        // No mod listens: the tickets stay as loaded.
+        let mods: horizon_client::mod_api::Mods =
+            vec![ModEntry::new("idle", Box::new(Idle))].into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let tickets = vec![saved("idle", [1, 64, 1], (7, 7))];
+                game.streaming
+                    .load_forced(Default::default(), tickets, |_| true);
+                game.validate_mod_chunk_tickets(game.dim);
+                assert!(game.streaming.forced.contains(&(7, 7)));
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn validation_sees_the_saved_tickets_not_ones_added_after_the_load() {
+        let mods: horizon_client::mod_api::Mods =
+            vec![ModEntry::new("machines", Box::new(Prune))].into();
+        horizon_client::mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let level = game.native_level(game.dim.id()).unwrap();
+                let tickets = vec![saved("machines", [1, 64, 1], (7, 7))];
+                game.streaming
+                    .load_forced(Default::default(), tickets, |_| true);
+                // `level_load` runs after the load: its hold is the same owner's.
+                let fresh = game.native_level_chunk_ref(level, [6, 6]).unwrap();
+                {
+                    let _guard = in_mod("machines");
+                    let owner = horizon_client::mod_api::NativeTicketOwner::Block([1, 64, 1]);
+                    assert!(game.native_chunk_set_mod_forced(fresh, owner, true));
+                }
+                game.validate_mod_chunk_tickets(game.dim);
+                assert!(!game.streaming.forced.contains(&(7, 7)), "saved one pruned");
+                assert!(game.streaming.forced.contains(&(6, 6)), "fresh one kept");
+            });
         });
     }
 }

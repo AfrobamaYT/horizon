@@ -1694,25 +1694,28 @@ impl Game<'_> {
             let Some(i) = cart_at(&self.carts, id, i) else {
                 continue;
             };
-            let mut c = self.carts[i].clone();
-            let alive = self.tick_cart(&mut c, [0.0; 2]);
-            if c.kind == CartKind::Hopper && c.enabled {
-                self.hopper_cart_suck(&mut c);
-            }
-            let Some(i) = cart_at(&self.carts, id, i) else {
-                self.native_tick_post_one(&round, id, kind);
-                continue;
-            };
-            if alive {
-                let due = std::mem::take(&mut c.command_due);
-                self.carts[i] = c;
-                if due {
-                    self.perform_cart_command(id);
+            let due = self.with_entity_held_out(id, |game| {
+                let mut c = game.carts[i].clone();
+                let alive = game.tick_cart(&mut c, [0.0; 2]);
+                if c.kind == CartKind::Hopper && c.enabled {
+                    game.hopper_cart_suck(&mut c);
                 }
-            } else {
-                self.eject_cart_mobs(i);
-                self.release_vehicle_container(id);
-                self.carts.remove(i);
+                let Some(i) = cart_at(&game.carts, id, i) else {
+                    return false;
+                };
+                if alive {
+                    let due = std::mem::take(&mut c.command_due);
+                    game.carts[i] = c;
+                    due
+                } else {
+                    game.eject_cart_mobs(i);
+                    game.release_vehicle_container(id);
+                    game.carts.remove(i);
+                    false
+                }
+            });
+            if due {
+                self.perform_cart_command(id);
             }
             // After the ticked cart is stored: a mod reads and changes the cart as it is now.
             self.native_tick_post_one(&round, id, kind);
@@ -1818,26 +1821,33 @@ impl Game<'_> {
         let r = self.yaw.to_radians();
         let (s, co) = (f64::from(r.sin()), f64::from(r.cos()));
         let intent = [left * co - forward * s, forward * co + left * s];
-        let mut c = self.carts[i].clone();
-        let alive = self.tick_cart(&mut c, intent);
-        if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
-            p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
-            p.velocity = Vec3::ZERO;
-            p.fall_distance = 0.0;
-        }
-        let Some(i) = self.carts.iter().position(|x| x.id == c.id) else {
-            self.riding = None;
+        let id = self.carts[i].id;
+        let result = self.with_entity_held_out(id, |game| {
+            let mut c = game.carts[i].clone();
+            let alive = game.tick_cart(&mut c, intent);
+            if let Some(p) = game.player.as_mut() {
+                game.previous_position = p.position;
+                p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
+                p.velocity = Vec3::ZERO;
+                p.fall_distance = 0.0;
+            }
+            let Some(i) = game.carts.iter().position(|x| x.id == c.id) else {
+                game.riding = None;
+                return None;
+            };
+            if alive {
+                game.carts[i] = c;
+            } else {
+                game.eject_cart_mobs(i);
+                game.release_vehicle_container(c.id);
+                game.carts.remove(i);
+                game.riding = None;
+            }
+            Some((i, alive))
+        });
+        let Some((i, alive)) = result else {
             return true;
         };
-        if alive {
-            self.carts[i] = c;
-        } else {
-            self.eject_cart_mobs(i);
-            self.release_vehicle_container(c.id);
-            self.carts.remove(i);
-            self.riding = None;
-        }
         // AbstractMinecart.activateMinecart: a powered activator rail ejects
         // the rider, and getDismountLocationForPassenger places it beside the
         // cart instead of leaving it at the seat.

@@ -1,4 +1,4 @@
-//! Read-only lifecycle observations for native mods on authoritative servers.
+//! World epochs for native handles, and lifecycle observations on authoritative servers.
 //! A paused pass
 //! observes nothing; a frozen world reports `world_running: false` except during a step.
 
@@ -11,8 +11,8 @@ pub(super) use horizon_client::mod_api::{
     WorldPhase,
 };
 
-/// Epoch allocation spans `Game` instances (a new server `Game` per
-/// launch), so the counter is process-wide.
+/// Epoch allocation spans server and client `Game` instances and client level
+/// replacements, so the counter is process-wide.
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 /// Internal state for deciding which events can fire.
@@ -41,6 +41,10 @@ impl OpenAttempt {
             epoch: NativeWorldEpoch::new(self.epoch),
             tick: NativeTickId::new(self.ticks),
         }
+    }
+
+    fn server_context(&self) -> Option<NativeLifecycleContext> {
+        (self.authority != NativeAuthority::RemoteClient).then(|| self.context())
     }
 }
 
@@ -88,7 +92,7 @@ impl NativeLifecycle {
             return None;
         }
         attempt.session = OpenState::Ready;
-        Some(attempt.context())
+        attempt.server_context()
     }
 
     /// `WorldOpenFailed`: only while opening; the attempt is invalidated.
@@ -97,9 +101,9 @@ impl NativeLifecycle {
         if attempt.session != OpenState::Opening {
             return None;
         }
-        let context = attempt.context();
+        let context = attempt.server_context();
         self.attempt = None;
-        Some(context)
+        context
     }
 
     pub(super) fn begin_close(&mut self) {
@@ -114,9 +118,9 @@ impl NativeLifecycle {
         if attempt.session == OpenState::Opening {
             return None;
         }
-        let context = attempt.context();
+        let context = attempt.server_context();
         self.attempt = None;
-        Some(context)
+        context
     }
 
     /// `WorldCloseFinal`: at most once per epoch; the epoch retires.
@@ -125,9 +129,9 @@ impl NativeLifecycle {
         if attempt.session != OpenState::Closing {
             return None;
         }
-        let context = attempt.context();
+        let context = attempt.server_context();
         self.attempt = None;
-        Some(context)
+        context
     }
 
     /// Non-paused ready ticks only; a paused pass observes nothing, does not count.
@@ -136,7 +140,8 @@ impl NativeLifecycle {
         world_running: bool,
     ) -> Option<(NativeLifecycleContext, ServerTickPhase)> {
         let attempt = self.attempt.as_mut()?;
-        if attempt.session != OpenState::Ready {
+        if attempt.session != OpenState::Ready || attempt.authority == NativeAuthority::RemoteClient
+        {
             return None;
         }
         attempt.ticks += 1;
@@ -200,8 +205,10 @@ impl Game<'_> {
 
     /// `error_text` is the engine's own error text, unchanged.
     pub(super) fn native_lifecycle_world_failed(&mut self, error_text: &str) {
-        // The levels that opened before the failure close first.
-        self.native_levels_closing();
+        // The server levels that opened before the failure close first.
+        if self.remote.is_none() {
+            self.native_levels_closing();
+        }
         if let Some(context) = self.native_lifecycle.world_open_failed() {
             self.native_world_lifecycle(&context, WorldPhase::WorldOpenFailed, error_text);
         }
@@ -209,19 +216,21 @@ impl Game<'_> {
 
     /// Report a server-loop or shutdown failure once and retire its epoch.
     pub(super) fn native_lifecycle_close_failed(&mut self, error_text: &str) {
-        self.native_levels_closing();
+        if self.remote.is_none() {
+            self.native_levels_closing();
+        }
         if let Some(context) = self.native_lifecycle.world_close_failed() {
             self.native_world_lifecycle(&context, WorldPhase::WorldCloseFailed, error_text);
         }
     }
 
-    /// After the final save, before the lock release. Mirrors never fire.
+    /// After the final save, before the lock release. Client epochs retire
+    /// without dispatching server lifecycle hooks.
     pub(super) fn native_lifecycle_world_closed(&mut self) {
-        if self.remote.is_some() {
-            return;
+        // Each server level closes after the final save (`LevelEvent.Unload`).
+        if self.remote.is_none() {
+            self.native_levels_closing();
         }
-        // Each level closes after the final save (`LevelEvent.Unload`).
-        self.native_levels_closing();
         if let Some(context) = self.native_lifecycle.world_close_final() {
             self.native_world_lifecycle(&context, WorldPhase::WorldCloseFinal, "");
         }
@@ -248,6 +257,31 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_epochs_never_emit_server_lifecycle_events() {
+        let mut lifecycle = NativeLifecycle::default();
+        lifecycle.begin_open(NativeAuthority::RemoteClient);
+        let epoch = lifecycle.epoch().unwrap();
+        assert!(lifecycle.world_open_ready().is_none());
+        assert_eq!(lifecycle.epoch(), Some(epoch));
+        assert!(lifecycle.server_tick_start(true).is_none());
+        assert!(lifecycle.server_tick_end(false).is_none());
+        assert!(!lifecycle.permits_read(&lifecycle.attempt.unwrap().context()));
+        lifecycle.begin_close();
+        assert!(lifecycle.world_close_final().is_none());
+        assert!(lifecycle.epoch().is_none());
+
+        lifecycle.begin_open(NativeAuthority::RemoteClient);
+        assert_ne!(lifecycle.epoch(), Some(epoch));
+        assert!(lifecycle.world_open_failed().is_none());
+        assert!(lifecycle.epoch().is_none());
+
+        lifecycle.begin_open(NativeAuthority::RemoteClient);
+        lifecycle.world_open_ready();
+        assert!(lifecycle.world_close_failed().is_none());
+        assert!(lifecycle.epoch().is_none());
+    }
 
     #[test]
     fn frozen_steps_are_observed_without_consuming_them() {
