@@ -174,39 +174,26 @@ impl Game<'_> {
 
     /// Sets the entity's health (`LivingEntity.setHealth`; Paper's
     /// `Damageable#setHealth`), cut to its maximum health. No heal or damage
-    /// hook runs. False for a stale handle, a health that isn't finite or
-    /// above 0 (a write doesn't kill), a dead or dying entity, an armor stand
+    /// hook runs. False for a stale handle, a non-finite value, an armor stand
     /// or the dragon.
     pub(super) fn native_living_set_health(&mut self, living: LivingRef, health: f32) -> bool {
-        if !health.is_finite() || health <= 0.0 {
+        if !health.is_finite() {
             return false;
         }
         match self.native_living_target(living) {
             Some(t @ (Target::Player | Target::Guest(_))) => self
                 .for_player(t, |g| {
                     let p = g.player.as_mut()?;
-                    // A write never raises the dead: the death screen's
-                    // player takes none (`living_health::set_health` would
-                    // store it blind).
-                    if p.health.health() <= 0.0 {
-                        return None;
-                    }
                     let max = p.attribute("minecraft:max_health").ok()? as f32;
                     p.set_health(health.min(max), false).ok()
                 })
                 .flatten()
                 .is_some(),
             Some(Target::Mob(id)) => {
-                // A dying mob, mid death animation, stays dead: the old
-                // mob write refused it and so does this one.
-                let Some(m) = self
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == id && !m.removed && m.alive())
-                else {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                m.health = health.min(m.attrs.max_health);
+                m.health = health.clamp(0.0, m.attrs.max_health);
                 m.needs_sync = true;
                 true
             }
@@ -216,10 +203,9 @@ impl Game<'_> {
     /// Heals the entity by `amount` (`LivingEntity.heal`), through the
     /// `living_heal` hook, which may change or cancel it. A dead or dying
     /// entity isn't healed, and health stops at the maximum. False for a stale
-    /// handle, an amount that isn't finite or above 0, an armor stand or the
-    /// dragon.
+    /// handle, a non-finite amount, an armor stand or the dragon.
     pub(super) fn native_living_heal(&mut self, living: LivingRef, amount: f32) -> bool {
-        if !amount.is_finite() || amount <= 0.0 {
+        if !amount.is_finite() {
             return false;
         }
         match self.native_living_target(living) {
@@ -246,11 +232,16 @@ impl Game<'_> {
     /// `armadillo.rs` reads it). None for a stale handle, a window that has
     /// passed, an attacker that is gone, an armor stand, the dragon or a
     /// client.
-    pub(super) fn native_living_last_attacker(&mut self, living: LivingRef) -> Option<EntityRef> {
+    pub(super) fn native_living_last_attacker(&self, living: LivingRef) -> Option<EntityRef> {
         match self.native_living_target(living)? {
-            t @ (Target::Player | Target::Guest(_)) => self
-                .for_player(t, |g| g.combat.kill_credit(g.world.game_time))
-                .flatten()
+            Target::Player => self
+                .combat
+                .kill_credit(self.world.game_time)
+                .and_then(|id| self.native_entity(id)),
+            Target::Guest(conn) => self
+                .guest_combat
+                .get(&conn)?
+                .kill_credit(self.world.game_time)
                 .and_then(|id| self.native_entity(id)),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
@@ -657,7 +648,121 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_dead_entity_takes_no_health_write() {
+    fn set_health_can_store_zero() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(living.set_health(game, 8.0));
+            assert_eq!(living.health(game), Some(8.0));
+            let accepted = living.set_health(game, 0.0);
+            assert_eq!((accepted, living.health(game)), (true, Some(0.0)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn heal_uses_the_vanilla_signed_sum() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(living.set_health(game, 10.0));
+            assert!(living.heal(game, 2.0));
+            assert_eq!(living.health(game), Some(12.0));
+            let _ = living.heal(game, -4.0);
+            assert_eq!(living.health(game), Some(8.0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn absorbed_player_hit_still_remembers_the_living_attacker() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(15, zombie, Vec3::ZERO, 0.0));
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let source = game
+                .motion
+                .health
+                .damage
+                .id("minecraft:mob_attack")
+                .unwrap();
+            let mut attackers = Vec::new();
+            let mut health = Vec::new();
+            for absorption in [0.0, 8.0] {
+                game.combat = Default::default();
+                let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+                player.entity_id = 20;
+                player
+                    .set_modifier(
+                        "minecraft:max_absorption",
+                        "test:absorption",
+                        8.0,
+                        "add_value",
+                        true,
+                    )
+                    .unwrap();
+                player.set_health(absorption, true).unwrap();
+                game.player = Some(player);
+                game.note_attacker("minecraft:mob_attack", 15);
+                let player = game.player.as_mut().unwrap();
+                assert!(
+                    player
+                        .hurt_caused_by(
+                            &game.motion.health,
+                            game.world.health_rules,
+                            source,
+                            4.0,
+                            None,
+                            true,
+                            15
+                        )
+                        .unwrap()
+                        .hurt
+                );
+                let events = std::mem::take(&mut player.events);
+                game.record_combat(&events);
+                let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+                health.push(living.health(game));
+                let host: &dyn crate::mod_api::Host = game;
+                attackers.push(living.last_attacker(host).map(|attacker| attacker.id()));
+            }
+            assert_eq!(
+                health,
+                vec![Some(16.0), Some(20.0)],
+                "damage/absorption control"
+            );
+            assert_eq!(attackers, vec![Some(15), Some(15)]);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn raw_health_write_can_change_a_dead_entity_but_heal_cannot() {
         use horizon_client::mobs::Mob;
         use horizon_client::motion::PlayerMotion;
         use horizon_core::geometry::Vec3;
@@ -671,17 +776,21 @@ mod tests {
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
             let mob_living = game.native_living(game.native_entity(12).unwrap()).unwrap();
-            assert!(!mob_living.set_health(game, 10.0));
+            assert!(mob_living.heal(game, 10.0));
             assert_eq!(mob_living.health(game), Some(0.0));
-            // The death screen's player: the write never raises the dead.
+            assert!(mob_living.set_health(game, 10.0));
+            assert_eq!(mob_living.health(game), Some(10.0));
+            // A raw write also reaches a zero-health player.
             game.player
                 .as_mut()
                 .unwrap()
                 .set_health(0.0, false)
                 .unwrap();
             let player_living = game.native_living(game.native_entity(20).unwrap()).unwrap();
-            assert!(!player_living.set_health(game, 10.0));
+            assert!(player_living.heal(game, 10.0));
             assert_eq!(player_living.health(game), Some(0.0));
+            assert!(player_living.set_health(game, 10.0));
+            assert_eq!(player_living.health(game), Some(10.0));
         });
     }
 

@@ -2579,9 +2579,10 @@ the server entity and level reads available on a client.
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
-  maximum, with no hook; a health that isn't finite or above 0 is refused, so a write never kills, and the
-  answer is false for a dead or dying entity.
-  `living.heal(host, amount)` is `LivingEntity.heal`, through the `living_heal` hook. Both write players, guests
+  range from zero to the maximum, with no hook; a non-finite value is refused. This raw write can set zero
+  or change a dead entity's health without running the death pipeline.
+  `living.heal(host, amount)` is `LivingEntity.heal`, through the `living_heal` hook: a signed amount changes
+  health only when current health is above zero. Both write players, guests
   (in their own turn) and mobs, and answer false for armor stands and the dragon.
   `living.last_attacker(host)` is `LivingEntity.getLastHurtByMob`: who last hurt the entity, within a hundred
   ticks of the hurt, as an `EntityRef` of the current open; `None` once the window has passed or the attacker
