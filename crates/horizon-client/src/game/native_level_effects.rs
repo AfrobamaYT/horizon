@@ -60,6 +60,7 @@ impl Game<'_> {
             volume,
             pitch,
             except,
+            entity: None,
         });
         true
     }
