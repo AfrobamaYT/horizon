@@ -1059,7 +1059,9 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() || !horizon_client::mod_api::mods().is_empty() {
+        if round.listening()
+            || crate::mod_api::listened(crate::mod_api::HookId::CanContinueSleeping)
+        {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
