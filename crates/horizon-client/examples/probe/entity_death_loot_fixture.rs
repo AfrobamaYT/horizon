@@ -286,7 +286,6 @@ pub fn main() -> horizon_client::Result<()> {
                 vehicle: c.get("vehicle").map(|v| LootEntity::new(v)),
                 mob_drops: true,
                 world_seed,
-                equipment_chance: [None; 8],
             };
             // Vanilla's entity tables all name a random sequence: no level random.
             let mut level = horizon_core::random::LegacyRandom::new(0);

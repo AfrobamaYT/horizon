@@ -708,7 +708,6 @@ mod tests {
             vehicle: None,
             mob_drops,
             world_seed: 0,
-            equipment_chance: [None; 8],
         };
         let mut sequences = RandomSequences::default();
         let mut random = horizon_core::random::LegacyRandom::new(0);

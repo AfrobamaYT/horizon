@@ -833,7 +833,7 @@ impl Game<'_> {
             if !super::armor_stands::spared_by_blast(a)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
-                self.break_armor_stand_by_anything(i);
+                self.break_armor_stand_by_anything(i, "minecraft:explosion", 0);
             } else {
                 i += 1;
             }

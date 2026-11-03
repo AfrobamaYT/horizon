@@ -4660,28 +4660,30 @@ impl Game<'_> {
     /// the stacks a table rolled (blocks, shearing, a mob's table). This hook
     /// fires once after it, on the entity's whole collected drop list, and
     /// nothing is spawned until it returns.
-    /// A dying mob or server player `entity` of `kind` (`player` is the
-    /// player's UUID) is about to drop `drops`, the items
+    /// A dying mob, server player or armor stand `entity` of `kind` (`player`
+    /// is a player's UUID) is about to drop `drops`, the items
     /// `LivingEntity.dropAllDeathLoot` collected (NeoForge's
     /// `LivingDropsEvent`): the loot tables' stacks (after `native_loot_drops`),
     /// the equipment that rolled to drop, a mob's own extras (an enderman's
-    /// carried block, a fox's mouth item, a piglin's inventory) and a player's
-    /// inventory, each with the position, motion and pickup delay its item
-    /// entity will have. Edit the list (take out, change or add drops) or set
-    /// `cancel` for no drops at all; empty stacks don't drop. `damage_type`
-    /// (`minecraft:player_attack`) and `attacker` (an entity id, 0 for none)
-    /// are the killing blow and `recently_hit` is whether a player hurt it
-    /// within 100 ticks, which is what lets a mob drop its equipment.
-    /// Experience orbs are not in the list (`native_living_experience_drop`),
-    /// and a spectator dropping nothing, an armor stand and a block's drops
-    /// don't call this. Server-side.
+    /// carried block, a fox's mouth item, a piglin's inventory, a copper golem's
+    /// preserved equipment) and a player's inventory, each with the position,
+    /// motion and pickup delay its item entity will have. Edit the list (take
+    /// out, change or add drops) or set `cancel` for no drops at all; empty
+    /// stacks don't drop. `source` is the killing blow (`causing` and `direct`
+    /// entity ids, 0 when none or not known) and `recently_hit` is whether a
+    /// player hurt it within 100 ticks, which is what lets a mob drop its
+    /// equipment. An armor stand fires it from `brokenByAnything` with an
+    /// empty list (its stand item and its equipment pop outside the list, as
+    /// in vanilla). Experience orbs are not in the list
+    /// (`native_living_experience_drop`); a spectator, who drops nothing,
+    /// doesn't call this. Item entity state such as no-gravity, owner and
+    /// lifetime isn't in `NativeItemDrop`. Server-side.
     pub(super) fn native_living_drops(
         &mut self,
         entity: u32,
         kind: &str,
         player: Option<u128>,
-        damage_type: &str,
-        attacker: u32,
+        source: &HurtSource<'_>,
         recently_hit: bool,
         drops: &mut Vec<NativeItemDrop>,
         cancel: &mut bool,
@@ -4692,32 +4694,36 @@ impl Game<'_> {
             entity,
             kind,
             player,
-            damage_type,
-            attacker,
+            source,
             recently_hit,
             drops,
             cancel,
         );
     }
     /// A dying mob `entity` of `kind` is about to roll its drop chance for
-    /// the item in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
-    /// `GetEquipmentDropChanceEvent`). `chance` is vanilla's, after the
-    /// enchantments of the attacker and the victim; change it (1.0 or more
-    /// always drops, 0 or less never does). Only a slot that holds an item
-    /// and whose chance isn't 0 is asked, once, in `EquipmentSlot` order. The
-    /// roll is drawn whatever the chance is, so the mob's random follows
-    /// vanilla's order. A chance above 1.0 (`preserve`: saddles, body armour)
-    /// keeps its meaning of an item that drops without a player kill; a mod's
-    /// choice doesn't change that. `damage_type`, `attacker` and
-    /// `recently_hit` are as in `native_living_drops`. Server-side.
+    /// the item `stack` in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
+    /// `GetEquipmentDropChanceEvent`). `original_chance` is
+    /// `DropChances.byEquipment`; `chance` starts as the chance after the
+    /// enchantments of the attacker and the victim (`getOriginalChance` and
+    /// `getDropChance`); change `chance` (1.0 or more always drops, 0 or less
+    /// never does). `preserved` is `DropChances.isPreserved`: the slot drops
+    /// without a player kill, whatever the mod chooses. Each slot is asked
+    /// at its own point of the loop, after the mob's loot table was rolled
+    /// and just before the slot's roll, only when it holds an item and its
+    /// recorded chance isn't 0, in `EquipmentSlot` order. The roll is drawn
+    /// whatever the chance is, so the mob's random follows vanilla's order.
+    /// `source` and `recently_hit` are as in `native_living_drops`.
+    /// Server-side.
     pub(super) fn native_get_equipment_drop_chance(
         &mut self,
         entity: u32,
         kind: &str,
         slot: EquipmentSlot,
-        damage_type: &str,
-        attacker: u32,
+        source: &HurtSource<'_>,
         recently_hit: bool,
+        stack: &ItemStack,
+        original_chance: f32,
+        preserved: bool,
         chance: &mut f32,
     ) {
         mod_api::dispatch_get_equipment_drop_chance(
@@ -4726,9 +4732,11 @@ impl Game<'_> {
             entity,
             kind,
             slot,
-            damage_type,
-            attacker,
+            source,
             recently_hit,
+            stack,
+            original_chance,
+            preserved,
             chance,
         );
     }

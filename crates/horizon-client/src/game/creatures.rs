@@ -34,15 +34,43 @@ use horizon_core::{
 };
 use std::sync::Arc;
 
+/// Damage types of a projectile: its own entity is the direct one, and
+/// the game keeps no id for it.
+const PROJECTILE_DAMAGE: [&str; 9] = [
+    "minecraft:arrow",
+    "minecraft:trident",
+    "minecraft:fireball",
+    "minecraft:unattributed_fireball",
+    "minecraft:wither_skull",
+    "minecraft:mob_projectile",
+    "minecraft:thrown",
+    "minecraft:wind_charge",
+    "minecraft:fireworks",
+];
+
+/// The `HurtSource` of a death's blow. A melee hit's direct entity is the
+/// one that caused it; a projectile's isn't known, so `direct` is 0.
+pub(super) fn death_hurt_source(damage_type: &str, causing: u32) -> HurtSource<'_> {
+    let direct = if PROJECTILE_DAMAGE.contains(&damage_type) {
+        0
+    } else {
+        causing as i32
+    };
+    HurtSource {
+        damage_type,
+        causing: causing as i32,
+        direct,
+    }
+}
+
 /// A dying entity whose items drop (`LivingDropsEvent`).
 pub(super) struct DyingDrops<'a> {
     pub(super) entity: u32,
     pub(super) kind: &'a str,
     /// The UUID of a dying player.
     pub(super) player: Option<u128>,
-    /// The killing blow's damage type and attacker id (0 for none); none
-    /// when no mod listens.
-    pub(super) source: Option<(&'a str, u32)>,
+    /// The killing blow; none when no mod listens.
+    pub(super) source: Option<HurtSource<'a>>,
     /// Whether a player hurt it within 100 ticks.
     pub(super) recently_hit: bool,
 }
@@ -1395,10 +1423,6 @@ impl Game<'_> {
             source,
         );
         self.create_wither_rose(m);
-        if m.species() == Species::CopperGolem {
-            // CopperGolem.dropEquipment: the preserved equipment too.
-            self.golem_drop_equipment(&mut dying);
-        }
         if matches!(
             m.species(),
             Species::Slime | Species::MagmaCube | Species::SulfurCube
@@ -1625,7 +1649,7 @@ impl Game<'_> {
             .and_then(|id| self.mobs.iter().find(|o| o.id == id))
             .map(|o| LootEntity::new(&o.kind.id));
         let kind = super::native_hooks::mob_kind(m);
-        let mut death = drops::Death {
+        let death = drops::Death {
             loot: &loot,
             damage,
             player: by_player.then(player),
@@ -1633,28 +1657,47 @@ impl Game<'_> {
             vehicle,
             mob_drops: self.ui.rules.bool("mob_drops"),
             world_seed: self.level.seed,
-            equipment_chance: [None; 8],
         };
-        if let Some((damage_type, attacker)) = source {
-            // GetEquipmentDropChanceEvent, asked before `die` rolls the chances.
-            death.equipment_chance = drops::equipment_chances(m, &death, |slot, chance| {
-                let mut chance = chance;
+        let raider = horizon_client::mobs::raider::is_raider(m.species());
+        let to_stack = |stack: &horizon_world::loot::LootStack| {
+            if raider && stack.item == horizon_client::mobs::raider::BANNER {
+                horizon_client::mobs::raider::ominous_banner()
+            } else {
+                from_loot(stack)
+            }
+        };
+        // LootContextParams.ORIGIN of a death: the mob's position.
+        let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
+        let hurt = source.map(|(damage_type, causing)| death_hurt_source(damage_type, causing));
+        let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
+            let rolled =
+                drops::roll_death(m, &death, &mut self.rand_sequences, &mut self.world.random);
+            let Some(hurt) = &hurt else {
+                return drops::finish_death(m, &death, rolled, None);
+            };
+            // GetEquipmentDropChanceEvent, asked for each slot just before its roll.
+            let id = m.id;
+            let mut choose = |choice: drops::EquipmentChoice<'_>| {
+                let stack = match choice.stack {
+                    drops::Drop::Item(stack) => to_stack(stack),
+                    drops::Drop::Stack(stack) => stack.clone(),
+                    _ => return choice.chance,
+                };
+                let mut chance = choice.chance;
                 self.native_get_equipment_drop_chance(
-                    m.id,
+                    id,
                     &kind,
-                    EquipmentSlot::ALL[slot],
-                    damage_type,
-                    attacker,
+                    EquipmentSlot::ALL[choice.slot],
+                    hurt,
                     by_player,
+                    &stack,
+                    choice.original,
+                    choice.preserved,
                     &mut chance,
                 );
                 chance
-            });
-        }
-        // LootContextParams.ORIGIN of a death: the mob's position.
-        let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
-        let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
-            drops::die(m, &death, &mut self.rand_sequences, &mut self.world.random)
+            };
+            drops::finish_death(m, &death, rolled, Some(&mut choose))
         });
         if skulls && let Some(Who::Mob(id)) = m.last_damage.and_then(|(d, _)| d.attacker) {
             // Creeper.droppedSkulls: one head per charged explosion.
@@ -1663,20 +1706,13 @@ impl Game<'_> {
                 creeper.extra.charged = false;
             }
         }
-        let raider = horizon_client::mobs::raider::is_raider(m.species());
         // The item drops come before the carried block and the orbs, so the
         // mods get them all at once and they still spawn in that order.
         let mut stacks = Vec::new();
         let mut rest = Vec::new();
         for d in items {
             match d {
-                drops::Drop::Item(stack) => stacks.push(
-                    if raider && stack.item == horizon_client::mobs::raider::BANNER {
-                        horizon_client::mobs::raider::ominous_banner()
-                    } else {
-                        from_loot(&stack)
-                    },
-                ),
+                drops::Drop::Item(stack) => stacks.push(to_stack(&stack)),
                 drops::Drop::Stack(stack) => stacks.push(stack),
                 other => rest.push(other),
             }
@@ -1713,6 +1749,11 @@ impl Game<'_> {
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
             }
         }
+        if m.species() == Species::CopperGolem {
+            // CopperGolem.dropEquipment: the preserved equipment is part of
+            // dropAllDeathLoot, so the mods hear it with the rest.
+            stacks.extend(Self::golem_preserved_equipment(m));
+        }
         // Every death drop is its own ItemEntity, and the drop entity's own
         // random (not the level's) gives it the constructor's horizontal push
         // (its motion otherwise stays [0, 0.2, 0] and the drops land stacked
@@ -1722,7 +1763,7 @@ impl Game<'_> {
             entity: m.id,
             kind: &kind,
             player: None,
-            source,
+            source: hurt,
             recently_hit: by_player,
         };
         self.drop_death_items(&dying, stacks, pos, 10, |_| dispenser::new_item_motion());
@@ -1741,7 +1782,7 @@ impl Game<'_> {
         pickup_delay: u32,
         mut velocity: impl FnMut(&mut Self) -> [f64; 3],
     ) {
-        let Some((damage_type, attacker)) = dying.source else {
+        let Some(source) = &dying.source else {
             for stack in stacks {
                 let motion = velocity(self);
                 self.spawn_item(stack, position, motion, pickup_delay);
@@ -1759,8 +1800,7 @@ impl Game<'_> {
             dying.entity,
             dying.kind,
             dying.player,
-            damage_type,
-            attacker,
+            source,
             dying.recently_hit,
             &mut drops,
             &mut cancel,
@@ -8073,5 +8113,112 @@ mod dye_mix_tests {
         assert_eq!(dye_color_mix_in_recipes(&recipes, orange, cyan), None);
         let kept = dye_mix(&recipes, &mut random, orange, cyan);
         assert!(kept == orange || kept == cyan, "kept {kept}");
+    }
+}
+
+#[cfg(test)]
+mod living_drops_tests {
+    use super::*;
+
+    #[test]
+    fn a_projectile_blow_has_no_known_direct_entity_and_a_melee_one_is_its_causer() {
+        let arrow = death_hurt_source("minecraft:arrow", 7);
+        assert_eq!((arrow.causing, arrow.direct), (7, 0));
+        let melee = death_hurt_source("minecraft:mob_attack", 7);
+        assert_eq!((melee.causing, melee.direct), (7, 7));
+        let none = death_hurt_source("minecraft:generic", 0);
+        assert_eq!((none.causing, none.direct), (0, 0));
+    }
+
+    /// `LivingDropsEvent` hears a copper golem's preserved equipment with the
+    /// rest of its drops and can cancel it, and an armor stand's break
+    /// fires it with an empty list.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
+        use horizon_client::mod_api::{Flow, Hooks, Host, LivingDropsEvent, MODS};
+        use std::sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+        struct Observer(Arc<Mutex<Vec<String>>>, Arc<AtomicBool>);
+        impl Hooks for Observer {
+            fn living_drops(&self, _: &mut dyn Host, event: &mut LivingDropsEvent<'_>) -> Flow {
+                let items: Vec<_> = event
+                    .drops
+                    .iter()
+                    .map(|d| d.stack.item.to_string())
+                    .collect();
+                self.0.lock().unwrap().push(format!(
+                    "{} {:?} {} {}",
+                    event.kind, items, event.source.damage_type, event.recently_hit
+                ));
+                if self.1.load(Ordering::SeqCst) {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mods: horizon_client::mod_api::Mods =
+            Arc::from(vec![
+                Box::new(Observer(seen.clone(), cancel.clone())) as Box<dyn Hooks>
+            ]);
+        assert!(MODS.set(mods).is_ok());
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.load_server_loot();
+            let golem_type = game
+                .res
+                .mob_types()
+                .get("minecraft:copper_golem")
+                .unwrap()
+                .clone();
+            let spawn_golem = |game: &mut Game<'_>| {
+                game.next_entity += 1;
+                let mut golem = Mob::new(
+                    game.next_entity,
+                    golem_type.clone(),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                horizon_client::mobs::transport_items::set_held(
+                    &mut golem,
+                    Some(ItemStack::new("minecraft:diamond", 1)),
+                );
+                golem.health = 0.0;
+                golem
+            };
+            let golem = spawn_golem(game);
+            game.mobs.push(golem.clone());
+            game.mob_died(&golem);
+            // The preserved stack comes last in the list the mods hear.
+            assert!(
+                seen.lock().unwrap()[0].starts_with("minecraft:copper_golem [")
+                    && seen.lock().unwrap()[0]
+                        .ends_with("\"minecraft:diamond\"] minecraft:generic false")
+            );
+            let dropped = game.dropped.len();
+            assert!(dropped >= 1);
+            // A canceled list drops nothing, the preserved stack included.
+            cancel.store(true, Ordering::SeqCst);
+            let golem = spawn_golem(game);
+            game.mob_died(&golem);
+            assert_eq!(game.dropped.len(), dropped);
+            // An armor stand that breaks fires it with nothing in the list.
+            game.armor_stands
+                .push(horizon_client::entities::ArmorStand::new(
+                    9000,
+                    Vec3::new(4.5, 64.0, 4.5),
+                    0.0,
+                ));
+            game.break_armor_stand_by_anything(0, "minecraft:explosion", 0);
+            let seen = seen.lock().unwrap();
+            assert_eq!(
+                seen.last().unwrap(),
+                "minecraft:armor_stand [] minecraft:explosion false"
+            );
+        });
     }
 }

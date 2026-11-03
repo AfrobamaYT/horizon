@@ -4008,9 +4008,9 @@ impl Game<'_> {
                 entity: id as u32,
                 kind: "minecraft:player",
                 player: Some(uuid),
-                source: blow
-                    .as_ref()
-                    .map(|(damage_type, attacker)| (damage_type.as_str(), *attacker)),
+                source: blow.as_ref().map(|(damage_type, attacker)| {
+                    super::creatures::death_hurt_source(damage_type, *attacker)
+                }),
                 recently_hit,
             };
             // LivingEntity.die: the death is heard, and a sculk catalyst

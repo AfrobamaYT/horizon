@@ -2398,14 +2398,20 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   frame's entity, no table). A dispenser's shears and an explosion's frames aren't told. Leads: untying one or cutting it with
   shears is a use (the leashed mob, no table), and a mob a player killed while leashed drops its lead on its next tick as a call
   of its own, naming the killer (`used` false, no table). A lead that snaps or loses its holder names no player and isn't told.
-- **`native_living_drops(entity, kind, player, damage_type, attacker, recently_hit, drops, cancel)`**: NeoForge's
-  `LivingDropsEvent`, the whole of what a dying mob or server player drops, after `native_loot_drops` and with the rest
-  of `dropAllDeathLoot` in: an enderman's carried block, and a player's inventory (unless `keepInventory`). Each
-  `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets. Edit the list or set `cancel`
-  for no drops; experience orbs are separate (`native_living_experience_drop`). `native_loot_drops` stays for loot that is not a
-  death (blocks, shearing, leads); for a mob's death it is heard first (it edits the stacks a table rolled), and this hook then fires once on the whole collected list, with nothing spawned until it returns.
-- **`native_get_equipment_drop_chance(entity, kind, slot, damage_type, attacker, recently_hit, chance)`**: NeoForge's
-  `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item in `slot`; the roll is drawn whatever the chance is.
+- **`native_living_drops(entity, kind, player, source, recently_hit, drops, cancel)`**: NeoForge's
+  `LivingDropsEvent`, the whole of what a dying mob, server player or armor stand drops, after `native_loot_drops` and with the
+  rest of `dropAllDeathLoot` in: an enderman's carried block, a copper golem's preserved equipment, and a player's inventory
+  (unless `keepInventory`). Each `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets;
+  item entity state such as no-gravity, owner and lifetime isn't exposed through it. `source` is a `HurtSource` (the damage type,
+  `causing` and `direct` entity ids); the id of a projectile isn't kept, so `direct` is 0 for it. Edit the list or set `cancel`
+  for no drops; experience orbs are separate (`native_living_experience_drop`). An armor stand fires it from `brokenByAnything`
+  with an empty list, and its stand item and equipment pop outside the list, as in vanilla. `native_loot_drops` stays for loot that
+  is not a death (blocks, shearing, leads); for a mob's death it is heard first (it edits the stacks a table rolled), and this hook
+  then fires once on the whole collected list, with nothing spawned until it returns.
+- **`native_get_equipment_drop_chance(entity, kind, slot, source, recently_hit, stack, original_chance, preserved, chance)`**:
+  NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
+  is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
+  own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
 
 ### A block's items
 
