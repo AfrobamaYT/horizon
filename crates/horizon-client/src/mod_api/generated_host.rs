@@ -1335,8 +1335,8 @@ pub trait Host {
         unimplemented!("Host::living")
     }
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
-    /// None when it is empty, the entity has no such slot (a player has no
-    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    /// None when it is empty, unsupported (player body and saddle storage is
+    /// not yet modeled), or the handle is stale. API @API:living_refs@.
     fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
         let _ = living;
         let _ = slot;
@@ -1350,7 +1350,7 @@ pub trait Host {
         unimplemented!("Host::living_hand_item")
     }
     /// Puts `stack` (None: empties it) in equipment slot `slot`
-    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// (`LivingEntity.setItemSlot`). False
     /// when the entity has no such slot or is a mob. Mob equipment writes
     /// are not supported until full equipment stacks can be stored.
     /// API @API:living_refs@.
@@ -1471,8 +1471,8 @@ impl LevelRef {
 }
 impl LivingRef {
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
-    /// None when it is empty, the entity has no such slot (a player has no
-    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    /// None when it is empty, unsupported (player body and saddle storage is
+    /// not yet modeled), or the handle is stale. API @API:living_refs@.
     pub fn equipment(self, host: &dyn Host, slot: EquipmentSlot) -> Option<ItemStack> {
         host.living_equipment(self, slot)
     }
@@ -1482,7 +1482,7 @@ impl LivingRef {
         host.living_hand_item(self, hand)
     }
     /// Puts `stack` (None: empties it) in equipment slot `slot`
-    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// (`LivingEntity.setItemSlot`). False
     /// when the entity has no such slot or is a mob. Mob equipment writes
     /// are not supported until full equipment stacks can be stored.
     /// API @API:living_refs@.
