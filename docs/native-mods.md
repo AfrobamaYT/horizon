@@ -105,15 +105,15 @@ the catalog, not a global API number, source comments or documentation histories
 - Item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
   lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip.
 
-- Using an item, on the server for every player: `native_use_item_on` hears a right click with an item on a
+- Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
-  after `native_use_item_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
+  after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
   instead of the item's use.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims
-  `native_use_item_on`, which runs before it.
+  `native_use_on`, which runs before it.
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
   `native_block_entity_tick`): made when the block is placed, ticked on the server and saved with the chunk.
@@ -2288,7 +2288,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `native_acting_player`, `native_tell` and the
   item helpers reach them. Not heard: the host of a LAN world.
 - `native_acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
-  `native_right_click_block`, `native_use_item_on`, `native_destroy_block`...; None elsewhere);
+  `native_right_click_block`, `native_use_on`, `native_destroy_block`...; None elsewhere);
   `native_run_command(line)`, a command run as the server's console (level 4, no output), only where no player is
   swapped in (`native_tick`, a menu hook): a teleport to another level (`execute in minecraft:the_nether run tp Alex 0
   70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
@@ -2458,6 +2458,18 @@ a dimension.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
+- `level.chunk_ref(host, [x, z])` makes a `ChunkRef` for any chunk of an open level, loaded or not (None past 30 million
+  blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
+  `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
+  is the world's own state: it is saved with the level and stays until `/forceload remove`.
+- `chunk.set_mod_forced(host, owner, forced)` (NeoForge's `TicketController.forceChunk`, one implicit controller per mod)
+  holds or releases a chunk for the calling mod and returns whether its tickets changed. `owner` is a `NativeTicketOwner`,
+  `Block([x, y, z])` or `Entity(uuid)`. A ticket is scoped by mod, owner and chunk, so two owners in one chunk release
+  separately; the chunk stays loaded, entity ticking and saved, and its level keeps ticking, while any ticket or
+  `/forceload` holds it. `level.mod_forced_chunks(host)` lists the calling mod's tickets as `(owner, [x, z])`.
+  Tickets are saved in `data/horizon/mod_chunk_tickets.dat`, never in vanilla's `chunk_tickets.dat`; when a world loads,
+  the tickets of a mod that isn't installed are discarded. There is no non-ticking ticket. Outside a mod's hook, and for a
+  stale handle or a chunk past the world's bounds, the calls return `false` or `None`.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
@@ -3120,6 +3132,10 @@ naming the thing it is about, has a method on that scope's trait: `BlockPart`, `
 thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
+`BlockPart::clone_item_stack` answers on the server when a player picks the block. It receives the
+level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
+`None` to keep the game's item.
+
 A block entity part names its block entity type and the blocks that hold one, as vanilla's
 `BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
 The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
@@ -3526,3 +3542,14 @@ The client `tooltip_color` hook changes the background and top and bottom border
 # Camera and collision reads
 
 The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
+
+`ClientHost::crosshair_target()` returns the ordinary interaction-range target as
+`NativeCrosshairTarget::Block { pos, state, hit }` or
+`NativeCrosshairTarget::Entity { id, point }`. The block hit contains its world-space
+location, face and inside flag; the entity point is also in world coordinates.
+It uses the game's current targeting ray and block/entity reach, respects blocks
+occluding entities, and returns `None` on a miss or without a client world.
+It can be read with a screen open. The entity id is a network id in the current
+world, including dragon-part ids, not a persistent handle; use the planned client
+handles for entity data. Unlike `view_hit` and `raycast`, this does not find blocks
+in distant terrain or return a block behind a targeted entity.

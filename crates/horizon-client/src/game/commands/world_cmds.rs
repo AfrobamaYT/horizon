@@ -1629,7 +1629,7 @@ impl Game<'_> {
             let y = self.spread_spawn_y(p, max_y);
             let mut to = [p[0].floor() + 0.5, f64::from(y), p[1].floor() + 0.5];
             let mut skip = false;
-            if !horizon_client::mod_api::mods().is_empty()
+            if crate::mod_api::listened(crate::mod_api::HookId::SpreadPlayersTeleport)
                 && let (Some(entity), Some(from)) =
                     (self.network_entity_id(t), self.target_position(t))
             {
