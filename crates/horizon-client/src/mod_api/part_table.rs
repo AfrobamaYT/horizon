@@ -1949,6 +1949,21 @@ pub(crate) mod tests {
         mods
     }
 
+    /// Install a redstone connector on glass for real-game tests.
+    pub(crate) fn redstone_game_thread() {
+        struct RedstoneMod;
+        impl Hooks for RedstoneMod {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:glass", Connector);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("redstone_test", Box::new(RedstoneMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// The comparator reading of state `state`, from 1.
     fn read(state: u32) -> i32 {
         let mut output = 1;
