@@ -893,10 +893,7 @@ impl Content {
         for (fluid, name) in fluids {
             let file: FluidFile =
                 serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
-            if file.sprite.as_deref().is_some_and(|s| {
-                !s.split_once(':')
-                    .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty())
-            }) {
+            if file.sprite.as_deref().is_some_and(|s| !namespaced_id(s)) {
                 return Err(format!(
                     "{name}: sprite is an atlas sprite id (namespace:path)"
                 ));
@@ -2021,9 +2018,15 @@ capabilities = ["registries"]
                 },
             ]
         );
-        let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", br#"{"sprite":"steam"}"#)];
-        let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
-        assert!(e.contains("sprite"), "{e}");
+        for sprite in [
+            &br#"{"sprite":"steam"}"#[..],
+            br#"{"sprite":"ruby:has space"}"#,
+            br#"{"sprite":"Ruby:steam"}"#,
+        ] {
+            let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", sprite)];
+            let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
+            assert!(e.contains("sprite"), "{e}");
+        }
     }
 
     #[test]
