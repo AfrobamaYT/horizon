@@ -1059,6 +1059,20 @@ pub(super) mod tests {
             assert_eq!(game.native_player_is_fake(made), None);
             let replacement = game.native_fake_player(level, 1234, "machine").unwrap();
             assert_ne!(made, replacement);
+            let mut host = game.lan.take().unwrap();
+            let conn = host
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.uuid == 1234)
+                .unwrap()
+                .conn;
+            game.as_guest(&mut host, conn, |game| {
+                assert!(!game.native_player_remove_fake(replacement));
+                assert!(game.native_fake_player(level, 4321, "other").is_none());
+            })
+            .unwrap();
+            game.lan = Some(host);
             assert!(game.native_player_remove_fake(replacement));
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);

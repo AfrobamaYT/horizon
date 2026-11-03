@@ -31,7 +31,12 @@ impl Game<'_> {
     pub(super) fn lan_update_waypoints(&mut self, host: &mut LanHost) {
         let mut players: Vec<(&str, waypoints::Player)> = Vec::new();
         let mut respawned = Vec::new();
-        for g in host.hub.guests.iter().filter(|g| g.placed) {
+        for g in host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| g.placed && g.participates_online())
+        {
             // PlayerList.respawn makes a new ServerPlayer.
             if g.dead {
                 host.waypoint_dead.insert(g.uuid);

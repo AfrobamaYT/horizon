@@ -453,11 +453,16 @@ impl Game<'_> {
     /// The players who can be told about a bar: the one in place, then guests.
     fn known_boss_players(&self) -> Vec<([i32; 4], Text)> {
         let mut out = Vec::new();
-        if self.player.is_some() {
+        if self.player.is_some() && !self.lan_acting_fake {
             out.push((self.acting_uuid(), self.target_name(Target::Player)));
         }
         if let Some(host) = &self.lan {
-            for g in host.hub.guests.iter().filter(|g| g.placed) {
+            for g in host
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.placed && g.participates_online())
+            {
                 let ints = horizon_client::lan::playerdata::uuid_ints(g.uuid);
                 if out.iter().any(|(uuid, _)| *uuid == ints) {
                     continue;
@@ -536,7 +541,12 @@ impl Game<'_> {
             });
         }
         if let Some(host) = &self.lan {
-            for g in host.hub.guests.iter().filter(|g| g.placed) {
+            for g in host
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.placed && g.participates_online())
+            {
                 if out.iter().any(|v| v.uuid == g.uuid) {
                     continue;
                 }
