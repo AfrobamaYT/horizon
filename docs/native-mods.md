@@ -750,8 +750,8 @@ one, where vanilla gives the `by` one.
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
-`&RegistrationContext<'_>` before their event. `context.phase()` identifies the
-bootstrap declarations being collected; `context.mods()` returns a read-only
+`&RegistrationContext<'_>` before their event. The hook identifies the bootstrap
+declarations being collected; `context.mods()` returns a read-only
 `LoadedMods` view whose `ids()` lists loaded code mods in dispatch order. These
 contexts are supplied by the engine and have no game `Host`, handle constructors
 or transactions. Declarations still go on each event; `Hooks::register(&mut

@@ -2,16 +2,6 @@
 use super::ModEntry;
 pub use horizon_world::native_load_context::DataLoadOrigin;
 
-/// The registry whose declarations are being collected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum RegistrationPhase {
-    Components,
-    Blocks,
-    Items,
-    StandaloneModels,
-}
-
 /// Read-only view of the currently loaded code mods.
 pub struct LoadedMods<'a> {
     entries: &'a [ModEntry],
@@ -51,21 +41,14 @@ impl LoadedMods<'_> {
 /// }
 /// ```
 pub struct RegistrationContext<'a> {
-    phase: RegistrationPhase,
     mods: LoadedMods<'a>,
 }
 
 impl RegistrationContext<'_> {
-    pub(crate) fn new(phase: RegistrationPhase) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            phase,
             mods: LoadedMods::new(),
         }
-    }
-
-    /// The declarations this hook may add to its event.
-    pub fn phase(&self) -> RegistrationPhase {
-        self.phase
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
