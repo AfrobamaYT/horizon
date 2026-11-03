@@ -30,6 +30,8 @@ mod inject_cache;
 mod package;
 
 const PREFIX: &str = "native-";
+// A staging change invalidates both installed builds and patched-source snapshots.
+const STAGING: &str = "source-only-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
@@ -945,7 +947,7 @@ fn bundle_files(bundle: &Bundle) -> Result<Vec<(String, PathBuf)>, String> {
 /// The installed version `bundles` built on Horizon `revision` with horizon-mixins `mixins`
 /// become: `native-<7 digits of the revision>-<12 hex digits>`. The two targets' keys never mix:
 /// a server build salts its hash, so it is another version than the client build of the same
-/// mods, and the client key is unchanged.
+/// mods.
 pub fn version_for(
     revision: &str,
     mixins: &str,
@@ -955,7 +957,7 @@ pub fn version_for(
 ) -> Result<String, String> {
     let mut hash = Sha256::new();
     let (cargo_profile, configs) = profile.cargo();
-    for part in [mixins, cargo_profile]
+    for part in [STAGING, mixins, cargo_profile]
         .into_iter()
         .chain(configs.iter().copied())
         .chain([rust_toolchain::VERSION, revision])
@@ -1685,8 +1687,9 @@ pub fn build(
 /// docs/server.md): the same pipeline as [`build`] on the same revision, compiled with
 /// `--no-default-features`, installed as its own version (its key distinct from the game's, so
 /// the two never stand in for each other) and exported into `output` as a standalone runtime
-/// folder: the built engine, the base version's resources and the build's record. The folder lives outside the launcher's managed versions, where nothing of
-/// the launcher's can remove it; nothing of it is overwritten, and a folder already at `output`
+/// folder: the built engine, the base version's resources and the build's record. The folder
+/// lives outside the launcher's managed versions, where nothing of the launcher's can remove
+/// it; nothing of it is overwritten, and a folder already at `output`
 /// is refused before anything is downloaded or compiled. No instance is edited and no version
 /// selected: a server build changes nothing the launcher's window plays. Returns the absolute
 /// path of the exported engine binary.
@@ -2741,6 +2744,8 @@ mod tests {
             .unwrap()
         };
         let mut seen = vec![key()];
+        // This package's pre-source-only build must not be reused with its staged data.
+        assert_ne!(seen[0], "native-aaaaaaa-2596136aef15");
         for file in [
             "src/lib.rs",
             "src/salt.rs",
