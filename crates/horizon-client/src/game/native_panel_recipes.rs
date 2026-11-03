@@ -6,9 +6,9 @@
 use super::{
     Game,
     native_hooks::{
-        NativePanelEvent as BrowserEvent, NativeRecipeLayout as BrowserLayout,
-        NativeRecipeResult as BrowserResult, NativeRecipeView as BrowserRecipe,
-        NativeStack as BrowserStack,
+        NativePanelEvent as BrowserEvent, NativeRecipeFluid as BrowserFluid,
+        NativeRecipeLayout as BrowserLayout, NativeRecipeResult as BrowserResult,
+        NativeRecipeView as BrowserRecipe, NativeStack as BrowserStack,
     },
     native_panel::{Layout, Owner, browser_stack, inside},
 };
@@ -24,10 +24,16 @@ const TITLE: f32 = 18.0;
 /// A tab's step: an 18 px slot and a gap.
 const TAB: f32 = 20.0;
 const GAP: f32 = 6.0;
+/// A fluid well's step along a row (its slot, and room for "16000 mB" under
+/// it) and the row's height under the slot.
+const FLUID_WELL: f32 = 44.0;
+const FLUID_TEXT: f32 = 10.0;
+/// The room a result's chance takes under its slot.
+const CHANCE_TEXT: f32 = 9.0;
 
 /// Recipes a page may show, slots in one, stacks a slot cycles, and tabs.
 const RECIPES: usize = 256;
-const RECIPE_SLOTS: usize = 9;
+const RECIPE_SLOTS: usize = 27;
 const RESULTS: usize = 4;
 const FLUIDS: usize = 8;
 const SLOT_STACKS: usize = 64;
@@ -98,6 +104,8 @@ pub(super) struct Shown {
     /// Each result's chance in percent, in order; its length is the number of
     /// result slots at the end of `slots`.
     chances: Vec<Option<f32>>,
+    fluid_inputs: Vec<BrowserFluid>,
+    fluid_outputs: Vec<BrowserFluid>,
     note: String,
     action: Option<bool>,
 }
@@ -138,6 +146,8 @@ impl Pages {
                     height: r.height as usize,
                     slots,
                     chances: r.results.iter().map(|res| res.chance).collect(),
+                    fluid_inputs: r.fluid_inputs.clone(),
+                    fluid_outputs: r.fluid_outputs.clone(),
                     note: r.note.clone(),
                     action: r.action,
                 }
@@ -164,7 +174,12 @@ impl Shown {
         let row = |n: usize| (0..n).map(|i| (i as f32 * SLOT, 0.0)).collect();
         match self.layout {
             BrowserLayout::Grid => {
-                let (w, h) = (self.width.max(1), self.height.max(1));
+                // Slots past the grid continue in rows under it.
+                let w = self.width.max(1);
+                let h = self
+                    .height
+                    .max(1)
+                    .max((self.slots.len() - self.chances.len()).div_ceil(w));
                 let at = (0..w * h)
                     .map(|i| ((i % w) as f32 * SLOT, (i / w) as f32 * SLOT))
                     .collect();
@@ -177,18 +192,50 @@ impl Shown {
             BrowserLayout::Brewing => ((2.0 * SLOT, SLOT), row(2)),
         }
     }
-    /// The height of its slots, arrow and button, `room` wide.
+    /// The height of its slots, arrow and button, `room` wide; a chance is
+    /// written under its result, so the results' row has room for it.
     fn block(&self, room: f32) -> f32 {
         let h = self.inputs().0.1;
         let (_, _, action) = self.places(room);
+        let h = if self.chances.iter().any(Option::is_some) {
+            h.max(((h - SLOT) / 2.0).floor() + SLOT + CHANCE_TEXT)
+        } else {
+            h
+        };
         match self.action {
             Some(_) => h.max(action.1 + 12.0),
             None => h,
         }
     }
+    /// The fluid wells' places from the recipe's corner, `room` wide: the
+    /// inputs' rows under the slots, then the outputs' rows; and the height they take.
+    fn fluid_places(&self, room: f32) -> (Vec<(f32, f32)>, Vec<(f32, f32)>, f32) {
+        let per_row = ((room / FLUID_WELL).floor() as usize).max(1);
+        let mut top = self.block(room) + 2.0;
+        let mut rows = |n: usize| {
+            let at: Vec<(f32, f32)> = (0..n)
+                .map(|i| {
+                    (
+                        (i % per_row) as f32 * FLUID_WELL,
+                        top + (i / per_row) as f32 * (SLOT + FLUID_TEXT),
+                    )
+                })
+                .collect();
+            top += n.div_ceil(per_row) as f32 * (SLOT + FLUID_TEXT);
+            at
+        };
+        let inputs = rows(self.fluid_inputs.len());
+        let outputs = rows(self.fluid_outputs.len());
+        let used = if inputs.is_empty() && outputs.is_empty() {
+            0.0
+        } else {
+            top - self.block(room)
+        };
+        (inputs, outputs, used)
+    }
     fn height(&self, room: f32) -> f32 {
         let note = if self.note.is_empty() { 0.0 } else { 11.0 };
-        self.block(room) + note + GAP
+        self.block(room) + self.fluid_places(room).2 + note + GAP
     }
     /// Every slot's place from the recipe's corner (the results last, in a
     /// row), the arrow's and the action button's: beside the last result, or
@@ -215,6 +262,27 @@ impl Shown {
         at.extend((0..self.chances.len()).map(|j| (first.0 + j as f32 * SLOT, first.1)));
         (at, arrow, action)
     }
+}
+
+/// A chance as the panel writes it: a whole percent as "25%", else "12.5%".
+fn chance_text(chance: f32) -> String {
+    if (chance - chance.round()).abs() < 0.05 {
+        format!("{}%", chance.round() as u32)
+    } else {
+        format!("{chance:.1}%")
+    }
+}
+
+/// `formic_acid` as "Formic Acid", for a fluid its lang doesn't name.
+fn prettified(path: &str) -> String {
+    path.split('_')
+        .map(|w| {
+            w.chars().next().map_or(String::new(), |c| {
+                c.to_uppercase().chain(w.chars().skip(1)).collect()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The tabs' places, in rows under the title row.
@@ -407,6 +475,11 @@ impl Game<'_> {
             let (cooking, note, button) =
                 (r.layout == BrowserLayout::Cooking, r.note.clone(), r.action);
             let (chances, inputs) = (r.chances.clone(), r.slots.len() - r.chances.len());
+            let (wells_in, wells_out, wells_h) = r.fluid_places(layout.width());
+            let fluids = [
+                (wells_in, r.fluid_inputs.clone()),
+                (wells_out, r.fluid_outputs.clone()),
+            ];
             let atlas = &self.gui.atlas;
             for &(sx, sy) in at.iter().filter(|p| p.0.is_finite()) {
                 batch.sprite(atlas, "gui/sprites/container/slot", x + sx, y + sy);
@@ -451,7 +524,14 @@ impl Game<'_> {
                 horizon_client::widgets::record(&format!("+ {i}"), rect, enabled);
             }
             if !note.is_empty() {
-                batch.text(atlas, &note, x, y + h + 2.0, rgba(224, 224, 224, 255), true);
+                batch.text(
+                    atlas,
+                    &note,
+                    x,
+                    y + h + wells_h + 2.0,
+                    rgba(224, 224, 224, 255),
+                    true,
+                );
             }
             for (k, &(sx, sy)) in at.iter().enumerate().filter(|(_, p)| p.0.is_finite()) {
                 let Some((_, stack)) = self.recipe_slot_now(i, k).cloned() else {
@@ -460,10 +540,10 @@ impl Game<'_> {
                 self.draw_item(batch, &stack, x + sx + 1.0, y + sy + 1.0);
                 let chance = k.checked_sub(inputs).and_then(|j| chances[j]);
                 if let Some(chance) = chance {
-                    let text = format!("{chance}%");
+                    let text = chance_text(chance);
                     let atlas = &self.gui.atlas;
                     let w = HudBatch::text_width(atlas, &text);
-                    let at = (x + sx + SLOT - w, y + sy + SLOT - 9.0);
+                    let at = (x + sx + ((SLOT - w) / 2.0).floor(), y + sy + SLOT + 1.0);
                     batch.text(atlas, &text, at.0, at.1, rgba(255, 255, 85, 255), true);
                 }
                 if inside(cursor, [x + sx, y + sy, SLOT, SLOT]) {
@@ -484,7 +564,60 @@ impl Game<'_> {
                     horizon_client::widgets::Kind::Button,
                 );
             }
+            for (wells, list) in &fluids {
+                for (&(sx, sy), fluid) in wells.iter().zip(list) {
+                    self.draw_fluid_well(batch, fluid, x + sx, y + sy);
+                }
+            }
         }
+    }
+
+    /// A fluid's well, no clicks: its slot, the sprite or colour in it and
+    /// its amount under it.
+    fn draw_fluid_well(&self, batch: &mut HudBatch, fluid: &BrowserFluid, x: f32, y: f32) {
+        let atlas = &self.gui.atlas;
+        batch.sprite(atlas, "gui/sprites/container/slot", x, y);
+        let tint = fluid.tint.unwrap_or(match &*fluid.stack.fluid {
+            "minecraft:water" => 0xFF3F76E4,
+            "minecraft:lava" => 0xFFFF6A00,
+            _ => 0xFF9A9A9A,
+        });
+        let dst = [x + 1.0, y + 1.0, 16.0, 16.0];
+        let sprite = fluid
+            .sprite
+            .as_deref()
+            .and_then(|s| self.native_sprite_size(s).map(|size| (s, size)));
+        match sprite {
+            Some((name, size)) => {
+                self.native_sprite(batch, name, [0.0, 0.0, size[0], size[1]], dst, Some(tint));
+            }
+            None => {
+                let [a, r, g, b] = tint.to_be_bytes();
+                batch.fill(atlas, dst[0], dst[1], dst[2], dst[3], rgba(r, g, b, a));
+            }
+        }
+        let amount = format!("{} mB", fluid.stack.amount);
+        batch.text(
+            atlas,
+            &amount,
+            x,
+            y + SLOT + 1.0,
+            rgba(224, 224, 224, 255),
+            true,
+        );
+        // Vanilla names a fluid block `block.<namespace>.<path>`, as a content mod's lang does.
+        let (ns, path) = fluid
+            .stack
+            .fluid
+            .split_once(':')
+            .unwrap_or(("minecraft", &fluid.stack.fluid));
+        let name = self.translate(&format!("block.{ns}.{path}"), &prettified(path));
+        horizon_client::widgets::record_as(
+            &format!("{name} {amount}"),
+            [x, y, FLUID_WELL, SLOT + FLUID_TEXT],
+            false,
+            horizon_client::widgets::Kind::Button,
+        );
     }
 
     /// The tabs, on slots; the selected one framed.
@@ -613,6 +746,8 @@ mod tests {
             height: 1,
             slots: vec![Vec::new(); 4],
             chances: vec![None, Some(25.0), None],
+            fluid_inputs: Vec::new(),
+            fluid_outputs: Vec::new(),
             note: String::new(),
             action: None,
         };
@@ -622,5 +757,71 @@ mod tests {
         assert_eq!((at[2].0 - at[1].0, at[3].0 - at[2].0), (SLOT, SLOT));
         assert_eq!(at[1].1, at[3].1);
         assert!(action.0 > at[3].0);
+    }
+
+    fn fluid(amount: u32) -> BrowserFluid {
+        BrowserFluid {
+            stack: crate::mod_api::FluidStack::new("minecraft:water", amount),
+            sprite: None,
+            tint: None,
+        }
+    }
+
+    /// Inputs past the grid continue in rows under it, and the block grows with them.
+    #[test]
+    fn inputs_grow_the_grid_downwards() {
+        let shown = Shown {
+            layout: BrowserLayout::Grid,
+            width: 3,
+            height: 3,
+            slots: vec![Vec::new(); 16],
+            chances: vec![None],
+            fluid_inputs: Vec::new(),
+            fluid_outputs: Vec::new(),
+            note: String::new(),
+            action: None,
+        };
+        let (at, _, _) = shown.places(200.0);
+        assert_eq!(at[9], (0.0, 3.0 * SLOT));
+        assert_eq!(at[14], (2.0 * SLOT, 4.0 * SLOT));
+        assert!(shown.block(200.0) >= 5.0 * SLOT);
+    }
+
+    /// Wells sit under the slots, inputs before outputs, wrapping to the room; a chance
+    /// is written under its slot, which the block has room for.
+    #[test]
+    fn fluid_wells_sit_under_the_slots() {
+        let mut shown = Shown {
+            layout: BrowserLayout::Single,
+            width: 1,
+            height: 1,
+            slots: vec![Vec::new(); 2],
+            chances: vec![Some(10.0)],
+            fluid_inputs: vec![fluid(1000); 3],
+            fluid_outputs: vec![fluid(250)],
+            note: String::new(),
+            action: None,
+        };
+        let block = shown.block(200.0);
+        assert!(block >= SLOT + CHANCE_TEXT);
+        let (inputs, outputs, used) = shown.fluid_places(200.0);
+        assert_eq!((inputs.len(), outputs.len()), (3, 1));
+        assert!(inputs.iter().all(|p| p.1 >= block));
+        assert!(outputs[0].1 > inputs[0].1);
+        assert_eq!(inputs[1].0 - inputs[0].0, FLUID_WELL);
+        assert_eq!(shown.height(200.0), block + used + GAP);
+        // Too narrow for three: they wrap.
+        let (wrapped, _, _) = shown.fluid_places(2.0 * FLUID_WELL);
+        assert_eq!(wrapped[2], (0.0, wrapped[0].1 + SLOT + FLUID_TEXT));
+        shown.fluid_inputs.clear();
+        shown.fluid_outputs.clear();
+        assert_eq!(shown.fluid_places(200.0).2, 0.0);
+    }
+
+    #[test]
+    fn chance_and_fluid_names_read_well() {
+        assert_eq!(chance_text(25.0), "25%");
+        assert_eq!(chance_text(12.5), "12.5%");
+        assert_eq!(prettified("formic_acid"), "Formic Acid");
     }
 }

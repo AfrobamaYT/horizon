@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "fluid wells in a mod's recipe pages: `fluid_inputs` and `fluid_outputs` are `NativeRecipeFluid`s (stack, sprite, tint), a chance is written under its result, and the input grid grows past 3 x 3.",
+  "doc_summary": "`NativeRecipeView`'s `fluid_inputs` and `fluid_outputs` are `NativeRecipeFluid`s: the `FluidStack`, the atlas sprite its well shows (a content mod's `mymod:gui/fluids/steam`, tinted with `tint`, `0xAARRGGBB`; a fluid with no sprite is a flat square of the tint, grey by default and vanilla's colours for water and lava) and its amount in millibuckets written under it. A fluid's name, for the widget label, is the lang key `block.<namespace>.<path>`. Wells take no clicks, so `SlotClicked` still numbers the inputs, then the results. Inputs beyond the 3 x 3 grid continue in rows under it, up to 27, and a result's chance is written under its slot.",
+  "comments": []
+}
