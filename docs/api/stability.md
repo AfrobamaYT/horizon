@@ -17,7 +17,7 @@ promise, how something is deprecated and removed, and the tests that keep old mo
 | API | The version | A user names the line they need |
 | --- | --- | --- |
 | Content mods | the manifest's `api` line | `api = "0.2"` in `horizon-mod.toml` |
-| Native mods | the Horizon and horizon-mixins revisions the bundle pins | `horizon_revision` in `horizon-mixin.toml` |
+| Native mods | the exact Horizon and horizon-mixins revisions the mod pins | `[native] horizon` and `mixins` in `horizon-mod.toml` |
 | Agent control | the control protocol's version (`hello` replies it; MCP `serverInfo` carries the release) | `horizon-ctl --api 0.1` (planned) |
 | Server control API | the path (`/api/v1/`) | the path |
 | `server.toml` | the file's keys; a key is never renamed in place | nothing: old files keep loading |
@@ -88,7 +88,7 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 | Part | Level | Version |
 | --- | --- | --- |
 | Content mods (`registries`: data-driven blocks, items, mob effects, thrown entity types and menu types) | preview | manifest `api = "0.2"` |
-| Native mods (horizon-mixins bundles, [native-mods.md](../native-mods.md)) | experimental | the pinned revisions |
+| Native mods (flat Rust projects, [native-mods.md](../native-mods.md)) | experimental | the pinned revisions |
 | `cargo horizon-mod` (`new`, `build`, `run`, `check`) | preview | none yet (unversioned) |
 | Shader API | not started | |
 | `horizon-ctl` commands and MCP tools | preview | none yet (unversioned) |

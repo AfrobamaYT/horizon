@@ -3,6 +3,7 @@
 //! native (docs/native-mods.md).
 pub mod content;
 pub mod game_identity;
+pub mod icon;
 #[cfg(feature = "index")]
 pub mod index;
 pub mod manifest;
