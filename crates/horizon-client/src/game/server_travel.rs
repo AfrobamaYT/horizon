@@ -9,7 +9,7 @@
 
 use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};
-use super::respawn_anchor::{RespawnConfig, SpawnHear};
+use super::respawn_anchor::RespawnConfig;
 use super::{Dim, Game, Mob, boats, lan::LanHost, minecarts};
 use horizon_client::{lan::hub::TickCtx, world_spawn::PlayerSpawnFinder};
 use horizon_core::{geometry::Vec3, position::BlockPos};
@@ -549,29 +549,15 @@ impl Game<'_> {
                 // PlayerList.respawn: the block was found, so the new player
                 // copies the respawn point (`copyRespawnPosition`). A cancel
                 // leaves it with none.
-                if self.spawn_point_change(
-                    config.dim,
-                    config.pos,
-                    true,
-                    config.forced,
-                    "respawn",
-                    SpawnHear::New,
-                ) {
+                if self.spawn_point_change(config.dim, config.pos, config.forced) {
                     self.respawn_config = None;
                 }
                 Some((at, yaw))
             }
             Ok(None) | Err(_) => {
-                if self.spawn_point_change(
-                    config.dim,
-                    config.pos,
-                    false,
-                    config.forced,
-                    "death_reset",
-                    SpawnHear::Old,
-                ) {
-                    return None;
-                }
+                // The block is gone: `PlayerList.respawn` skips
+                // `copyRespawnPosition`, so the new player has no point and
+                // no `setRespawnPosition` call is made.
                 self.respawn_config = None;
                 None
             }

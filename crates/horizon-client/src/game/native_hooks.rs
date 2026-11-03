@@ -165,8 +165,6 @@
 //!
 //! API 278 adds A server player selected a stonecutter recipe (`native_player_stonecutter_recipe_select`).
 //!
-//! API 277 adds A server player's respawn point about to change, cancellable (`native_player_spawn_point_set`).
-//!
 //! API 276 adds A player's shield was disabled by a blocked hit (`native_player_shield_disable`).
 //!
 //! API 275 adds A player about to shear a mob, cancellable (`native_player_shear_entity`).
@@ -4750,32 +4748,6 @@ impl Game<'_> {
             cancel,
         );
     }
-    /// A server player's respawn point is about to change. `cause` is `bed`,
-    /// `respawn_anchor`, `command` or `death_reset`; `pos` is its block
-    /// position. The player's state is not swapped in, so helpers that look
-    /// them up through `self.lan` may find nothing while a guest packet is
-    /// handled. Set `cancel` to keep the old point. Server-side.
-    /// 277.
-    pub(super) fn native_player_spawn_point_set(
-        &mut self,
-        player: u128,
-        name: &str,
-        dimension: &str,
-        pos: [i32; 3],
-        cause: &str,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_player_spawn_point_set(
-            self,
-            mod_api::mods(),
-            player,
-            name,
-            dimension,
-            pos,
-            cause,
-            cancel,
-        );
-    }
     /// NeoForge's `PlayerSetSpawnEvent`: a server player's respawn point is about to be
     /// set (`ServerPlayer.setRespawnPosition`), once for each call vanilla makes: every sleep
     /// in a bed (the same bed too, which refreshes its angle), an anchor that is a new
@@ -4783,9 +4755,8 @@ impl Game<'_> {
     /// respawn block was found (`pos` is none for a player with no point). A respawn block
     /// that is gone makes no call. `pos` is the block position and `dimension` its level;
     /// `forced` is `/spawnpoint`'s flag. Set `cancel` and the point stays as it was (the
-    /// respawned player is left with none). Where it also fires `native_player_spawn_point_set`
-    /// fires first, and that one hears only a change, with its cause. `player_entity_id` is
-    /// the server's entity id for the player. Server-side. @API:player_set_spawn@.
+    /// respawned player is left with none). `player_entity_id` is the server's entity id for
+    /// the player. Server-side.
     pub(super) fn native_player_set_spawn(
         &mut self,
         player: u128,
@@ -8257,7 +8228,6 @@ impl Game<'_> {
     /// source that bypasses invulnerability never reaches it. `native_player_totem` still
     /// hears a server player's totem that did save them, after this. No `self`, as
     /// `native_living_shield_block`: the game is in the middle of the hit.
-    /// @API:living_use_totem@.
     pub(super) fn native_living_use_totem(
         entity: i32,
         kind: &str,
