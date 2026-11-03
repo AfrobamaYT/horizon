@@ -2963,7 +2963,10 @@ impl Game<'_> {
 impl Game<'_> {
     /// After a player's chat was broadcast: the dedicated server's event
     /// log, and `detectRateSpam`.
-    fn lan_player_chatted(&mut self, host: &mut LanHost, sender: u128, text: &str) {
+    fn lan_player_chatted(&mut self, sender: u128, text: &str) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
             if self.options.dedicated.is_some() {
                 super::dedicated::events::record(
@@ -2974,7 +2977,7 @@ impl Game<'_> {
                 );
             }
             let conn = g.conn;
-            self.detect_rate_spam(host, conn, false);
+            self.detect_rate_spam(conn, false);
         }
     }
     /// A hub's chat and log lines: a dedicated server logs them
