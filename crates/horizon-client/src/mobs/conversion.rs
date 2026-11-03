@@ -66,7 +66,15 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     to.extra.leash = from.extra.leash;
     to.extra.leash_pending = from.extra.leash_pending;
     to.extra.leash_player = from.extra.leash_player;
-    // convertCommon.
+    common(from, to, params.preserve_can_pick_up_loot);
+    // A zombie that turns into another zombie keeps canBreakDoors.
+    if super::doors::is_zombie(from.species()) && super::doors::is_zombie(to.species()) {
+        super::doors::set_can_break_doors(to, from.extra.can_break_doors);
+    }
+}
+
+/// State shared by single and split conversions, without spawn finalization.
+pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
     to.extra.effects = from.extra.effects.clone();
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
@@ -79,7 +87,7 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
         to.extra.forced_age = from.extra.forced_age;
         to.extra.forced_age_timer = from.extra.forced_age_timer;
     }
-    if params.preserve_can_pick_up_loot {
+    if preserve_can_pick_up_loot {
         to.extra.pick_up_loot = from.extra.pick_up_loot;
     }
     to.extra.left_handed = from.extra.left_handed;
@@ -93,10 +101,6 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     // COMPONENTS_TO_COPY: the custom name.
     to.custom_name = from.custom_name.clone();
     to.custom_name_text = from.custom_name_text.clone();
-    // A zombie that turns into another zombie keeps canBreakDoors.
-    if super::doors::is_zombie(from.species()) && super::doors::is_zombie(to.species()) {
-        super::doors::set_can_break_doors(to, from.extra.can_break_doors);
-    }
 }
 
 #[cfg(test)]

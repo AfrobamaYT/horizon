@@ -1,6 +1,6 @@
 //! The sample index (`tests/index/index-v1.json`, the one docs/api/mod-index.md
 //! shows) and its files: `coords_hud-0.1.0.hmod`, signed with the throwaway
-//! key `test.pub` by minisign 0.12 (its secret key was deleted),
+//! key `test.pub` (Ed25519/Blake2b via OpenSSL; its private key was deleted),
 //! `cozy-1.0.0.hpack`, unsigned, and `glow-1.0.0.hshader`, unsigned
 //! (`horizon-shader new --template post`, then `horizon-shader pack`).
 use super::*;
@@ -29,10 +29,7 @@ fn reads_the_sample_and_keeps_unknown_kinds() {
     assert_eq!(kinds, ["mod", "modpack", "shader", "world"]);
     assert_eq!(index.projects[3].kind, Kind::Other("world".into()));
     let hud = index.project("coords_hud").unwrap();
-    assert_eq!(
-        hud.versions[0].capabilities,
-        [Capability::GameRead, Capability::Hud, Capability::Chat]
-    );
+    assert_eq!(hud.versions[0].capabilities, [Capability::Registries]);
     // What CI writes reads back the same.
     let text = serde_json::to_string(&index).unwrap();
     let again = Index::parse(&text).unwrap();

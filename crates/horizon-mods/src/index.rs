@@ -146,7 +146,7 @@ pub struct Version {
     pub published: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub changelog: String,
-    /// A mod's API line (`0.1`), from its manifest; a modpack's format (`1`).
+    /// A content mod's API line (`0.2`), from its manifest; a modpack's format (`1`).
     pub api: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side: Option<Side>,

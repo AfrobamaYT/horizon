@@ -1722,7 +1722,14 @@ impl Game<'_> {
                 .and_then(|conn| hub.guest(*conn))
                 .map(|g| g.entity_id);
             let leash = m.extra.leash.and_then(|h| match h {
-                Holder::Player => player_entity,
+                Holder::Player => match m.extra.leash_player {
+                    Some(u) => hub
+                        .guests
+                        .iter()
+                        .find(|g| playerdata::uuid_ints(g.uuid) == u)
+                        .map(|g| g.entity_id),
+                    None => player_entity,
+                },
                 Holder::Mob(id) | Holder::Boat(id) => Some(id as i32),
                 Holder::Knot(p) => self.knot_ids.get(&p).map(|&id| id as i32),
             });
@@ -1996,16 +2003,13 @@ impl Game<'_> {
                         });
                     }
                 }
-                HostEvent::MainHandChanged(conn, left) => {
+                HostEvent::ClientInformation(conn, old, new) => {
                     if let Some(g) = host.hub.guest(conn) {
-                        let (uuid, name) = (g.uuid, g.name.clone());
-                        self.native_player_change_main_hand(uuid, &name, left);
-                    }
-                }
-                HostEvent::LocaleChanged(conn, locale) => {
-                    if let Some(g) = host.hub.guest(conn) {
-                        let (uuid, name) = (g.uuid, g.name.clone());
-                        self.native_player_locale_change(uuid, &name, &locale);
+                        let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
+                        // The packet's raw ids become the enums once, here.
+                        let old = horizon_client::mod_api::NativeClientInfo::from(&*old);
+                        let new = horizon_client::mod_api::NativeClientInfo::from(&*new);
+                        self.native_client_information_updated(uuid, entity_id, &name, &old, &new);
                     }
                 }
                 HostEvent::PlayerLoaded(conn) => {

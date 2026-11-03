@@ -17,10 +17,10 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
-    NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
-    NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
+    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
+    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
+    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
+    NativeShake, PhantomSpawnResult, SleepProblem,
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
@@ -31,7 +31,7 @@ pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
-pub use crate::menu::StackedOnOther;
+pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
@@ -57,6 +57,7 @@ pub use horizon_world::{
     registry::BlockStateId,
 };
 pub use serde_json;
+
 use serde_json::{Map, Value};
 use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
@@ -80,16 +81,37 @@ pub struct NativeCamera {
     pub dimension: String,
 }
 
+/// Context and adjustable pose for a first-person hand render.
+///
+/// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
+/// The renderer applies the transform before the ordinary hand and item poses.
+pub struct NativeHandRender<'a> {
+    pub player: u128,
+    pub player_entity_id: i32,
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub interpolated_pitch: f32,
+    pub swing: f32,
+    pub equip: f32,
+    /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
+    pub packed_light: u32,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 3],
+    pub scale: f32,
+}
+
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
 
 /// Context for a player tuning a note block.
 #[derive(Clone, Copy, Debug)]
-pub struct NativeNoteBlockChange<'a> {
+pub struct NativeNoteBlockChange {
     pub dimension: LevelDimension,
     pub pos: BlockPos,
-    pub instrument: &'a str,
+    /// The block's instrument before tuning.
+    pub instrument: NativeNoteInstrument,
     /// The note before tuning, in the range 0 through 24.
     pub old_note: i32,
 }
@@ -130,6 +152,48 @@ pub struct NativeLootDrops<'a> {
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.
     pub used: bool,
+}
+
+/// A statistic type (`BuiltInRegistries.STAT_TYPE`), for a player's
+/// statistics: what the stat's key names (a block, an item, an entity type,
+/// or a `minecraft:custom` stat).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeStatType {
+    /// `minecraft:mined`, keyed by block.
+    Mined,
+    /// `minecraft:crafted`, keyed by item.
+    Crafted,
+    /// `minecraft:used`, keyed by item.
+    Used,
+    /// `minecraft:broken`, keyed by item.
+    Broken,
+    /// `minecraft:picked_up`, keyed by item.
+    PickedUp,
+    /// `minecraft:dropped`, keyed by item.
+    Dropped,
+    /// `minecraft:killed`, keyed by entity type.
+    Killed,
+    /// `minecraft:killed_by`, keyed by entity type.
+    KilledBy,
+    /// `minecraft:custom`, keyed by custom stat (`minecraft:jump`...).
+    Custom,
+}
+
+impl NativeStatType {
+    /// The type's registry path (`mined`, `killed_by`...).
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Mined => "mined",
+            Self::Crafted => "crafted",
+            Self::Used => "used",
+            Self::Broken => "broken",
+            Self::PickedUp => "picked_up",
+            Self::Dropped => "dropped",
+            Self::Killed => "killed",
+            Self::KilledBy => "killed_by",
+            Self::Custom => "custom",
+        }
+    }
 }
 
 /// A note block's instrument (`NoteBlockInstrument`), for `note_block_play`,
@@ -691,6 +755,19 @@ pub enum ChunkStatus {
     Full,
 }
 
+/// What an explosion a mod sets off does to blocks
+/// (`Level.ExplosionInteraction`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeExplosionInteraction {
+    /// Blocks stay; entities are hurt and pushed (`NONE`).
+    None,
+    /// Blocks break and drop by the `block_explosion_drop_decay` rule (`BLOCK`).
+    #[default]
+    Block,
+    /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
+    Tnt,
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {
@@ -698,6 +775,75 @@ pub enum NativeBlockShapeKind {
     Outline,
     /// Collision shape (`BlockState.getCollisionShape`).
     Collision,
+}
+
+/// `ChatVisiblity`: which chat a client shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeChatVisibility {
+    Full,
+    System,
+    Hidden,
+}
+
+/// `HumanoidArm`: a player's main hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeMainHand {
+    Left,
+    Right,
+}
+
+/// `ParticleStatus`: how many particles a client shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeParticleStatus {
+    All,
+    Decreased,
+    Minimal,
+}
+
+/// A player's client options, as `ServerboundClientInformationPacket` carries them
+/// (vanilla's `ClientInformation`). Raw ids map as vanilla's `ByIdMap` does: chat
+/// visibility and particle status wrap (`floorMod(id, 3)`), the main hand reads an
+/// unknown id as left.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeClientInfo {
+    pub language: String,
+    pub view_distance: i8,
+    pub chat_visibility: NativeChatVisibility,
+    pub chat_colors: bool,
+    /// Skin layer bits (`PlayerModelPart`).
+    pub model_customisation: u8,
+    pub main_hand: NativeMainHand,
+    pub text_filtering: bool,
+    pub allows_listing: bool,
+    pub particle_status: NativeParticleStatus,
+}
+
+impl From<&horizon_protocol::packets::configuration::ClientInformation> for NativeClientInfo {
+    fn from(i: &horizon_protocol::packets::configuration::ClientInformation) -> Self {
+        Self {
+            language: i.language.clone(),
+            view_distance: i.view_distance,
+            chat_visibility: match i.chat_visibility.rem_euclid(3) {
+                0 => NativeChatVisibility::Full,
+                1 => NativeChatVisibility::System,
+                _ => NativeChatVisibility::Hidden,
+            },
+            chat_colors: i.chat_colors,
+            model_customisation: i.model_customisation,
+            main_hand: if i.main_hand == 1 {
+                NativeMainHand::Right
+            } else {
+                NativeMainHand::Left
+            },
+            text_filtering: i.text_filtering,
+            allows_listing: i.allows_listing,
+            particle_status: match i.particle_status.rem_euclid(3) {
+                0 => NativeParticleStatus::All,
+                1 => NativeParticleStatus::Decreased,
+                _ => NativeParticleStatus::Minimal,
+            },
+        }
+    }
 }
 
 /// A block face for a level support query.
@@ -719,6 +865,17 @@ pub enum NativeSupportType {
     Full,
     Center,
     Rigid,
+}
+
+/// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
+/// that destroy it. The unloading and dimension-change reasons belong to the
+/// game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeRemovalReason {
+    /// `KILLED`: a mob's effects that act on removal run.
+    Killed,
+    /// `DISCARDED`, as `Entity.discard`.
+    Discarded,
 }
 
 /// Block shape used by an empty-context level ray.
@@ -747,6 +904,16 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeItemCooldown {
+    /// The cooldown group: an item id, or the group an item's
+    /// `use_cooldown` component names.
+    pub group: String,
+    /// Ticks until the cooldown ends.
+    pub ticks_left: i32,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
@@ -771,6 +938,57 @@ impl From<PlayerRef> for EntityRef {
     }
 }
 
+/// A player's game mode (vanilla's `GameType`).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GameMode {
+    Survival,
+    Creative,
+    Adventure,
+    Spectator,
+}
+
+impl GameMode {
+    /// Every mode, in id order.
+    pub const ALL: [Self; 4] = [
+        Self::Survival,
+        Self::Creative,
+        Self::Adventure,
+        Self::Spectator,
+    ];
+    /// `GameType.getId`: 0 survival, 1 creative, 2 adventure, 3 spectator.
+    pub fn id(self) -> i32 {
+        match self {
+            Self::Survival => 0,
+            Self::Creative => 1,
+            Self::Adventure => 2,
+            Self::Spectator => 3,
+        }
+    }
+    /// The mode with `GameType` id `id`, or None for an id vanilla doesn't
+    /// have.
+    pub fn from_id(id: i32) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+    /// `GameType.getName`: `survival`, `creative`, `adventure`, `spectator`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Survival => "survival",
+            Self::Creative => "creative",
+            Self::Adventure => "adventure",
+            Self::Spectator => "spectator",
+        }
+    }
+}
+
+/// One player's open menu, invalidated on close, replacement or reconnect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MenuRef {
+    pub(crate) player: PlayerRef,
+    pub(crate) window: i32,
+    pub(crate) generation: u64,
+}
+
 /// A player's food data.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
@@ -781,6 +999,19 @@ pub struct NativePlayerFood {
     pub saturation: f32,
     /// Food exhaustion.
     pub exhaustion: f32,
+}
+
+/// A player's experience (`Player.experienceLevel`, `experienceProgress`,
+/// `totalExperience`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerExperience {
+    /// Experience level.
+    pub level: i32,
+    /// Progress toward the next level, from 0 to 1.
+    pub progress: f32,
+    /// Points gained in all.
+    pub total: i32,
 }
 
 /// Damage sources supported for a mod effect tick.
@@ -927,6 +1158,24 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// The player responsible for a game rule change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GameRuleActor<'a> {
+    /// Player UUID.
+    pub uuid: u128,
+    /// Server entity ID.
+    pub entity_id: i32,
+    /// Player name.
+    pub name: &'a str,
+}
+
+/// How a criterion's advancement progress changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeProgressType {
+    Grant,
+    Revoke,
+}
+
 /// Read-only context for a tool modification.
 #[non_exhaustive]
 pub struct ToolUse {
@@ -1051,8 +1300,7 @@ pub enum Flow {
 pub struct BlockHit {
     /// The point clicked, in world coordinates (`getLocation`).
     pub point: [f64; 3],
-    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`), the same
-    /// as the event's `face`.
+    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`).
     pub face: [i32; 3],
     /// The ray started inside the block's shape (`isInside`).
     pub inside: bool,
@@ -1063,6 +1311,74 @@ impl BlockHit {
             point,
             face,
             inside,
+        }
+    }
+}
+
+/// A player's right click on a block, for `right_click_block`
+/// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
+/// `useItemOn` starts, on the clicking client and on the server.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeBlockClick<'a> {
+    /// The side running the click (`getSide`).
+    pub side: LogicalSide,
+    /// The clicking player's level (`getLevel`).
+    pub dimension: LevelDimension,
+    /// The block clicked (`getPos`).
+    pub pos: [i32; 3],
+    /// Where it was clicked (`getHitVec`); `hit.face` is `getFace`.
+    pub hit: BlockHit,
+    /// The hand clicking (`getHand`) and what it holds (`getItemStack`).
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    /// The clicking player's UUID and entity id (`getEntity`).
+    pub player: u128,
+    pub player_entity_id: i32,
+}
+
+/// Vanilla's `InteractionResult`, as a hook answers it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeInteractionResult {
+    /// `SUCCESS`: the action is used and the hand swings on the clicking
+    /// client (`SwingSource.PREDICTED`).
+    Success,
+    /// `SUCCESS_SERVER`: the action is used and the server swings the hand.
+    SuccessServer,
+    /// `CONSUME`: the action is used, with no swing.
+    Consume,
+    /// `FAIL`: nothing happens and the click ends.
+    Fail,
+    /// `PASS`: nothing happens and the click goes on.
+    #[default]
+    Pass,
+    /// `TRY_WITH_EMPTY_HAND`: passes, as `PASS` does here.
+    TryWithEmptyHand,
+}
+impl NativeInteractionResult {
+    /// `consumesAction`: the click is used up.
+    pub fn consumes_action(self) -> bool {
+        matches!(self, Self::Success | Self::SuccessServer | Self::Consume)
+    }
+}
+
+/// NeoForge's `TriState`: force a part of an action off or on, or leave it
+/// to vanilla.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeTriState {
+    False,
+    #[default]
+    Default,
+    True,
+}
+impl NativeTriState {
+    /// Whether the part runs, `vanilla` deciding for `Default`.
+    pub fn or(self, vanilla: bool) -> bool {
+        match self {
+            Self::False => false,
+            Self::Default => vanilla,
+            Self::True => true,
         }
     }
 }
@@ -1152,20 +1468,23 @@ macro_rules! level_attachment_host {
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
-pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS, ItemHandler};
+pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
 mod transaction;
-pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
-pub use transaction::TransactionSeal;
+pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
+mod resource;
+pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
+pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
-pub(crate) use part_table::{
-    Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
-    providers, resolve_parts,
-};
 pub use part_table::{
-    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
+    Attached, BlockEntityProviders, BlockProvider, ItemProvider, Parts, Registrar,
+    block_entity_providers,
+};
+pub(crate) use part_table::{
+    KnownIds, answered, ask_providers, install_parts, mark_game_thread, parts, place_provider,
+    providers, resolve_parts,
 };
 
 mod generated {
@@ -1183,6 +1502,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    #[test]
+    fn game_modes_round_trip_through_their_ids() {
+        for mode in GameMode::ALL {
+            assert_eq!(GameMode::from_id(mode.id()), Some(mode));
+        }
+        assert_eq!(GameMode::from_id(-1), None);
+        assert_eq!(GameMode::from_id(4), None);
+        assert_eq!(GameMode::Adventure.name(), "adventure");
+    }
+
     struct Quiet;
     impl Hooks for Quiet {}
 
@@ -1193,15 +1522,19 @@ mod tests {
         }
     }
 
-    /// A double with the three `Host` methods the probe calls.
+    /// A double with the `Host` methods the probe calls.
     struct Reader {
         block: &'static str,
         lines: Vec<Text>,
     }
 
     impl Host for Reader {
-        fn block(&self, _pos: [i32; 3]) -> String {
-            self.block.to_string()
+        fn level(&self, dimension: &str) -> Option<LevelRef> {
+            (dimension == "minecraft:overworld")
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+        }
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {
@@ -1222,19 +1555,104 @@ mod tests {
         }
     }
 
+    #[test]
+    fn render_hand_chains_pose_until_cancelled() {
+        struct HandMod {
+            offset: f32,
+            cancel: bool,
+        }
+        impl Hooks for HandMod {
+            fn render_hand(&self, _host: &dyn Host, event: &mut RenderHandEvent<'_, '_>) -> Flow {
+                assert_eq!((event.render.player, event.render.player_entity_id), (7, 9));
+                event.render.translation[0] += self.offset;
+                if self.cancel {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(HandMod {
+                offset: 1.0,
+                cancel: false,
+            }),
+            Box::new(HandMod {
+                offset: 2.0,
+                cancel: true,
+            }),
+            Box::new(HandMod {
+                offset: 4.0,
+                cancel: false,
+            }),
+        ];
+        let host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut render = NativeHandRender {
+            player: 7,
+            player_entity_id: 9,
+            hand: Hand::Main,
+            stack: None,
+            partial: 0.5,
+            interpolated_pitch: 0.0,
+            swing: 0.0,
+            equip: 0.0,
+            packed_light: 0,
+            translation: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: 1.0,
+        };
+        let mut canceled = false;
+        dispatch_render_hand(&host, &mods, &mut render, &mut canceled);
+        assert!(canceled);
+        assert_eq!(render.translation, [3.0, 0.0, 0.0]);
+    }
+
     /// Claims a use on stone, after telling the player what the block is.
     struct Probe;
 
     impl Hooks for Probe {
         fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-            let block = host.block(event.pos);
             let player = host.acting_player().expect("a player acts");
+            let level = host.level(&player.dimension).expect("a loaded level");
+            let block = level.block(host, event.pos).expect("a loaded block");
             host.action_bar(player.uuid, Text::literal(block.clone()));
             if block == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue
             }
+        }
+    }
+
+    #[test]
+    fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
+        struct XpHook(bool);
+        impl Hooks for XpHook {
+            fn player_xp_change(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerXpChangeEvent<'_>,
+            ) -> Flow {
+                assert_eq!(
+                    (event.player, event.player_entity_id, event.name),
+                    (7, 42, "Probe")
+                );
+                event.amount = -5;
+                if self.0 { Flow::Cancel } else { Flow::Continue }
+            }
+        }
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for cancelled in [false, true] {
+            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let (mut amount, mut cancel) = (10, false);
+            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            assert_eq!((amount, cancel), (-5, cancelled));
         }
     }
 
@@ -1550,15 +1968,23 @@ mod tests {
         }
 
         fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
-            let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
-            if event.hand == Hand::Off
+            let click = event.click;
+            let top_half = click.hit.point[1] - f64::from(click.pos[1]) >= 0.5;
+            if click.hand == Hand::Off
                 && top_half
-                && event.player == 7
-                && event.player_entity_id == 41
-                && !event.hit.inside
+                && click.player == 7
+                && click.player_entity_id == 41
+                && !click.hit.inside
             {
+                *event.cancellation_result = NativeInteractionResult::Fail;
                 Flow::Cancel
             } else {
+                // A held stick never uses the block; an empty hand always does.
+                *event.use_block = if click.stack.is_some() {
+                    NativeTriState::False
+                } else {
+                    NativeTriState::True
+                };
                 Flow::Continue
             }
         }
@@ -1587,24 +2013,59 @@ mod tests {
         );
         assert!(!claimed);
         let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
-        for (hand, hit, expected) in [
-            (Hand::Off, top_hit(), true),
-            (Hand::Main, top_hit(), false),
-            (Hand::Off, low, false),
+        let held = stick();
+        for (hand, hit, stack, canceled, answer, use_block) in [
+            (
+                Hand::Off,
+                top_hit(),
+                None,
+                true,
+                NativeInteractionResult::Fail,
+                NativeTriState::Default,
+            ),
+            (
+                Hand::Main,
+                top_hit(),
+                Some(&held),
+                false,
+                NativeInteractionResult::Pass,
+                NativeTriState::False,
+            ),
+            (
+                Hand::Off,
+                low,
+                None,
+                false,
+                NativeInteractionResult::Pass,
+                NativeTriState::True,
+            ),
         ] {
-            let mut canceled = false;
+            let click = NativeBlockClick {
+                side: LogicalSide::Server,
+                dimension: LevelDimension::Overworld,
+                pos: [0; 3],
+                hit,
+                hand,
+                stack,
+                player: 7,
+                player_entity_id: 41,
+            };
+            let (mut block, mut item) = (NativeTriState::Default, NativeTriState::Default);
+            let (mut result, mut was_canceled) = (NativeInteractionResult::Pass, false);
             dispatch_right_click_block(
                 &mut host,
                 &mods,
-                [0; 3],
-                hit.face,
-                hand,
-                hit,
-                7,
-                41,
-                &mut canceled,
+                &click,
+                &mut block,
+                &mut item,
+                &mut result,
+                &mut was_canceled,
             );
-            assert_eq!(canceled, expected, "{hand:?} {hit:?}");
+            assert_eq!(
+                (was_canceled, result, block, item),
+                (canceled, answer, use_block, NativeTriState::Default),
+                "{hand:?} {hit:?}"
+            );
         }
     }
 
@@ -1730,6 +2191,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn game_rule_change_reports_optional_actor() {
+        struct ActorRecorder(Arc<Mutex<Vec<Option<(u128, i32, String)>>>>);
+        impl Hooks for ActorRecorder {
+            fn game_rule_changed(&self, _: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+                self.0.lock().unwrap().push(
+                    event
+                        .actor
+                        .map(|actor| (actor.uuid, actor.entity_id, actor.name.to_owned())),
+                );
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let actor = GameRuleActor {
+            uuid: 123,
+            entity_id: 42,
+            name: "Alex",
+        };
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(true),
+            Some(&actor),
+        );
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(false),
+            None,
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [Some((123, 42, "Alex".into())), None]
+        );
+    }
+
     /// `GameRuleChangedEvent` as the server's setters fire it: only for a
     /// rule `GameRules.set` took, with its id and new value, to every mod.
     #[test]
@@ -1747,7 +2251,13 @@ mod tests {
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
-                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+                dispatch_game_rule_changed(
+                    &mut host,
+                    &mods,
+                    &["minecraft:", name].concat(),
+                    value,
+                    None,
+                );
             }
         };
         set("keep_inventory", GameRuleValue::Bool(true));

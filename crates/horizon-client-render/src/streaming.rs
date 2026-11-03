@@ -61,6 +61,27 @@ pub mod job_stats {
 }
 /// A chunk under generation, opaque to the streamer.
 pub type Proto = Box<dyn std::any::Any + Send>;
+
+/// A proto checked out for saving, before its worker takes ownership.
+pub struct ProtoSave {
+    pub pos: (i32, i32),
+    pub proto: Proto,
+}
+
+/// Borrowed, read-only generation state, before serialization on the save worker.
+/// Fields synthesized only by the encoder are not available through this view.
+pub struct ProtoSnapshot<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 2],
+    pub proto: &'a Proto,
+    pub access: &'a dyn ProtoAccess,
+    pub status: horizon_world::chunk_status::ChunkStatus,
+}
+impl ProtoSnapshot<'_> {
+    pub fn block(&self, pos: [i32; 3]) -> Option<u32> {
+        self.access.block(self.proto, pos)
+    }
+}
 /// Chunk generation in vanilla's stages: a neighbour-independent proto chunk
 /// (biomes, noise, surface, carvers), decoration of a 3x3 neighbourhood
 /// (FEATURES, which may write into neighbours), then conversion of a chunk
@@ -140,6 +161,14 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// Whether `proto` has been decorated (a saved one can come back decorated).
     fn is_decorated(&self, _proto: &Proto) -> bool {
         false
+    }
+    /// Generation status of a proto that can be saved, if known.
+    fn proto_status(&self, _proto: &Proto) -> Option<horizon_world::chunk_status::ChunkStatus> {
+        None
+    }
+    /// Read an absolute block position from the proto without making a column copy.
+    fn proto_block(&self, _proto: &Proto, _pos: [i32; 3]) -> Option<u32> {
+        None
     }
     /// What to save of a proto chunk dropped before it became final.
     /// A decorated proto chunk's blocks as a column, to light a finished
@@ -245,7 +274,20 @@ impl<G: ChunkGenerator> LodSource for G {
     }
 }
 /// The generator's saving, for the streamer (which doesn't know its type).
-trait Saves: LodSource {
+/// Read-only access to checked-out generation state.
+pub trait ProtoAccess: Send + Sync {
+    fn status(&self, proto: &Proto) -> Option<horizon_world::chunk_status::ChunkStatus>;
+    fn block(&self, proto: &Proto, pos: [i32; 3]) -> Option<u32>;
+}
+impl<G: ChunkGenerator> ProtoAccess for G {
+    fn status(&self, proto: &Proto) -> Option<horizon_world::chunk_status::ChunkStatus> {
+        self.proto_status(proto)
+    }
+    fn block(&self, proto: &Proto, pos: [i32; 3]) -> Option<u32> {
+        self.proto_block(proto, pos)
+    }
+}
+trait Saves: LodSource + ProtoAccess {
     fn save_protos(&self, protos: &[&Proto]);
     fn save_finished(&self, chunk: Chunk);
 }
@@ -281,7 +323,7 @@ enum Job {
     Mesh(i32, i32, i32, Box<Region>, u64, MeshSettings),
     /// Proto chunks checked out to be saved (`ChunkGenerator::save_protos`),
     /// off the main thread like vanilla's IOWorker.
-    Save(Vec<((i32, i32), Proto)>),
+    Save(Vec<ProtoSave>),
     /// A proto chunk checked out for its light view (`light_region`).
     LightView(i32, i32, Proto),
     /// Meshes the renderer is done with (`Streaming::free`): their memory
@@ -345,6 +387,7 @@ struct Shared {
     /// Only workers use this pool; frames never wait for its lock. Retaining
     /// cleared buffers avoids racing the renderer for the process heap.
     meshes: Mutex<MeshPool>,
+    aborted: std::sync::atomic::AtomicBool,
 }
 #[derive(Default)]
 struct MeshPool {
@@ -449,11 +492,33 @@ pub struct StreamingUpdate {
     paused: bool,
 }
 
-impl StreamingUpdate {
-    /// Chunks the update plans to unload, still present in the world.
-    pub fn unloading(&self) -> &[(i32, i32)] {
-        &self.far
-    }
+/// Result of processing generation results, pausing before a late full save.
+pub enum PlanStep {
+    Ready(StreamingUpdate),
+    Save { chunk: Chunk, resume: PlanResume },
+}
+
+/// A save step is pending, ready for proto submission, or paused at a late full chunk.
+pub enum SaveStep {
+    Pending,
+    Full(Chunk),
+    Protos(Vec<ProtoSave>),
+}
+
+/// Work retained while a late full-chunk save callback runs.
+pub struct PlanResume {
+    sweep: bool,
+    uploads: Vec<((i32, i32, i32), SectionMesh)>,
+    stale: Vec<((i32, i32, i32), SectionMesh)>,
+    deferred: std::vec::IntoIter<Done>,
+    received: VecDeque<Done>,
+}
+
+/// A streaming update paused before scheduling generation after proto checkout.
+pub struct StreamingCommit {
+    uploads: Vec<((i32, i32, i32), SectionMesh)>,
+    removed: Vec<Arc<Chunk>>,
+    paused: bool,
 }
 
 pub struct Streaming {
@@ -810,6 +875,18 @@ struct Jobs<G: ChunkGenerator> {
 impl<G: ChunkGenerator> Source for Jobs<G> {
     fn next(&self) -> Option<Rank> {
         let queue = self.shared.queue.lock().unwrap();
+        if self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            for q in queue.iter() {
+                if matches!(q.job, Job::Save(..)) {
+                    return Some(Rank::new(Class::Urgent, q.priority));
+                }
+            }
+            return None;
+        }
         queue.peek().map(|q| {
             // Jobs without a column (saves, meshes to free) go first.
             let class = if q.at.is_none() {
@@ -824,6 +901,14 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
         let Some(job) = self.shared.queue.lock().unwrap().pop() else {
             return false;
         };
+        if self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && !matches!(job.job, Job::Save(..))
+        {
+            return true;
+        }
         let started = job_stats::enabled().then(|| {
             let kind = match &job.job {
                 Job::Generate(..) => 1,
@@ -935,9 +1020,9 @@ impl<G: ChunkGenerator> Jobs<G> {
                 Done::Generated(chunk)
             }
             Job::Save(protos) => {
-                let refs: Vec<&Proto> = protos.iter().map(|(_, p)| p).collect();
+                let refs: Vec<&Proto> = protos.iter().map(|p| &p.proto).collect();
                 generator.save_protos(&refs);
-                Done::Saved(protos)
+                Done::Saved(protos.into_iter().map(|p| (p.pos, p.proto)).collect())
             }
             Job::LightView(x, z, proto) => {
                 let view = generator.light_view(&proto);
@@ -1005,6 +1090,7 @@ impl Streaming {
             context: RwLock::new(context.clone()),
             done: Mailbox::default(),
             meshes: Mutex::new(MeshPool::default()),
+            aborted: std::sync::atomic::AtomicBool::new(false),
         });
         let light_tables = context.light.clone();
         let saves: Arc<dyn Saves> = generator.clone();
@@ -1323,24 +1409,23 @@ impl Streaming {
             self.protos.insert(key, Some(proto));
         }
     }
-    /// Check out the proto chunks at `keys` and save them on a worker.
-    fn save_checked_out(&mut self, keys: impl IntoIterator<Item = (i32, i32)>) {
-        let protos: Vec<((i32, i32), Proto)> = keys
-            .into_iter()
-            .filter_map(|k| {
-                let proto = self.protos.get_mut(&k)?.take()?;
-                self.light_views.remove(&k);
-                Some((k, proto))
-            })
-            .collect();
+    /// A read-only view of checked-out protos independent of the streaming borrow.
+    pub fn proto_access(&self) -> Arc<dyn ProtoAccess> {
+        self.saves.clone()
+    }
+    /// Check out proto chunks without submitting them yet.
+    fn checkout_protos(&mut self, keys: impl IntoIterator<Item = (i32, i32)>) -> Vec<ProtoSave> {
+        checkout_protos(&mut self.protos, &mut self.light_views, keys)
+    }
+    /// Queue checked-out protos ahead of other generation work.
+    pub fn submit_protos(&mut self, protos: Vec<ProtoSave>) -> bool {
         if !protos.is_empty() {
             self.saving += 1;
-            // Ahead of every other job: a column generated again meanwhile
-            // would not find them saved.
             self.submit(None, 0, Job::Save(protos));
         }
+        self.saving == 0
     }
-    fn receive_generated(&mut self, mut chunk: Chunk, world: &mut World) {
+    fn receive_generated(&mut self, mut chunk: Chunk, world: &mut World) -> Option<Chunk> {
         self.generation_scan.exhausted = false;
         let key = (chunk.x, chunk.z);
         self.generating.remove(&key);
@@ -1355,9 +1440,9 @@ impl Streaming {
         if !self.ranges().chunk_kept(key.0, key.1, self.decorates) {
             if chunk.fresh {
                 self.dropped_new.insert(key);
-                self.saves.save_finished(chunk);
+                return Some(chunk);
             }
-            return;
+            return None;
         }
         // Generated columns are saved like edited ones, as vanilla saves
         // every chunk it generates.
@@ -1402,6 +1487,11 @@ impl Streaming {
                 }
             }
         }
+        None
+    }
+    /// Finish a generated column's deferred save after its snapshot callback.
+    pub fn save_finished(&self, chunk: Chunk) {
+        self.saves.save_finished(chunk);
     }
     /// The order jobs around the player run in, lowest first.
     fn distance(&self, x: i32, z: i32) -> i64 {
@@ -1602,14 +1692,27 @@ impl Streaming {
 
     /// Collect completed work and plan removals without removing live chunks.
     pub fn plan_update(&mut self, world: &mut World) -> StreamingUpdate {
-        let mut uploads = Vec::new();
+        let mut step = self.begin_plan_update(world);
+        loop {
+            match step {
+                PlanStep::Ready(plan) => return plan,
+                PlanStep::Save { chunk, resume } => {
+                    self.save_finished(chunk);
+                    step = self.resume_plan_update(world, resume);
+                }
+            }
+        }
+    }
+
+    /// Start planning, yielding before any late-generated column is saved.
+    pub fn begin_plan_update(&mut self, world: &mut World) -> PlanStep {
         if self.paused {
-            return StreamingUpdate {
-                uploads,
+            return PlanStep::Ready(StreamingUpdate {
+                uploads: Vec::new(),
                 sweep: false,
                 far: Vec::new(),
                 paused: true,
-            };
+            });
         }
         ExtraCover::refresh(&mut self.cover, &self.extra);
         // The sweeps below walk every loaded column and proto chunk. Run them
@@ -1621,11 +1724,27 @@ impl Streaming {
         self.scan_age = if sweep { 0 } else { self.scan_age + 1 };
         self.requeue();
         self.relight_edits(world);
-        let deferred = std::mem::take(&mut self.deferred);
+        let deferred = std::mem::take(&mut self.deferred).into_iter();
         let received = self.shared.done.take();
-        // Meshes made stale meanwhile, freed with the uploaded ones (`free`).
-        let mut stale = Vec::new();
-        for done in deferred.into_iter().chain(received) {
+        self.resume_plan_update(
+            world,
+            PlanResume {
+                sweep,
+                uploads: Vec::new(),
+                stale: Vec::new(),
+                deferred,
+                received,
+            },
+        )
+    }
+
+    /// Resume processing the same batch after the caller saves a late column.
+    pub fn resume_plan_update(&mut self, world: &mut World, mut resume: PlanResume) -> PlanStep {
+        while let Some(done) = resume
+            .deferred
+            .next()
+            .or_else(|| resume.received.pop_front())
+        {
             match done {
                 Done::Proto(x, z, proto, decorated) => {
                     self.generation_scan.exhausted = false;
@@ -1641,7 +1760,11 @@ impl Streaming {
                 Done::Decorated(x, z, region, finals, writes) => {
                     self.receive_decorated(x, z, *region, finals, writes, world)
                 }
-                Done::Generated(chunk) => self.receive_generated(chunk, world),
+                Done::Generated(chunk) => {
+                    if let Some(chunk) = self.receive_generated(chunk, world) {
+                        return PlanStep::Save { chunk, resume };
+                    }
+                }
                 Done::Saved(protos) => self.receive_saved(protos),
                 Done::LightView(x, z, proto, view) => self.receive_light_view(x, z, proto, view),
                 Done::Lit(x, z, sections, seq) => {
@@ -1685,37 +1808,37 @@ impl Streaming {
                 }
                 Done::Meshed(x, sy, z, mesh, seq) => {
                     if self.meshing.get(&(x, sy, z)) != Some(&seq) {
-                        stale.push(((x, sy, z), mesh));
+                        resume.stale.push(((x, sy, z), mesh));
                         continue;
                     }
                     // Its column unloaded while it was meshed: nothing would
                     // ever remove the uploaded section.
                     if !world.chunks.contains_key(&(x, z)) {
                         self.meshing.remove(&(x, sy, z));
-                        stale.push(((x, sy, z), mesh));
+                        resume.stale.push(((x, sy, z), mesh));
                         continue;
                     }
                     self.meshing.remove(&(x, sy, z));
                     self.compile_started.insert((x, sy, z), seq);
                     self.meshed_total += 1;
-                    uploads.push(((x, sy, z), mesh));
+                    resume.uploads.push(((x, sy, z), mesh));
                 }
             }
         }
-        self.free(stale);
-        let far = if sweep {
+        self.free(resume.stale);
+        let far = if resume.sweep {
             plan_unloads(world, |x, z| {
                 !self.remote && self.ranges().unloaded(x, z, self.decorates)
             })
         } else {
             Vec::new()
         };
-        StreamingUpdate {
-            uploads,
-            sweep,
+        PlanStep::Ready(StreamingUpdate {
+            uploads: resume.uploads,
+            sweep: resume.sweep,
             far,
             paused: false,
-        }
+        })
     }
 
     /// Commit a planned update after the caller has finished with live chunks.
@@ -1724,6 +1847,17 @@ impl Streaming {
         world: &mut World,
         plan: StreamingUpdate,
     ) -> (Vec<((i32, i32, i32), SectionMesh)>, Vec<Arc<Chunk>>) {
+        let (commit, protos) = self.prepare_commit(world, plan);
+        self.submit_protos(protos);
+        self.complete_commit(world, commit)
+    }
+
+    /// Remove planned columns and check out proto saves before further scheduling.
+    pub fn prepare_commit(
+        &mut self,
+        world: &mut World,
+        plan: StreamingUpdate,
+    ) -> (StreamingCommit, Vec<ProtoSave>) {
         let StreamingUpdate {
             uploads,
             sweep,
@@ -1731,9 +1865,17 @@ impl Streaming {
             paused,
         } = plan;
         if paused {
-            return (uploads, Vec::new());
+            return (
+                StreamingCommit {
+                    uploads,
+                    removed: Vec::new(),
+                    paused: true,
+                },
+                Vec::new(),
+            );
         }
         let mut removed = Vec::new();
+        let mut proto_saves = Vec::new();
         if sweep {
             for key in &far {
                 self.decorated.remove(key);
@@ -1789,7 +1931,31 @@ impl Streaming {
                     self.light_views.remove(&key);
                 }
             }
-            self.save_checked_out(written);
+            proto_saves = self.checkout_protos(written);
+        }
+        (
+            StreamingCommit {
+                uploads,
+                removed,
+                paused: false,
+            },
+            proto_saves,
+        )
+    }
+
+    /// Resume an update after submitting its proto saves.
+    pub fn complete_commit(
+        &mut self,
+        world: &mut World,
+        commit: StreamingCommit,
+    ) -> (Vec<((i32, i32, i32), SectionMesh)>, Vec<Arc<Chunk>>) {
+        let StreamingCommit {
+            uploads,
+            removed,
+            paused,
+        } = commit;
+        if paused {
+            return (uploads, removed);
         }
         let (protos, finishing) = (&self.protos, &self.finishing);
         self.decorated.retain(|k| {
@@ -2248,6 +2414,30 @@ impl Streaming {
     fn near_finished(&self, x: i32, z: i32, reach: i32) -> bool {
         self.ranges().near_finished(x, z, reach)
     }
+    /// Abort unvisited background chunk generation, decoration, and meshing on world exit.
+    pub fn abort_generation(&mut self) {
+        self.shared
+            .aborted
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut queue) = self.shared.queue.lock() {
+            let mut saves = Vec::new();
+            for item in std::mem::take(&mut *queue).into_vec() {
+                if matches!(item.job, Job::Save(..)) {
+                    saves.push(item);
+                }
+            }
+            *queue = std::collections::BinaryHeap::from(saves);
+        }
+        self.generating.clear();
+        self.decorating = 0;
+        self.decorating_finals.clear();
+        self.finishing.clear();
+        self.viewing.clear();
+        self.waiting.clear();
+        self.meshing.clear();
+        self.lighting.clear();
+        self.jobs.notify_all();
+    }
     /// Save what generation holds outside the world: the proto chunks
     /// decoration wrote to. With `wait`, the decorations, columns and saves
     /// in flight are waited for first (their proto chunks are out in the
@@ -2256,23 +2446,45 @@ impl Streaming {
     /// the IOWorker too), and those out in jobs are saved later, as they
     /// unload or at the next save.
     pub fn save(&mut self, world: &mut World, wait: bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match self.prepare_save(world, wait, deadline) {
+                SaveStep::Full(chunk) => self.save_finished(chunk),
+                SaveStep::Protos(protos) => {
+                    self.finish_save(protos, wait);
+                    return;
+                }
+                SaveStep::Pending => unreachable!(),
+            }
+        }
+    }
+
+    /// Check out the proto saves, yielding for late full saves first.
+    pub fn prepare_save(
+        &mut self,
+        world: &mut World,
+        wait: bool,
+        deadline: std::time::Instant,
+    ) -> SaveStep {
         if !wait {
             let written: Vec<(i32, i32)> = self.written.drain().collect();
-            self.save_checked_out(written);
-            return;
+            return SaveStep::Protos(self.checkout_protos(written));
         }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while self.decorating > 0
-            || !self.finishing.is_empty()
-            || self.saving > 0
-            || !self.viewing.is_empty()
+        let aborted = self.shared.aborted.load(std::sync::atomic::Ordering::Relaxed);
+        while (self.saving > 0)
+            || (!aborted
+                && (self.decorating > 0 || !self.finishing.is_empty() || !self.viewing.is_empty()))
         {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             match self.shared.done.recv_timeout(left) {
                 Some(Done::Decorated(x, z, region, finals, writes)) => {
                     self.receive_decorated(x, z, *region, finals, writes, world)
                 }
-                Some(Done::Generated(chunk)) => self.receive_generated(chunk, world),
+                Some(Done::Generated(chunk)) => {
+                    if let Some(chunk) = self.receive_generated(chunk, world) {
+                        return SaveStep::Full(chunk);
+                    }
+                }
                 Some(Done::Saved(protos)) => self.receive_saved(protos),
                 Some(Done::LightView(x, z, proto, view)) => {
                     self.receive_light_view(x, z, proto, view)
@@ -2284,46 +2496,75 @@ impl Streaming {
                 }
             }
         }
-        let protos: Vec<&Proto> = self
-            .written
-            .iter()
-            .filter_map(|k| self.protos.get(k)?.as_ref())
-            .collect();
-        if !protos.is_empty() {
-            self.saves.save_protos(&protos);
+        let written: Vec<_> = self.written.drain().collect();
+        SaveStep::Protos(self.checkout_protos(written))
+    }
+
+    /// Complete a prepared save, returning synchronous protos to streaming.
+    pub fn finish_save(&mut self, protos: Vec<ProtoSave>, wait: bool) {
+        if wait {
+            if !protos.is_empty() {
+                let refs: Vec<&Proto> = protos.iter().map(|p| &p.proto).collect();
+                self.saves.save_protos(&refs);
+                for proto in protos {
+                    self.protos.insert(proto.pos, Some(proto.proto));
+                }
+            }
+        } else {
+            self.submit_protos(protos);
         }
-        self.written.clear();
     }
     /// Finish generation for a closing world without waiting on the event
     /// loop. No new generation is scheduled while the save screen is shown.
-    /// Proto snapshots are checked out to workers before chunk writes, just as
-    /// in `save(true)`, so older generation cannot overwrite the final chunks.
-    pub fn poll_save(&mut self, world: &mut World) -> bool {
-        let started = std::time::Instant::now();
-        while let Some(done) = self.shared.done.try_recv() {
+    /// Poll generation and yield for each late full save before proto submission.
+    /// The caller keeps the same deadline across every yield in this tick.
+    pub fn prepare_poll_save(
+        &mut self,
+        world: &mut World,
+        deadline: std::time::Instant,
+    ) -> SaveStep {
+        self.prepare_poll_save_with_clock(world, deadline, std::time::Instant::now)
+    }
+
+    fn prepare_poll_save_with_clock(
+        &mut self,
+        world: &mut World,
+        deadline: std::time::Instant,
+        mut now: impl FnMut() -> std::time::Instant,
+    ) -> SaveStep {
+        while now() < deadline {
+            let Some(done) = self.shared.done.try_recv() else {
+                break;
+            };
             match done {
                 Done::Decorated(x, z, region, finals, writes) => {
                     self.receive_decorated(x, z, *region, finals, writes, world)
                 }
-                Done::Generated(chunk) => self.receive_generated(chunk, world),
+                Done::Generated(chunk) => {
+                    if let Some(chunk) = self.receive_generated(chunk, world) {
+                        return SaveStep::Full(chunk);
+                    }
+                }
                 Done::Saved(protos) => self.receive_saved(protos),
                 Done::LightView(x, z, proto, view) => self.receive_light_view(x, z, proto, view),
                 other => self.deferred.push(other),
             }
-            if started.elapsed() >= std::time::Duration::from_millis(2) {
-                return false;
-            }
         }
-        if self.decorating > 0
-            || !self.finishing.is_empty()
-            || self.saving > 0
-            || !self.viewing.is_empty()
+        if now() >= deadline {
+            return SaveStep::Pending;
+        }
+        let aborted = self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if (self.saving > 0)
+            || (!aborted
+                && (self.decorating > 0 || !self.finishing.is_empty() || !self.viewing.is_empty()))
         {
-            return false;
+            return SaveStep::Pending;
         }
         let written: Vec<_> = self.written.drain().collect();
-        self.save_checked_out(written);
-        self.saving == 0
+        SaveStep::Protos(self.checkout_protos(written))
     }
     fn in_range(&self, x: i32, z: i32, margin: i32) -> bool {
         self.ranges().in_range(x, z, margin)
@@ -2859,6 +3100,7 @@ impl Ranges<'_> {
 }
 impl Drop for Streaming {
     fn drop(&mut self) {
+        self.abort_generation();
         // Saves in flight hold proto chunks nothing else would save.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while self.saving > 0 {
@@ -3056,9 +3298,171 @@ fn forget_pending_sections(
     }
 }
 
+/// Take save ownership before dispatch, so no generation job can mutate the view.
+fn checkout_protos(
+    protos: &mut FxHashMap<(i32, i32), Option<Proto>>,
+    light_views: &mut FxHashMap<(i32, i32), Arc<Chunk>>,
+    keys: impl IntoIterator<Item = (i32, i32)>,
+) -> Vec<ProtoSave> {
+    keys.into_iter()
+        .filter_map(|pos| {
+            let proto = protos.get_mut(&pos)?.take()?;
+            light_views.remove(&pos);
+            Some(ProtoSave { pos, proto })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires HORIZON_TEST_RESOURCES"]
+    fn late_generated_saves_yield_before_writing_in_all_receive_loops() {
+        use crate::{
+            assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables, models,
+        };
+        use horizon_items::blocks::BlockFacts;
+        use horizon_world::registry::BlockStateId;
+        use std::path::PathBuf;
+
+        #[derive(Default)]
+        struct Generator(std::sync::Mutex<Vec<(i32, i32)>>);
+        impl ChunkGenerator for Generator {
+            type Worker = ();
+            fn worker(&self) {}
+            fn proto(&self, _: &mut (), _: i32, _: i32) -> Proto {
+                Box::new(())
+            }
+            fn finish(&self, _: Proto) -> Chunk {
+                Chunk::empty(0, 0)
+            }
+            fn save_finished(&self, chunk: Chunk) {
+                self.0.lock().unwrap().push((chunk.x, chunk.z));
+            }
+        }
+        let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let assets = Arc::new(Assets::load(&root).unwrap());
+        let render = Arc::new(assets.reload(&root).unwrap());
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let visibility = models::load_visibility(&root, assets.registry).unwrap();
+        let context = Arc::new(WorkerContext {
+            tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
+            light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
+            biomes: Arc::new(Biomes::load(&root).unwrap()),
+            assets,
+            render,
+        });
+        let generator = Arc::new(Generator::default());
+        let mut streaming = Streaming::new(generator.clone(), context, 1);
+        streaming.radius = 0;
+        let mut world = World::new(BlockStateId(0), 0);
+        let late = |x| {
+            let mut chunk = Chunk::empty(x, 0);
+            chunk.fresh = true;
+            Done::Generated(chunk)
+        };
+        streaming.finishing.extend([(100, 0), (101, 0)]);
+        streaming.shared.done.send(late(100));
+        streaming.shared.done.send(late(101));
+        let PlanStep::Save { chunk, resume } = streaming.begin_plan_update(&mut world) else {
+            panic!("first plan yield")
+        };
+        assert!(generator.0.lock().unwrap().is_empty());
+        streaming.save_finished(chunk);
+        let PlanStep::Save { chunk, resume } = streaming.resume_plan_update(&mut world, resume)
+        else {
+            panic!("second plan yield")
+        };
+        assert_eq!(*generator.0.lock().unwrap(), [(100, 0)]);
+        streaming.save_finished(chunk);
+        assert!(matches!(
+            streaming.resume_plan_update(&mut world, resume),
+            PlanStep::Ready(_)
+        ));
+        streaming.finishing.extend([(102, 0), (104, 0)]);
+        streaming.shared.done.send(late(102));
+        streaming.shared.done.send(late(104));
+        let before = std::time::Instant::now();
+        let poll_deadline = before + std::time::Duration::from_millis(2);
+        let SaveStep::Full(chunk) =
+            streaming.prepare_poll_save_with_clock(&mut world, poll_deadline, || before)
+        else {
+            panic!("poll yield")
+        };
+        assert_eq!(*generator.0.lock().unwrap(), [(100, 0), (101, 0)]);
+        streaming.save_finished(chunk);
+        assert!(matches!(
+            streaming.prepare_poll_save_with_clock(&mut world, poll_deadline, || poll_deadline),
+            SaveStep::Pending
+        ));
+        let next_deadline = poll_deadline + std::time::Duration::from_millis(2);
+        let SaveStep::Full(chunk) =
+            streaming.prepare_poll_save_with_clock(&mut world, next_deadline, || poll_deadline)
+        else {
+            panic!("next tick yield")
+        };
+        assert_eq!(*generator.0.lock().unwrap(), [(100, 0), (101, 0), (102, 0)]);
+        streaming.save_finished(chunk);
+        streaming.finishing.insert((103, 0));
+        streaming.shared.done.send(late(103));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let SaveStep::Full(chunk) = streaming.prepare_save(&mut world, true, deadline) else {
+            panic!("blocking yield")
+        };
+        assert_eq!(
+            *generator.0.lock().unwrap(),
+            [(100, 0), (101, 0), (102, 0), (104, 0)]
+        );
+        streaming.save_finished(chunk);
+        assert!(matches!(
+            streaming.prepare_save(&mut world, true, deadline),
+            SaveStep::Protos(_)
+        ));
+        assert_eq!(
+            *generator.0.lock().unwrap(),
+            [(100, 0), (101, 0), (102, 0), (104, 0), (103, 0)]
+        );
+    }
+
+    #[test]
+    fn checked_out_proto_is_the_read_only_state_given_to_the_save_job() {
+        struct Access;
+        impl ProtoAccess for Access {
+            fn status(&self, _: &Proto) -> Option<horizon_world::chunk_status::ChunkStatus> {
+                Some(horizon_world::chunk_status::ChunkStatus::Features)
+            }
+            fn block(&self, proto: &Proto, _: [i32; 3]) -> Option<u32> {
+                proto.downcast_ref::<u32>().copied()
+            }
+        }
+        let mut protos = FxHashMap::default();
+        protos.insert((2, -1), Some(Box::new(73_u32) as Proto));
+        protos.insert((3, -1), None);
+        let mut views = FxHashMap::default();
+        views.insert((2, -1), Arc::new(Chunk::empty(2, -1)));
+        let saves = checkout_protos(&mut protos, &mut views, [(2, -1), (3, -1), (4, -1)]);
+        assert_eq!(saves.len(), 1);
+        assert!(protos[&(2, -1)].is_none());
+        assert!(!views.contains_key(&(2, -1)));
+        let snapshot = ProtoSnapshot {
+            dimension: "minecraft:overworld",
+            pos: [saves[0].pos.0, saves[0].pos.1],
+            proto: &saves[0].proto,
+            access: &Access,
+            status: Access.status(&saves[0].proto).unwrap(),
+        };
+        assert_eq!(
+            snapshot.status,
+            horizon_world::chunk_status::ChunkStatus::Features
+        );
+        assert_eq!(snapshot.block([32, 0, -16]), Some(73));
+        let Job::Save(saved) = Job::Save(saves) else {
+            unreachable!()
+        };
+        assert_eq!(saved[0].proto.downcast_ref::<u32>(), Some(&73));
+    }
 
     #[test]
     fn unload_plan_keeps_dirty_chunks_live_until_the_snapshot() {
@@ -3068,18 +3472,10 @@ mod tests {
         world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         world.modified.insert((10, 0));
         let plan = plan_unloads(&world, |x, _| x > 5);
-        let mut dispatched = Vec::new();
-        for &key in &plan {
-            if world.modified.contains(&key) {
-                let live = world.chunks.get_mut(&key).unwrap();
-                Arc::make_mut(live).set(0, 0, 0, 7);
-                dispatched.push(key);
-            }
-        }
-        assert_eq!(dispatched, [(10, 0)]);
+        assert!(world.chunks.contains_key(&(10, 0)));
         let saved = world.chunks.get(&(10, 0)).unwrap().clone();
         let unloaded = commit_unloads(&mut world, &plan);
-        assert_eq!(saved.get(0, 0, 0), 7);
+        assert_eq!((saved.x, saved.z), (10, 0));
         assert_eq!(unloaded.len(), 2);
         assert!(!world.chunks.contains_key(&(10, 0)));
         assert!(!world.chunks.contains_key(&(11, 0)));

@@ -60,7 +60,7 @@ pub(super) struct NativeSound {
 /// Mob-system state owned by the game.
 #[derive(Default)]
 pub(super) struct Creatures {
-    pub projectiles: Vec<Projectile>,
+    pub projectiles: horizon_client::join_seq::JoinList<Projectile>,
     /// The entities a family tells the mods ticked, kept between ticks
     /// (game/native_ticks.rs).
     pub tick_buffer: Vec<(u32, super::native_ticks::TickKind)>,
@@ -755,6 +755,7 @@ impl Game<'_> {
                     "temper": m.extra.variant3,
                     "chested": m.extra.chested,
                     "head": m.extra.head.as_deref(),
+                    "body": m.extra.body.as_deref(),
                     "warden": horizon_client::mobs::warden::describe(m),
                     "villager": horizon_client::mobs::villager::ext(m).map(|e| serde_json::json!({
                         "food_level": e.food_level,
@@ -840,7 +841,7 @@ impl Game<'_> {
             } else {
                 None
             },
-            ask_taming: self.remote.is_none() && !horizon_client::mod_api::mods().is_empty(),
+            ask_mods: self.asks_mods(),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -1347,31 +1348,21 @@ impl Game<'_> {
             // CopperGolem.dropEquipment: the preserved equipment too.
             self.golem_drop_equipment(&mut dying);
         }
-        if m.species() == Species::SulfurCube {
-            self.split_sulfur_cube(m);
-        }
-        if m.species() == Species::Slime || m.species() == Species::MagmaCube {
-            // Slime.remove: split into 2-4 smaller slimes.
-            let size = m.extra.size;
-            if size > 1 {
-                let mut n = 2 + self.world.random.next_int_bound(3).unwrap_or(0);
-                let mut cancel = false;
-                let mut count = n as u32;
-                let kind = super::native_hooks::mob_kind(m);
-                self.native_mob_split(m.id, &kind, size, size / 2, &mut count, &mut cancel);
-                n = if cancel { 0 } else { count.min(64) as _ };
-                for k in 0..n {
-                    let off = |kk: i32| (f64::from(kk % 2) - 0.5) * f64::from(size) / 4.0;
-                    let at = [
-                        m.position.x + off(k),
-                        m.position.y + 0.5,
-                        m.position.z + off(k / 2),
-                    ];
-                    if let Some(id) = self.spawn_mob(&m.kind.id, at, m.persistent)
-                        && let Some(c) = self.mobs.iter_mut().find(|c| c.id == id)
-                    {
-                        horizon_client::mobs::cube::set_size(c, size / 2);
-                    }
+        if matches!(
+            m.species(),
+            Species::Slime | Species::MagmaCube | Species::SulfurCube
+        ) && m.extra.size > 1
+        {
+            // AbstractCubeMob.remove: convert without spawn finalization.
+            let drawn = horizon_client::mobs::cube::split_count(&mut dying);
+            if drawn > 0 {
+                let count = self.mob_split_count(&dying, drawn);
+                for i in 0..count {
+                    self.next_entity += 1;
+                    let mut child = Mob::new(self.next_entity, m.kind.clone(), m.position, 0.0);
+                    horizon_client::mobs::cube::split_child(&mut dying, &mut child, i);
+                    self.mobs.push(child);
+                    self.native_mobs_joined(self.mobs.len() - 1, false);
                 }
             }
         }
@@ -1466,6 +1457,23 @@ impl Game<'_> {
     /// The UUID of the player `last_hurt_by_player` keeps: the guest on
     /// connection `conn` (None once they left), else the player in place
     /// (None on a server, which has none of its own).
+    /// The entity id of the player `killer_uuid` names for `conn`.
+    fn love_cause_entity_id(&self, conn: Option<u32>) -> Option<i32> {
+        match conn {
+            Some(conn) if self.lan_acting != Some(conn) => {
+                Some(self.lan.as_ref()?.hub.guest(conn)?.entity_id)
+            }
+            Some(_) => Some(self.own_entity_id()),
+            None if self.lan_acting.is_none() && self.player.is_some() => {
+                Some(self.own_entity_id())
+            }
+            None => None,
+        }
+    }
+    /// A server with native mods: it asks their cancellable mob events.
+    pub(super) fn asks_mods(&self) -> bool {
+        self.remote.is_none() && !horizon_client::mod_api::mods().is_empty()
+    }
     fn killer_uuid(&mut self, conn: Option<u32>) -> Option<u128> {
         match conn {
             // During that guest's own turn, the hub is out of `lan`.
@@ -3068,7 +3076,7 @@ impl Game<'_> {
     /// `mob_drops` game rule is on.
     fn spawn_breeding_orb(&mut self, at: [f64; 3], amount: u32) {
         if self.ui.rules.bool("mob_drops") {
-            self.spawn_orbs(at, amount);
+            self.add_orb(at, amount);
         }
     }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
@@ -3135,9 +3143,17 @@ impl Game<'_> {
                 .get(&parent)
                 .or(self.love_cause.get(&partner))
                 .copied();
-            let player = conn.and_then(|c| self.killer_uuid(c)).unwrap_or(0);
+            let player = conn.and_then(|c| self.killer_uuid(c));
+            let player_entity_id = conn.and_then(|c| self.love_cause_entity_id(c));
             let mut cancel = false;
-            self.native_baby_entity_spawn(parent, partner, player, &kind, &mut cancel);
+            self.native_baby_entity_spawn(
+                parent,
+                partner,
+                player,
+                player_entity_id,
+                &kind,
+                &mut cancel,
+            );
             if cancel {
                 breeding_credit(&mut self.love_cause, parent, partner);
                 if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
@@ -3290,9 +3306,16 @@ impl Game<'_> {
                 child.extra.screaming = parent_screams || self.world.random.next_double() < 0.02;
             }
             // A llama's baby was drawn in the parent's tick, with the
-            // experience.
+            // experience unless BabyEntitySpawnEvent was asked first.
             if let Some(o) = llama {
                 horizon_client::mobs::llama::apply_offspring(child, &o);
+                if self.asks_mods()
+                    && self.ui.rules.bool("mob_drops")
+                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == parent)
+                {
+                    let xp = 1 + m.random.next_int_bound(7).unwrap_or(0) as u32;
+                    self.spawn_breeding_orb([p.position.x, p.position.y, p.position.z], xp);
+                }
                 return;
             }
             if horizon_client::mobs::equine::is_equine(p.species()) {
@@ -7780,7 +7803,7 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
-            ask_taming: false,
+            ask_mods: false,
             border: None,
         };
         let pw = ProjWorld {

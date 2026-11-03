@@ -23,7 +23,7 @@ Level: preview ([stability.md](stability.md)). Schema 1.
     "license": "MIT", "source": "https://github.com/...", "icon": "https://...png", "key": "RWT...", "downloads": 1234,
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
-      "api": "0.1", "side": "client", "capabilities": ["registries"], "game": "26.3",
+      "api": "0.2", "side": "client", "capabilities": ["registries"], "game": "26.3",
       "file": { "name": "coords_hud-0.1.0.hmod", "url": "https://github.com/horizon-rust/horizon-mods/releases/download/...",
                 "size": 438, "sha256": "e113...", "signature": "untrusted comment: ...\n...\ntrusted comment: ...\n...\n" }
     }]
@@ -84,7 +84,7 @@ game = "26.3"
 [[mods]]
 id = "coords_hud"
 version = "0.1.0"
-sha256 = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53"
+sha256 = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce"
 on = true                   # optional, default true: turned on in the profile's horizon-mods.txt
 ```
 
@@ -168,8 +168,8 @@ The submission form's service (`crates/horizon-mod-registry`) lists a new projec
 reads the repository's address and the page, and opens the pull request. It no longer takes updates for a project listed
 with a `repo`: "publish a GitHub release in <repo>". Projects without a `repo` can still be updated through the form
 (it uploads the file to the repository's `staging` release as `<sha256>.<extension>` and opens a pull request; an
-owner's update with nothing else changed is merged by `owner-update` once the checks pass). An owner may turn a `mod` into a `native-mod` once by sending an `.hnmod`
-(reviewed by hand, never an owner update); no other kind change goes through. A submission that GitHub broke off after
+owner's update with nothing else changed is merged by `owner-update` once the checks pass). A project's kind never
+changes. A submission that GitHub broke off after
 making its `submit/<id>-<version>` branch can be sent again: the same account's retry starts that branch again from
 `main` while it has no open pull request; anyone else's is refused.
 

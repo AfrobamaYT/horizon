@@ -300,7 +300,7 @@ fn project_of(p: &index::Project) -> Option<Project> {
     })
 }
 
-/// Version `v` of `p` as the browser shows it; blocked when taken down or needing a native port.
+/// Version `v` of `p` as the browser shows it; blocked when taken down.
 fn version_of(index: &Index, p: &index::Project, v: &index::Version) -> Version {
     Version {
         id: v.version.clone(),
@@ -320,8 +320,7 @@ fn version_of(index: &Index, p: &index::Project, v: &index::Version) -> Version 
         required: v.requires.iter().map(|r| r.id.clone()).collect(),
         blocked: index
             .revoked(&p.id, &v.file.sha256)
-            .map(|r| format!("taken down: {}", r.reason))
-            .or_else(|| needs_port(v).then(|| NEEDS_PORT.to_string())),
+            .map(|r| format!("taken down: {}", r.reason)),
     }
 }
 
@@ -362,8 +361,6 @@ fn search(index: &Index, query: &Query) -> Vec<Project> {
         .iter()
         .filter(|p| kind_of(&p.kind) == Some(query.kind) && matches(p, &query.text))
         .filter(|p| query.everything || p.versions.iter().any(|v| v.game == GAME))
-        // A WebAssembly mod stays in the index for the modpacks that need it, not in the browser.
-        .filter(|p| !p.versions.iter().filter(|v| v.game == GAME).all(needs_port))
         .collect();
     let day = |p: &index::Project, newest: bool| {
         let days = p.versions.iter().map(|v| v.published.as_str());
@@ -577,9 +574,6 @@ fn install_from(
         .project(&project.id)
         .ok_or_else(|| format!("{} isn't in Horizon's registry.", project.title))?;
     let v = newest(index, p)?;
-    if needs_port(v) {
-        return Err(format!("{} {NEEDS_PORT}.", p.name));
-    }
     install_version(index, local, p, v, home, progress).map(|e| vec![e])
 }
 
@@ -597,18 +591,6 @@ fn newest<'a>(index: &Index, p: &'a index::Project) -> Result<&'a index::Version
         Some(r) => format!("{} was taken down: {}", p.name, r.reason),
         None => format!("{} has no version for {GAME} to install.", p.name),
     })
-}
-
-const NEEDS_PORT: &str = "needs a native port: Horizon doesn't run WebAssembly mods any more";
-
-/// Whether version `v` is a WebAssembly mod with code: a `.hmod` that may do more than add
-/// content. The registry keeps it for the modpacks that need it; a modpack installs it with its
-/// code left out (the game doesn't run it), and the browser neither lists nor installs it.
-pub fn needs_port(v: &index::Version) -> bool {
-    v.file.name.ends_with(".hmod")
-        && v.capabilities
-            .iter()
-            .any(|c| *c != horizon_mods::Capability::Registries)
 }
 
 /// Installs version `v` of the registry's mod, resource pack or shader pack `p` into the game
@@ -633,6 +615,19 @@ fn install_version(
     let mut list = installed::Installed::load(home);
     let ours = |e: &installed::Entry| e.source == SourceId::Horizon && e.project == p.id;
     let old = list.entries.iter().find(|e| ours(e)).cloned();
+    if old.as_ref().is_some_and(|o| {
+        o.kind != project.kind
+            || (o
+                .file
+                .starts_with(&format!("{}/", crate::native_mods::INSTALLED))
+                != native
+                && project.kind == Kind::Mod)
+    }) {
+        return Err(format!(
+            "{} has a different installed kind: remove it before installing this version.",
+            p.name
+        ));
+    }
     if old.as_ref().is_some_and(|o| o.version == v.version) {
         return Ok(old.expect("checked"));
     }
@@ -677,10 +672,7 @@ fn install_version(
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    if let Some(old) = old
-        .as_ref()
-        .filter(|o| o.file != relative && !stays(native, &o.file))
-    {
+    if let Some(old) = old.as_ref().filter(|o| o.file != relative) {
         let _ = fs::remove_file(home.join(&old.file));
     }
     if project.kind == Kind::Mod {
@@ -699,23 +691,13 @@ fn install_version(
         page: project.page.clone(),
         dependency: false,
         verdict: Some(trust_label(trust).into()),
-        skipped: match needs_port(v) {
-            true => vec![format!("its code ({NEEDS_PORT})")],
-            false => Vec::new(),
-        },
+        skipped: Vec::new(),
         namespaces: Vec::new(),
     };
     list.entries.retain(|e| !ours(e));
     list.entries.push(entry.clone());
     list.save(home)?;
     Ok(entry)
-}
-
-/// Whether an update to a native version keeps the old file `old`: a mod that turned native
-/// keeps its `.hmod` until the player builds the game with the new version. The game runs it
-/// meanwhile and skips it once the native one is built in; removing the mod removes both.
-fn stays(native: bool, old: &str) -> bool {
-    native && old.ends_with(".hmod")
 }
 
 /// The mod id of an installed mod (`horizon-mods/<id>`, `horizon-mods/<id>.hmod` or

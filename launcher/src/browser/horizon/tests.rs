@@ -33,8 +33,7 @@ fn hud(index: &Index) -> Project {
     project_of(index.project("coords_hud").unwrap()).unwrap()
 }
 
-/// Installs the sample's WebAssembly mod as a modpack does: the browser won't, it needs a native
-/// port.
+/// Installs the sample's checked content mod, as a modpack does.
 fn put(index: &Index, local: bool, home: &Path) -> Result<Vec<installed::Entry>, String> {
     let p = index.project("coords_hud").unwrap();
     install_version(index, local, p, &p.versions[0], home, &|_, _| {}).map(|e| vec![e])
@@ -83,9 +82,8 @@ fn searches_by_kind_and_words() {
             .map(|p| p.id)
             .collect()
     };
-    // The sample's only mod is a WebAssembly one: it stays in the index, not in the browser.
-    assert!(found("", Kind::Mod).is_empty());
-    assert!(found("coordinates HUD", Kind::Mod).is_empty());
+    assert_eq!(found("", Kind::Mod), ["coords_hud"]);
+    assert_eq!(found("coordinates HUD", Kind::Mod), ["coords_hud"]);
     assert!(found("zoom", Kind::Mod).is_empty());
     // Modpacks under Modpacks; a kind this launcher can't install yet (a world) never.
     assert_eq!(found("", Kind::Modpack), ["cozy"]);
@@ -138,17 +136,52 @@ fn searches_by_kind_and_words() {
 }
 
 #[test]
+fn update_rejects_a_changed_kind_without_removing_the_installed_file() {
+    let mut index = sample();
+    let home = scratch("changed-kind");
+    put(&index, true, &home).unwrap();
+    let project = index
+        .projects
+        .iter_mut()
+        .find(|p| p.id == "coords_hud")
+        .unwrap();
+    project.kind = index::Kind::NativeMod;
+    let p = index.project("coords_hud").unwrap();
+    let error = install_version(&index, true, p, &p.versions[0], &home, &|_, _| {}).unwrap_err();
+    assert!(error.contains("different installed kind"), "{error}");
+    assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn removing_native_mod_does_not_remove_a_separate_content_file() {
+    let index = sample();
+    let home = scratch("native-remove");
+    put(&index, true, &home).unwrap();
+    let mut list = installed::Installed::load(&home);
+    list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
+    list.save(&home).unwrap();
+    fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
+    fs::write(home.join("horizon-native-mods/coords_hud.hnmod"), "").unwrap();
+    installed::remove(&home, "coords_hud").unwrap();
+    assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
+    assert!(!home.join("horizon-native-mods/coords_hud.hnmod").exists());
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
 fn installs_checked_turns_on_and_removes() {
     let index = sample();
     let home = scratch("install");
     let p = hud(&index);
-    let e = install_from(&index, true, &p, &home, &|_, _| {}).unwrap_err();
-    assert_eq!(e, format!("Coordinates HUD {NEEDS_PORT}."));
-    let done = put(&index, true, &home).unwrap();
+    let done = install_from(&index, true, &p, &home, &|_, _| {}).unwrap();
     assert_eq!(done[0].file, "horizon-mods/coords_hud.hmod");
-    assert_eq!(done[0].skipped, [format!("its code ({NEEDS_PORT})")]);
+    assert!(done[0].skipped.is_empty());
     assert_eq!(done[0].verdict.as_deref(), Some("Verified"));
-    assert!(done[0].checksum.starts_with("SHA-256:e1135345"));
+    assert_eq!(
+        done[0].checksum,
+        "SHA-256:f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce"
+    );
     assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
     let list = fs::read_to_string(home.join("horizon-mods.txt")).unwrap();
     assert_eq!(list, "mod.coords_hud:true\n");
@@ -183,23 +216,34 @@ fn installs_checked_turns_on_and_removes() {
 }
 
 #[test]
-fn a_mod_that_turned_native_keeps_its_hmod_until_removed() {
-    assert!(stays(true, "horizon-mods/coords_hud.hmod"));
-    assert!(!stays(false, "horizon-mods/coords_hud.hmod"));
-    assert!(!stays(true, "horizon-native-mods/coords_hud.hnmod"));
-    let index = sample();
-    let home = scratch("turned-native");
-    put(&index, true, &home).unwrap();
-    // As install_version leaves it after the native update.
-    let mut list = installed::Installed::load(&home);
-    list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
-    list.save(&home).unwrap();
-    fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
-    fs::write(home.join("horizon-native-mods/coords_hud.hnmod"), "").unwrap();
-    installed::remove(&home, "coords_hud").unwrap();
-    assert!(!home.join("horizon-native-mods/coords_hud.hnmod").exists());
+fn executable_content_is_refused_without_installing_or_skipping_code() {
+    use std::io::Write;
+    let home = scratch("executable");
+    let path = home.join("executable.hmod");
+    fs::copy(fixtures().join("coords_hud-0.1.0.hmod"), &path).unwrap();
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let mut zip = zip::ZipWriter::new_append(file).unwrap();
+    zip.start_file("mod.wasm", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(b"\0asm").unwrap();
+    zip.finish().unwrap();
+    let mut index = sample();
+    let p = &mut index.projects[0];
+    p.key = None;
+    let v = &mut p.versions[0];
+    v.file.url = format!("file://{}", path.display());
+    v.file.size = fs::metadata(&path).unwrap().len();
+    v.file.sha256 = index::sha256_file(&path).unwrap();
+    v.file.signature = None;
+    let e = put(&index, true, &home).unwrap_err();
+    assert_eq!(e, "mod.wasm: unsupported executable file in a content mod");
     assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
-    fs::remove_dir_all(&home).unwrap();
+    assert!(installed::Installed::load(&home).entries.is_empty());
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -289,10 +333,9 @@ fn registry_versions_run_when_made_for_this_game() {
             .number,
         "1.0.0"
     );
-    // A WebAssembly mod is never picked: it needs a native port.
     let hud = versions("coords_hud");
-    assert_eq!(hud[0].blocked.as_deref(), Some(NEEDS_PORT));
-    assert!(pick(Kind::Mod, &hud, false).is_none());
+    assert!(hud[0].blocked.is_none());
+    assert_eq!(pick(Kind::Mod, &hud, false).unwrap().number, "0.1.0");
 }
 
 #[test]
