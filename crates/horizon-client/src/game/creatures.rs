@@ -7816,7 +7816,7 @@ mod breeding_tests {
     use super::*;
 
     #[test]
-    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    #[ignore = "needs prepared resources"]
     fn breeding_announces_the_orb_before_the_lower_id_child() {
         use crate::mod_api::{self, BabyEntitySpawnEvent, EntityJoinLevelEvent, Flow, Hooks, Host};
         use std::sync::{
