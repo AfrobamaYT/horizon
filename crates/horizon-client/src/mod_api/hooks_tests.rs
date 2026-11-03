@@ -1,4 +1,5 @@
 use super::*;
+use crate::mod_api;
 
 #[test]
 #[ignore = "optimized hot-hook microbenchmark"]
@@ -7,8 +8,10 @@ fn subscriber_tick_benchmark() {
     struct TestHost;
     impl Host for TestHost {}
     struct Quiet;
+    #[mod_api::hooks]
     impl Hooks for Quiet {}
     struct Listener;
+    #[mod_api::hooks]
     impl Hooks for Listener {
         fn tick(&self, _: &mut dyn Host, event: &mut TickEvent) {
             black_box(event);
@@ -43,7 +46,7 @@ fn subscriber_tick_benchmark() {
     installed.push(ModEntry::new("listener", Box::new(Listener)));
     install(installed.into());
     let mut host = TestHost;
-    dispatch_tick(&mut host); // Prune defaults once, outside the timed loop.
+    dispatch_tick(&mut host); // Warm the dispatch outside the timed loop.
     let iterations = 1_000_000;
     let start = Instant::now();
     for _ in 0..iterations {
@@ -68,8 +71,10 @@ fn subscriber_tick_benchmark() {
 fn subscriber_guards_are_thread_local_for_one_installation() {
     use std::sync::Barrier;
     struct Quiet;
+    #[mod_api::hooks]
     impl Hooks for Quiet {}
     struct Listener;
+    #[mod_api::hooks]
     impl Hooks for Listener {
         fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {}
     }
@@ -108,6 +113,7 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
     struct HostDouble;
     impl Host for HostDouble {}
     struct Counter(Arc<AtomicUsize>);
+    #[mod_api::hooks]
     impl Hooks for Counter {
         fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
             self.0.fetch_add(1, Ordering::Relaxed);
@@ -151,6 +157,7 @@ fn movement_input_writes_back_all_fields() {
     struct TestHost;
     impl Host for TestHost {}
     struct Movement;
+    #[mod_api::hooks]
     impl Hooks for Movement {
         fn movement_input(&self, _host: &dyn Host, event: &mut MovementInputEvent) {
             event.forward = -0.5;
@@ -174,6 +181,7 @@ fn recipe_book_categories_accept_mod_declarations() {
     struct TestHost;
     impl Host for TestHost {}
     struct Categories;
+    #[mod_api::hooks]
     impl Hooks for Categories {
         fn recipe_book_categories(
             &self,

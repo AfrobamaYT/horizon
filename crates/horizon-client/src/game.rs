@@ -22229,6 +22229,7 @@ mod tests {
         struct TagPart;
         impl BlockPart for TagPart {}
         struct ReloadMod;
+        #[mod_api::hooks]
         impl Hooks for ReloadMod {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
@@ -22268,6 +22269,7 @@ mod tests {
             atomic::{AtomicBool, AtomicUsize, Ordering},
         };
         struct Observer(Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicUsize>);
+        #[mod_api::hooks]
         impl Hooks for Observer {
             fn right_click_block(
                 &self,

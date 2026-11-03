@@ -77,8 +77,8 @@ pub fn hooks(_attribute: TokenStream, input: TokenStream) -> TokenStream {
         format_ident!("HookId")
     };
     implementation.items.push(syn::parse_quote! {
-        fn subscribed(&self) -> &'static [::horizon_client::mod_api::#id] {
-            &[#(::horizon_client::mod_api::#id::#variants),*]
+        fn subscribed(&self) -> &'static [mod_api::#id] {
+            &[#(mod_api::#id::#variants),*]
         }
     });
     quote!(#implementation).into()

@@ -312,16 +312,8 @@ pub(super) fn emit(
                     "{method_source}fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
                 ));
         }
-        let (domain, id_enum) = if is_render {
-            ("Render", "RenderHookId")
-        } else {
-            ("Gameplay", "HookId")
-        };
-        let report = format!(
-            "horizon_client_core::subscribers::default_called(horizon_client_core::subscribers::Domain::{domain}, {id_enum}::{hook_id} as usize, self);"
-        );
         method_source.push_str(&format!(
-            "fn {name}({trait_params}){result} {{ {report} {unused} {default} }}\n"
+            "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
         ));
         traits.push_str(&method_source);
         dispatch.push_str(&format!(

@@ -7973,6 +7973,7 @@ mod breeding_tests {
             joins: Arc<Mutex<Vec<(u32, String)>>>,
             cancel: Arc<AtomicBool>,
         }
+        #[mod_api::hooks]
         impl Hooks for Observer {
             fn baby_entity_spawn(
                 &self,
@@ -8157,6 +8158,7 @@ mod breeding_tests {
     fn empty_mod_stops_deferring_breeding_xp_after_first_event() {
         use crate::mod_api::{self, Hooks};
         struct Empty;
+        #[mod_api::hooks]
         impl Hooks for Empty {}
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
         mod_api::testing::with_mods(mods, || {
@@ -8541,12 +8543,13 @@ mod living_drops_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_golems_preserved_equipment_and_a_broken_stand_reach_living_drops() {
-        use horizon_client::mod_api::{Flow, Hooks, Host, LivingDropsEvent};
+        use horizon_client::mod_api::{self, Flow, Hooks, Host, LivingDropsEvent};
         use std::sync::{
             Mutex,
             atomic::{AtomicBool, Ordering},
         };
         struct Observer(Arc<Mutex<Vec<String>>>, Arc<AtomicBool>);
+        #[mod_api::hooks]
         impl Hooks for Observer {
             fn living_drops(&self, _: &mut dyn Host, event: &mut LivingDropsEvent<'_>) -> Flow {
                 let items: Vec<_> = event

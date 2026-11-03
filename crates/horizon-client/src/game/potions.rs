@@ -1943,8 +1943,9 @@ mod tests {
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
 
     fn effect_test_mod() {
-        use horizon_client::mod_api::*;
+        use horizon_client::mod_api::{self, *};
         struct TestMod;
+        #[mod_api::hooks]
         impl Hooks for TestMod {
             fn should_apply_effect_tick_this_tick(
                 &self,

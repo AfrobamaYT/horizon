@@ -287,6 +287,7 @@ mod tests {
         // Each scanForMerges queries the level afresh (ExperienceOrb.java:183),
         // so B's scan finds the orb a hook awarded during A's.
         struct Award;
+        #[mod_api::hooks]
         impl Hooks for Award {
             fn experience_orb_merge(
                 &self,

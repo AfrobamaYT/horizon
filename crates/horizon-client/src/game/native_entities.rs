@@ -383,6 +383,7 @@ mod tests {
             joins: Joins,
             leaves: Arc<Mutex<Vec<u32>>>,
         }
+        #[mod_api::hooks]
         impl Hooks for Observer {
             fn entity_join_level(
                 &self,

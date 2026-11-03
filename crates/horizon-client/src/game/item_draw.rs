@@ -670,8 +670,10 @@ mod tests {
         };
 
         struct Quiet;
+        #[mod_api::hooks]
         impl Hooks for Quiet {}
         struct Charged(Arc<AtomicUsize>);
+        #[mod_api::hooks]
         impl Hooks for Charged {
             fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
                 self.0.fetch_add(1, Ordering::Relaxed);
