@@ -832,11 +832,8 @@
 //! `native_known_recipes`, `native_place_recipe`, `native_give`): what a
 //! recipe viewer needs.
 //!
-//! Names, parameters and call sites are kept from release to release, and
-//! hook points are only ever added: each addition raises [`NATIVE_HOOKS_API`].
-//! A bundle that hooks only these names the API it needs (`hooks`), and the
-//! launcher builds it on any Horizon whose API is at least that one. A change
-//! that would break such a bundle is not made.
+//! Native hook contracts belong to the game source. Names, parameters and call
+//! sites may change; rebuild native mods after game updates.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
