@@ -298,20 +298,23 @@ changing the player's saved shader selection); other packs are unaffected.
 
 ## A bundle
 
-A bundle is a folder with a `horizon-mixin.toml`. Besides its helpers and modules (horizon-mixins' README) it can
+A mod project keeps its native bundle in `native/`, with the exact filename `horizon-mixin.toml` required by
+horizon-mixins. The launcher stages its contents into the tool's `<mods>/<id>/` folder; the package has no id
+directory level. Besides its helpers and modules (horizon-mixins' README) it can
 have its own crate, data files and a post-build step (horizon-mixins 0.6.0). The test bundle
 [`launcher/tests/fixtures/native-crate-demo`](../launcher/tests/fixtures/native-crate-demo) uses all of them:
 
 ```
 native-crate-demo/
-  horizon-mixin.toml
-  frame.rs                # helper, compiled into the game
-  data/greeting.txt       # the bundle's data: native_data!("crate_demo", "greeting.txt")
-  engine/                 # the mod's own crate
-    Cargo.toml            # [dependencies] crc32fast = "1"
-    data/salt.txt         # the crate's data: include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
-    src/lib.rs
-    src/bin/bake.rs       # the post-build step
+  native/
+    horizon-mixin.toml
+    data/greeting.txt     # native_data!("crate_demo", "greeting.txt")
+    rust/
+      Cargo.toml          # [dependencies] crc32fast = "1"
+      data/salt.txt       # include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
+      src/lib.rs
+      src/frame.rs        # helper, compiled into the game
+      src/bin/bake.rs     # the post-build step
 ```
 
 ```toml
@@ -324,12 +327,12 @@ id = "frame"
 hook = "frame"            # a name from native-hooks.json, instead of `target`
 hook_version = 1
 kind = "HEAD"
-helper = "frame.rs"
+helper = "rust/src/frame.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 
 [[crate]]
 id = "engine"
-path = "engine"           # holds Cargo.toml
+path = "rust"             # holds Cargo.toml; a non-dot path is required
 # dependent = "horizon-client"   (the default: the workspace package that depends on it)
 
 [[post_build]]
@@ -552,22 +555,22 @@ and the recipe fails, as an unknown kind does.
 
 A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
 module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
-`crate::native_data!` inside the lib), since hook points API 41. A mod's crate keeps its own data in its folder and
+`crate::native_data!` inside the lib). A mod's crate keeps its own data in its folder and
 reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
-both (`mixins/<id>/data/…`, `mixins/<id>/<crate>/data/…`).
+both (`native/data/…`, `native/rust/data/…`).
 
 Both are compiled in: neither folder is beside the game when it runs. A file the game reads at run time is one a
 post-build step writes into `HORIZON_NATIVE_DATA_DIR` (below), copying it from `HORIZON_NATIVE_BUNDLE_DATA_DIR` or
 making it; the game finds it with `native_built_data("<mod>")` (None only when the game can't tell its own folder).
 
-**What a native bundle holds.** Under `mixins/<id>/`: `.rs` and `.toml` files, the data folders above, and the
-text files a crate folder carries (`README*`, `LICENSE*`, `COPYING*`, `NOTICE*`, `.gitignore`, in the bundle's
-folder or a crate's), so a crate that compiles its README in builds the same from the registry as from a folder. At
-most 512 files and 64 MiB unpacked; anything else refuses the bundle. A local folder build has no such limits.
+**What a native bundle holds.** `native/horizon-mixin.toml`, `.rs` and `.toml` files under `native/rust/`,
+files under `native/data/` and `native/rust/data/`, and text files (`README*`, `LICENSE*`, `LICENCE*`, `COPYING*`,
+`NOTICE*`, `.gitignore`) in `native/` or `native/rust/`. At most 512 native files and 64 MiB unpacked;
+anything else refuses the archive. Every declared source root is `rust`.
 
 **One `.hmod` for content and code.** A mod's content and its native code ship as one `.hmod`, and what is inside
 decides what happens: only `horizon-mod.toml` with `assets/` and `data/` is a content mod, nothing compiles; with
-`horizon-native.json` and `mixins/<id>/` (a bundle as above) it is a native mod, built into the game. Both may be in
+`horizon-native.json` and `native/` (a bundle as above) it is a native mod, built into the game. Both may be in
 one file: `horizon-mod.toml`, `assets/` and `data/` are its content, checked as a content mod's
 (`horizon_mods::Content`) and left out of the build, and the two manifests name the same mod id. A `.hmod` with
 native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
@@ -923,7 +926,7 @@ there is no per-particle code hook.
 
 API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself — while its release still arrives and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves.
 
-API 105 adds `native_push_player([x, y, z])` on a client, added to the local player's velocity as an explosion's knockback is, and `native_set_flying_speed(player, speed)` for server mods, a player's creative flying speed, kept across respawns and game mode changes and saved with the player as vanilla's `abilities.flySpeed` is.
+API 105 adds `native_push_player([x, y, z])` on a client, added to the local player's velocity as an explosion's knockback is.
 
 API 106 adds `native_data_pack_files(files)`, a native mod's own pack files in the data the server loads: while the tables are assembled (a world's first open, and again on every `/reload`), push `(path, bytes)` and they join that load. `path` is the overlay's key, `<kind>/<namespace>:<path>` without `.json`, over the kinds the tables read: `recipe/mymod:thing`, `tags/mymod:block/thing`, `loot_table/…`, `advancement/…`, `trade_set/…`, `villager_trade/…`, `dialog/…`; a file that isn't JSON is skipped with a warning. Asked once per load on both paths, so it is where a mod recomputes them from its config or the world. Contributed files sit below the world's own data packs: a pack's file for the same path still overrides a mod's, and a later contribution overrides an earlier one.
 
@@ -1620,7 +1623,7 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hmod`.
   Release packages must contain native code; content-only packages are rejected by this native installer.
 - **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
-  registry file (native source under `mixins/<id>/`, optional content, size limits, nothing run) before it is installed.
+  registry file (native source under `native/`, optional content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
@@ -1723,7 +1726,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
   review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hmod` contains `.rs` and `.toml` files and may contain data files under
-  `mixins/<id>/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
+  `native/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
   The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
   `horizon-native.json`. `revoked.toml` takes a bad release down.
   A project's kind never changes.
@@ -2381,6 +2384,22 @@ a dimension.
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
   slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
   preserve complete stacks for all mob slots.
+- `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened
+  by mining fatigue, unless one is under way and past its first half (it returns whether one started). The players around
+  see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing the hand asked for. Mobs and
+  players work; armor stands and the dragon return false, and so does a player other than the acting one while another
+  player acts.
+- `living.arrow_count(host)` / `set_arrow_count` and `stinger_count` / `set_stinger_count` (`DATA_ARROW_COUNT_ID`,
+  `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
+  such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
+  next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or less the timer restarts at `20 * (30 - count)`).
+- `living.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data) and
+  `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`; an allay and a sulfur cube decide for
+  themselves) work on mobs; players and the other kinds read None and write false.
+- `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
+  the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
+  vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
+  which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.
@@ -2492,7 +2511,7 @@ it moves only what the player sees, not where they are or aim.
 
 ### A player's motion
 
-`crates/horizon-client/src/game/native_motion.rs`: a push on a client, a flying speed on a server.
+`crates/horizon-client/src/game/native_motion.rs`: a push on a client.
 
 - `native_push_player([x, y, z])` (client) adds a push to the player's own velocity, in blocks a tick, as an
   explosion's knockback does: the player's own game moves them. The server didn't send it, so on a LAN or dedicated
@@ -2500,12 +2519,6 @@ it moves only what the player sees, not where they are or aim.
   players back); for a push the server should stand behind, have the server send it. Each component is
   cut to 4 either way; an upward push lifts the player off the ground. A spectator, no player, or a value that isn't
   a number is left alone. A server mod that wants a client pushed sends its client half a message (API 40).
-- `native_set_flying_speed(player, speed)` (server) sets `player`'s creative flying speed: vanilla's is 0.05, `None`
-  puts it back, and it is cut to 0 to 50 (1000 times vanilla's). The player's client is told at once, a respawn and
-  a game mode change keep it, and it is saved with the player as vanilla's `abilities.flySpeed` is. Past about 0.45
-  (sprinting) a player flies more than 10 blocks a tick: anyone but the single-player owner then meets the server's
-  moved-too-quickly check, which can send them back, as vanilla's does. It answers false for a player not on this server,
-  on a client, and inside a player's hook (call it from a tick hook).
 
 ### Values for a mod's shader pack
 
@@ -2745,16 +2758,20 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 ## Trait mods (draft)
 
 `cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
-`horizon-mixin.toml`, pinned to that Horizon commit, and an `[api]` crate whose `hooks()` greets each player who
-joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
+`horizon-native.json`, top-level content manifest, assets and data directories, `native/horizon-mixin.toml`,
+pinned to that Horizon commit, and `native/rust/`, whose `hooks()` greets each player who joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
 as it is (`native-build <path>`) and packs it into a `.hmod`.
 
-A bundle declares its trait mod package by its path inside the bundle:
+A bundle declares its trait mod package by its path inside `native/`:
 
 ```toml
 [api]
-path = "engine"
+path = "rust"
 ```
+
+A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest cannot declare both routes.
+`rust/` is required because the tool rejects a dot crate path. `cargo horizon-mod build` packages this project
+without moving its content into the native directory.
 
 The package may use only crates and versions in Horizon's `Cargo.lock`, like mixin crates.
 The folder contains a Rust package with a `horizon-client` dependency. Its library exports
