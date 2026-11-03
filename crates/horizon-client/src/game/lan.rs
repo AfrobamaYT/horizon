@@ -1816,18 +1816,54 @@ impl Game<'_> {
                     action,
                 } => self.chat_filtered(&mut host, sender, &name, place, &text, count, action),
                 HostEvent::PlayerChat { sender, text } => {
-                    if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
-                        if self.options.dedicated.is_some() {
-                            super::dedicated::events::record(
-                                "chat",
-                                &g.name,
-                                sender,
-                                serde_json::json!({ "message": text }),
-                            );
-                        }
-                        let conn = g.conn;
-                        self.detect_rate_spam(&mut host, conn, false);
+                    self.lan_player_chatted(&mut host, sender, &text);
+                }
+                HostEvent::ChatSubmitted {
+                    message,
+                    bound,
+                    name,
+                } => {
+                    let Some(id) = host
+                        .hub
+                        .guests
+                        .iter()
+                        .find(|g| g.placed && g.uuid == message.sender)
+                        .map(|g| g.entity_id)
+                    else {
+                        continue;
+                    };
+                    let mut message = *message;
+                    let sender = message.sender;
+                    let raw = message.content.clone();
+                    // `PlayerChatMessage.decoratedContent`: the text as a literal.
+                    let original = Text::literal(raw.clone());
+                    let mut text = original.clone();
+                    let mut cancel = false;
+                    self.lan = Some(host);
+                    self.native_server_chat(id, sender, &name, &raw, &mut text, &mut cancel);
+                    // A hook's command can close the hub.
+                    host = self.lan.take()?;
+                    // Canceled, NeoForge returns before `detectRateSpam`.
+                    if cancel {
+                        continue;
                     }
+                    let mut line = format!("<{name}> {raw}");
+                    if text != original {
+                        // `withUnsignedContent`: clients show the mod's text,
+                        // the signature still covers what was typed.
+                        message.unsigned_content =
+                            Some(horizon_client::lan::data::component_nbt(&text.component()));
+                        line = format!("<{name}> {}", text.plain());
+                    }
+                    let mut chat = Vec::new();
+                    host.hub.broadcast_chat(&message, &bound, line, &mut chat);
+                    for event in chat {
+                        self.lan_log_event(event);
+                    }
+                    self.lan_player_chatted(&mut host, sender, &raw);
+                }
+                HostEvent::ChatSessionStarted(update) => {
+                    host.hub.broadcast(&C::PlayerInfoUpdate(*update));
                 }
                 HostEvent::Joined(conn) => {
                     // The mods may refuse the login before the player is placed.
@@ -2925,6 +2961,22 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
+    /// After a player's chat was broadcast: the dedicated server's event
+    /// log, and `detectRateSpam`.
+    fn lan_player_chatted(&mut self, host: &mut LanHost, sender: u128, text: &str) {
+        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
+            if self.options.dedicated.is_some() {
+                super::dedicated::events::record(
+                    "chat",
+                    &g.name,
+                    sender,
+                    serde_json::json!({ "message": text }),
+                );
+            }
+            let conn = g.conn;
+            self.detect_rate_spam(host, conn, false);
+        }
+    }
     /// A hub's chat and log lines: a dedicated server logs them
     /// (MinecraftServer.logChatMessage, `[Not Secure]` for unsigned or
     /// expired messages); a LAN host shows the chat.
