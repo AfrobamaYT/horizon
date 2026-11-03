@@ -372,7 +372,10 @@ name = "cargo-horizon-mod"
 version = "0.1.0"
 dependencies = [
  "horizon-mods",
+ "horizon-port-pack",
  "serde_json",
+ "sha2",
+ "toml",
  "zip",
 ]
 
