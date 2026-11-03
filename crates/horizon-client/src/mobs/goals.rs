@@ -2237,9 +2237,8 @@ impl Goal for Breed {
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
             let llama = super::llama::is_llama(m.species())
                 .then(|| Box::new(super::llama::breed_offspring(m, &p)));
-            let parent_variant = (!cx.w.asks_baby_spawn
-                && super::draws_parent_variant(m.species()))
-            .then(|| m.random.next_boolean());
+            let parent_variant =
+                super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
             let experience = if (llama.is_some() || parent_variant.is_some())
                 && !cx.w.asks_baby_spawn
                 && !super::orb_after_child(m.species())
@@ -2854,6 +2853,72 @@ mod breeding_variant_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn chicken_breeding_coin_precedes_same_tick_egg_with_or_without_listener() {
+        #[derive(Debug, Clone)]
+        struct SeedAtBreed(Breed);
+        impl Goal for SeedAtBreed {
+            goal_clone!();
+            fn flags(&self) -> u8 {
+                MOVE | LOOK
+            }
+            fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn can_continue(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+                m.random = LegacyRandom::new(1);
+                self.0.tick(m, cx);
+            }
+        }
+        assert!(with_test_world(&[], |world, types| {
+            let kind = Arc::new(types.types["minecraft:chicken"].clone());
+            let mut mate = Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0);
+            mate.extra.in_love = 600;
+            let partner = [mate.seen(None)];
+            for asks_baby_spawn in [false, true] {
+                let w = MobWorld {
+                    asks_baby_spawn,
+                    mob_drops: false,
+                    others: &partner,
+                    ..world.clone()
+                };
+                let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                parent.persistent = true;
+                parent.extra.in_love = 600;
+                parent.extra.egg_time = 1;
+                parent.ai.targets.clear();
+                parent.ai.goals = GoalSelector {
+                    goals: vec![Wrapped {
+                        priority: 2,
+                        running: true,
+                        goal: Box::new(SeedAtBreed(Breed {
+                            speed: 1.0,
+                            partner: Some(2),
+                            love_time: reduced(60) - 1,
+                        })),
+                    }],
+                    locked: [Some(0), Some(0), None, None],
+                    disabled: 0,
+                };
+                let mut events = Vec::new();
+                parent.tick(&w, &mut LegacyRandom::new(1), &mut events);
+                assert!(events.iter().any(|event| matches!(
+                    event,
+                    MobEvent::Breed {
+                        parent_variant: Some(true),
+                        ..
+                    }
+                )));
+                assert_eq!(parent.extra.egg_time, 8313);
+                assert_eq!(parent.extra.age, 5999);
+            }
+        }));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn variant_and_experience_are_drawn_in_order_before_later_goal_work() {
         assert!(with_test_world(&[], |world, types| {
             for id in [
@@ -2901,7 +2966,7 @@ mod breeding_variant_tests {
                             _ => None,
                         })
                         .expect("the animals breed");
-                    assert_eq!(choice, (!ask_mods).then_some(true), "{id}");
+                    assert_eq!(choice, Some(true), "{id}");
                     assert_eq!(
                         experience,
                         if ask_mods || id == "minecraft:fox" {
@@ -2913,9 +2978,7 @@ mod breeding_variant_tests {
                     );
                     assert_eq!(
                         parent.random.state(),
-                        if ask_mods {
-                            25_214_903_917
-                        } else if mob_drops && id != "minecraft:fox" {
+                        if !ask_mods && mob_drops && id != "minecraft:fox" {
                             234_029_835_660_143
                         } else {
                             205_749_139_540_596

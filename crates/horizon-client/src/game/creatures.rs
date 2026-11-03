@@ -8016,6 +8016,7 @@ mod breeding_tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
+                assert!(game.mob_world_base(&[]).asks_baby_spawn);
                 let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 let base = game.next_entity;
                 game.next_entity += 2;
@@ -8031,6 +8032,7 @@ mod breeding_tests {
                 let parent = game.mobs.iter_mut().find(|mob| mob.id == base + 1).unwrap();
                 parent.random = horizon_core::random::LegacyRandom::new(0);
                 parent.extra.variant = 1;
+                parent.extra.age = 6000;
                 let child = game.breed(
                     base + 1,
                     base + 2,
@@ -8039,6 +8041,33 @@ mod breeding_tests {
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(child, Some(base + 3));
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == base + 3)
+                        .unwrap()
+                        .extra
+                        .age,
+                    -24000
+                );
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == base + 1)
+                        .unwrap()
+                        .extra
+                        .age,
+                    6000
+                );
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == base + 2)
+                        .unwrap()
+                        .extra
+                        .age,
+                    6000
+                );
                 assert_eq!(
                     *joins.lock().unwrap(),
                     vec![
@@ -8101,19 +8130,17 @@ mod breeding_tests {
                 );
                 joins.lock().unwrap().clear();
                 let next = game.next_entity;
-                let random = game
-                    .mobs
-                    .iter()
-                    .find(|mob| mob.id == base + 1)
-                    .unwrap()
-                    .random
-                    .state();
+                let parent = game.mobs.iter_mut().find(|mob| mob.id == base + 1).unwrap();
+                let mut expected = parent.random.clone();
+                let choice = parent.random.next_boolean();
+                assert_eq!(choice, expected.next_boolean());
+                let random = expected.state();
                 cancel.store(true, Ordering::SeqCst);
                 let child = game.breed(
                     base + 1,
                     base + 2,
                     None,
-                    None,
+                    Some(choice),
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(child, None);
@@ -8128,6 +8155,24 @@ mod breeding_tests {
                     random
                 );
                 assert!(joins.lock().unwrap().is_empty());
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn empty_mod_stops_deferring_breeding_xp_after_first_event() {
+        use crate::mod_api::{self, Hooks};
+        struct Empty;
+        impl Hooks for Empty {}
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("empty", Box::new(Empty))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                assert!(game.mob_world_base(&[]).asks_baby_spawn);
+                let mut cancel = false;
+                game.native_baby_entity_spawn(1, 2, None, None, "minecraft:chicken", &mut cancel);
+                assert!(!cancel);
+                assert!(!game.mob_world_base(&[]).asks_baby_spawn);
             });
         });
     }
