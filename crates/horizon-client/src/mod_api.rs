@@ -1246,9 +1246,31 @@ pub type Mods = Arc<[Box<dyn Hooks>]>;
 
 static MODS: OnceLock<Mods> = OnceLock::new();
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     static TEST_MODS: std::cell::Cell<Option<&'static Mods>> = const { std::cell::Cell::new(None) };
+}
+
+/// Scoped trait-mod installation for tests, enabled by the `testing` feature.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
+    use super::{Mods, TEST_MODS};
+
+    /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
+    ///
+    /// The test allocation is leaked because dispatch exposes a static slice. Nested scopes and
+    /// panic unwinding restore the preceding list; other threads are unaffected.
+    pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
+        struct Restore(Option<&'static Mods>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_MODS.set(self.0);
+            }
+        }
+        let mods = Box::leak(Box::new(mods));
+        let _restore = Restore(TEST_MODS.replace(Some(mods)));
+        f()
+    }
 }
 
 /// Install the process-wide ordered list of mods.
@@ -1262,16 +1284,14 @@ pub(crate) fn install(mods: Mods) -> &'static Mods {
     }
     #[cfg(not(test))]
     {
-        if MODS.set(mods).is_err() {
-            log::warn!("Trait mods already installed; ignoring the second list");
-        }
+        assert!(MODS.set(mods).is_ok(), "trait mods are installed once");
         MODS.get().unwrap()
     }
 }
 
 /// The process-wide list in dispatch order, or an empty list before installation.
 pub fn mods() -> &'static [Box<dyn Hooks>] {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     if let Some(mods) = TEST_MODS.get() {
         return mods;
     }
