@@ -634,7 +634,7 @@ impl Game<'_> {
         };
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
-        if !horizon_client::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt) {
             let kind = self
                 .mobs
                 .iter()
@@ -733,7 +733,7 @@ impl Game<'_> {
         }
         let t = self.res.mob_types().get(kind).cloned()?;
         let mut cancel = false;
-        let from_kind = (!horizon_client::mod_api::mods().is_empty())
+        let from_kind = crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPre)
             .then(|| super::native_hooks::mob_kind(from));
         if let Some(from_kind) = &from_kind {
             self.native_living_conversion_pre(from.id, from_kind, kind, &mut cancel);
@@ -1356,7 +1356,7 @@ impl Game<'_> {
     /// `LivingDeathEvent` for a mob whose health ran out: whether a native
     /// mod canceled the death. A canceled mob stays alive at 1 health.
     fn mob_death_canceled(&mut self, m: &Mob) -> bool {
-        if horizon_client::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::LivingDeath) {
             return false;
         }
         let (damage_type, attacker) = self.mob_damage_source(m);
@@ -2118,7 +2118,7 @@ impl Game<'_> {
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
     fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
-        if horizon_client::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::LivingDestroyBlock) {
             return true;
         }
         let Some(kind) = self
@@ -3387,7 +3387,7 @@ impl Game<'_> {
         if !matches!(
             p.species(),
             Species::Turtle | Species::Frog | Species::Sniffer
-        ) && !horizon_client::mod_api::mods().is_empty()
+        ) && crate::mod_api::listened(crate::mod_api::HookId::BabyEntitySpawn)
         {
             let mule = matches!(
                 (
