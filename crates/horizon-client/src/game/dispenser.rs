@@ -286,7 +286,7 @@ fn mob_can_dispenser_equip(m: &Mob, slot: Slot) -> bool {
     }
 }
 /// `getEquipSound`: the saddle overrides of pigs, striders, horses, camels and nautili.
-fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
+pub(super) fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
     if slot != Slot::Saddle {
         return default;
     }

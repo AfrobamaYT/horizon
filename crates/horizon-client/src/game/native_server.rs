@@ -344,6 +344,22 @@ impl Game<'_> {
         Some(self.player_handle_read(player)?.mode())
     }
 
+    /// Changes a player's game mode as `ServerPlayer.setGameMode` and
+    /// `/gamemode` do, including the cancellable change hook and ability
+    /// updates. Modes are 0 survival, 1 creative, 2 adventure and 3 spectator.
+    /// Returns false for an invalid mode, stale or unavailable player, another
+    /// player during a swap, no change, or a canceled change. API
+    /// @API:player_game_mode_write@.
+    pub(super) fn native_player_set_game_mode(&mut self, player: PlayerRef, mode: i32) -> bool {
+        if !(0..=3).contains(&mode) || self.player_handle_read(player).is_none() {
+            return false;
+        }
+        let mut changed = false;
+        self.native_as_player(player.uuid, |game| {
+            changed = game.set_game_mode(super::game_mode::mode_from_id(mode));
+        }) && changed
+    }
+
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_creative(&self, player: PlayerRef) -> Option<bool> {
         Some(self.player_handle_read(player)?.creative())

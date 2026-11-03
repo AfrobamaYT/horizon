@@ -1004,6 +1004,9 @@ pub fn item_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
     stored_stack(m, slot).or_else(|| {
         let mut stack = crate::items::ItemStack::new(&item(m, slot)?, 1);
         stack.set_crafting_enchantments(slot_enchantments(m, slot));
+        if let Some(trim) = gear::gear(m).and_then(|g| g.trims[gear_slot(slot)].clone()) {
+            stack.data_mut().trim = Some(trim);
+        }
         Some(stack)
     })
 }
@@ -1012,6 +1015,13 @@ pub fn item_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
 pub fn set_item_stack(m: &mut Mob, slot: usize, stack: crate::items::ItemStack) {
     set_item(m, slot, &stack.item);
     set_slot_enchantments(m, slot, stack.enchantments().to_vec());
+    if slot <= HEAD {
+        gear::set_trim(
+            m,
+            gear_slot(slot),
+            stack.data().and_then(|d| d.trim.clone()),
+        );
+    }
     if slot == MAINHAND {
         m.extra.set_main_hand_stack(Some(stack));
     } else if slot <= HEAD {

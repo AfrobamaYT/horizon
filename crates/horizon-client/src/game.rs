@@ -221,6 +221,7 @@ mod native_hooks;
 mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
+mod native_item_entity_refs;
 mod native_item_fluids;
 mod native_item_places;
 mod native_level_effects;
@@ -237,6 +238,7 @@ mod native_mounts;
 mod native_net;
 mod native_panel;
 mod native_panel_recipes;
+mod native_player_cooldowns;
 mod native_projectiles;
 mod native_quick_move;
 mod native_recipes;
@@ -1326,6 +1328,47 @@ impl LevelAccess for GameLevel<'_> {
                 note,
                 &mut cancel,
             );
+        }
+        !cancel
+    }
+    fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+        use horizon_client::mod_api::NativeNoteInstrument;
+        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+            return true;
+        }
+        let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
+        let mut played = *note;
+        let mut cancel = false;
+        self.native_note_block_play(
+            self.dimension,
+            pos,
+            &mut played_instrument,
+            &mut played,
+            &mut cancel,
+        );
+        *instrument = played_instrument as u8;
+        // A note out of 0 to 24 keeps the block's own.
+        if (0..=24).contains(&played) {
+            *note = played;
+        }
+        !cancel
+    }
+    fn allow_portal_spawn(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        shape: &horizon_world::level::PortalShape,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+            let b = shape.bottom_left;
+            let shape = horizon_client::mod_api::NativePortalShape {
+                x_axis: shape.x_axis,
+                bottom_left: [b.x, b.y, b.z],
+                width: shape.width,
+                height: shape.height,
+            };
+            self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
         }
         !cancel
     }
@@ -3467,15 +3510,13 @@ impl Game<'_> {
             return vec![std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i])];
         }
         let f = self.res.facts().get(state);
-        let o = if f.outline_offset {
-            self.pack
-                .context
-                .tables
-                .offset(state, pos[0], pos[2])
-                .unwrap_or([0.0; 3])
-        } else {
-            [0.0; 3]
-        };
+        let o = perspective::outline_offset(
+            &self.pack.context.tables,
+            state,
+            pos[0],
+            pos[2],
+            f.outline_offset,
+        );
         let base = [
             f64::from(pos[0]) + o[0],
             f64::from(pos[1]) + o[1],
@@ -13524,7 +13565,10 @@ impl Game<'_> {
                 hit.pos[2] + hit.face[2],
             ];
             if self.can_place_used_fire(target) {
-                if !self.try_light_portal(target)? {
+                // With mods, the fire goes in and `BaseFireBlock.onPlace`
+                // fills the frame, as vanilla's order is, so that
+                // `portal_spawn` is asked once, where vanilla asks it.
+                if !horizon_client::mod_api::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -15546,6 +15590,9 @@ impl Game<'_> {
         self.save_raids();
         if wait {
             self.save.flush()?;
+        }
+        if !horizon_client::mod_api::mods().is_empty() {
+            self.native_level_save(self.dim.id());
         }
         Ok(())
     }

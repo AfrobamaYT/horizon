@@ -2379,7 +2379,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_block_form(dimension, pos, from, to, cancel)`** (on `GameLevel`): precipitation is about to place ice or
   snow, or add a snow layer at `pos`. `from` and `to` are block state IDs. Set `cancel` to keep the old state.
 - **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
-  sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
+  sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged. It is a
+  near match of NeoForge's `NoteBlockEvent.Play` (cancel only) and is asked first; `note_block_play` is the counterpart,
+  and a cancel here skips it.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to
   stop the ring and its raider reveal.
 - **`native_cauldron_level_changed(dimension, player, pos, from_level, to_level, reason, cancel)`** (on `GameLevel`):
