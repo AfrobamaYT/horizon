@@ -540,6 +540,13 @@ impl Game<'_> {
         if self.remote.is_some() || !self.sculk.tables.built {
             return;
         }
+        if !horizon_client::mod_api::mods().is_empty() {
+            let mut cancel = false;
+            self.native_vanilla_game_event(event, pos, &mut cancel);
+            if cancel {
+                return;
+            }
+        }
         let at = block_of(pos);
         let radius = sculk::notification_radius(event).min(16);
         let near: Vec<(i32, i32, i32)> = self

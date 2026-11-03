@@ -1606,11 +1606,27 @@ impl Game<'_> {
             };
             let p = points[i];
             let y = self.spread_spawn_y(p, max_y);
-            self.teleport_to(
-                t,
-                [p[0].floor() + 0.5, f64::from(y), p[1].floor() + 0.5],
-                None,
-            );
+            let mut to = [p[0].floor() + 0.5, f64::from(y), p[1].floor() + 0.5];
+            let mut skip = false;
+            if !horizon_client::mod_api::mods().is_empty()
+                && let (Some(entity), Some(from)) =
+                    (self.network_entity_id(t), self.target_position(t))
+            {
+                let mut moved = to;
+                self.native_spread_players_teleport(
+                    self.dim.id(),
+                    entity as u32,
+                    from,
+                    &mut moved,
+                    &mut skip,
+                );
+                if moved.iter().all(|v| v.is_finite()) {
+                    to = moved;
+                }
+            }
+            if !skip {
+                self.teleport_to(t, to, None);
+            }
             let closest = points
                 .iter()
                 .enumerate()

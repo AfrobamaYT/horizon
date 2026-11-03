@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "vanilla_game_event",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vanilla_game_event",
+      "neoforge": "VanillaGameEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a cancellable vanilla game event (`native_vanilla_game_event`).",
+  "doc_summary": "`native_vanilla_game_event(event, pos, cancel)`, for each game event (`minecraft:step`, `minecraft:block_place`...) before its listeners hear it. Set `cancel` and sculk sensors, wardens and allays do not hear it. `native_game_event` still hears every event. Server-side. Bundles need \"hooks\": @API:vanilla_game_event@."
+}

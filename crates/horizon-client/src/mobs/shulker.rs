@@ -187,6 +187,33 @@ fn teleport(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool {
         ) {
             continue;
         }
+        // EntityTeleportEvent.EnderEntity: the spot is where `setPos` snaps to.
+        let mut t = t;
+        if crate::native_client_hooks::has_mods() {
+            let mut target = [
+                f64::from(t[0]) + 0.5,
+                f64::from(t[1]),
+                f64::from(t[2]) + 0.5,
+            ];
+            let mut cancel = false;
+            super::enderman::native_ender_entity_teleport(
+                m.id,
+                &m.kind.id,
+                [m.position.x, m.position.y, m.position.z],
+                &mut target,
+                &mut cancel,
+            );
+            if cancel {
+                return false;
+            }
+            if target.iter().all(|v| v.is_finite()) {
+                t = [
+                    target[0].floor() as i32,
+                    (target[1] + 0.5).floor() as i32,
+                    target[2].floor() as i32,
+                ];
+            }
+        }
         m.extra.variant3 = face;
         events.push(MobEvent::Sound(
             "entity.shulker.teleport",

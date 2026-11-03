@@ -71,21 +71,24 @@ pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
             Vec3::new(m.position.x, m.eye_y(), m.position.z),
         )
 }
-/// Enderman.teleport(x, y, z): never while riding something; drop to standing
-/// ground, require free space without liquid.
-pub fn teleport_to(
-    m: &mut Mob,
-    w: &MobWorld,
-    x: f64,
-    y: f64,
-    z: f64,
-    events: &mut Vec<MobEvent>,
-) -> bool {
-    if m.extra.passenger {
-        return false;
-    }
-    // LivingEntity.randomTeleport: WorldBorder.clampVec3ToBound keeps the
-    // target inside the border (Mth.clamp, 1.0E-5F inside the far edges).
+/// An enderman or a shulker is about to teleport on its own
+/// (`EntityTeleportEvent.EnderEntity`). A mod may move `target` or cancel.
+/// @API:ender_entity_teleport@.
+#[inline(never)]
+pub fn native_ender_entity_teleport(
+    entity: u32,
+    kind: &str,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::ender_entity_teleport(entity, kind, from, target, cancel);
+}
+/// `LivingEntity.randomTeleport`'s target: `x` and `z` kept inside the
+/// world border (Mth.clamp, 1.0E-5F inside the far edges), then the block
+/// below `y` it drops to. None for an unloaded chunk, or ground that doesn't
+/// block motion or holds water.
+fn ground(w: &MobWorld, x: f64, y: f64, z: f64) -> Option<(f64, i32, f64)> {
     let (x, z) = match w.border {
         Some(border) => {
             let [min_x, min_z, max_x, max_z] = border.bounds(0.0);
@@ -99,16 +102,54 @@ pub fn teleport_to(
     };
     let (bx, bz) = (x.floor() as i32, z.floor() as i32);
     if !w.world.loaded(bx, bz) {
-        return false;
+        return None;
     }
     let mut by = y.floor() as i32;
     while by > w.world.bottom_y() && !w.facts.get(w.world.block(bx, by, bz)).full_collision {
         by -= 1;
     }
     let ground = w.facts.get(w.world.block(bx, by, bz));
-    if !ground.full_collision || ground.fluid == Fluid::Water {
+    (ground.full_collision && ground.fluid != Fluid::Water).then_some((x, by, z))
+}
+/// Enderman.teleport(x, y, z): never while riding something; drop to standing
+/// ground, require free space without liquid.
+pub fn teleport_to(
+    m: &mut Mob,
+    w: &MobWorld,
+    x: f64,
+    y: f64,
+    z: f64,
+    events: &mut Vec<MobEvent>,
+) -> bool {
+    if m.extra.passenger {
         return false;
     }
+    let Some(mut spot) = ground(w, x, y, z) else {
+        return false;
+    };
+    // EntityTeleportEvent.EnderEntity, once the spot stands on ground
+    // (NeoForge fires it in `EnderMan.teleport` before `randomTeleport`).
+    if crate::native_client_hooks::has_mods() {
+        let mut target = [x, y, z];
+        let mut cancel = false;
+        native_ender_entity_teleport(
+            m.id,
+            &m.kind.id,
+            [m.position.x, m.position.y, m.position.z],
+            &mut target,
+            &mut cancel,
+        );
+        if cancel {
+            return false;
+        }
+        if target != [x, y, z] && target.iter().all(|v| v.is_finite()) {
+            let Some(moved) = ground(w, target[0], target[1], target[2]) else {
+                return false;
+            };
+            spot = moved;
+        }
+    }
+    let (x, by, z) = spot;
     let ny = f64::from(by + 1);
     let half = f64::from(m.width()) / 2.0;
     let b = Aabb::new(
