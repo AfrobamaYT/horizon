@@ -1653,7 +1653,7 @@ pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
 pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
-pub use fluid_capability::{FLUIDS, FluidResource, FluidStack};
+pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
 mod item_place;
 mod menu_slot;
 pub use menu_slot::MenuSlotBacking;

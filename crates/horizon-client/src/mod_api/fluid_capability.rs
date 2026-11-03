@@ -1,7 +1,10 @@
 //! The fluid capability (arismoko/horizon#41 §7): [`FLUIDS`], as NeoForge 26.3's
 //! `Capabilities.Fluid.BLOCK`, a [`ResourceHandler`] of [`FluidResource`]s as
 //! [`ITEMS`](super::ITEMS) is of items. Amounts are millibuckets: a bucket is 1000.
-use super::{BlockSide, CapabilityKey, Host, ResourceHandler, Transaction};
+use super::{
+    BlockSide, CapabilityKey, Host, ItemCapabilityKey, ItemPlace, ItemResource, ItemStack,
+    ResourceHandler, Transaction,
+};
 use crate::item_data::StackData;
 use std::{fmt, marker::PhantomData, sync::Arc};
 
@@ -139,5 +142,116 @@ impl ResourceHandler<FluidResource> for GameFluids {
         }
         host.fluid_tank_extract(self.0, index, amount, tx)
             .map_or(0, |out| out.amount.min(amount))
+    }
+}
+
+/// Fluid held by an item, as NeoForge 26.3's `Capabilities.Fluid.ITEM`: a handler for the item at
+/// one place, whose changes rewrite the item there with an [`exchange`](ItemPlace::exchange) of
+/// one, so from a stack of more than one the changed item splits off. The game answers it for
+/// vanilla's buckets (NeoForge's `BucketResourceHandler`): one tank of a bucket, filled and drained
+/// whole, an empty bucket taking plain water or lava.
+pub const ITEM_FLUIDS: ItemCapabilityKey<dyn ResourceHandler<FluidResource>> = ItemCapabilityKey {
+    name: "horizon:item_fluids",
+    default: Some(|_, place, stack| {
+        BUCKETS
+            .iter()
+            .any(|&(bucket, _)| *stack.item == *bucket)
+            .then(|| Box::new(GameBucket(place.clone())) as Box<dyn ResourceHandler<FluidResource>>)
+    }),
+    handler: PhantomData,
+};
+
+/// The buckets and the fluid each holds: the empty one none.
+const BUCKETS: [(&str, Option<&str>); 3] = [
+    ("minecraft:bucket", None),
+    ("minecraft:water_bucket", Some("minecraft:water")),
+    ("minecraft:lava_bucket", Some("minecraft:lava")),
+];
+
+/// A bucket holds this much, all or nothing.
+const BUCKET: u32 = 1000;
+
+/// The game's own [`ITEM_FLUIDS`] for the bucket at `.0`.
+struct GameBucket(ItemPlace);
+impl GameBucket {
+    /// What the bucket here holds: none for an empty one, or where no bucket is now.
+    fn held(&self, host: &mut dyn Host) -> Option<&'static str> {
+        let stack = self.0.stack(host)?;
+        BUCKETS
+            .iter()
+            .find(|&&(bucket, _)| *stack.item == *bucket)?
+            .1
+    }
+    /// The bucket holding `fluid`, plain water or lava; none for another fluid.
+    fn bucket_of(fluid: &FluidResource) -> Option<&'static str> {
+        if fluid.0.has_components() {
+            return None;
+        }
+        let &(bucket, _) = BUCKETS[1..]
+            .iter()
+            .find(|&&(_, held)| held == Some(fluid.fluid()))?;
+        Some(bucket)
+    }
+    /// One bucket here exchanged for `bucket`: `BUCKET` when that goes through, else 0.
+    fn exchange(&self, host: &mut dyn Host, tx: &Transaction, bucket: &str) -> u32 {
+        let bucket = ItemResource::of(&ItemStack::new(bucket, 1));
+        match self.0.exchange(host, tx, &bucket, 1) {
+            1 => BUCKET,
+            _ => 0,
+        }
+    }
+}
+impl ResourceHandler<FluidResource> for GameBucket {
+    fn size(&self, _: &mut dyn Host) -> usize {
+        1
+    }
+    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<FluidResource> {
+        let fluid = self.held(host).filter(|_| index == 0)?;
+        Some(FluidResource::of(&FluidStack::new(fluid, 1)))
+    }
+    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        match self.resource(host, index) {
+            Some(_) => BUCKET,
+            None => 0,
+        }
+    }
+    fn capacity(&self, _: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+        match Self::bucket_of(resource) {
+            Some(_) if index == 0 => BUCKET,
+            _ => 0,
+        }
+    }
+    fn insert(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        index: usize,
+        resource: &FluidResource,
+        amount: u32,
+    ) -> u32 {
+        let empty = self
+            .0
+            .stack(host)
+            .is_some_and(|stack| *stack.item == *BUCKETS[0].0);
+        match Self::bucket_of(resource) {
+            Some(full) if index == 0 && empty && amount >= BUCKET => self.exchange(host, tx, full),
+            _ => 0,
+        }
+    }
+    fn extract(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        index: usize,
+        resource: &FluidResource,
+        amount: u32,
+    ) -> u32 {
+        let held = self.resource(host, index);
+        match held {
+            Some(held) if held == *resource && amount >= BUCKET => {
+                self.exchange(host, tx, BUCKETS[0].0)
+            }
+            _ => 0,
+        }
     }
 }
