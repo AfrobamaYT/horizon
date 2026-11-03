@@ -27,6 +27,7 @@ mod crates;
 mod dependencies;
 mod inject;
 mod inject_cache;
+mod package;
 
 const PREFIX: &str = "native-";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
@@ -395,7 +396,7 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 
 const MANIFEST: &str = "horizon-mixin.toml";
 /// A registry download's manifest (`.hmod`, `horizon_mods::index::native`), beside `native/`.
-const NATIVE_MANIFEST: &str = horizon_mods::index::native::MANIFEST;
+const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
 pub const INSTALLED: &str = "horizon-native-mods";
@@ -435,24 +436,33 @@ pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-/// A mixin bundle: a folder with a `horizon-mixin.toml`, and the revisions it pins.
+/// A validated flat mod project. The package manifest owns identity and build pins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
-    pub id: String,
-    pub version: String,
+    pub manifest: horizon_mods::manifest::Manifest,
     pub dir: PathBuf,
-    /// The Horizon commit it builds on (`[compatibility] horizon_revision`, or its `.hmod`'s).
-    pub horizon: Option<String>,
-    /// The horizon-mixins commit it was tested with (its `.hmod`'s).
-    pub mixins: Option<String>,
-    /// The bundle-relative trait package folder (`[api] path`).
-    pub api: Option<String>,
-    /// True when the manifest has content for horizon-mixins.
-    pub mixins_content: bool,
-    /// Its `[[injection]]` entries, for the build's warnings. Read leniently:
-    /// an entry the launcher cannot make sense of is left out, horizon-mixins
-    /// refuses it when it applies.
+    /// The typed injection sites projected for conflict warnings.
     pub injections: Vec<Injection>,
+}
+
+impl std::ops::Deref for Bundle {
+    type Target = horizon_mods::manifest::Manifest;
+    fn deref(&self) -> &Self::Target {
+        &self.manifest
+    }
+}
+
+impl Bundle {
+    fn native(&self) -> &horizon_mods::manifest::Native {
+        self.manifest
+            .native
+            .as_ref()
+            .expect("validated code package")
+    }
+
+    fn needs_mixins(&self) -> bool {
+        !self.native().injection.is_empty()
+    }
 }
 
 /// One `[[injection]]` of a bundle's manifest, read for the build's
@@ -553,115 +563,7 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
 }
 
 pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
-    let source = dir.join(horizon_mods::index::native::SOURCE);
-    let path = dir.join(NATIVE_MANIFEST);
-    if !source.join(MANIFEST).is_file() {
-        if path.exists() || dir.join(MANIFEST).exists() {
-            return Err(format!("{} needs native/{MANIFEST}", dir.display()));
-        }
-        return Ok(None);
-    }
-    if !path.is_file() {
-        return bundle(&source, None).map(Some);
-    }
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let native: horizon_mods::index::native::Manifest =
-        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    native
-        .check()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    let found = bundle(&source, Some(native.mixins))?;
-    if found.id != native.id || found.version != native.version {
-        return Err("native manifest and mixin identity/revision differ".into());
-    }
-    if let Some(pinned) = &found.horizon {
-        if *pinned != native.horizon {
-            return Err(format!(
-                "{}: {NATIVE_MANIFEST} pins Horizon {}, its {MANIFEST} {pinned}.",
-                native.id, native.horizon
-            ));
-        }
-    }
-    Ok(Some(Bundle {
-        horizon: Some(native.horizon),
-        ..found
-    }))
-}
-
-fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
-    let path = dir.join(MANIFEST);
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let value: toml::Table = text
-        .parse()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    let field = |table: &str, name: &str| {
-        value
-            .get(table)
-            .and_then(|m| m.get(name))
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
-    };
-    horizon_mods::index::native::check_source_layout(&value).map_err(|e| e.to_string())?;
-    let need = |name: &str| {
-        field("mod", name).ok_or_else(|| format!("{} has no [mod] {name}.", path.display()))
-    };
-    // The `[mod]` `priority` the injections fall back to. horizon-mixins
-    // defaults it to 0 (`#[serde(default)] priority: i32`), not to a README
-    // example's 100.
-    let mod_priority = value
-        .get("mod")
-        .and_then(|m| m.get("priority"))
-        .and_then(|v| v.as_integer())
-        .unwrap_or(0);
-    // Read leniently: an entry without an id and a site (`hook` or `target`)
-    // is left out — horizon-mixins refuses it when it applies.
-    let injections = value
-        .get("injection")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let text = |name: &str| entry.get(name).and_then(|v| v.as_str()).map(str::to_owned);
-            let id = text("id")?;
-            let site = match (text("hook"), text("target")) {
-                (Some(hook), _) => InjectionSite::Hook(hook),
-                (None, Some(target)) => InjectionSite::Target(target),
-                (None, None) => return None,
-            };
-            Some(Injection {
-                id,
-                site,
-                kind: text("kind"),
-                selector: text("selector"),
-                ordinal: entry.get("ordinal").and_then(|v| v.as_integer()),
-                priority: entry
-                    .get("priority")
-                    .and_then(|v| v.as_integer())
-                    .unwrap_or(mod_priority),
-                cancellable: entry.get("cancellable").and_then(|v| v.as_bool()) == Some(true),
-            })
-        })
-        .collect();
-    let api = value.get("api").map(|_| api::folder(dir)).transpose()?;
-    let mixins_content = value
-        .keys()
-        .any(|key| !["mod", "compatibility", "api", "dependencies"].contains(&key.as_str()));
-    // Reject links before copying the bundle into the incoming folder.
-    files_with_api(dir, api.as_deref())?;
-    let id = need("id")?;
-    if !api::valid_id(&id) {
-        return Err(format!("{}: invalid mod id {id:?}", path.display()));
-    }
-    Ok(Bundle {
-        id,
-        version: need("version")?,
-        dir: dir.to_owned(),
-        horizon: field("compatibility", "horizon_revision"),
-        mixins,
-        injections,
-        api,
-        mixins_content,
-    })
+    package::read(dir)
 }
 
 fn is_revision(text: &str) -> bool {
@@ -906,7 +808,7 @@ pub const MISMATCH: &str = "Made for other Horizon versions: ";
 fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     let list: Vec<String> = mods
         .iter()
-        .filter_map(|b| b.horizon.as_ref().map(|r| (b, r)))
+        .map(|b| (b, &b.native().horizon))
         .filter(|(_, r)| *r != revision)
         .map(|(b, r)| format!("{} → {}", b.id, &r[..r.len().min(7)]))
         .collect();
@@ -1007,54 +909,41 @@ pub fn newer_than(base: &str, installed: &[String]) -> Option<String> {
 /// Every file under `dir`, by its path relative to `dir` (with `/`), sorted. A symlink is refused:
 /// horizon-mixins refuses them too.
 fn files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
-    files_with_api(dir, None)
-}
-
-/// Bundle files omit only the API package's Cargo build output.
-fn bundle_files(bundle: &Bundle) -> Result<Vec<(String, PathBuf)>, String> {
-    files_with_api(&bundle.dir, bundle.api.as_deref())
-}
-
-/// The API package's target folder in a canonical bundle root.
-fn api_target(root: &Path, api: Option<&str>) -> Result<Option<PathBuf>, String> {
-    api.map(|path| root.join(path).canonicalize().map(|p| p.join("target")))
-        .transpose()
-        .map_err(|e| e.to_string())
-}
-
-fn files_with_api(dir: &Path, api: Option<&str>) -> Result<Vec<(String, PathBuf)>, String> {
-    fn walk(
-        root: &Path,
-        dir: &Path,
-        skip: Option<&Path>,
-        out: &mut Vec<(String, PathBuf)>,
-    ) -> Result<(), String> {
-        for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
             let (path, kind) = (entry.path(), entry.file_type().map_err(|e| e.to_string())?);
             if kind.is_symlink() {
                 return Err(format!(
                     "{} is a link: copy the file instead.",
                     path.display()
                 ));
-            } else if kind.is_dir() {
-                if Some(path.as_path()) != skip {
-                    walk(root, &path, skip, out)?;
-                }
+            }
+            if kind.is_dir() {
+                walk(root, &path, out)?;
+            } else if kind.is_file() {
+                out.push((
+                    path.strip_prefix(root)
+                        .map_err(|e| e.to_string())?
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    path,
+                ));
             } else {
-                let relative = path.strip_prefix(root).unwrap_or(&path);
-                out.push((relative.to_string_lossy().replace('\\', "/"), path));
+                return Err(format!("{}: unsupported file type", path.display()));
             }
         }
         Ok(())
     }
-    let root = dir
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", dir.display()))?;
-    let skip = api_target(&root, api)?;
     let mut out = Vec::new();
-    walk(&root, &root, skip.as_deref(), &mut out)?;
+    walk(dir, dir, &mut out)?;
     out.sort();
     Ok(out)
+}
+
+/// Bundle files omit only the API package's Cargo build output.
+fn bundle_files(bundle: &Bundle) -> Result<Vec<(String, PathBuf)>, String> {
+    package::files(bundle)
 }
 
 /// The installed version `bundles` built on Horizon `revision` with horizon-mixins `mixins`
@@ -1117,20 +1006,7 @@ pub fn digest<'a>(files: impl Iterator<Item = (&'a str, &'a [u8])>) -> String {
 /// unpacked `.hmod`'s whole folder, its `horizon-native.json` included, else the bundle's own
 /// folder. A build records it, so a build of the mods turned on reads as up to date.
 fn source_digest(bundle: &Bundle) -> Option<String> {
-    let root = bundle
-        .dir
-        .parent()
-        .filter(|root| {
-            root.join(NATIVE_MANIFEST).is_file()
-                && bundle.dir == root.join(horizon_mods::index::native::SOURCE)
-        })
-        .unwrap_or(&bundle.dir);
-    // An installed .hmod keeps its archive digest for the Mods page.
-    let paths = if root == bundle.dir {
-        bundle_files(bundle)
-    } else {
-        files(root)
-    };
+    let paths = bundle_files(bundle);
     let read: Vec<_> = paths
         .ok()?
         .into_iter()
@@ -1421,7 +1297,7 @@ fn lock_crates(
     };
     let api_ids: Vec<&str> = mods
         .iter()
-        .filter(|m| m.api.is_some())
+        .filter(|_| true)
         .map(|m| m.id.as_str())
         .collect();
     if let Some(why) = crates::refused(&horizon, Some(&staged), &wanted, &api_ids) {
@@ -1552,27 +1428,33 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
 
 /// Copy a bundle without its API package's Cargo build output.
 fn copy_bundle(bundle: &Bundle, to: &Path) -> Result<(), String> {
-    let root = bundle.dir.canonicalize().map_err(|e| e.to_string())?;
-    let skip = api_target(&root, bundle.api.as_deref())?;
-    backend::copy_dir_except(&root, to, skip.as_deref()).map_err(|e| e.to_string())
+    package::copy(bundle, to)
 }
 
 /// Stage only manifests horizon-mixins can apply, after trait injections are prepared.
-fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<(), String> {
+fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<Vec<Bundle>, String> {
     if to.exists() {
         fs::remove_dir_all(to).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
-    for bundle in mods.iter().filter(|b| b.mixins_content) {
-        copy_bundle(bundle, &to.join(&bundle.id))?;
+    let mut staged = Vec::new();
+    for bundle in mods {
+        let dir = to.join(&bundle.id);
+        copy_bundle(bundle, &dir)?;
+        let copied = Bundle {
+            dir,
+            ..bundle.clone()
+        };
+        package::tool_manifest(&copied)?;
+        staged.push(copied);
     }
-    Ok(())
+    Ok(staged)
 }
 
 /// The `data/` of the bundles horizon-mixins doesn't apply, staged in `stage` where it stages the
 /// others' (`native-data/<mod id>/`), for `native_data!` and the mods' build steps.
 fn stage_trait_data(mods: &[Bundle], stage: &Path) -> Result<(), String> {
-    for bundle in mods.iter().filter(|b| !b.mixins_content) {
+    for bundle in mods {
         let data = bundle.dir.join("data");
         if data.is_dir() {
             let to = stage.join("native-data").join(&bundle.id);
@@ -1647,22 +1529,15 @@ fn pipeline(
         .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
-        .map(|bundle| {
-            let path = bundle.dir.join(MANIFEST);
-            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let table: toml::Table = text
-                .parse()
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-            dependencies::parse(&bundle.id, table.get("dependencies")).map_err(|e| e.to_string())
-        })
-        .collect::<Result<_, String>>()?;
+        .map(|bundle| dependencies::from_manifest(&bundle.dependencies))
+        .collect();
     let inputs: Vec<_> = mods
         .iter()
         .zip(&declared)
         .map(|(bundle, deps)| dependencies::Mod {
             id: &bundle.id,
             version: &bundle.version,
-            has_api: bundle.api.is_some(),
+            has_api: true,
             dependencies: deps,
         })
         .collect();
@@ -1677,18 +1552,16 @@ fn pipeline(
         return Err(format!("{MISMATCH}{list}; rebuild against this game."));
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
-    let blame = |e: String| {
-        match &other {
+    let blame = |e: String| match &other {
         Some(list) => format!(
             "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."
         ),
         None => e,
-    }
     };
     let mixins = newest(
         &mods,
         "horizon-mixins",
-        |b| b.mixins.as_ref(),
+        |b| Some(&b.native().mixins),
         || Ok(MIXINS_REV.into()),
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
@@ -1719,7 +1592,7 @@ fn pipeline(
             Target::Server => rust_toolchain::linker_server()?,
         }
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
-        let needs_mixins = mods.iter().any(|m| m.mixins_content);
+        let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
@@ -1734,10 +1607,10 @@ fn pipeline(
                 progress(Step::CachedMixins);
                 sync(&snapshot, &fresh)?;
             } else {
-                let injections = inject::prepare(&ordered, &source)?;
                 let tool = tool(&rust, &mixins, &progress)?;
                 let mixin_input = real.join("mixins.incoming");
-                stage_mixins(&ordered, &mixin_input)?;
+                let tool_mods = stage_mixins(&ordered, &mixin_input)?;
+                let injections = inject::prepare(&tool_mods, &source)?;
                 progress(Step::Mixins);
                 let result = run(
                     apply(&rust, &tool, &source, &mixin_input, &fresh),
@@ -1759,7 +1632,7 @@ fn pipeline(
             sync(&source, &fresh)?;
         }
         stage_trait_data(&mods, &fresh)?;
-        if mods.iter().any(|m| m.api.is_some()) {
+        if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
             let mut fetch = cargo(&rust, &source, "fetch");
             fetch.arg("--locked");
@@ -2265,7 +2138,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."]
+            [
+                "mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2285,7 +2160,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."]
+            [
+                "mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2303,7 +2180,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2322,7 +2201,9 @@ mod tests {
         // beta's is 0 (the default), alpha's 50: alpha first.
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2340,7 +2221,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at `game::calls::compute` HEAD; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at `game::calls::compute` HEAD; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2360,7 +2243,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities."]
+            [
+                "mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities."
+            ]
         );
     }
 
@@ -2400,7 +2285,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at hook `tick` BEFORE_CALL selector `x` ordinal 1; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at hook `tick` BEFORE_CALL selector `x` ordinal 1; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2427,7 +2314,9 @@ mod tests {
         )];
         assert_eq!(
             warn_conflicts(&mods),
-            ["alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."]
+            [
+                "alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."
+            ]
         );
     }
 
@@ -2506,12 +2395,23 @@ mod tests {
         for (id, injection) in [
             ("plain", ""),
             ("ordinary", "[[injection]]\nid = 'ordinary'\n"),
-            ("trait_injection", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\n"),
+            (
+                "trait_injection",
+                "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\n",
+            ),
         ] {
             let bundle = incoming.join(id).join("native");
             fs::create_dir_all(bundle.join("rust")).unwrap();
-            fs::write(bundle.join("rust/Cargo.toml"), "[package]\nname = 'example'\nversion = '1.0.0'\n").unwrap();
-            fs::write(bundle.join(MANIFEST), format!("[mod]\nid = '{id}'\nversion = '1'\n[api]\npath = 'rust'\n{injection}")).unwrap();
+            fs::write(
+                bundle.join("rust/Cargo.toml"),
+                "[package]\nname = 'example'\nversion = '1.0.0'\n",
+            )
+            .unwrap();
+            fs::write(
+                bundle.join(MANIFEST),
+                format!("[mod]\nid = '{id}'\nversion = '1'\n[api]\npath = 'rust'\n{injection}"),
+            )
+            .unwrap();
         }
         let mods = bundles(&incoming).unwrap();
         assert!(!mods[1].mixins_content);
@@ -2529,10 +2429,12 @@ mod tests {
         stage_mixins(&mods, &input).unwrap();
         assert!(!input.join("plain").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
-        assert!(input
-            .join("trait_injection")
-            .join("horizon-trait-injection-0.rs")
-            .is_file());
+        assert!(
+            input
+                .join("trait_injection")
+                .join("horizon-trait-injection-0.rs")
+                .is_file()
+        );
         let manifest = fs::read_to_string(input.join("trait_injection").join(MANIFEST)).unwrap();
         assert!(manifest.contains("horizon-trait-injection-0.rs"));
         assert!(!manifest.contains("trait_method"));

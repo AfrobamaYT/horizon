@@ -95,7 +95,10 @@ pub struct Injection {
     pub hook: Option<String>,
     pub hook_version: Option<u32>,
     pub kind: InjectionKind,
-    pub helper: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub helper: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trait_method: Option<String>,
     #[serde(default)]
     pub cancellable: bool,
     pub argument: Option<usize>,
@@ -239,6 +242,41 @@ impl Manifest {
             ));
         }
         if let Some(native) = &m.native {
+            let mut ids = std::collections::HashSet::new();
+            for injection in &native.injection {
+                if injection.id.is_empty() || !ids.insert(&injection.id) {
+                    return Err(format!("{MANIFEST}: empty or duplicate injection id"));
+                }
+                if injection.hook.is_some() == injection.target.is_some() {
+                    return Err(format!(
+                        "{MANIFEST}: injection needs exactly one hook or target"
+                    ));
+                }
+                match (&injection.helper, &injection.trait_method) {
+                    (Some(helper), None) if plain_path(helper) && source_file(helper) => {}
+                    (None, Some(method))
+                        if !method.is_empty()
+                            && method
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                            && !method.as_bytes()[0].is_ascii_digit() => {}
+                    _ => {
+                        return Err(format!(
+                            "{MANIFEST}: injection needs one source helper or trait_method"
+                        ));
+                    }
+                }
+            }
+            for step in &native.post_build {
+                if step.bin.is_empty()
+                    || !step
+                        .bin
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                {
+                    return Err(format!("{MANIFEST}: invalid post-build binary name"));
+                }
+            }
             if m.version.is_empty()
                 || native.game.is_empty()
                 || !revision(&native.horizon)
@@ -508,8 +546,10 @@ impl Package {
             .and_then(|f| zip::ZipArchive::new(f).ok())
             .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
     }
-    /// Pack a flat project, selecting its source and resource files deterministically.
-    pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
+    /// Select and validate a flat project's source and resource files deterministically.
+    pub fn directory_files(
+        root: &Path,
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
         let package = Self::read(root)?;
         let content = crate::Content::read(root, &package.manifest)?;
         let mut files = std::collections::BTreeMap::new();
@@ -565,7 +605,18 @@ impl Package {
             let (mut source_bytes, mut source_count) = (0, 0);
             walk(root, root, &mut files, &mut source_bytes, &mut source_count)?
         }
-        let text = std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| e.to_string())?;
+        files.insert(
+            MANIFEST.to_owned(),
+            std::fs::read(root.join(MANIFEST)).map_err(|e| e.to_string())?,
+        );
+        Ok(files)
+    }
+
+    /// Pack a flat project, selecting its source and resource files deterministically.
+    pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
+        let mut files = Self::directory_files(root)?;
+        let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
+            .map_err(|e| e.to_string())?;
         let files: Vec<_> = files
             .iter()
             .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))

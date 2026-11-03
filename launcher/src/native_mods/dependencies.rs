@@ -74,56 +74,48 @@ pub(super) struct Dependency {
     pub optional: bool,
 }
 
-pub(super) fn parse(owner: &str, value: Option<&toml::Value>) -> Result<Vec<Dependency>, Error> {
+pub(super) fn from_manifest(
+    values: &BTreeMap<String, horizon_mods::manifest::Dependency>,
+) -> Vec<Dependency> {
+    use horizon_mods::manifest::Dependency as Declared;
+    values
+        .iter()
+        .map(|(id, value)| {
+            let (requirement, optional) = match value {
+                Declared::Version(version) => (version, false),
+                Declared::Detailed(details) => (&details.version, details.optional),
+            };
+            Dependency {
+                id: id.clone(),
+                requirement: requirement.clone(),
+                optional,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn parse(owner: &str, value: Option<&toml::Value>) -> Result<Vec<Dependency>, Error> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
-    let invalid = |target: &str, reason: &str| Error::Manifest {
-        owner: owner.into(),
-        target: target.into(),
-        reason: reason.into(),
-    };
-    let table = value
-        .as_table()
-        .ok_or_else(|| invalid("[dependencies]", "expected a table"))?;
-    table
-        .iter()
-        .map(|(id, value)| {
-            if !super::api::valid_id(id) {
-                return Err(invalid(id, "invalid mod id"));
-            }
-            let (version, optional) = if let Some(version) = value.as_str() {
-                (version, false)
-            } else if let Some(details) = value.as_table() {
-                if details
-                    .keys()
-                    .any(|key| key != "version" && key != "optional")
-                {
-                    return Err(invalid(id, "only version and optional are accepted"));
-                }
-                let version = details
-                    .get("version")
-                    .and_then(toml::Value::as_str)
-                    .ok_or_else(|| invalid(id, "version must be a string"))?;
-                let optional = match details.get("optional") {
-                    Some(value) => value
-                        .as_bool()
-                        .ok_or_else(|| invalid(id, "optional must be a boolean"))?,
-                    None => false,
-                };
-                (version, optional)
-            } else {
-                return Err(invalid(id, "expected a version string or table"));
-            };
-            let requirement =
-                VersionReq::parse(version).map_err(|e| invalid(id, &e.to_string()))?;
-            Ok(Dependency {
-                id: id.clone(),
-                requirement,
-                optional,
-            })
-        })
-        .collect()
+    let manifest = format!(
+        "id='test'\nname='Test'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{}\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+        toml::to_string(&toml::Table::from_iter([(
+            "dependencies".into(),
+            value.clone()
+        )]))
+        .unwrap(),
+        "a".repeat(40),
+        "b".repeat(40)
+    );
+    let manifest =
+        horizon_mods::manifest::Manifest::parse(&manifest).map_err(|reason| Error::Manifest {
+            owner: owner.into(),
+            target: "[dependencies]".into(),
+            reason,
+        })?;
+    Ok(from_manifest(&manifest.dependencies))
 }
 
 pub(super) struct Mod<'a> {
@@ -394,16 +386,18 @@ mod tests {
         );
         assert_eq!(manifest["features"]["extra"][0].as_str(), Some("dep:extra"));
         let mut absent = toml::Table::new();
-        assert!(rewrite(
-            "user",
-            &mut absent,
-            &[Package {
-                dependency: &deps[1],
-                package: None
-            }]
-        )
-        .unwrap()
-        .is_empty());
+        assert!(
+            rewrite(
+                "user",
+                &mut absent,
+                &[Package {
+                    dependency: &deps[1],
+                    package: None
+                }]
+            )
+            .unwrap()
+            .is_empty()
+        );
         assert!(absent["features"]["extra"].as_array().unwrap().is_empty());
         assert!(absent["dependencies"].get("extra").is_none());
     }
@@ -417,15 +411,17 @@ mod tests {
         ] {
             let mut manifest: toml::Table = text.parse().unwrap();
             let original = manifest.clone();
-            assert!(rewrite(
-                "user",
-                &mut manifest,
-                &[Package {
-                    dependency: &deps[0],
-                    package: Some("extra-package")
-                }]
-            )
-            .is_err());
+            assert!(
+                rewrite(
+                    "user",
+                    &mut manifest,
+                    &[Package {
+                        dependency: &deps[0],
+                        package: Some("extra-package")
+                    }]
+                )
+                .is_err()
+            );
             assert_eq!(manifest, original);
         }
     }
