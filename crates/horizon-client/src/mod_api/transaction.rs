@@ -3,6 +3,11 @@
 //! transaction commits; an abort puts back everything its closure changed.
 use super::Host;
 
+/// What the game's raw transaction helpers take, and only [`transaction`](dyn Host::transaction)
+/// makes: a mod opens and closes transactions through it alone, so its drop guard closes every
+/// one a mod opens.
+pub struct TransactionSeal(());
+
 impl dyn Host + '_ {
     /// Runs `f` in a transaction, nested in the open one if any (`Transaction.openRoot` and
     /// `open`): `Ok` commits it (`commit`), into the transaction around it or, at the
@@ -25,10 +30,11 @@ impl dyn Host + '_ {
         }
         impl Drop for Open<'_, '_> {
             fn drop(&mut self) {
-                self.host.transaction_close(self.commit);
+                self.host
+                    .transaction_close(TransactionSeal(()), self.commit);
             }
         }
-        self.transaction_open();
+        self.transaction_open(TransactionSeal(()));
         let mut open = Open {
             host: self,
             commit: false,
@@ -50,10 +56,10 @@ mod tests {
         closed: Vec<(usize, bool)>,
     }
     impl Host for Journal {
-        fn transaction_open(&mut self) {
+        fn transaction_open(&mut self, _: TransactionSeal) {
             self.depth += 1;
         }
-        fn transaction_close(&mut self, commit: bool) {
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             self.closed.push((self.depth, commit));
             self.depth -= 1;
         }

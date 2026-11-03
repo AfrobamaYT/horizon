@@ -16,6 +16,7 @@
 //! transaction changes the song. Player and entity inventories come with item places.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::items::ItemStack;
+use horizon_client::mod_api::TransactionSeal;
 use horizon_world::attachments::Attachments;
 use std::collections::HashMap;
 
@@ -50,14 +51,28 @@ pub(super) enum After {
 }
 
 impl Game<'_> {
-    /// Opens a transaction, nested in the open one if any (`Transaction.open`).
-    pub(in crate::game) fn native_transaction_open(&mut self) {
+    /// Opens a transaction, nested in the open one if any (`Transaction.open`). Only
+    /// `host.transaction` reaches it, through its seal.
+    pub(in crate::game) fn native_transaction_open(&mut self, seal: TransactionSeal) {
+        let _ = seal;
+        self.transaction_open();
+    }
+    /// `native_transaction_close`, which only `host.transaction` reaches, through its seal.
+    pub(in crate::game) fn native_transaction_close(
+        &mut self,
+        seal: TransactionSeal,
+        commit: bool,
+    ) {
+        let _ = seal;
+        self.transaction_close(commit);
+    }
+    fn transaction_open(&mut self) {
         self.transactions.push(Level::default());
     }
     /// Closes the innermost transaction: `commit` hands its changes to the one around it, or
     /// at the root makes them final and tells the world; otherwise every storage it wrote goes
     /// back to how it was. Nothing happens with none open.
-    pub(in crate::game) fn native_transaction_close(&mut self, commit: bool) {
+    fn transaction_close(&mut self, commit: bool) {
         let Some(level) = self.transactions.pop() else {
             return;
         };
@@ -75,11 +90,12 @@ impl Game<'_> {
             (false, _) => self.roll_back(level),
         }
     }
-    /// Closes every transaction left open, as aborted: one a mod opened through the helpers
-    /// and never closed. Run before each tick.
+    /// Closes every transaction left open, as aborted. Run before each tick, as a backstop:
+    /// `host.transaction` is the only way in, and its drop guard closes each one it opens, so
+    /// none is left open by a mod.
     pub(super) fn abort_open_transactions(&mut self) {
         while !self.transactions.is_empty() {
-            self.native_transaction_close(false);
+            self.transaction_close(false);
         }
     }
     /// Keeps the block entity at `pos` as it is, with its attachments and a hopper's
@@ -307,7 +323,7 @@ mod tests {
 
         // A transaction a mod opened through the helpers and never closed is aborted before
         // the next tick.
-        game.native_transaction_open();
+        game.transaction_open();
         let host: &mut dyn Host = &mut game;
         host.container_insert([0, 64, 0], None, 0, sticks(1), false);
         game.abort_open_transactions();
@@ -329,10 +345,10 @@ mod tests {
         // An attachment map a write made inside an aborted transaction is gone with it.
         let chest_holder = horizon_client::mod_api::Holder::BlockEntity([0, 64, 0]);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
-        game.native_transaction_open();
+        game.transaction_open();
         assert!(game.attachment_map_quiet(chest_holder).is_ok());
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_some());
-        game.native_transaction_close(false);
+        game.transaction_close(false);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
 
         // An aborted cauldron change leaves no write behind in the world's queues.

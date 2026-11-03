@@ -3119,7 +3119,7 @@ compound and attachments, a hopper's cooldown, and a cauldron's block state. A n
 the transaction around it, and only the outermost commit makes them final. Then the world is told of each change
 once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox starting or stopping, a cauldron's
 block update and an item dropped at a block. An abort puts every storage back quietly, so nothing outside saw the
-change. A panic inside aborts every open transaction before the next tick. A handler keeps no journal of its own:
+change. A panic unwinding out of the closure aborts that transaction as it passes, and the one around it stays open. `host.transaction` is the only way to open one: the raw `transaction_open` and `transaction_close` helpers take a `TransactionSeal` that only it makes. A handler keeps no journal of its own:
 its state is the game's, so the game's journal covers it. A player's or an entity's inventory isn't covered yet:
 what changes there inside a transaction is final at once.
 
