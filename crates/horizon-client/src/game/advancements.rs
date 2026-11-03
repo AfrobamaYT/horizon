@@ -624,12 +624,14 @@ impl Game<'_> {
             self.lan_acting_entity,
             self.lan_acting_name.clone(),
         ) {
-            let player = crate::mod_api::AdvancementPlayer {
+            self.native_player_advancement_progress(
                 uuid,
-                entity_id,
-                name: &name,
-            };
-            self.native_player_advancement_progress(&player, advancement, criterion, granted);
+                entity_id as i32,
+                &name,
+                advancement,
+                criterion,
+                granted,
+            );
         }
     }
     /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
@@ -641,11 +643,9 @@ impl Game<'_> {
         for batch in std::mem::take(&mut host.hub.native_advancement_grants) {
             for grant in batch.grants {
                 self.native_player_advancement_progress(
-                    &crate::mod_api::AdvancementPlayer {
-                        uuid: batch.player,
-                        entity_id: batch.entity_id,
-                        name: &batch.name,
-                    },
+                    batch.player,
+                    batch.entity_id,
+                    &batch.name,
                     &grant.advancement,
                     &grant.criterion,
                     true,

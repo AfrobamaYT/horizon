@@ -46,7 +46,6 @@
 //!
 //! API 340 adds A guest's server handled arm swing (`native_player_arm_swing`).
 //!
-//!
 //! API 338 adds a boat or minecart about to be destroyed (`native_vehicle_destroy`).
 //!
 //! API 337 adds a vehicle taking damage (`native_vehicle_damage`).
@@ -881,9 +880,9 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, AdvancementPlayer, EffectTickChange, LivingRef, NativeCamera, NativeCommand,
-    NativeDispensed, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
-    NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
+    self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeServerPlayer,
+    RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
@@ -4622,7 +4621,9 @@ impl Game<'_> {
     /// packet. 320.
     pub(super) fn native_player_advancement_progress(
         &mut self,
-        player: &AdvancementPlayer<'_>,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
         advancement: &str,
         criterion: &str,
         granted: bool,
@@ -4631,6 +4632,8 @@ impl Game<'_> {
             self,
             mod_api::mods(),
             player,
+            player_entity_id,
+            name,
             advancement,
             criterion,
             granted,
