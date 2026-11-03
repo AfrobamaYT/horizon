@@ -218,17 +218,10 @@ fn carry_over(from: &Mob, to: &mut Mob) {
     to.name_visible = from.name_visible;
     to.invisible = from.invisible;
     to.extra.pick_up_loot = from.extra.pick_up_loot;
-    to.extra.set_main_hand(from.extra.main_hand.clone());
-    if let Some(stack) = from.extra.main_hand_stack() {
-        to.extra.set_main_hand_stack(Some(stack.clone()));
+    for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::BODY {
+        to.extra
+            .set_slot_stack(slot, from.extra.slot_stack(slot).cloned());
     }
-    to.extra.off_hand = from.extra.off_hand.clone();
-    to.extra.head = from.extra.head.clone();
-    to.extra.set_body_stack(from.extra.body_stack().cloned());
-    to.extra.chest = from.extra.chest.clone();
-    to.extra.legs = from.extra.legs.clone();
-    to.extra.feet = from.extra.feet.clone();
-    to.extra.armor = from.extra.armor.clone();
     to.extra.gear = from.extra.gear.clone();
     to.extra.effects = from.extra.effects.clone();
     // VillagerData and the trades, experience and gossip.

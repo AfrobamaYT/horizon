@@ -144,7 +144,7 @@ pub fn populate_default_equipment(m: &mut Mob) {
         } else {
             "minecraft:feather"
         };
-        m.extra.main_hand = Some(held.into());
+        m.extra.set_main_hand(Some(held.into()));
     }
 }
 /// `Fox.registerGoals` and `setTargetGoals` (the targets wait for the variant:
@@ -248,7 +248,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         return;
     }
     m.extra.ints[TICKS_SINCE_EATEN] += 1;
-    if let Some(item) = m.extra.main_hand.clone()
+    if let Some(item) = super::finalize::item(m, super::finalize::MAINHAND)
         && eats(w, &item)
         && m.ai.target.is_none()
         && m.on_ground
@@ -951,7 +951,7 @@ impl EatBerries {
                     .and_then(|a| a.parse().ok())
                     .unwrap_or(0);
             let mut count = 1 + m.random.next_int_bound(2).unwrap_or(0) + i32::from(age == 3);
-            if m.extra.main_hand.is_none() {
+            if m.extra.main_hand_id().is_none() {
                 m.extra
                     .set_main_hand(Some("minecraft:sweet_berries".into()));
                 count -= 1;
@@ -1134,7 +1134,7 @@ pub fn set_item_at(m: &mut Mob, at: Option<[f64; 3]>) {
 /// `Fox.canHoldItem`: an empty mouth, or food to swap for what is not food once it has
 /// eaten at all. `food` says whether `item` and the held item are consumable food.
 pub fn can_hold_item(m: &Mob, item_is_food: bool, held_is_food: bool) -> bool {
-    m.extra.main_hand.is_none()
+    m.extra.main_hand_id().is_none()
         || (m.extra.ints[TICKS_SINCE_EATEN] > 0 && item_is_food && !held_is_food)
 }
 /// `Fox.pickUpItem` after the swap: it has taken the item (`ticksSinceEaten = 0`).
@@ -1150,7 +1150,7 @@ impl Goal for SearchForItems {
         MOVE
     }
     fn can_use(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
-        if m.extra.main_hand.is_some() {
+        if m.extra.main_hand_id().is_some() {
             return false;
         }
         if m.ai.target.is_some() || m.ai.last_hurt_by.is_some() {
@@ -1162,7 +1162,7 @@ impl Goal for SearchForItems {
         if m.random.next_int_bound(reduced(10)).unwrap_or(0) != 0 {
             return false;
         }
-        m.extra.point.is_some() && m.extra.main_hand.is_none()
+        m.extra.point.is_some() && m.extra.main_hand_id().is_none()
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         if let Some(at) = m.extra.point {
@@ -1170,7 +1170,7 @@ impl Goal for SearchForItems {
         }
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        if m.extra.main_hand.is_none()
+        if m.extra.main_hand_id().is_none()
             && let Some(at) = m.extra.point
         {
             m.nav_move_to_entity(cx.w, at, 0, f64::from(1.2_f32));
@@ -1274,7 +1274,7 @@ mod consume_tests {
                     "it stands on the stone floor, got {}",
                     m.position.y
                 );
-                assert_eq!(m.extra.main_hand, None, "the fruit was eaten");
+                assert_eq!(m.extra.main_hand_id(), None, "the fruit was eaten");
                 assert_eq!(m.extra.ints[TICKS_SINCE_EATEN], 0);
                 assert!(
                     events

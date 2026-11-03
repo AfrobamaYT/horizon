@@ -359,7 +359,12 @@ mod tests {
                 zombie.equipment(game, EquipmentSlot::Head),
                 Some(helmet.clone())
             );
-            assert_eq!(game.mobs[0].extra.armor[0], Some(helmet.clone()));
+            assert_eq!(
+                game.mobs[0]
+                    .extra
+                    .slot_stack(horizon_items::equipment::HEAD),
+                Some(&helmet)
+            );
             let mut shield = ItemStack::new("minecraft:shield", 2);
             shield.damage = 11;
             assert!(game.native_living_set_equipment(
