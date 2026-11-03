@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_set_spawn",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_set_spawn",
+      "neoforge": "PlayerSetSpawnEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a server player's respawn point about to be set or cleared, cancellable (`native_player_set_spawn`).",
+  "doc_summary": "a server player's respawn point about to change (`ServerPlayer.setRespawnPosition`): `native_player_set_spawn(player, name, dimension, pos, forced, cancel)` for a bed, a respawn anchor, `/spawnpoint`, and a point forgotten because its block is gone (`pos` is then none and `dimension` the old point's). Set `cancel` and the point stays as it was. `native_player_spawn_point_set` fires first at the same places and names the cause. Bundles need \"hooks\": @API:player_set_spawn@."
+}

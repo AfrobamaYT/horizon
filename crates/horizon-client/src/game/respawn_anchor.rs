@@ -166,6 +166,29 @@ impl Game<'_> {
         }
         Ok(AnchorUse::Other)
     }
+    /// The mods' say on a server player's respawn point about to change
+    /// (`ServerPlayer.setRespawnPosition`) to `pos`, or cleared when `set` is
+    /// false (`pos` is then the old point). `player_spawn_point_set` (with
+    /// the `cause`) hears it, then `player_set_spawn`. True when either
+    /// canceled.
+    pub(super) fn spawn_point_change(
+        &mut self,
+        dim: Dim,
+        pos: [i32; 3],
+        set: bool,
+        forced: bool,
+        cause: &str,
+    ) -> bool {
+        let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        else {
+            return false;
+        };
+        let mut cancel = false;
+        self.native_player_spawn_point_set(player, &name, dim.id(), pos, cause, &mut cancel);
+        let new = set.then_some(pos);
+        self.native_player_set_spawn(player, &name, dim.id(), new, forced, &mut cancel);
+        cancel
+    }
     /// `RespawnAnchorBlock.useWithoutItem` on a charged anchor: outside the
     /// Nether it explodes; inside, it becomes the respawn point.
     pub(super) fn respawn_anchor_used(&mut self, pos: [i32; 3]) -> Result<()> {
@@ -184,19 +207,7 @@ impl Game<'_> {
             .respawn_config
             .is_some_and(|c| c.dim == config.dim && c.pos == config.pos);
         if !same {
-            let mut cancel = false;
-            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
-            {
-                self.native_player_spawn_point_set(
-                    player,
-                    &name,
-                    self.dim.id(),
-                    pos,
-                    "respawn_anchor",
-                    &mut cancel,
-                );
-            }
-            if cancel {
+            if self.spawn_point_change(self.dim, pos, true, false, "respawn_anchor") {
                 return Ok(());
             }
             // setRespawnPosition(config, true): the message, the point; the

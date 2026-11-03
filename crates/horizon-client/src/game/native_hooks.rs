@@ -4707,6 +4707,35 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// NeoForge's `PlayerSetSpawnEvent`: a server player's respawn point is about to change
+    /// (`ServerPlayer.setRespawnPosition`): a bed, a respawn anchor, `/spawnpoint`, or
+    /// the point being forgotten because its block is gone. `pos` is the new block
+    /// position, none when the point is cleared (then `dimension` is the old point's).
+    /// `forced` is `/spawnpoint`'s forced flag. Set `cancel` and the point stays as it
+    /// was. The same four places fire `native_player_spawn_point_set` first, which also names
+    /// the cause but not `forced` or the clearing. The player's state is not swapped in,
+    /// so helpers that look them up through `self.lan` may find nothing while a guest
+    /// packet is handled. Server-side. @API:player_set_spawn@.
+    pub(super) fn native_player_set_spawn(
+        &mut self,
+        player: u128,
+        name: &str,
+        dimension: &str,
+        pos: Option<[i32; 3]>,
+        forced: bool,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_player_set_spawn(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            dimension,
+            pos,
+            forced,
+            cancel,
+        );
+    }
     /// A server player is about to travel through a Nether portal, End portal
     /// or End gateway. `cause` is `nether_portal`, `end_portal` or `end_gateway`.
     /// The player's state is not swapped in, so helpers that look them up
@@ -7890,6 +7919,33 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// NeoForge's `LivingUseTotemEvent`: a killing blow on entity `entity` of type `kind`
+    /// from `source` (named as `native_living_incoming_damage` names it) would be taken by the
+    /// `death_protection` item `item` in its `hand` (`main_hand` or `off_hand`;
+    /// `LivingEntity.checkTotemDeathProtection`). Set `cancel` and the entity gets no
+    /// protection: it dies and the item is kept. A player or a mob holding a totem fires it; a
+    /// source that bypasses invulnerability never reaches it. `native_player_totem` still
+    /// hears a server player's totem that did save them, after this. No `self`, as
+    /// `native_living_shield_block`: the game is in the middle of the hit.
+    /// @API:living_use_totem@.
+    pub(super) fn native_living_use_totem(
+        entity: i32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        hand: &str,
+        item: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_use_totem(
+            mod_api::mods(),
+            entity,
+            kind,
+            source,
+            hand,
+            item,
+            cancel,
+        );
+    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -8056,6 +8112,26 @@ impl Game<'_> {
             damage,
         );
     }
+}
+
+/// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
+/// canceled the totem. The entity and the source are named as the damage hook names them.
+pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
+    if mod_api::mods().is_empty() {
+        return false;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting);
+    let hand = if off_hand { "off_hand" } else { "main_hand" };
+    let mut cancel = false;
+    Game::native_living_use_totem(
+        entity,
+        kind,
+        &source,
+        hand,
+        "minecraft:totem_of_undying",
+        &mut cancel,
+    );
+    cancel
 }
 
 /// `native_living_shield_block` for the damage code (`health::SHIELD_BLOCK`): whether it
