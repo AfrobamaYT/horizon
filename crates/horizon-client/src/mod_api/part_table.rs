@@ -980,7 +980,11 @@ pub(crate) mod tests {
     /// each tick adds a data slot.
     struct Press;
     #[mod_api::horizon_part]
-    impl BlockPart for Press {}
+    impl BlockPart for Press {
+        fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
+            event.output += 40;
+        }
+    }
     #[mod_api::horizon_part]
     impl BlockEntityPart for Press {
         fn block_entity_ticks(&self, _: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
@@ -2223,11 +2227,12 @@ pub(crate) mod tests {
             KnownIds {
                 block: &|_| true,
                 item: &|_| true,
-                state_count: 4,
+                state_count: 5,
                 state_block: &|state| match state {
                     1 => "test:gauge",
                     2 => "test:other",
                     3 => "test:connector",
+                    4 => "test:press",
                     _ => "minecraft:air",
                 },
             },
@@ -2256,6 +2261,8 @@ pub(crate) mod tests {
         assert!(connect.block_state(BlockStateId(1)).is_empty());
         assert_eq!(connect.block_state(BlockStateId(3)).len(), 1);
         assert!(analog.block_state(BlockStateId(3)).is_empty());
+        // The block entity part's BlockPart override is indexed independently.
+        assert_eq!(read(4), 42);
         assert!(!super::has_part_hook(HookId::ShouldCheckWeakPower));
         super::TEST_PART_LOOKUPS.set(0);
         let mut check = false;
