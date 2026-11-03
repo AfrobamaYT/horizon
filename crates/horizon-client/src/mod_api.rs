@@ -3205,10 +3205,7 @@ mod tests {
     #[test]
     fn dispatch_before_installation_is_empty() {
         let mut components = Vec::new();
-        dispatch_component_types(
-            &RegistrationContext::new(),
-            &mut components,
-        );
+        dispatch_component_types(&RegistrationContext::new(), &mut components);
         assert!(mods().is_empty());
         assert!(components.is_empty());
     }
@@ -3236,10 +3233,7 @@ mod tests {
             }
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(
-                &RegistrationContext::new(),
-                &mut Vec::new(),
-            )
+            dispatch_component_types(&RegistrationContext::new(), &mut Vec::new())
         }));
         // Once the dispatch has unwound, the thread is in no mod.
         let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
