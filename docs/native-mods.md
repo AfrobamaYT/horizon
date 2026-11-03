@@ -280,10 +280,12 @@ the catalog, not a global API number, source comments or documentation histories
   `ItemEntityRef::set_stack` changes one's nonempty stack; discarding an entity is a separate operation. The query acts on
   the level in place.
 
-- `native_level_random(dimension)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
+- `LevelRef::random(host)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
   `level.getRandom()`): a mod draws from the stream vanilla's explosions and block drops use, so its draws shift theirs
-  as a Java mod's would. It is `None` on a client of a server and for a level that isn't open: the Nether and the End
-  open when someone first goes there and close after 300 ticks with nobody in them.
+  as a Java mod's would. The draws are made at the call site on that level's real stream, also for a level parked while
+  the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
+  the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
+  restricted level hook, `LevelRandomHost::random` is the same stream.
 
 - The server starting and stopping, on the single player server thread and on a dedicated server:
   `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
