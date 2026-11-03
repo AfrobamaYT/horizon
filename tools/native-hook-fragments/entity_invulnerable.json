@@ -1,0 +1,30 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity_invulnerable",
+      "target": "horizon_client::game::native_entity_invulnerable::Game<'_>::native_entity_invulnerable",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_set_invulnerable",
+      "target": "horizon_client::game::native_entity_invulnerable::Game<'_>::native_entity_set_invulnerable",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_invulnerable_time",
+      "target": "horizon_client::game::native_entity_invulnerable::Game<'_>::native_entity_invulnerable_time",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_set_invulnerable_time",
+      "target": "horizon_client::game::native_entity_invulnerable::Game<'_>::native_entity_set_invulnerable_time",
+      "receiver": "entity"
+    }
+  ],
+  "rust_summary": "an entity's invulnerable flag and invulnerable time through an `EntityRef` (`native_entity_set_invulnerable_time`...).",
+  "doc_summary": "an entity's invulnerability through an `EntityRef`, as vanilla's `Entity` and `LivingEntity`: `invulnerable(host)` and `set_invulnerable(host, on)` (`Entity.isInvulnerable`/`setInvulnerable`: mobs keep the flag; a player's reads false) and `invulnerable_time(host)` and `set_invulnerable_time(host, ticks)` (`LivingEntity.invulnerableTime`: mobs and players). None or false for a stale handle, on a client, or a kind with no such state. Bundles need \"hooks\": @API:entity_invulnerable@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_entity_invulnerable.rs"
+  ]
+}
