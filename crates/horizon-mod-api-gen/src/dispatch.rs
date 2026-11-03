@@ -108,6 +108,7 @@ pub(super) fn emit(
             && args.iter().any(|(name, ty)| {
                 name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
             });
+        host_param::validate(hook, name, is_level, receiver_mut, ticks)?;
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
@@ -178,24 +179,29 @@ pub(super) fn emit(
                     .iter()
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
-                let mut table = table;
-                let id = match ty.to_token_stream().to_string().as_str() {
+                let lookup = match ty.to_token_stream().to_string().as_str() {
+                    "BlockStateId" if table == "block" => format!("block_state({key})"),
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
                         };
-                        format!("{level}.state_block({key})")
+                        if hook.side == HelperSide::Both {
+                            format!(
+                                "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
+                            )
+                        } else {
+                            format!("{table}(|| {level}.state_block({key}))")
+                        }
                     }
-                    "& ItemStack" => format!("Some(&*{key}.item)"),
-                    "& str" => format!("Some({key})"),
+                    "& ItemStack" => format!("{table}(|| Some(&*{key}.item))"),
+                    "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
-                        table = "block_entity_kind";
-                        format!("Some(&*{key}.id)")
+                        format!("block_entity_kind(|| Some({key}.id()))")
                     }
                     other => return Err(format!("key {key} of {name} has type {other}")),
                 };
-                Some((part_trait, format!("{table}(|| {id})")))
+                Some((part_trait, lookup))
             }
             _ => return Err(format!("{name} needs both scope and key, or neither")),
         };
@@ -220,8 +226,19 @@ pub(super) fn emit(
         let mut call_args = Vec::new();
         if let Some((name, param)) = &host {
             trait_params.push(format!("{name}: {}", param.ty));
-            dispatch_params.push(format!("{name}: {}", param.ty));
-            call_args.push(name.clone());
+            let by_side = param.ty == "HostSide" || param.ty == "LevelSide";
+            dispatch_params.push(format!(
+                "{}{name}: {}",
+                if by_side { "mut " } else { "" },
+                param.ty
+            ));
+            call_args.push(if by_side {
+                format!("{name}.reborrow()")
+            } else if param.ty.starts_with("&mut ") {
+                format!("&mut *{name}")
+            } else {
+                name.clone()
+            });
         }
 
         let mut lifetimes = EventLifetimes::default();
@@ -231,7 +248,13 @@ pub(super) fn emit(
         let collected = output.as_ref().filter(|_| contract == "collect");
         for (name, ty) in args.iter().chain(collected) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
-            let (field, scalar) = lifetimes.field(ty);
+            let mutable_entity = ty.to_token_stream().to_string() == "& mut ModBlockEntity";
+            let field_ty = if mutable_entity {
+                syn::parse_quote!(ModBlockEntityView<'_>)
+            } else {
+                (**ty).clone()
+            };
+            let (field, scalar) = lifetimes.field(&field_ty);
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
                 "pub(super)"
             } else {
@@ -244,6 +267,8 @@ pub(super) fn emit(
             if scalar {
                 inits.push(format!("{name}: *{name}"));
                 write_back.push_str(&format!("*{name} = {event}.{name};"));
+            } else if mutable_entity {
+                inits.push(format!("{name}: ModBlockEntityView::new({name})"));
             } else {
                 inits.push(name.clone());
             }
@@ -365,7 +390,7 @@ pub(super) fn emit(
                 );
                 (
                     format!(
-                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup};"
+                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup}; if {part_list}.is_empty() && !super::listened(HookId::{hook_id}) {{ return; }}"
                     ),
                     if matches!(contract, "cancel" | "replace") {
                         format!("'hook: {{ {calls} }}")

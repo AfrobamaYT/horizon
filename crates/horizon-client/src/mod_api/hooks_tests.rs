@@ -7,22 +7,23 @@ fn subscriber_tick_benchmark() {
     use std::{hint::black_box, time::Instant};
     struct TestHost;
     impl Host for TestHost {}
+    impl ServerHost for TestHost {}
     struct Quiet;
     #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
     struct Listener;
     #[mod_api::__subscriptions]
     impl Hooks for Listener {
-        fn tick(&self, _: &mut dyn Host, event: &mut TickEvent) {
+        fn tick(&self, _: crate::mod_api::HostSide, event: &mut TickEvent) {
             black_box(event);
         }
     }
     trait Before {
-        fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {}
+        fn tick(&self, _: crate::mod_api::HostSide, _: &mut TickEvent) {}
     }
     impl Before for Quiet {}
     impl Before for Listener {
-        fn tick(&self, _: &mut dyn Host, event: &mut TickEvent) {
+        fn tick(&self, _: crate::mod_api::HostSide, event: &mut TickEvent) {
             black_box(event);
         }
     }
@@ -46,20 +47,20 @@ fn subscriber_tick_benchmark() {
     installed.push(ModEntry::new("listener", Box::new(Listener)));
     install(installed.into());
     let mut host = TestHost;
-    dispatch_tick(&mut host); // Warm the dispatch outside the timed loop.
+    dispatch_tick(HostSide::Server(&mut host)); // Prune defaults once, outside the timed loop.
     let iterations = 1_000_000;
     let start = Instant::now();
     for _ in 0..iterations {
         let mut event = TickEvent {};
         for entry in black_box(&before) {
             let _guard = mark_mod(entry.id, "tick");
-            entry.hooks.tick(&mut host, &mut event);
+            entry.hooks.tick(HostSide::Server(&mut host), &mut event);
         }
     }
     let baseline = start.elapsed().as_nanos() as f64 / f64::from(iterations);
     let start = Instant::now();
     for _ in 0..iterations {
-        dispatch_tick(black_box(&mut host));
+        dispatch_tick(HostSide::Server(black_box(&mut host)));
     }
     let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
     println!(
@@ -124,10 +125,11 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
 
     struct HostDouble;
     impl Host for HostDouble {}
+    impl ServerHost for HostDouble {}
     struct Counter(Arc<AtomicUsize>);
     #[mod_api::__subscriptions]
     impl Hooks for Counter {
-        fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
+        fn tick(&self, _: crate::mod_api::HostSide, _: &mut TickEvent) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -141,7 +143,7 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
         )]
         .into(),
         || {
-            dispatch_tick(&mut HostDouble);
+            dispatch_tick(HostSide::Server(&mut HostDouble));
             let result = std::panic::catch_unwind(|| {
                 with_mods(
                     vec![ModEntry::new(
@@ -150,13 +152,13 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
                     )]
                     .into(),
                     || {
-                        dispatch_tick(&mut HostDouble);
+                        dispatch_tick(HostSide::Server(&mut HostDouble));
                         panic!("test unwind");
                     },
                 );
             });
             assert!(result.is_err());
-            dispatch_tick(&mut HostDouble);
+            dispatch_tick(HostSide::Server(&mut HostDouble));
         },
     );
     assert_eq!(outer.load(Ordering::Relaxed), 2);
@@ -168,10 +170,12 @@ fn scoped_mods_dispatch_and_restore_after_panic() {
 fn movement_input_writes_back_all_fields() {
     struct TestHost;
     impl Host for TestHost {}
+    impl ServerHost for TestHost {}
+    impl ClientHost for TestHost {}
     struct Movement;
     #[mod_api::__subscriptions]
     impl Hooks for Movement {
-        fn movement_input(&self, _host: &dyn Host, event: &mut MovementInputEvent) {
+        fn movement_input(&self, _host: &dyn ClientHost, event: &mut MovementInputEvent) {
             event.forward = -0.5;
             event.strafe = 0.25;
             event.jump = true;
@@ -192,12 +196,13 @@ fn recipe_book_categories_accept_mod_declarations() {
     };
     struct TestHost;
     impl Host for TestHost {}
+    impl ServerHost for TestHost {}
     struct Categories;
     #[mod_api::__subscriptions]
     impl Hooks for Categories {
         fn recipe_book_categories(
             &self,
-            _host: &dyn Host,
+            _host: crate::mod_api::HostSide,
             event: &mut RecipeBookCategoriesEvent<'_>,
         ) {
             event.categories.push(RecipeBookCategory {
@@ -208,11 +213,11 @@ fn recipe_book_categories_accept_mod_declarations() {
         }
     }
     let mut declarations = Vec::new();
-    dispatch_recipe_book_categories(&TestHost, &mut declarations);
+    dispatch_recipe_book_categories(HostSide::Server(&mut TestHost), &mut declarations);
     assert!(declarations.is_empty());
     let mods = [ModEntry::new("categories", Box::new(Categories))];
     install(mods.into());
-    dispatch_recipe_book_categories(&TestHost, &mut declarations);
+    dispatch_recipe_book_categories(HostSide::Server(&mut TestHost), &mut declarations);
     assert_eq!(declarations.len(), 1);
     assert_eq!(declarations[0].id, "mymod:crushing");
     assert_eq!(declarations[0].recipe_type, "mymod:crusher");

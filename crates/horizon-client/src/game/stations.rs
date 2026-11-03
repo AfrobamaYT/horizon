@@ -3083,7 +3083,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn anvil_subscriber_probe_and_answer_cache() {
-        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, Host, ModEntry};
+        use crate::mod_api::{self, AnvilUpdateEvent, Flow, HookId, Hooks, HostSide, ModEntry};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -3095,7 +3095,7 @@ mod tests {
         struct Listener(Arc<AtomicUsize>);
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
-            fn anvil_update(&self, _: &mut dyn Host, _: &mut AnvilUpdateEvent<'_>) -> Flow {
+            fn anvil_update(&self, _: HostSide<'_>, _: &mut AnvilUpdateEvent<'_>) -> Flow {
                 self.0.fetch_add(1, Ordering::Relaxed);
                 Flow::Continue
             }
