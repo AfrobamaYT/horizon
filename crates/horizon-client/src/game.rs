@@ -3101,7 +3101,6 @@ struct Game<'a> {
     remote: Option<remote::Remote>,
     /// The client chunk seam's listener (game/remote_chunks.rs): `None`
     /// until the client side of `chunk_load`/`chunk_unload` is wired.
-    client_chunk_listener: Option<Box<dyn FnMut(remote_chunks::ClientChunkEvent, i32, i32)>>,
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
@@ -19451,7 +19450,6 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             entity_attachments: Default::default(),
             remote: None,
-            client_chunk_listener: None,
             lan: None,
             integrated: None,
             level_shapes: Default::default(),
