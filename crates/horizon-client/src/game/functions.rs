@@ -154,43 +154,35 @@ impl Game<'_> {
     fn datapack_settings_path(&self) -> std::path::PathBuf {
         self.world_root.join("datapacks.json")
     }
-    /// Discover and load the data packs of the world (once, or on `/reload`).
-    pub(super) fn ensure_datapacks(&mut self) {
-        if self.fns.loaded || self.world_root.as_os_str().is_empty() {
-            return;
-        }
-        self.reload_datapacks(false);
-    }
-    pub(super) fn reload_datapacks(&mut self, run_load: bool) {
+    pub(super) fn reload_datapacks(&mut self, run_load: bool, enabled_features: &[String]) {
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
+            enabled_features,
         );
         self.fns.packs = stack.packs;
         self.fns.enabled = stack.enabled;
-        self.rebuild_store();
+        self.rebuild_store(enabled_features);
         self.fns.loaded = true;
         self.fns.load_pending = true;
-        // An explicit reload (`/reload`, `/datapack`) reloads the content
-        // tables with the functions, as `ReloadableServerResources` does;
-        // the lazy first load ran after the world already built them.
+        // An explicit reload (`/reload`, `/datapack`) also rebuilds the
+        // content tables, as `ReloadableServerResources` does; on world open
+        // `finish_open_world` builds them right after this.
         if run_load {
             self.reload_world_tables();
         }
-        let _ = run_load;
         if self.fns.schedule.is_empty() {
             self.load_schedule();
         }
     }
-    fn rebuild_store(&mut self) {
+    fn rebuild_store(&mut self, enabled_features: &[String]) {
         // The built-in pack first (lowest priority), unless disabled.
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
+            enabled_features,
         );
         let packs: Vec<&DataPack> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
         let store = DataStore::load(&packs);
@@ -198,7 +190,7 @@ impl Game<'_> {
             log::warn!("Horizon: failed to load function {id}: {e}");
         }
         self.fns.store = store;
-        self.sync_function_registries();
+        self.sync_function_registries(enabled_features);
     }
     fn save_datapack_settings(&self) {
         let disabled: Vec<&String> = self
@@ -211,7 +203,7 @@ impl Game<'_> {
         let json = serde_json::json!({"enabled": self.fns.enabled, "disabled": disabled});
         let _ = std::fs::write(self.datapack_settings_path(), json.to_string());
     }
-    pub(super) fn sync_function_registries(&mut self) {
+    pub(super) fn sync_function_registries(&mut self, enabled_features: &[String]) {
         let reg = &mut self.ui.registries;
         reg.functions = self.fns.store.functions.keys().cloned().collect();
         reg.function_tags = self.fns.store.function_tags.keys().cloned().collect();
@@ -236,11 +228,8 @@ impl Game<'_> {
             &self.world_root,
             &self.options.resources,
         );
-        let enabled = horizon_client::datapack::enabled_ids(
-            &self.world_root,
-            &packs,
-            &self.level.enabled_features,
-        );
+        let enabled =
+            horizon_client::datapack::enabled_ids(&self.world_root, &packs, enabled_features);
         let enabled: Vec<_> = enabled
             .iter()
             .filter_map(|id| packs.iter().find(|p| &p.id == id))
@@ -352,7 +341,6 @@ impl Game<'_> {
 
     /// `ServerFunctionManager.tick` and the scheduled events.
     pub(super) fn tick_functions(&mut self) {
-        self.ensure_datapacks();
         if self.remote.is_some() {
             return;
         }
@@ -451,7 +439,6 @@ impl Game<'_> {
     }
     /// The functions a `FunctionArgument` names: a function or a tag.
     pub(in crate::game) fn functions_named(&mut self, name: &str) -> R<Vec<Function>> {
-        self.ensure_datapacks();
         match name.strip_prefix('#') {
             // ServerFunctionLibrary.getTag: an unknown tag is empty.
             Some(tag) => {
@@ -596,7 +583,6 @@ impl Game<'_> {
         Ok(value)
     }
     pub(super) fn cmd_schedule(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks();
         if id == "schedule.clear" {
             let Some(Arg::Resource(name)) = ctx.get("function").cloned() else {
                 return Ok(0);
@@ -611,7 +597,7 @@ impl Game<'_> {
                 "commands.schedule.cleared.success",
                 &[Text::literal(count.to_string()), Text::literal(name)],
             ));
-            self.sync_function_registries();
+            self.sync_function_registries(&self.level.enabled_features.clone());
             return Ok(count as i32);
         }
         let Some(Arg::Resource(name)) = ctx.get("function").cloned() else {
@@ -669,13 +655,13 @@ impl Game<'_> {
                 Text::literal(tick_time.to_string()),
             ],
         ));
-        self.sync_function_registries();
+        self.sync_function_registries(&self.level.enabled_features.clone());
         Ok((tick_time.rem_euclid(i64::from(i32::MAX))) as i32)
     }
     /// ReloadCommand: the message, then the (asynchronous) reload; returns 0.
     pub(super) fn cmd_reload(&mut self) -> R<i32> {
         self.feedback(Text::translate("commands.reload.success", &[]));
-        self.reload_datapacks(true);
+        self.reload_datapacks(true, &self.level.enabled_features.clone());
         Ok(0)
     }
     /// `PackLocationInfo.createChatLink`: the id decorated with its source
@@ -791,7 +777,6 @@ impl Game<'_> {
         Ok(1)
     }
     pub(super) fn cmd_datapack(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks();
         let name = match ctx.get("name") {
             Some(Arg::Str(n)) => Some(n.clone()),
             _ => None,
@@ -933,7 +918,7 @@ impl Game<'_> {
     /// tables with the functions.
     fn apply_pack_change(&mut self) {
         self.save_datapack_settings();
-        self.rebuild_store();
+        self.rebuild_store(&self.level.enabled_features.clone());
         self.fns.load_pending = true;
         self.reload_world_tables();
     }
@@ -942,7 +927,6 @@ impl Game<'_> {
 
     /// `if predicate`: a datapack predicate tested for the source entity.
     pub(in crate::game) fn check_predicate(&mut self, id: &str) -> R<bool> {
-        self.ensure_datapacks();
         let Some(json) = self.fns.store.predicates.get(id).cloned() else {
             return Err(err("argument.predicate.unknown", &[&id]));
         };
@@ -963,6 +947,106 @@ const FEATURE_PACKS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn world_open_loads_functions_before_first_tick() {
+        use crate::game::{native_entity_refs::tests::with_game, world_loading::WorldRequest};
+
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("world-open-datapacks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pack = root.join("datapacks/test");
+        for path in [
+            "data/test/function",
+            "data/minecraft/tags/function",
+            "data/test/tags/item",
+            "data/test/tags/worldgen/biome",
+            "data/test/recipe",
+        ] {
+            std::fs::create_dir_all(pack.join(path)).unwrap();
+        }
+        std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+        let function = pack.join("data/test/function/start.mcfunction");
+        std::fs::write(
+            &function,
+            "scoreboard objectives add loaded dummy\nscoreboard players add times loaded 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("data/minecraft/tags/function/load.json"),
+            r#"{"values":["test:start"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("data/test/tags/item/sample.json"),
+            r#"{"values":["minecraft:stone"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pack.join("data/test/recipe/sample.json"), r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#).unwrap();
+        std::fs::write(
+            pack.join("data/test/tags/worldgen/biome/feature_marker.json"),
+            r#"{"values":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("datapacks.json"),
+            r#"{"enabled":["file/test"],"disabled":[]}"#,
+        )
+        .unwrap();
+        with_game(|game| {
+            game.load_world(WorldRequest {
+                save_root: root.clone(),
+                folder: "test".into(),
+                name: Some("test".into()),
+                seed: Some(1),
+                creative: true,
+                create: None,
+            })
+            .unwrap();
+            assert!(game.fns.store.functions.contains_key("test:start"));
+            assert_eq!(
+                game.fns.store.tag_functions("minecraft:load"),
+                ["test:start"]
+            );
+            assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
+            assert!(game.stations().recipe_index.contains("test:sample"));
+            // Changes on disk must not make the first tick reload any table.
+            std::fs::write(&function, "scoreboard objectives add changed dummy\n").unwrap();
+            std::fs::write(
+                pack.join("data/test/tags/item/sample.json"),
+                r#"{"values":["minecraft:diamond"]}"#,
+            )
+            .unwrap();
+            std::fs::remove_file(pack.join("data/test/recipe/sample.json")).unwrap();
+            game.tick_functions();
+            assert!(game.score.board.objective("loaded").is_some());
+            assert!(game.score.board.objective("changed").is_none());
+            game.tick_functions();
+            assert_eq!(game.score.board.score("times", "loaded").unwrap().value, 1);
+            assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
+            assert!(game.stations().recipe_index.contains("test:sample"));
+
+            // World-open selection and completions must both use the incoming
+            // level's flags, even while `self.level` is still the old level.
+            game.ui.registries.by_registry.clear();
+            game.level.enabled_features.clear();
+            std::fs::write(
+                pack.join("pack.mcmeta"),
+                r#"{"features":{"enabled":["test:feature"]}}"#,
+            )
+            .unwrap();
+            game.reload_datapacks(false, &["test:feature".into()]);
+            assert!(
+                game.ui.registries.by_registry["minecraft:worldgen/biome"]
+                    .tags
+                    .contains(&"test:feature_marker".to_owned())
+            );
+        });
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     /// Two packs override the same recipe: the later one in the selected
     /// (`datapacks.json`) order wins, not the later one alphabetically.

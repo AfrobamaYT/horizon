@@ -662,7 +662,7 @@ impl Game<'_> {
         };
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
-        if !horizon_client::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt) {
             let kind = self
                 .mobs
                 .iter()
@@ -761,8 +761,9 @@ impl Game<'_> {
         }
         let t = self.res.mob_types().get(kind).cloned()?;
         let mut cancel = false;
-        let from_kind = (!horizon_client::mod_api::mods().is_empty())
-            .then(|| super::native_hooks::mob_kind(from));
+        let from_kind = (crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPre)
+            || crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPost))
+        .then(|| super::native_hooks::mob_kind(from));
         if let Some(from_kind) = &from_kind {
             self.native_living_conversion_pre(from.id, from_kind, kind, &mut cancel);
         }
@@ -892,12 +893,12 @@ impl Game<'_> {
                     "sitting": m.extra.sitting,
                     "temper": m.extra.variant3,
                     "chested": m.extra.chested,
-                    "head": m.extra.head_id(),
-                    "body": m.extra.body_id(),
-                    "warden": horizon_client::mobs::warden::describe(m),
                 });
-                // Set apart from the json! above, which would otherwise pass
-                // the default macro recursion limit.
+                // Set apart: one json! with every key goes past the default macro recursion
+                // limit, and horizon-client can't raise it (#8169).
+                state["head"] = m.extra.head_id().into();
+                state["body"] = m.extra.body_id().into();
+                state["warden"] = serde_json::json!(horizon_client::mobs::warden::describe(m));
                 state["villager"] = serde_json::json!(horizon_client::mobs::villager::ext(m).map(|e| serde_json::json!({
                     "food_level": e.food_level,
                     "inventory": e.inventory.iter().map(|s| format!("{}x{}", s.count, s.item)).collect::<Vec<_>>(),
@@ -1092,7 +1093,9 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() || !horizon_client::mod_api::mods().is_empty() {
+        if round.listening()
+            || crate::mod_api::listened(crate::mod_api::HookId::CanContinueSleeping)
+        {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
@@ -1387,7 +1390,7 @@ impl Game<'_> {
     /// `LivingDeathEvent` for a mob whose health ran out: whether a native
     /// mod canceled the death. A canceled mob stays alive at 1 health.
     fn mob_death_canceled(&mut self, m: &Mob) -> bool {
-        if horizon_client::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::LivingDeath) {
             return false;
         }
         let (damage_type, attacker) = self.mob_damage_source(m);
@@ -2145,7 +2148,7 @@ impl Game<'_> {
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
     fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
-        if horizon_client::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::LivingDestroyBlock) {
             return true;
         }
         let Some(kind) = self
@@ -3460,7 +3463,7 @@ impl Game<'_> {
         if !matches!(
             p.species(),
             Species::Turtle | Species::Frog | Species::Sniffer
-        ) && !horizon_client::mod_api::mods().is_empty()
+        ) && crate::mod_api::listened(crate::mod_api::HookId::BabyEntitySpawn)
         {
             let mule = matches!(
                 (
@@ -8550,6 +8553,69 @@ mod dye_mix_tests {
         assert_eq!(dye_color_mix_in_recipes(&recipes, orange, cyan), None);
         let kept = dye_mix(&recipes, &mut random, orange, cyan);
         assert!(kept == orange || kept == cyan, "kept {kept}");
+    }
+}
+
+#[cfg(test)]
+mod conversion_subscriber_tests {
+    use super::*;
+    use crate::mod_api::{self, Hooks, Host, LivingConversionPostEvent, ModEntry};
+    use std::sync::Mutex;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn post_only_listener_survives_pre_pruning() {
+        struct DefaultMod;
+        impl Hooks for DefaultMod {}
+        struct PostOnly(Arc<Mutex<Vec<(u32, u32)>>>);
+        impl Hooks for PostOnly {
+            fn living_conversion_post(
+                &self,
+                _: &mut dyn Host,
+                event: &mut LivingConversionPostEvent<'_>,
+            ) {
+                assert_eq!(event.kind, "minecraft:zombie");
+                assert_eq!(event.converted_kind, "minecraft:drowned");
+                self.0.lock().unwrap().push((event.entity, event.converted));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![
+            ModEntry::new("default", Box::new(DefaultMod)),
+            ModEntry::new("post", Box::new(PostOnly(seen.clone()))),
+        ]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let zombie = game
+                    .res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone();
+                for _ in 0..2 {
+                    game.next_entity += 1;
+                    let from = Mob::new(
+                        game.next_entity,
+                        zombie.clone(),
+                        Vec3::new(0.5, 64.0, 0.5),
+                        0.0,
+                    );
+                    let converted = game
+                        .convert_to(
+                            &from,
+                            "minecraft:drowned",
+                            horizon_client::mobs::conversion::Params::KEEP_ALL,
+                            |_, _| {},
+                        )
+                        .unwrap();
+                    let events = seen.lock().unwrap();
+                    assert_eq!(events.last(), Some(&(from.id, converted)));
+                }
+                assert!(!mod_api::listened(mod_api::HookId::LivingConversionPre));
+                assert_eq!(seen.lock().unwrap().len(), 2);
+            });
+        });
     }
 }
 

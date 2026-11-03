@@ -1270,7 +1270,9 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         feature: Option<&'a str>,
     ) -> Option<std::borrow::Cow<'a, str>> {
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::BlockGrowFeature)
+        {
             return feature.map(std::borrow::Cow::Borrowed);
         }
         let mut feature = feature.map(str::to_owned);
@@ -1346,7 +1348,9 @@ impl LevelAccess for GameLevel<'_> {
         note: &mut i32,
     ) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::NoteBlockPlay)
+        {
             return true;
         }
         let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
@@ -1380,7 +1384,9 @@ impl LevelAccess for GameLevel<'_> {
         shape: &horizon_world::level::PortalShape,
     ) -> bool {
         let mut cancel = false;
-        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+        if self.native_authoritative
+            && crate::mod_api::listened(crate::mod_api::HookId::PortalSpawn)
+        {
             let b = shape.bottom_left;
             let shape = horizon_client::mod_api::NativePortalShape {
                 x_axis: shape.x_axis,
@@ -8111,7 +8117,7 @@ impl Game<'_> {
         let active = self.focused || self.agent_pointer;
         if active
             && grabbed
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::CalculatePlayerTurn)
             && let Some(remote) = &self.remote
         {
             self.native_calculate_player_turn(
@@ -12411,6 +12417,7 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         self.fns = Default::default();
+        self.reload_datapacks(false, &level.enabled_features);
         self.world_tables = self.build_world_tables();
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
@@ -12928,7 +12935,7 @@ impl Game<'_> {
         });
         // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
         let mut amounts = [amount; 4];
-        if !horizon_client::mod_api::mods().is_empty()
+        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
             let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
@@ -14176,7 +14183,7 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<Vertex>,
     ) {
-        if !crate::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::RenderArm) {
             let eye = self.eye_position().unwrap_or_default();
             let mut draw = BlockEntityDraw::posed(
                 partial,
@@ -14306,7 +14313,7 @@ impl Game<'_> {
                 scale: 1.0,
             };
             let mut canceled = false;
-            if !horizon_client::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::RenderHand) {
                 self.native_render_hand(&mut render, &mut canceled);
             }
             if canceled {
@@ -15734,7 +15741,7 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
-        self.save.save_forced_chunks(&self.streaming.forced)?;
+        self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match self.streaming.prepare_save(&mut self.world, wait, deadline) {
@@ -15765,7 +15772,7 @@ impl Game<'_> {
         if wait {
             self.save.flush()?;
         }
-        if !horizon_client::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::LevelSave) {
             self.native_level_save(self.dim.id());
         }
         Ok(())
@@ -21909,17 +21916,22 @@ pub fn run_with() -> Result<()> {
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    options.resources = packs::startup_root(&vanilla_root, &early_settings.resource_packs, &[])
-        .unwrap_or_else(|e| {
-            log::warn!("Horizon: resource packs not applied: {e}");
-            pack_error = Some(e.to_string());
-            vanilla_root.clone()
-        });
-    options.resources = mods::content_root(
-        &options.resources,
+    options.resources = packs::startup_root(
+        &vanilla_root,
+        &early_settings.resource_packs,
+        &[],
         &early_settings.mods.enabled,
         &options.dev_mods,
-    );
+    )
+    .unwrap_or_else(|e| {
+        log::warn!("Horizon: resource packs not applied: {e}");
+        pack_error = Some(e.to_string());
+        mods::content_root(
+            &vanilla_root,
+            &early_settings.mods.enabled,
+            &options.dev_mods,
+        )
+    });
     let loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),

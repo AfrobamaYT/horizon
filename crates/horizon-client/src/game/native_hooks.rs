@@ -5558,6 +5558,23 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_release_using(self, stack, entity, time_left, used);
     }
+    /// `BlockBehaviour.getCloneItemStack`, asked by
+    /// `ServerGamePacketListenerImpl.handlePickItemFromBlock`. `include_data`
+    /// is true for a creative player picking with Ctrl. Leave `stack` unset to
+    /// keep the game's item. Creative breaking, such as a beehive's
+    /// `playerWillDestroy`, does not ask this query. Server-side.
+    #[inline(always)]
+    pub(super) fn native_clone_item_stack(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        block: &str,
+        state: BlockStateId,
+        include_data: bool,
+        stack: &mut Option<ItemStack>,
+    ) {
+        mod_api::dispatch_clone_item_stack(self, dimension, pos, block, state, include_data, stack);
+    }
     /// A player breaks the block `state` at `pos`, once the game allowed it
     /// (the held item can break blocks, the debug stick didn't take the
     /// click): where `ServerPlayerGameMode.destroyBlock` starts. Set
@@ -6724,7 +6741,7 @@ impl Game<'_> {
 /// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
-    if mod_api::mods().is_empty() {
+    if !mod_api::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -8229,7 +8246,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
     ) -> BlockClickAnswer {
         let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::RightClickBlock) {
             return BlockClickAnswer::Go {
                 use_block,
                 use_item,
@@ -8276,14 +8293,14 @@ impl Game<'_> {
         value: GameRuleValue,
         actor: Option<&GameRuleActor<'_>>,
     ) {
-        if !mod_api::mods().is_empty() {
+        if mod_api::listened(mod_api::HookId::GameRuleChanged) {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
     /// children: how many to spawn.
     pub(super) fn mob_split_count(&mut self, m: &horizon_client::mobs::Mob, count: u32) -> u32 {
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::MobSplit) {
             return count;
         }
         let (size, kind) = (m.extra.size, mob_kind(m));
@@ -8300,7 +8317,7 @@ impl Game<'_> {
         tamer: u128,
         tamer_entity_id: i32,
     ) -> bool {
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::AnimalTame) {
             return false;
         }
         let m = &self.mobs[index];
