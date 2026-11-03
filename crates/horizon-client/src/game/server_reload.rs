@@ -45,10 +45,7 @@ pub(super) enum PreparedReload {
 }
 
 impl PackStack {
-    fn reload_context(
-        &self,
-        converter: &FileToIdConverter,
-    ) -> Result<ServerReloadContext, ServerReloadError> {
+    fn reload_context(&self, listener: &Identifier, converter: &FileToIdConverter) -> ServerReloadContext {
         let mut selected = std::collections::BTreeMap::new();
         for pack in self.builtin.iter().chain(self.enabled_packs()) {
             for file in pack.list_kinds(&[converter.directory()]) {
@@ -62,15 +59,21 @@ impl PackStack {
         }
         let mut files = std::collections::BTreeMap::new();
         for (id, (pack, path)) in selected {
-            let bytes = pack.read(&path).ok_or_else(|| {
-                ServerReloadError::new(
-                    id.clone(),
-                    std::io::Error::other("could not read selected data resource"),
-                )
-            })?;
-            files.insert(id, bytes);
+            // A file that vanishes or fails to read between listing and reading is one bad
+            // entry, as vanilla's `scanDirectory` treats a parse failure: log it, skip it.
+            match pack.read(&path) {
+                Some(bytes) => {
+                    files.insert(id, bytes);
+                }
+                None => log::error!(
+                    "Couldn't read data file '{id}' from '{}/{}' for listener {}",
+                    pack.id,
+                    path,
+                    listener
+                ),
+            }
         }
-        Ok(ServerReloadContext::new(files))
+        ServerReloadContext::new(files)
     }
 }
 
@@ -85,13 +88,13 @@ impl Game<'_> {
         let mut prepared = Vec::new();
         for listener in listeners {
             if let Some(converter) = &listener.converter {
-                let apply = stack
-                    .reload_context(converter)
-                    .and_then(|context| listener.listener.prepare(&context))
-                    .map_err(|source| ServerDataReloadError::Listener {
+                let context = stack.reload_context(&listener.id, converter);
+                let apply = listener.listener.prepare(&context).map_err(|source| {
+                    ServerDataReloadError::Listener {
                         listener: listener.id,
                         source,
-                    })?;
+                    }
+                })?;
                 prepared.push(PreparedReload::Mod(apply));
             } else if listener.id == VanillaServerListeners::functions() {
                 let packs: Vec<_> = stack.builtin.iter().chain(stack.enabled_packs()).collect();

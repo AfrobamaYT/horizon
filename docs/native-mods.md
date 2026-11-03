@@ -960,10 +960,13 @@ The prepare context is the pack view only, as vanilla's `ResourceManager`. Like 
 changing live state and returns `ServerReloadApply::new(move || { /* publish parsed state */ })`.
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
-cannot fail. Any preparation, registration or ordering error drops all pending applies and
-keeps the old mod data and vanilla function library. The error names the namespaced listener
-and, for file errors, resource ID; world open fails, and `/reload` reports the failure. A failed
-`/datapack` change also preserves the selected packs on disk.
+cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a listener that
+parses its files logs and skips one that will not parse, carrying the rest through. Returning
+`Err` from `prepare` — like any preparation, registration or ordering error — aborts the whole
+reload: all pending applies are dropped and the old mod data and vanilla function library are
+kept. The error names the namespaced listener and, for file errors, resource ID; world open
+fails, and `/reload` reports the failure. A failed `/datapack` change also preserves the
+selected packs on disk.
 
 `event.listeners.add_dependency(first, second)` orders named listeners. Both names must
 already be registered; unknown names fail immediately, and cycles fail after registration.

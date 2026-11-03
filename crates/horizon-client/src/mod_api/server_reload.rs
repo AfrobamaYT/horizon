@@ -104,6 +104,11 @@ impl ServerReloadApply {
 /// pending applies are dropped, keeping the previous data and function library.
 pub trait ServerReloadListener: Send + Sync + 'static {
     /// Parse and validate new data without changing the listener's live state.
+    ///
+    /// As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a
+    /// listener that parses its files logs and skips one that won't parse,
+    /// carrying the rest through; returning `Err` aborts the whole reload and
+    /// keeps every listener's previous data.
     fn prepare(
         &self,
         context: &ServerReloadContext,

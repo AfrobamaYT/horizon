@@ -222,6 +222,128 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
 
 #[test]
 #[ignore = "needs prepared resources"]
+fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
+    // Vanilla's `SimpleJsonResourceReloadListener.scanDirectory` logs and skips one bad
+    // file; only a listener's own error aborts the reload. This listener follows it.
+    struct ParsingListener(Arc<Mutex<Vec<(String, String)>>>);
+    impl ServerReloadListener for ParsingListener {
+        fn prepare(
+            &self,
+            context: &ServerReloadContext,
+        ) -> Result<ServerReloadApply, ServerReloadError> {
+            let mut parsed = Vec::new();
+            for id in context.list() {
+                match serde_json::from_slice::<String>(context.read(id).unwrap()) {
+                    Ok(value) => parsed.push((id.to_string(), value)),
+                    Err(error) => log::warn!("Couldn't parse data file '{id}': {error}"),
+                }
+            }
+            let live = self.0.clone();
+            Ok(ServerReloadApply::new(move || {
+                *live.lock().unwrap() = parsed
+            }))
+        }
+    }
+    struct SkipHooks(Arc<Mutex<Vec<(String, String)>>>);
+    impl Hooks for SkipHooks {
+        fn add_server_reload_listeners(
+            &self,
+            _host: &dyn Host,
+            event: &mut AddServerReloadListenersEvent<'_>,
+        ) {
+            event
+                .listeners
+                .add_listener(
+                    Identifier::parse("reload_test:data").unwrap(),
+                    FileToIdConverter::json("machines").unwrap(),
+                    Arc::new(ParsingListener(self.0.clone())),
+                )
+                .unwrap();
+        }
+    }
+    let root = std::env::current_dir()
+        .unwrap()
+        .join("target")
+        .join(format!("server-reload-skip-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let manifest = "id = \"reload_test\"\nname = \"Reload Test\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
+    let package = root.join("reload_test.hmod");
+    write(
+        &package,
+        horizon_mods::Package::write_files(
+            manifest,
+            &[("data/reload_test/machines/bar.json", b"\"good\"")],
+        )
+        .unwrap(),
+    );
+    let package_manifest = horizon_mods::Package::read(&package).unwrap().manifest;
+    let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
+    let resources = root.join("resources");
+    let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+    horizon_client::mod_content::build(
+        &base,
+        &[horizon_client::mod_content::ContentMod {
+            id: "reload_test".into(),
+            content,
+        }],
+        &resources,
+    )
+    .unwrap();
+    let world = root.join("world");
+    let pack = world.join("datapacks/test");
+    write(&pack.join("pack.mcmeta"), "{}");
+    let malformed = pack.join("data/reload_test/machines/foo.json");
+    write(&malformed, "{bad json");
+    write(&pack.join("data/reload_test/machines/bar.json"), "\"better\"");
+    write(
+        &world.join("datapacks.json"),
+        r#"{"enabled":["file/test"],"disabled":[]}"#,
+    );
+    let live = Arc::new(Mutex::new(Vec::new()));
+    mod_api::testing::with_mods(
+        vec![ModEntry::new(
+            "reload_test",
+            Box::new(SkipHooks(live.clone())),
+        )]
+        .into(),
+        || {
+            with_game(|game| {
+                game.options.resources = resources;
+                game.load_world(request(&world)).unwrap();
+                assert_eq!(
+                    *live.lock().unwrap(),
+                    vec![("reload_test:bar".into(), "better".into())],
+                    "the malformed file is skipped and the override wins"
+                );
+                write(&malformed, "\"fixed\"");
+                assert!(game.run_command("reload"));
+                assert_eq!(
+                    *live.lock().unwrap(),
+                    vec![
+                        ("reload_test:bar".into(), "better".into()),
+                        ("reload_test:foo".into(), "fixed".into()),
+                    ],
+                    "a repaired file joins the next reload"
+                );
+                write(&malformed, "still not json");
+                assert!(
+                    game.run_command("reload"),
+                    "a skipped file never fails the reload"
+                );
+                assert_eq!(
+                    *live.lock().unwrap(),
+                    vec![("reload_test:bar".into(), "better".into())],
+                    "the bad file is skipped again"
+                );
+            })
+        },
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
 fn server_reload_registration_failure_stops_world_open_and_quiet_mods_are_pruned() {
     struct Quiet;
     impl Hooks for Quiet {}
