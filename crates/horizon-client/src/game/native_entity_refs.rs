@@ -176,16 +176,12 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn entities_in_returns_readable_handles_and_intersects_boxes() {
+pub(super) mod tests {
+    pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
-        use horizon_client::entities::ArmorStand;
-        use horizon_client::mod_api::{LevelRef, NativeAuthority, NativeWorldEpoch};
-        use horizon_core::geometry::Vec3;
+        use horizon_client::mod_api::NativeAuthority;
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -216,34 +212,45 @@ mod tests {
         .unwrap();
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
-        let level = game.native_level(game.dim.id()).unwrap();
-        game.armor_stands
-            .push(ArmorStand::new(0, Vec3::new(0.5, 0.0, 0.0), 0.0));
-        assert!(game.native_entity(0).is_none());
-        game.armor_stands
-            .push(ArmorStand::new(12, Vec3::new(1.0, 0.0, 0.0), 0.0));
-        let found = game
-            .native_level_entities_in(level, [0.0, 0.0, -1.0], [0.8, 1.0, 1.0])
-            .unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!(game.native_entity_position(found[0]), Some([1.0, 0.0, 0.0]));
-        assert_eq!(
-            game.native_entity_kind(found[0]).as_deref(),
-            Some("minecraft:armor_stand")
-        );
-        assert!(
-            game.native_level_entities_in(level, [0.0, 0.0, -1.0], [0.75, 1.0, 1.0])
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            game.native_level_entities_in(
-                LevelRef::new(NativeWorldEpoch::new(0), game.dim.id()),
-                [0.0; 3],
-                [2.0; 3]
-            )
-            .is_none()
-        );
+        test(&mut game);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entities_in_returns_readable_handles_and_intersects_boxes() {
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::mod_api::{LevelRef, NativeWorldEpoch};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            game.armor_stands
+                .push(ArmorStand::new(0, Vec3::new(0.5, 0.0, 0.0), 0.0));
+            assert!(game.native_entity(0).is_none());
+            game.armor_stands
+                .push(ArmorStand::new(12, Vec3::new(1.0, 0.0, 0.0), 0.0));
+            let found = game
+                .native_level_entities_in(level, [0.0, 0.0, -1.0], [0.8, 1.0, 1.0])
+                .unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(game.native_entity_position(found[0]), Some([1.0, 0.0, 0.0]));
+            assert_eq!(
+                game.native_entity_kind(found[0]).as_deref(),
+                Some("minecraft:armor_stand")
+            );
+            assert!(
+                game.native_level_entities_in(level, [0.0, 0.0, -1.0], [0.75, 1.0, 1.0])
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                game.native_level_entities_in(
+                    LevelRef::new(NativeWorldEpoch::new(0), game.dim.id()),
+                    [0.0; 3],
+                    [2.0; 3]
+                )
+                .is_none()
+            );
+        });
     }
 
     #[test]

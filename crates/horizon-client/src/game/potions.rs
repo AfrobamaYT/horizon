@@ -797,10 +797,6 @@ impl Game<'_> {
             }
             action => action,
         };
-        if let EffectAction::Hurt(source, amount) = action {
-            self.apply_effect_damage(source, amount);
-            return;
-        }
         let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {
@@ -815,7 +811,16 @@ impl Game<'_> {
                     let _ = p.set_health((h + amount).min(max), false);
                 }
             }
-            EffectAction::Hurt(_, _) => unreachable!(),
+            EffectAction::Hurt(source, amount) => {
+                let mut canceled = false;
+                if !creative
+                    && let Some(id) = self.motion.health.damage.id(source)
+                    && let Ok(o) = p.hurt_blocking(&self.motion.health, rules, id, amount, None)
+                {
+                    canceled = o.canceled;
+                }
+                self.combat.forget_noted(canceled);
+            }
             EffectAction::Poison => {
                 if !creative
                     && p.health.health() > 1.0
@@ -835,24 +840,6 @@ impl Game<'_> {
             }
         }
     }
-    fn apply_effect_damage(&mut self, source: &str, amount: f32) {
-        let mut canceled = false;
-        if !self.creative
-            && let Some(id) = self.motion.health.damage.id(source)
-            && let Some(player) = self.player.as_mut()
-            && let Ok(outcome) = player.hurt_blocking(
-                &self.motion.health,
-                self.world.health_rules,
-                id,
-                amount,
-                None,
-            )
-        {
-            canceled = outcome.canceled;
-        }
-        self.combat.forget_noted(canceled);
-    }
-
     /// The local player's effects (`tick_mob_effects`), then the potions
     /// in flight, which a server without a local player still has. A frozen
     /// tick (`/tick freeze`) leaves the potions where they are
@@ -902,7 +889,7 @@ impl Game<'_> {
             .is_some_and(|p| p.health.absorption() <= 0.0);
         let mut effects = std::mem::take(&mut self.potions.effects);
         let (actions, raid_omen_added) = effects.tick_with(
-            &mut |e, t| {
+            &mut |e, t, actions| {
                 if !brewing::is_mod_effect(e.id) {
                     self.omen_tick(e)
                 } else {
@@ -932,22 +919,17 @@ impl Game<'_> {
                         max_health,
                         food,
                     );
-                    for change in changes {
-                        match change {
-                            EffectTickChange::Heal(amount) => {
-                                self.apply_effect_action(EffectAction::Heal(amount))
-                            }
-                            EffectTickChange::Hurt(source, amount) => {
-                                self.apply_effect_damage(&source, amount)
-                            }
-                            EffectTickChange::AddExhaustion(amount) => {
-                                self.apply_effect_action(EffectAction::Exhaust(amount))
-                            }
-                            EffectTickChange::Eat(nutrition, saturation) => {
-                                self.apply_effect_action(EffectAction::Eat(nutrition, saturation))
-                            }
+                    actions.extend(changes.into_iter().map(|change| match change {
+                        EffectTickChange::Heal(amount) => EffectAction::Heal(amount),
+                        EffectTickChange::Hurt(source, amount) => EffectAction::Hurt(
+                            super::creatures::damage_type(source.mob_kind(), false),
+                            amount,
+                        ),
+                        EffectTickChange::AddExhaustion(amount) => EffectAction::Exhaust(amount),
+                        EffectTickChange::Eat(nutrition, saturation) => {
+                            EffectAction::Eat(nutrition, saturation)
                         }
-                    }
+                    }));
                     if keep {
                         OmenTick::Continue
                     } else {
@@ -1917,10 +1899,8 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         for change in changes {
             match change {
                 EffectTickChange::Heal(amount) => mob.heal(amount),
-                EffectTickChange::Hurt(source, amount)
-                    if self.motion.health.damage.id(&source).is_some() =>
-                {
-                    mob.damage(amount, Damage::of(Self::damage_kind(&source)));
+                EffectTickChange::Hurt(source, amount) => {
+                    mob.damage(amount, Damage::of(source.mob_kind()));
                 }
                 _ => {}
             }
@@ -1944,7 +1924,126 @@ fn client_tick_effects(effects: &mut PlayerEffects, darkness: &mut (f32, f32)) {
 mod tests {
     use super::super::sculk::darkness_blend_added;
     use super::*;
-    use horizon_client::screen_effects::nausea_blend_added;
+    use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
+
+    fn effect_test_mod() {
+        use horizon_client::mod_api::*;
+        struct TestMod;
+        impl Hooks for TestMod {
+            fn should_apply_effect_tick_this_tick(
+                &self,
+                _: &dyn Host,
+                event: &mut ShouldApplyEffectTickThisTickEvent<'_>,
+            ) {
+                event.apply = true;
+            }
+            fn apply_effect_tick(&self, _: &dyn Host, event: &mut ApplyEffectTickEvent<'_>) {
+                match event.amplifier {
+                    0 => {
+                        event.heal(10.0);
+                        event.eat(4, 0.5);
+                        event.add_exhaustion(1.5);
+                    }
+                    1 => event.hurt(NativeEffectDamage::Magic, 3.0),
+                    _ => event.hurt(NativeEffectDamage::Wither, 100.0),
+                }
+            }
+        }
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            crate::mod_api::MODS
+                .set(std::sync::Arc::from([Box::new(TestMod) as Box<dyn Hooks>]))
+                .unwrap_or_else(|_| panic!("mods already installed"));
+            brewing::register_mod_effects([("test:effect".into(), 0, brewing::Category::Neutral)]);
+            let _ =
+                horizon_client::health::HURT_SERVER.set(super::super::native_hooks::hurt_server);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_heals_and_feeds_player() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let player = game.player.as_mut().unwrap();
+            player.set_health(18.0, false).unwrap();
+            player.health.food.food = 14;
+            player.health.food.saturation = 2.0;
+            let id = brewing::effect("test:effect").unwrap().id;
+            game.potions.effects.add(EffectInstance::new(id, 10, 0));
+            game.tick_mob_effects();
+            let player = game.player.as_ref().unwrap();
+            assert_eq!(player.health.health(), 20.0);
+            assert_eq!(player.health.food.food, 18);
+            assert_eq!(player.health.food.saturation, 6.0);
+            assert_eq!(player.health.food.exhaustion, 1.5);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_magic_respects_player_hit_frames() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let id = brewing::effect("test:effect").unwrap().id;
+            game.potions.effects.add(EffectInstance::new(id, 10, 1));
+            game.tick_mob_effects();
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 17.0);
+            game.tick_mob_effects();
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 17.0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_kills_mob_through_death_and_drops() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            use horizon_client::chunk::Chunk;
+            use std::sync::Arc;
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(12, kind, Vec3::new(1.0, 64.0, 1.0), 0.0);
+            mob.extra.main_hand = Some(Arc::from("minecraft:iron_sword"));
+            mob.extra.drop_chances = Some(Box::new([2.0; 8]));
+            mob.add_effect(brewing::effect("test:effect").unwrap().id, 10, 2);
+            game.mobs.push(mob);
+            game.tick_creature_entities().unwrap();
+            assert!(!game.mobs[0].alive());
+            assert!(
+                game.dropped
+                    .iter()
+                    .any(|item| &*item.stack.item == "minecraft:iron_sword")
+            );
+            for _ in 0..20 {
+                game.tick_creature_entities().unwrap();
+            }
+            assert!(game.mobs.is_empty());
+        });
+    }
+
+    #[test]
+    fn effect_damage_sources_retain_their_ids() {
+        use horizon_client::mod_api::NativeEffectDamage;
+        for (source, expected) in [
+            (NativeEffectDamage::Magic, "minecraft:magic"),
+            (NativeEffectDamage::Wither, "minecraft:wither"),
+        ] {
+            assert_eq!(
+                super::super::creatures::source_damage_type(Damage::of(source.mob_kind())),
+                expected
+            );
+        }
+    }
 
     /// #5876: a potion thrown straight up from inside its thrower's box does
     /// not hit them while it climbs out, then hits them on the way down;

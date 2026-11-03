@@ -249,7 +249,7 @@ impl PlayerEffects {
     /// ticked; the next tick refreshes Raid Omen and drops Bad Omen.
     pub fn tick_with(
         &mut self,
-        omen: &mut dyn FnMut(&EffectInstance, i32) -> OmenTick,
+        omen: &mut dyn FnMut(&EffectInstance, i32, &mut Vec<EffectAction>) -> OmenTick,
         absorption_empty: bool,
     ) -> (Vec<EffectAction>, bool) {
         self.tick_count = self.tick_count.wrapping_add(1);
@@ -271,9 +271,9 @@ impl PlayerEffects {
                 actions.push(a);
             }
             let answer = match e.id {
-                "bad_omen" => omen(e, t),
-                "raid_omen" if t == 1 => omen(e, t),
-                id if potions::is_mod_effect(id) => omen(e, t),
+                "bad_omen" => omen(e, t, &mut actions),
+                "raid_omen" if t == 1 => omen(e, t, &mut actions),
+                id if potions::is_mod_effect(id) => omen(e, t, &mut actions),
                 "absorption" if absorption_empty => OmenTick::Remove,
                 _ => OmenTick::Continue,
             };
@@ -511,7 +511,7 @@ mod tests {
         let mut fx = PlayerEffects::default();
         fx.add(EffectInstance::new("bad_omen", 100, 1));
         fx.add(EffectInstance::new("speed", 50, 0));
-        let mut convert = |e: &EffectInstance, _: i32| match e.id {
+        let mut convert = |e: &EffectInstance, _: i32, _: &mut Vec<EffectAction>| match e.id {
             "bad_omen" => OmenTick::Add(EffectInstance::new("raid_omen", 600, e.amplifier)),
             _ => OmenTick::Continue,
         };
@@ -546,6 +546,25 @@ mod tests {
         let saved = fx.saved();
         assert_eq!(saved, [("ruby:glow".to_owned(), 600, 1, false, true)]);
         assert_eq!(PlayerEffects::from_saved(&saved).list, fx.list);
+        let mut ordered = PlayerEffects::default();
+        ordered.add(EffectInstance::new("regeneration", 50, 0));
+        ordered.add(EffectInstance::new("ruby:glow", 10, 0));
+        ordered.add(EffectInstance::new("wither", 40, 0));
+        let (actions, _) = ordered.tick_with(
+            &mut |_, _, actions| {
+                actions.push(EffectAction::Eat(2, 0.5));
+                OmenTick::Continue
+            },
+            false,
+        );
+        assert_eq!(
+            actions,
+            [
+                EffectAction::Heal(1.0),
+                EffectAction::Eat(2, 0.5),
+                EffectAction::Hurt("minecraft:wither", 1.0)
+            ]
+        );
         // Without its mod the saved effect is dropped, as an unknown id is.
         assert!(
             PlayerEffects::from_saved(&[("gone:glow".into(), 600, 1, false, true)])
@@ -561,7 +580,7 @@ mod tests {
         fx.add(EffectInstance::new("ruby:glow", 3, 1));
         fx.add(EffectInstance::new("ruby:bleed", -1, 0));
         let mut seen = Vec::new();
-        let mut answer = |e: &EffectInstance, t: i32| {
+        let mut answer = |e: &EffectInstance, t: i32, _: &mut Vec<EffectAction>| {
             seen.push((e.id, t));
             match (e.id, t) {
                 ("ruby:glow", 2) => OmenTick::Remove,
@@ -585,7 +604,7 @@ mod tests {
         let mut fx = PlayerEffects::default();
         fx.add(EffectInstance::new("raid_omen", 2, 0));
         let mut seen = Vec::new();
-        let mut watch = |e: &EffectInstance, _: i32| {
+        let mut watch = |e: &EffectInstance, _: i32, _: &mut Vec<EffectAction>| {
             seen.push(e.duration);
             OmenTick::Remove
         };

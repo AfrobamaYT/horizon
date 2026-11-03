@@ -7025,8 +7025,10 @@ pub struct ApplyEffectTickEvent<'a> {
     pub entity: Option<i32>,
     pub amplifier: i32,
     pub holder: LivingRef,
+    /// For a player, read at the start of the effect tick; vanilla's queued periodic effects this tick aren't reflected yet.
     pub health: f32,
     pub max_health: f32,
+    /// For a player, read at the start of the effect tick; vanilla's queued periodic effects this tick aren't reflected yet.
     pub food: Option<NativePlayerFood>,
     pub(super) changes: &'a mut Vec<EffectTickChange>,
     pub keep: bool,

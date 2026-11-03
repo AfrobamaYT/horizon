@@ -479,11 +479,28 @@ pub struct NativePlayerFood {
     pub exhaustion: f32,
 }
 
+/// Damage sources supported for a mod effect tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeEffectDamage {
+    /// Poison's magic damage.
+    Magic,
+    /// The Wither effect's damage.
+    Wither,
+}
+impl NativeEffectDamage {
+    pub(crate) fn mob_kind(self) -> crate::mobs::DamageKind {
+        match self {
+            Self::Magic => crate::mobs::DamageKind::Magic,
+            Self::Wither => crate::mobs::DamageKind::Wither,
+        }
+    }
+}
+
 /// A change requested by an effect tick, applied after its hooks return.
 #[doc(hidden)]
 pub enum EffectTickChange {
     Heal(f32),
-    Hurt(String, f32),
+    Hurt(NativeEffectDamage, f32),
     AddExhaustion(f32),
     Eat(i32, f32),
 }
@@ -494,10 +511,10 @@ impl ApplyEffectTickEvent<'_> {
         self.changes.push(EffectTickChange::Heal(amount));
     }
 
-    /// Queue damage from a registered damage type. Unknown types are ignored.
-    pub fn hurt(&mut self, damage_type: &str, amount: f32) {
+    /// Queue damage with a supported source.
+    pub fn hurt(&mut self, damage_type: NativeEffectDamage, amount: f32) {
         self.changes
-            .push(EffectTickChange::Hurt(damage_type.to_owned(), amount));
+            .push(EffectTickChange::Hurt(damage_type, amount));
     }
 
     /// Queue food exhaustion; a non-player holder ignores it.
