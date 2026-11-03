@@ -377,13 +377,76 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 
 #[cfg(test)]
 pub(super) mod tests {
+    /// Isolate declarations and frozen registries without changing another test's resources.
+    pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
+        if std::env::var_os(flag).is_some() {
+            return false;
+        }
+        let resources =
+            std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
+                .canonicalize()
+                .unwrap();
+        let target = std::env::current_dir().unwrap().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        for case in cases {
+            let scratch = target.join(format!(
+                "be-types-fixture-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&scratch).unwrap();
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--ignored",
+                    "--exact",
+                    name,
+                    "--nocapture",
+                    "--test-threads=4",
+                ])
+                .current_dir(&scratch)
+                .env(flag, case)
+                .env("HORIZON_TEST_RESOURCES", &resources)
+                .env("HORIZON_NO_AUDIO", "1")
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1");
+            for key in [
+                "HORIZON_HOME",
+                "HORIZON_LAUNCHER_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_RUNTIME_DIR",
+                "HORIZON_LAUNCHER_TRASH",
+                "HORIZON_LAUNCHER_CLIPBOARD",
+                "HORIZON_LAUNCHER_DESKTOP",
+            ] {
+                let home = scratch.join(key);
+                std::fs::create_dir(&home).unwrap();
+                command.env(key, home);
+            }
+            let status = command.status().unwrap();
+            std::fs::remove_dir_all(scratch).unwrap();
+            assert!(status.success(), "{name}: {case}");
+        }
+        true
+    }
+
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        with_game_at(root, test);
+    }
+
+    pub(in crate::game) fn with_game_at(
+        root: std::path::PathBuf,
+        test: impl FnOnce(&mut super::Game<'_>),
+    ) {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
         use horizon_client::mod_api::NativeAuthority;
 
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
             root.clone(),
@@ -803,7 +866,25 @@ pub(super) mod tests {
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
                 host.hub.guests.push(guest);
             }
+            let motion = horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
+            )
+            .unwrap();
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
             let player = game.native_player_ref(12).unwrap();
+            let guest_living = game.native_living(player.entity).unwrap();
+            let host: &dyn horizon_client::mod_api::Host = game;
+            assert_eq!(
+                guest_living.attribute_base(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(
+                guest_living.attribute_value(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(guest_living.max_health(host), Some(20.0));
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
             // Body and saddle are stored on a guest like on a mob.
             let living = game.native_living(player.entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);

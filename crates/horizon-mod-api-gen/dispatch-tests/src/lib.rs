@@ -330,38 +330,60 @@ mod tests {
         }
     }
     struct Registrar;
-    /// No parts: the scoped dispatch calls the mods only.
-    struct Parts;
-    fn parts(_: &'static str) -> Parts {
-        Parts
+    /// The parts every thing in a scope has, whatever its key: a test's own, or none.
+    #[derive(Default)]
+    struct Parts {
+        blocks: Vec<&'static dyn BlockPart>,
+        block_entities: Vec<&'static dyn BlockEntityPart>,
+        items: Vec<&'static dyn ItemPart>,
+        menus: Vec<&'static dyn MenuPart>,
+    }
+    static NO_PARTS: Parts = Parts {
+        blocks: Vec::new(),
+        block_entities: Vec::new(),
+        items: Vec::new(),
+        menus: Vec::new(),
+    };
+    thread_local! {
+        static PARTS: std::cell::Cell<&'static Parts> = const { std::cell::Cell::new(&NO_PARTS) };
+    }
+    fn install_parts(parts: Parts) {
+        PARTS.set(Box::leak(Box::new(parts)));
+    }
+    /// `part` for the parts list of a test: parts live as long as the installation.
+    fn leak<T>(part: T) -> &'static T {
+        Box::leak(Box::new(part))
+    }
+    fn has_part_hook(_: HookId) -> bool {
+        true
+    }
+    fn parts(_: &'static str) -> &'static Parts {
+        PARTS.get()
     }
     impl Parts {
-        fn block_state(&self, _: BlockStateId) -> &'static [&'static dyn BlockPart] {
-            &[]
+        fn for_hook(&self, _: HookId) -> Option<&Self> {
+            Some(self)
+        }
+        fn block_state(&self, _: BlockStateId) -> &[&'static dyn BlockPart] {
+            &self.blocks
         }
         fn block_entity<'k>(
             &self,
             _: impl FnOnce() -> Option<&'k str>,
-        ) -> &'static [&'static dyn BlockEntityPart] {
-            &[]
+        ) -> &[&'static dyn BlockEntityPart] {
+            &self.block_entities
         }
         fn block_entity_kind<'k>(
             &self,
             _: impl FnOnce() -> Option<&'k str>,
-        ) -> &'static [&'static dyn BlockEntityPart] {
-            &[]
+        ) -> &[&'static dyn BlockEntityPart] {
+            &self.block_entities
         }
-        fn item<'k>(
-            &self,
-            _: impl FnOnce() -> Option<&'k str>,
-        ) -> &'static [&'static dyn ItemPart] {
-            &[]
+        fn item<'k>(&self, _: impl FnOnce() -> Option<&'k str>) -> &[&'static dyn ItemPart] {
+            &self.items
         }
-        fn menu<'k>(
-            &self,
-            _: impl FnOnce() -> Option<&'k str>,
-        ) -> &'static [&'static dyn MenuPart] {
-            &[]
+        fn menu<'k>(&self, _: impl FnOnce() -> Option<&'k str>) -> &[&'static dyn MenuPart] {
+            &self.menus
         }
     }
     fn entered_parts<'a, P: ?Sized>(
@@ -539,8 +561,15 @@ mod tests {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
     }
-    #[mod_api::__subscriptions]
-    impl Hooks for Mod {
+    impl BlockPart for Mod {
+        fn block_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+    }
+    impl BlockEntityPart for Mod {
+        fn block_entity_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
         fn menu_button(&self, _: &mut dyn ServerHost, event: &mut MenuButtonEvent<'_>) {
             assert_eq!(event.context.player, 123);
             assert_eq!(event.context.player_entity_id, 42);
@@ -557,6 +586,34 @@ mod tests {
             assert_eq!(event.block, "example:machine");
             event.draw.0.push(self.id);
         }
+    }
+    impl MenuPart for Mod {
+        fn menu_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+        fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
+            event.may_place = false;
+            event.max_stack = self.id;
+        }
+    }
+    impl ItemPart for Mod {
+        fn item_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+        fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
+            event.lines.push((Text, self.id));
+        }
+        fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
+            self.calls.lock().unwrap().push(self.id);
+            if self.id == 1 {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Mod {
         fn living_entity_use_item_finish(
             &self,
             _: &mut dyn ServerHost,
@@ -571,10 +628,6 @@ mod tests {
             } else {
                 Flow::Continue
             }
-        }
-        fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
-            event.may_place = false;
-            event.max_stack = self.id;
         }
         fn living_entity_use_item_tick(
             &self,
@@ -601,9 +654,6 @@ mod tests {
         fn level_tick_pre(&self, _: &mut dyn ServerHost, _: &mut LevelTickPreEvent<'_>) {
             self.calls.lock().unwrap().push(self.id);
         }
-        fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
-            event.lines.push((Text, self.id));
-        }
         fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<NativeZoom> {
             self.calls.lock().unwrap().push(self.id);
             Some(NativeZoom(self.id))
@@ -624,26 +674,20 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
-            self.calls.lock().unwrap().push(self.id);
-            if self.id == 1 {
-                Flow::Cancel
-            } else {
-                Flow::Continue
-            }
-        }
+    }
+    fn part(id: u32, calls: &Arc<Mutex<Vec<u32>>>) -> &'static Mod {
+        leak(Mod {
+            id,
+            calls: calls.clone(),
+        })
     }
     #[test]
     fn menu_button_mutates_entity_and_cursor_once() {
-        let mods = [ModEntry::new(
-            "menu-button",
-            Box::new(Mod {
-                id: 1,
-                calls: Arc::new(Mutex::new(Vec::new())),
-            }),
-        )];
-        let mods: Arc<[ModEntry]> = mods.into();
-        install(mods.clone());
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        install_parts(Parts {
+            block_entities: vec![part(1, &calls)],
+            ..Parts::default()
+        });
         let context = generated::horizon_client::menu::MenuButtonContext {
             player: 123,
             player_entity_id: 42,
@@ -661,18 +705,10 @@ mod tests {
     #[test]
     fn block_entity_submit_dispatches_in_order_with_shared_draw() {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<ModEntry> = vec![
-            ModEntry::new(
-                "mod-0",
-                Box::new(Mod {
-                    id: 1,
-                    calls: calls.clone(),
-                }),
-            ),
-            ModEntry::new("mod-1", Box::new(Mod { id: 2, calls })),
-        ];
-        let mods: Arc<[ModEntry]> = mods.into();
-        install(mods.clone());
+        install_parts(Parts {
+            block_entities: vec![part(1, &calls), part(2, &calls)],
+            ..Parts::default()
+        });
         let mut draw = BlockEntityDraw(Vec::new());
         dispatch_block_entity_submit(
             &TestHost,
@@ -687,15 +723,20 @@ mod tests {
 
     #[test]
     fn slot_rules_mutate_and_item_tick_can_cancel() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<ModEntry> = vec![ModEntry::new(
             "mod-2",
             Box::new(Mod {
                 id: 1,
-                calls: Arc::new(Mutex::new(Vec::new())),
+                calls: calls.clone(),
             }),
         )];
         let mods: Arc<[ModEntry]> = mods.into();
         install(mods.clone());
+        install_parts(Parts {
+            menus: vec![part(1, &calls)],
+            ..Parts::default()
+        });
         let (mut may_place, mut max_stack) = (true, 64);
         dispatch_menu_slot_rules(
             "test:menu",
@@ -775,8 +816,10 @@ mod tests {
         struct Level;
         impl LevelHost for Level {}
         struct Refuse(Arc<Mutex<Vec<u32>>>, u32);
-        #[mod_api::__subscriptions]
-        impl Hooks for Refuse {
+        impl BlockPart for Refuse {
+            fn block_subscribed(&self) -> &'static [Option<HookId>] {
+                &[]
+            }
             fn state_for_placement(
                 &self,
                 _: &dyn LevelHost,
@@ -787,12 +830,13 @@ mod tests {
             }
         }
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<ModEntry> = vec![
-            ModEntry::new("refuse-6", Box::new(Refuse(calls.clone(), 1))),
-            ModEntry::new("refuse-7", Box::new(Refuse(calls.clone(), 2))),
-        ];
-        let mods: Arc<[ModEntry]> = mods.into();
-        install(mods.clone());
+        install_parts(Parts {
+            blocks: vec![
+                leak(Refuse(calls.clone(), 1)),
+                leak(Refuse(calls.clone(), 2)),
+            ],
+            ..Parts::default()
+        });
         let mut answer = None;
         dispatch_state_for_placement(
             &Level,
@@ -978,6 +1022,10 @@ mod tests {
         calls.lock().unwrap().clear();
         dispatch_zoom(&host, &mut zoom);
         assert!(calls.lock().unwrap().is_empty());
+        install_parts(Parts {
+            items: vec![part(1, &calls), part(2, &calls)],
+            ..Parts::default()
+        });
         let mut lines = Vec::new();
         dispatch_tooltip(&host, &ItemStack::default(), &mut lines);
         assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);

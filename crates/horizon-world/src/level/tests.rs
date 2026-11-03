@@ -1367,12 +1367,17 @@ impl World<'_> {
             f64::from(pos.y) + 0.5,
             f64::from(pos.z),
         );
+        let state = self.level.block_state(pos);
         self.f.behaviours.use_without_item(
             &mut self.level,
             &mut self.ticks,
-            pos,
-            Direction::North,
-            hit,
+            state,
+            horizon_core::geometry::BlockHit {
+                block: pos,
+                direction: Direction::North,
+                location: hit,
+                inside: false,
+            },
             player,
         )
     }
@@ -1391,12 +1396,17 @@ impl World<'_> {
             f64::from(pos.y) + 0.5,
             f64::from(pos.z),
         );
+        let state = self.level.block_state(pos);
         self.f.behaviours.use_item_on_branch(
             &mut self.level,
             &mut self.ticks,
-            pos,
-            Direction::North,
-            hit,
+            state,
+            horizon_core::geometry::BlockHit {
+                block: pos,
+                direction: Direction::North,
+                location: hit,
+                inside: false,
+            },
             player,
             item,
         )
@@ -1430,9 +1440,12 @@ impl World<'_> {
         self.f.behaviours.use_item_on(
             &mut self.level,
             &mut self.ticks,
-            pos,
-            Direction::North,
-            hit,
+            horizon_core::geometry::BlockHit {
+                block: pos,
+                direction: Direction::North,
+                location: hit,
+                inside: false,
+            },
             player,
             item,
         )
@@ -2314,8 +2327,11 @@ fn replacing_moving_piston_skips_the_same_effects_with_or_without_flag() {
         ));
         assert!(w.b().set_block(&mut w.level, &mut w.ticks, pos, air, flags));
         assert_eq!(w.get(pos), air);
-        // Current engine behavior, not vanilla: horizon-rust/horizon#7863.
-        assert_eq!(w.get(base), air);
+        assert_eq!(
+            w.get(base),
+            extended,
+            "setBlock over the head keeps the extended base"
+        );
         assert!(!w.ticks.moving_pistons.iter().any(|(p, _)| *p == pos));
     }
 }
