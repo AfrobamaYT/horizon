@@ -11,6 +11,7 @@ use crate::mod_api::{
 use horizon_client::{chunk::Chunk, first_person::Hand, items::ItemStack, motion::PlayerMotion};
 use horizon_core::geometry::Vec3;
 use horizon_protocol::connection::Pipe;
+use horizon_world::nbt::Tag;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -46,7 +47,7 @@ fn side(host: HostSide<'_>) -> LogicalSide {
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
     fn register(&self, r: &mut Registrar) {
-        for block in ["minecraft:lever", "minecraft:stone"] {
+        for block in ["minecraft:lever", "minecraft:stone", "minecraft:campfire"] {
             r.block_part(block, self.clone());
         }
         for item in ["minecraft:stick", "minecraft:shield"] {
@@ -299,6 +300,60 @@ fn phase_events_replace_the_behaviour_before_its_part_on_both_sides() {
                 };
                 assert!(!use_block(game, client));
                 assert!(observer.0.lock().unwrap().steps.is_empty());
+
+                // ItemStack.useOn passes before Item.useOn in adventure mode.
+                game.set_mode_id(2);
+                *observer.0.lock().unwrap() = Controls {
+                    use_block: NativeTriState::False,
+                    ..Controls::default()
+                };
+                assert!(!use_block(game, client));
+                assert!(observer.0.lock().unwrap().steps.is_empty());
+                game.inventory[game.selected]
+                    .as_mut()
+                    .unwrap()
+                    .data_mut()
+                    .set_other(
+                        "minecraft:can_place_on",
+                        Some(Tag::Compound(
+                            [("blocks".into(), Tag::String("minecraft:stone".into()))].into(),
+                        )),
+                    );
+                *observer.0.lock().unwrap() = Controls {
+                    use_block: NativeTriState::False,
+                    item_on_answer: Some(Answer::Success),
+                    ..Controls::default()
+                };
+                assert!(use_block(game, client));
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Phase(UsePhase::ItemAfterBlock, side)]
+                );
+                game.set_mode_id(1);
+
+                // In 26.3 dousing is CampfireBlock.useItemOn, not Item.useOn:
+                // a canceled BLOCK cannot predict it or reach ITEM_AFTER_BLOCK.
+                let campfire = registry.default_state("minecraft:campfire").unwrap();
+                game.world.set(0, 64, 0, campfire).unwrap();
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:iron_shovel", 1));
+                *observer.0.lock().unwrap() = Controls {
+                    block_answer: Some(Answer::Success),
+                    ..Controls::default()
+                };
+                assert!(use_block(game, client));
+                assert_eq!(game.world.block(0, 64, 0), campfire);
+                assert_eq!(
+                    observer.0.lock().unwrap().steps,
+                    [Step::Phase(UsePhase::Block, side)]
+                );
+                *observer.0.lock().unwrap() = Controls::default();
+                assert!(use_block(game, client));
+                assert_ne!(game.world.block(0, 64, 0), campfire);
+                let mut expected = vec![Step::Phase(UsePhase::Block, side)];
+                if !client {
+                    expected.push(Step::BlockPart);
+                }
+                assert_eq!(observer.0.lock().unwrap().steps, expected);
 
                 game.offhand = Some(ItemStack::new("minecraft:stick", 1));
                 *observer.0.lock().unwrap() = Controls {

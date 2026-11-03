@@ -6939,6 +6939,17 @@ impl Game<'_> {
         {
             return Ok(false);
         }
+        // ItemStack.useOn: adventure's predicate selects Item.useOn before
+        // its event and Part, not just before the eventual block placement.
+        if let Some(hit) = block_hit
+            && !self.may_build()
+            && !self.can_place_on_in_adventure(hit.pos)
+        {
+            if on_block {
+                return Ok(false);
+            }
+            block_hit = None;
+        }
         // Native mods, where ItemStack.useOn and Item.use start: the block
         // aimed at had its turn, and the item is off cooldown. A guest's
         // UseItemOn reaches only useOn, its UseItem only use.
@@ -7140,8 +7151,9 @@ impl Game<'_> {
         // PlaceOnWaterBlockItem.use: the lily pad and frogspawn aim at the block
         // or water source the SOURCE_ONLY ray meets and are placed on the
         // position above it.
+        let water_placement = matches!(&*stack.item, "minecraft:lily_pad" | "minecraft:frogspawn");
         let water_hit;
-        let hit = if matches!(&*stack.item, "minecraft:lily_pad" | "minecraft:frogspawn") {
+        let hit = if water_placement {
             let Some(h) = self.pick_fluid() else {
                 return Ok(false);
             };
@@ -7159,8 +7171,8 @@ impl Game<'_> {
         if info.block.is_none() {
             return Ok(false);
         }
-        if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
-            // ItemStack.useOn passes in adventure mode; useItem eats.
+        if water_placement && !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
+            // The fluid-ray placement has its own target, selected by Item.use.
             return Ok(!on_block && self.start_eating(&info));
         }
         let face = match hit.face {

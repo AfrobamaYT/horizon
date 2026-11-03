@@ -7484,6 +7484,11 @@ impl Game<'_> {
             let item_used = canceled.is_none()
                 && use_item.or(true)
                 && held.as_ref().is_some_and(|stack| {
+                    if !self.may_build()
+                        && !self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
+                    {
+                        return false;
+                    }
                     self.items().get(&stack.item).is_some_and(|info| {
                         cooldown_forced
                             || !self
@@ -7690,24 +7695,19 @@ impl Game<'_> {
                 .as_ref()
                 .filter(|_| item_used)
                 .filter(|s| s.item.ends_with("_spawn_egg"))
-                .filter(|_| {
-                    self.may_build()
-                        || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
-                })
             {
                 // SpawnEggItem.useOn on a client level: FAIL for a mob that
                 // cannot spawn (the click ends, no swing), else SUCCESS (swing).
                 // Either way no UseItem follows, so the server does not spawn
-                // a second mob from the fluid ray (ItemStack.useOn passes in
-                // adventure mode off can_place_on, which the filter above keeps).
+                // a second mob from the fluid ray. ItemStack.useOn's adventure
+                // predicate was checked before selecting this phase.
                 if self.spawn_egg_allowed(&stack.item) {
                     self.with_hand(hand, Game::swing_arm);
                 }
                 return true;
             } else if let Some(stack) = held.as_ref().filter(|_| item_used)
-                && (self.with_hand(hand, |g| {
-                    g.predict_item_on_block(stack, &hit, hand, cooldown_forced)
-                }) || self.predict_map_on_banner(stack, &hit))
+                && (self.with_hand(hand, |g| g.predict_item_on_block(stack, &hit))
+                    || self.predict_map_on_banner(stack, &hit))
             {
                 // Item.useOn succeeded here (InteractionResult.SUCCESS):
                 // this hand swings and the click ends, so the other hand
@@ -7720,16 +7720,6 @@ impl Game<'_> {
                     .as_ref()
                     .and_then(|stack| self.items().get(&stack.item).cloned())
                     .filter(|info| info.consumable.is_some());
-                // ItemStack.useOn passes in adventure mode unless the item may
-                // be placed on this block: useItem eats it (a block item without
-                // a consumable keeps ending the click here).
-                if !reacts
-                    && consumable.is_some()
-                    && !self.may_build()
-                    && !self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
-                {
-                    return false;
-                }
                 let placed = if reacts {
                     None
                 } else {
@@ -7775,31 +7765,12 @@ impl Game<'_> {
     /// A cushion succeeds where it may be placed and spawns on the server, a
     /// firework rocket wherever it may be used, and the server launches it.
     /// Whether the item's use succeeded, which ends the click.
-    /// `cooldown_forced`: RightClickBlock's useItem TRUE uses it whatever its
-    /// cooldown.
-    fn predict_item_on_block(
-        &mut self,
-        stack: &ItemStack,
-        hit: &super::Hit,
-        hand: Hand,
-        cooldown_forced: bool,
-    ) -> bool {
-        // FireworkRocketItem.useOn: SUCCESS on the client too, so neither
-        // UseItem nor the off hand follows. It passes while gliding (the use
-        // boosts instead), cooling down (MultiPlayerGameMode.performUseItemOn
-        // skips useOn) and in adventure mode off its can_place_on
-        // (ItemStack.useOn).
+    /// The caller has selected Item.useOn after cooldown and adventure gates.
+    fn predict_item_on_block(&mut self, stack: &ItemStack, hit: &super::Hit) -> bool {
+        // FireworkRocketItem.useOn: SUCCESS unless gliding, when Item.use
+        // boosts instead. The phase's cooldown/adventure gates already ran.
         if &*stack.item == "minecraft:firework_rocket" {
-            let cooling = !cooldown_forced
-                && self.items().get(&stack.item).is_some_and(|info| {
-                    let group = horizon_client::cooldowns::group(stack, info.use_cooldown.as_ref());
-                    self.cooldowns.is_on_cooldown(&group)
-                });
-            let gliding = self.player.as_ref().is_some_and(|p| p.fall_flying);
-            return !cooling
-                && !gliding
-                && (self.may_build()
-                    || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)));
+            return !self.player.as_ref().is_some_and(|p| p.fall_flying);
         }
         let at = [
             f64::from(hit.pos[0]) + 0.5,
@@ -7845,11 +7816,10 @@ impl Game<'_> {
 
     /// `MapItem.useOn` on this client: a map used on a banner is SUCCESS
     /// whatever its data says (the server toggles the marker, or fails
-    /// quietly), so this hand swings and the click ends. `ItemStack.useOn`
-    /// passes in adventure mode.
+    /// quietly), so this hand swings and the click ends. The caller applies
+    /// ItemStack.useOn's adventure predicate before selecting this phase.
     fn predict_map_on_banner(&self, stack: &ItemStack, hit: &super::Hit) -> bool {
         super::maps::map_id(stack).is_some()
-            && self.may_build()
             && self.block_in_tag("minecraft:banners", &self.block_name(hit.pos))
     }
 
