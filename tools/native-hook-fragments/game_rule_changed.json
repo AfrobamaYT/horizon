@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "game_rule_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_game_rule_changed",
+      "neoforge": "GameRuleChangedEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a server game rule was set (`native_game_rule_changed`).",
+  "doc_summary": "`native_game_rule_changed(rule, value)`, once the server set a game rule (`GameRules.set` with a server): `/gamerule`, the game rules screen, the management protocol, a test environment or `server.properties`. `rule` is the rule's id (`minecraft:keep_inventory`), `value` its new `GameRuleValue`. Before `world_game_rule_change`. Server-side. Bundles need \"hooks\": @API:game_rule_changed@."
+}

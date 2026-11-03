@@ -10,7 +10,10 @@ use super::{
     commands::Target,
     entity::{Entity as _, entity_lists_of, for_each_entity},
 };
-use horizon_client::mod_api::{EntityRef, LevelRef, NativeBlockShapeKind, NativeBlockUpdateFlags};
+use horizon_client::mod_api::{
+    EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
+    NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
+};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
@@ -24,19 +27,22 @@ impl Game<'_> {
         if id == 0 {
             return None;
         }
+        // A guest action can take the hub out of the game while its player
+        // state is in place. Resolve that player before looking in the hub.
+        if self.lan_acting_uuid.is_some()
+            && self.lan_acting_entity == Some(entity.id())
+            && self.player.is_some()
+        {
+            return Some(Target::Player);
+        }
         let player = self
             .lan
             .iter()
             .flat_map(|h| h.hub.guests.iter())
             .find(|g| g.placed && g.entity_id == id);
         if let Some(g) = player {
-            // `as_guest` swaps the acting player's state into the game.
-            let acting = self.lan_acting == Some(g.conn) && self.player.is_some();
-            return Some(if acting {
-                Target::Player
-            } else {
-                Target::Guest(g.conn)
-            });
+            // An outer guest in a nested swap has a displaced record.
+            return (!self.lan_guest_swaps.contains(&g.conn)).then_some(Target::Guest(g.conn));
         }
         match self.level_entity(id)? {
             Target::Mob(id) if !self.mobs.iter().any(|m| m.id == id && !m.removed) => None,
@@ -45,7 +51,8 @@ impl Game<'_> {
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None on a client, with no world open, or for no such entity
-    /// in the level in place or among the server's players. API
+    /// in the level in place or among the server's players. During a nested
+    /// player swap, an outer player's displaced record is unavailable. API
     /// @API:entity_handles@.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
@@ -209,6 +216,106 @@ impl Game<'_> {
         })
     }
 
+    /// Gameplay's cached face support in the current or a parked level. Returns
+    /// None for clients, stale or closed levels, unloaded or out-of-height blocks,
+    /// dynamic-shape states (including moving pistons and shulker boxes), or an
+    /// exporter error. Dynamic support is a follow-up on #29. False means not
+    /// sturdy. API @API:level_shapes@.
+    pub(super) fn native_level_block_face_sturdy(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        face: NativeBlockFace,
+        support: NativeSupportType,
+    ) -> Option<bool> {
+        let state = self.native_level_state(level, pos)?;
+        use horizon_core::geometry::Direction;
+        let direction = match face {
+            NativeBlockFace::Down => Direction::Down,
+            NativeBlockFace::Up => Direction::Up,
+            NativeBlockFace::North => Direction::North,
+            NativeBlockFace::South => Direction::South,
+            NativeBlockFace::West => Direction::West,
+            NativeBlockFace::East => Direction::East,
+        };
+        let b = self.res.behaviours();
+        if !b.has_cached_support(state) {
+            return None;
+        }
+        Some(match support {
+            NativeSupportType::Full => b.is_face_sturdy(state, direction),
+            NativeSupportType::Center => b.is_face_sturdy_center(state, direction),
+            NativeSupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
+        })
+    }
+
+    /// Clip an empty-context ray against collider or outline shapes, without fluids.
+    /// None on failed reads, dynamic shapes, invalid rays or traversal limits.
+    /// API @API:level_shapes@.
+    pub(super) fn native_level_clip(
+        &self,
+        level: LevelRef,
+        from: [f64; 3],
+        to: [f64; 3],
+        blocks: NativeClipBlock,
+        fluids: NativeClipFluid,
+    ) -> Option<NativeClipHit> {
+        use horizon_client::collisions::SceneCollisions;
+        use horizon_core::geometry::Direction;
+        use horizon_world::{
+            collision_context::CollisionContext,
+            world_ray::{RayBlockMode, RayFluidMode, clip_world},
+        };
+        let world = self.native_level_world(level)?;
+        let mut rays = super::explosion::ColliderRays {
+            scene: SceneCollisions {
+                world,
+                binding: self.collision,
+                subject: None,
+            },
+            context: CollisionContext::empty(false),
+            clip_data: Some(super::explosion::ClipData {
+                facts: self.res.facts(),
+                behaviours: self.res.behaviours(),
+                tables: &self.pack.context.tables,
+                registry: self.pack.assets.registry,
+            }),
+        };
+        let mode = match blocks {
+            NativeClipBlock::Collider => RayBlockMode::Collider,
+            NativeClipBlock::Outline => RayBlockMode::Outline,
+        };
+        let fluid = match fluids {
+            NativeClipFluid::None => RayFluidMode::None,
+        };
+        let result = clip_world(
+            &mut rays,
+            Vec3::new(from[0], from[1], from[2]),
+            Vec3::new(to[0], to[1], to[2]),
+            mode,
+            fluid,
+            4096,
+        )
+        .ok()?;
+        let h = result.hit;
+        let face = match h.direction {
+            Direction::Down => NativeBlockFace::Down,
+            Direction::Up => NativeBlockFace::Up,
+            Direction::North => NativeBlockFace::North,
+            Direction::South => NativeBlockFace::South,
+            Direction::West => NativeBlockFace::West,
+            Direction::East => NativeBlockFace::East,
+        };
+        Some(NativeClipHit {
+            miss: result.miss,
+            block: [h.block.x, h.block.y, h.block.z],
+            face,
+            location: [h.location.x, h.location.y, h.location.z],
+            inside: h.inside,
+            world_border: false,
+        })
+    }
+
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
@@ -235,7 +342,7 @@ impl Game<'_> {
     /// API @API:entity_handles@.
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
         let words = match self.native_entity_target(entity)? {
-            Target::Player => return self.command_guest(self.lan_acting?).map(|g| g.uuid),
+            Target::Player => return self.lan_acting_uuid,
             Target::Guest(conn) => return self.command_guest(conn).map(|g| g.uuid),
             _ => self.uuid_for(entity.id()),
         };
@@ -446,6 +553,156 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn acting_guest_handles_resolve_while_hub_is_out() {
+        use super::super::lan::LanSettings;
+        use horizon_client::{
+            items::ItemStack,
+            lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
+            mod_api::EquipmentSlot,
+        };
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+
+        with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let mut host = game.lan.take().unwrap();
+            for id in [12, 13] {
+                let (tx, _rx) = std::sync::mpsc::channel();
+                let mut guest = Guest::new(
+                    Joined {
+                        conn: id,
+                        uuid: id as u128,
+                        name: format!("guest{id}"),
+                        properties: Vec::new(),
+                        info: ClientInformation::new(8),
+                        brand: String::new(),
+                        sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                        latency: Arc::new(AtomicI32::new(0)),
+                        address: "127.0.0.1:1".parse().unwrap(),
+                    },
+                    id as i32,
+                    [3.0, 64.0, 5.0],
+                    10,
+                );
+                guest.placed = true;
+                guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
+                host.hub.guests.push(guest);
+            }
+            game.lan = Some(host);
+            let player = game.native_player_ref(12).unwrap();
+            assert!(!game.native_player_set_game_mode(player, -1));
+            assert!(!game.native_player_set_game_mode(player, 4));
+            assert!(!game.native_player_set_game_mode(player, 0));
+            assert!(game.native_player_set_game_mode(player, 1));
+            assert_eq!(game.native_player_game_mode(player), Some(1));
+            let abilities = game.native_player_abilities(player).unwrap();
+            assert!(abilities.invulnerable && abilities.may_fly && abilities.instabuild);
+            assert!(game.native_player_set_game_mode(player, 0));
+            assert_eq!(game.native_player_game_mode(player), Some(0));
+            let abilities = game.native_player_abilities(player).unwrap();
+            assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
+            let mut stale = player;
+            stale.entity = horizon_client::mod_api::EntityRef::new(
+                horizon_client::mod_api::NativeWorldEpoch::new(0),
+                player.entity.id(),
+            );
+            assert!(!game.native_player_set_game_mode(stale, 1));
+            host = game.lan.take().unwrap();
+            let other = game
+                .native_lifecycle
+                .epoch()
+                .map(|epoch| horizon_client::mod_api::EntityRef::new(epoch, 13))
+                .unwrap();
+            game.as_guest(&mut host, 12, |game| {
+                let player = game.native_player_ref(12).unwrap();
+                let entity = game.native_entity(12).unwrap();
+                assert_eq!(player.entity, entity);
+                assert_eq!(entity.position(game), Some([3.0, 64.0, 5.0]));
+                assert_eq!(entity.uuid(game), Some(12));
+                let living = game.native_living(entity).unwrap();
+                assert_eq!(
+                    living
+                        .equipment(game, EquipmentSlot::MainHand)
+                        .unwrap()
+                        .item
+                        .as_ref(),
+                    "minecraft:stone"
+                );
+                assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+                assert!(other.position(game).is_none());
+                assert!(game.native_living(other).is_none());
+            })
+            .unwrap();
+            let swap = game.enter_guest(&mut host, 12).unwrap();
+            game.lan = Some(host);
+            assert!(game.native_entity(12).is_some());
+            let other = game.native_entity(13).unwrap();
+            assert_eq!(other.position(game), Some([3.0, 64.0, 5.0]));
+            assert_eq!(other.uuid(game), Some(13));
+            assert_eq!(other.kind(game).as_deref(), Some("minecraft:player"));
+            let living = game.native_living(other).unwrap();
+            assert_eq!(
+                living
+                    .equipment(game, EquipmentSlot::MainHand)
+                    .unwrap()
+                    .item
+                    .as_ref(),
+                "minecraft:stone"
+            );
+            let player = game.native_player_ref(13).unwrap();
+            assert_eq!(player.entity, other);
+            assert_eq!(player.game_mode(game), Some(0));
+            assert!(!game.native_player_set_game_mode(player, 1));
+            let acting = game.native_player_ref(12).unwrap();
+            assert!(game.native_player_set_game_mode(acting, 2));
+            assert_eq!(game.native_player_game_mode(acting), Some(2));
+            host = game.lan.take().unwrap();
+            let nested = game.enter_guest(&mut host, 13).unwrap();
+            game.lan = Some(host);
+            assert!(game.native_entity(12).is_none());
+            assert!(game.native_player_ref(12).is_none());
+            assert!(
+                game.native_living(horizon_client::mod_api::EntityRef::new(other.epoch(), 12))
+                    .is_none()
+            );
+            assert!(game.native_entity(13).is_some());
+            host = game.lan.take().unwrap();
+            game.leave_guest(&mut host, nested);
+            game.leave_guest(&mut host, swap);
+            assert!(game.lan_guest_swaps.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn entities_in_returns_readable_handles_and_intersects_boxes() {
         use horizon_client::entities::ArmorStand;
         use horizon_client::mod_api::{LevelRef, NativeWorldEpoch};
@@ -478,6 +735,243 @@ pub(super) mod tests {
                     [2.0; 3]
                 )
                 .is_none()
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn level_sturdy_uses_gameplay_support() {
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{
+                LevelRef, NativeBlockFace as Face, NativeSupportType as Support, NativeWorldEpoch,
+            },
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let slab = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone_slab")
+                .unwrap();
+            game.world.set(0, 64, 0, slab).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
+                Some(true)
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::North, Support::Full),
+                Some(false)
+            );
+            let wall = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cobblestone_wall")
+                .unwrap();
+            game.world.set(0, 64, 0, wall).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Center),
+                Some(true)
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [16, 64, 0], Face::Down, Support::Full),
+                None
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 10000, 0], Face::Down, Support::Full),
+                None
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Center),
+                Some(true)
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            let shulker = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:shulker_box")
+                .unwrap();
+            game.world.set(0, 64, 0, shulker).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                None
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert_eq!(
+                stale.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
+                None
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn level_clip_reads_parked_world_and_refuses_unloaded() {
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{
+                NativeBlockFace as Face, NativeClipBlock as Block, NativeClipFluid as Fluid,
+            },
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(1, 64, 0, stone).unwrap();
+            let from = [0.5, 64.5, 0.5];
+            let to = [2.5, 64.5, 0.5];
+            for mode in [Block::Collider, Block::Outline] {
+                let hit = level.clip(game, from, to, mode, Fluid::None).unwrap();
+                assert!(!hit.miss);
+                assert_eq!(hit.block, [1, 64, 0]);
+                assert_eq!(hit.face, Face::West);
+                assert_eq!(hit.location, [1.0, 64.5, 0.5]);
+                assert!(!hit.inside && !hit.world_border);
+            }
+            assert!(
+                level
+                    .clip(
+                        game,
+                        [15.5, 64.5, 0.5],
+                        [17.5, 64.5, 0.5],
+                        Block::Collider,
+                        Fluid::None
+                    )
+                    .is_none()
+            );
+            let miss = level
+                .clip(
+                    game,
+                    [0.5, 67.5, 0.5],
+                    [2.5, 67.5, 0.5],
+                    Block::Collider,
+                    Fluid::None,
+                )
+                .unwrap();
+            assert!(miss.miss);
+            let inside = level
+                .clip(
+                    game,
+                    [1.5, 64.5, 0.5],
+                    [2.5, 64.5, 0.5],
+                    Block::Collider,
+                    Fluid::None,
+                )
+                .unwrap();
+            assert!(inside.inside && !inside.miss);
+            assert!(
+                level
+                    .clip(
+                        game,
+                        [f64::NAN, 64.0, 0.0],
+                        to,
+                        Block::Collider,
+                        Fluid::None
+                    )
+                    .is_none()
+            );
+            let stale = horizon_client::mod_api::LevelRef::new(
+                horizon_client::mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert!(
+                stale
+                    .clip(game, from, to, Block::Collider, Fluid::None)
+                    .is_none()
+            );
+            use horizon_world::world_ray::RayWorld;
+            let mut ordinary = super::super::explosion::ColliderRays {
+                scene: horizon_client::collisions::SceneCollisions {
+                    world: &game.world,
+                    binding: game.collision,
+                    subject: None,
+                },
+                context: horizon_world::collision_context::CollisionContext::empty(false),
+                clip_data: None,
+            };
+            assert!(
+                ordinary
+                    .interaction_shape(
+                        horizon_world::registry::BlockStateId(u32::MAX),
+                        horizon_core::position::BlockPos::new(0, 0, 0)
+                    )
+                    .unwrap()
+                    .is_empty()
+            );
+            let plant = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:dandelion")
+                .unwrap();
+            game.world.set(4, 64, 4, plant).unwrap();
+            let facts = game.res.facts().get(plant);
+            assert!(facts.outline_offset);
+            let offset = game.pack.context.tables.offset(plant, 4, 4).unwrap();
+            assert_ne!(offset[0], 0.0);
+            let b = facts.outline[0];
+            let y = 64.0 + offset[1] + (b[1] + b[4]) / 2.0;
+            let z = 4.0 + offset[2] + (b[2] + b[5]) / 2.0;
+            let plant_hit = level
+                .clip(game, [3.0, y, z], [5.0, y, z], Block::Outline, Fluid::None)
+                .unwrap();
+            assert_eq!(plant_hit.block, [4, 64, 4]);
+            assert!((plant_hit.location[0] - (4.0 + offset[0] + b[0])).abs() < 1e-9);
+            let cauldron = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cauldron")
+                .unwrap();
+            game.world.set(0, 64, 2, cauldron).unwrap();
+            let bowl = level
+                .clip(
+                    game,
+                    [0.5, 65.27, 0.5],
+                    [0.5, 64.85, 3.5],
+                    Block::Outline,
+                    Fluid::None,
+                )
+                .unwrap();
+            assert!(!bowl.miss);
+            assert_eq!(bowl.block, [0, 64, 2]);
+            assert_eq!(bowl.face, Face::Up);
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(
+                level
+                    .clip(game, from, to, Block::Collider, Fluid::None)
+                    .unwrap()
+                    .block,
+                [1, 64, 0]
             );
         });
     }

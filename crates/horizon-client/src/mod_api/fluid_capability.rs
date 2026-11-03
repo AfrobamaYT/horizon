@@ -1,12 +1,12 @@
 //! The fluid capability (arismoko/horizon#41 §7): [`FLUIDS`], as NeoForge 26.3's
 //! `Capabilities.Fluid.BLOCK`, in the shape of [`ITEMS`](super::ITEMS). Amounts are millibuckets:
 //! a bucket is 1000.
-use super::{CapabilityKey, Direction, Host};
+use super::{Capability, CapabilityKey, Direction, Host};
 use crate::item_data::StackData;
 use std::{
     collections::HashSet,
     marker::PhantomData,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, Mutex},
 };
 
 /// An amount of one fluid, as NeoForge's `FluidStack`: its id (`minecraft:water`), how many
@@ -57,11 +57,9 @@ impl FluidStack {
 /// entity, so it is answered by position. Powder snow is no fluid: its cauldron has no answer.
 pub const FLUIDS: CapabilityKey<dyn FluidHandler> = CapabilityKey {
     name: "horizon:fluids",
-    default: Some(|host, pos| {
-        static GAME_FLUIDS: LazyLock<Arc<dyn FluidHandler>> =
-            LazyLock::new(|| Arc::new(GameFluids));
-        host.fluid_tank_count(pos, None)
-            .map(|_| GAME_FLUIDS.clone())
+    default: Some(|host, at| {
+        host.fluid_tank_count(at.pos, None)
+            .map(|_| Box::new(GameFluids) as Box<dyn FluidHandler>)
     }),
     handler: PhantomData,
 };
@@ -167,14 +165,9 @@ impl FluidHandler for GameFluids {
 /// The owners of fluid handlers whose real calls disagreed with their simulation, warned once.
 static BROKEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
-/// Who registered `handler`: a mod's id, or the game.
-fn owner(handler: &Arc<dyn FluidHandler>) -> String {
-    super::capability_mod(handler).map_or_else(|| "the game".to_owned(), super::mod_name)
-}
-
 /// A handler's real call disagreed with its simulation: a mod bug, warned once per owner.
-fn broken(handler: &Arc<dyn FluidHandler>, at: [i32; 3], what: &str) {
-    let owner = owner(handler);
+fn broken(handler: &Capability<dyn FluidHandler>, at: [i32; 3], what: &str) {
+    let owner = handler.owner();
     let mut warned = BROKEN.lock().unwrap_or_else(|e| e.into_inner());
     if warned.get_or_insert_default().insert(owner.clone()) {
         log::warn!(
@@ -191,13 +184,13 @@ pub(super) fn warned_about(owner: &str) -> bool {
 }
 
 /// One end of a move: a block's handler as one side reaches it.
-struct End {
-    handler: Arc<dyn FluidHandler>,
+struct End<'h> {
+    handler: &'h Capability<dyn FluidHandler>,
     at: [i32; 3],
     side: Option<Direction>,
 }
 
-impl End {
+impl End<'_> {
     /// One pass of `fluid` over the tanks, each offered what is left: how much went in. With
     /// `simulate`, how much such a pass would take.
     fn pass(&self, host: &mut dyn Host, fluid: &FluidStack, simulate: bool) -> u32 {
@@ -243,7 +236,7 @@ impl End {
     }
 }
 
-impl End {
+impl End<'_> {
     /// `rest` back into tank `tank`, else the handler's others; what neither takes.
     fn back(&self, host: &mut dyn Host, tank: usize, rest: FluidStack) -> Option<FluidStack> {
         let rest = self.fill_tank(host, tank, rest)?;
@@ -257,13 +250,13 @@ impl End {
 /// tank, else its others; what none of them takes is lost, with a warning naming that mod.
 fn give_back(
     host: &mut dyn Host,
-    handler: Arc<dyn FluidHandler>,
+    handler: &Capability<dyn FluidHandler>,
     at: [i32; 3],
     side: Option<Direction>,
     tank: usize,
     excess: FluidStack,
 ) {
-    broken(&handler, at, "gave");
+    broken(handler, at, "gave");
     let end = End { handler, at, side };
     if let Some(lost) = end.back(host, tank, excess) {
         log::warn!(
@@ -271,7 +264,7 @@ fn give_back(
              it was asked",
             lost.amount,
             lost.fluid,
-            owner(&end.handler)
+            end.handler.owner()
         );
     }
 }
@@ -283,7 +276,7 @@ impl dyn Host + '_ {
     /// showed, gives it back (`give_back`); the other fluid ends the drain.
     pub(crate) fn drain_one_named_fluid(
         &mut self,
-        handler: &Arc<dyn FluidHandler>,
+        handler: &Capability<dyn FluidHandler>,
         at: [i32; 3],
         side: Option<Direction>,
         max: u32,
@@ -306,12 +299,12 @@ impl dyn Host + '_ {
                 continue;
             };
             if !got.same_fluid_same_components(&there) {
-                give_back(self, handler.clone(), at, side, tank, got);
+                give_back(self, handler, at, side, tank, got);
                 break;
             }
             if got.amount > want {
                 let excess = got.with_amount(got.amount - want);
-                give_back(self, handler.clone(), at, side, tank, excess);
+                give_back(self, handler, at, side, tank, excess);
             }
             out = Some(there.with_amount(taken + got.amount.min(want)));
         }
@@ -357,13 +350,15 @@ impl dyn Host + '_ {
         if from == to {
             return None;
         }
+        let source_handler = self.capability(&FLUIDS, from, from_side)?;
+        let target_handler = self.capability(&FLUIDS, to, to_side)?;
         let source = End {
-            handler: self.capability(&FLUIDS, from)?,
+            handler: &source_handler,
             at: from,
             side: from_side,
         };
         let target = End {
-            handler: self.capability(&FLUIDS, to)?,
+            handler: &target_handler,
             at: to,
             side: to_side,
         };
@@ -413,13 +408,13 @@ impl dyn Host + '_ {
                 };
                 // Commit, with the requests that were simulated.
                 let Some(out) = extract(self, ask, false) else {
-                    broken(&source.handler, from, "gave");
+                    broken(source.handler, from, "gave");
                     break;
                 };
                 let mut liar = None;
                 if out != give {
-                    broken(&source.handler, from, "gave");
-                    liar = Some(&source.handler);
+                    broken(source.handler, from, "gave");
+                    liar = Some(source.handler);
                 }
                 // Only the fluid and amount both ends agreed on goes into the target; what came
                 // out beyond it is the source's to take back.
@@ -429,8 +424,8 @@ impl dyn Host + '_ {
                 };
                 let went = target.pass(self, &out.with_amount(agreed), false);
                 if went < agreed && liar.is_none() {
-                    broken(&target.handler, to, "took");
-                    liar = Some(&target.handler);
+                    broken(target.handler, to, "took");
+                    liar = Some(target.handler);
                 }
                 if let Some(liar) = liar.filter(|_| went < out.amount) {
                     let rest = out.with_amount(out.amount - went);
@@ -444,7 +439,7 @@ impl dyn Host + '_ {
                              {}'s fluid handler moved other than its simulation said",
                             lost.amount,
                             lost.fluid,
-                            owner(liar)
+                            liar.owner()
                         );
                     }
                 }
