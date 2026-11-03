@@ -23,7 +23,7 @@ Level: preview ([stability.md](stability.md)). Schema 1.
     "license": "MIT", "source": "https://github.com/...", "icon": "https://...png", "key": "RWT...", "downloads": 1234,
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
-      "api": "0.1", "side": "client", "capabilities": ["registries"], "game": "26.3",
+      "api": "0.2", "side": "client", "capabilities": ["registries"], "game": "26.3",
       "file": { "name": "coords_hud-0.1.0.hmod", "url": "https://github.com/horizon-rust/horizon-mods/releases/download/...",
                 "size": 438, "sha256": "e113...", "signature": "untrusted comment: ...\n...\ntrusted comment: ...\n...\n" }
     }]
@@ -86,7 +86,7 @@ game = "26.3"
 [[mods]]
 id = "coords_hud"
 version = "0.1.0"
-sha256 = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53"
+sha256 = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce"
 on = true                   # optional, default true: turned on in the profile's horizon-mods.txt
 ```
 
