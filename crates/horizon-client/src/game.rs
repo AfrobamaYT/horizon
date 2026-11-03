@@ -12211,6 +12211,8 @@ impl Game<'_> {
         if self.title.is_some() || self.saved_for_exit {
             return Ok(());
         }
+        // exitWorldAndClose disconnects the client from its world.
+        self.client_logging_out();
         if let Some(server) = self.integrated.take() {
             // The server thread saves the world.
             server.stop()?;
@@ -13451,7 +13453,7 @@ impl Game<'_> {
             self.add_pickup(pickups::Taken::Orb(Box::new(o)), pickups::Collector::Player);
         }
         if gained > 0 {
-            self.give_orb_points(gained);
+            self.give_experience_points(gained as i32);
         }
     }
     /// `FurnaceResultSlot.checkTakeAchievements`: the player took from the output of the
@@ -13475,23 +13477,32 @@ impl Game<'_> {
             self.spawn_orbs(at, xp);
         }
     }
-    /// `Player.giveExperiencePoints`, and `giveExperienceLevels`' level-up
-    /// sound every fifth level (at most every 100 ticks).
-    pub(super) fn give_orb_points(&mut self, gained: u32) {
-        let at = self.eye_position();
+    /// `Player.giveExperiencePoints`: `add_experience_levels` runs once for each
+    /// level gained or lost, and the mods hear of the level change once.
+    pub(super) fn give_experience_points(&mut self, points: i32) {
         let old_level = self.experience.level;
-        let gave = self.experience.give(gained as i32);
-        self.native_player_level_changed(old_level);
-        // Player.giveExperienceLevels runs per level, so the first multiple of 5
-        // crossed plays the sound (and starts the cooldown for the rest).
-        if let Some(level) = gave
-            && self.ticks > self.last_level_up + 100
-        {
-            self.last_level_up = self.ticks;
-            let volume = if level > 30 { 1.0 } else { level as f32 / 30.0 };
-            self.audio
-                .play("minecraft:entity.player.levelup", at, volume * 0.75, 1.0);
+        self.experience.add_points(points);
+        while self.experience.progress < 0.0 {
+            let xp = &self.experience;
+            let lost = xp.progress * horizon_client::entities::Experience::needed(xp.level) as f32;
+            let had_level = xp.level > 0;
+            self.add_experience_levels(-1);
+            let xp = &mut self.experience;
+            xp.progress = if had_level {
+                1.0 + lost / horizon_client::entities::Experience::needed(xp.level) as f32
+            } else {
+                0.0
+            };
         }
+        while self.experience.progress >= 1.0 {
+            let xp = &mut self.experience;
+            xp.progress =
+                (xp.progress - 1.0) * horizon_client::entities::Experience::needed(xp.level) as f32;
+            self.add_experience_levels(1);
+            let xp = &mut self.experience;
+            xp.progress /= horizon_client::entities::Experience::needed(xp.level) as f32;
+        }
+        self.native_player_level_changed(old_level);
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
     fn release_bow(&mut self, stack: &ItemStack, ticks: u32) {

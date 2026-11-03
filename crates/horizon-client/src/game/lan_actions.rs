@@ -3867,7 +3867,26 @@ impl Game<'_> {
             if let Some(eyes) = drops {
                 self.as_guest(host, conn, |game| game.drop_inventory(eyes));
             }
-            self.spawn_orbs(at, reward);
+            // ServerPlayer.die: a spectator never reaches dropAllDeathLoot.
+            if drops.is_some() {
+                // LivingEntity.dropExperience: Player.isAlwaysExperienceDropper.
+                let now = self.world.game_time;
+                let attacker = if horizon_client::mod_api::mods().is_empty() {
+                    None
+                } else {
+                    self.guest_combat
+                        .get_mut(&conn)
+                        .and_then(|c| c.take_hurt_by_player(now))
+                        .and_then(|c| c.uuid(host))
+                };
+                let reward = self.living_experience_drop(
+                    id as u32,
+                    "minecraft:player",
+                    attacker,
+                    reward as i32,
+                );
+                self.spawn_orbs(at, reward as u32);
+            }
         }
     }
 
@@ -4958,7 +4977,7 @@ impl Game<'_> {
                 };
                 let mut amount = rest.min(i32::MAX as u32) as i32;
                 game.native_player_exp_change(player, &name, &mut amount);
-                game.give_orb_points(amount.max(0) as u32);
+                game.give_experience_points(amount.max(0));
             }
         });
     }
