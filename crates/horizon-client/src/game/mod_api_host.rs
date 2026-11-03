@@ -202,6 +202,15 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
         self.world.is_loaded_at(pos[0], pos[1], pos[2])
     }
+    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+        self.world.is_loaded_at(pos[0], pos[1], pos[2])
+            && self
+                .behaviours
+                .is_raining_at(self, BlockPos::new(pos[0], pos[1], pos[2]))
+    }
+    fn enabled_features(&self) -> horizon_client::mod_api::FeatureFlags {
+        horizon_client::mod_api::FeatureFlags::from_ids(self.enabled_features)
+    }
 }
 
 impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
@@ -251,6 +260,12 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     }
     fn is_loaded(&self, pos: [i32; 3]) -> bool {
         horizon_client::mod_api::LevelHost::is_loaded(&*self.level, pos)
+    }
+    fn is_raining_at(&self, pos: [i32; 3]) -> bool {
+        horizon_client::mod_api::LevelHost::is_raining_at(&*self.level, pos)
+    }
+    fn enabled_features(&self) -> horizon_client::mod_api::FeatureFlags {
+        horizon_client::mod_api::LevelHost::enabled_features(&*self.level)
     }
 }
 
