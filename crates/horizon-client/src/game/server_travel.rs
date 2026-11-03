@@ -508,7 +508,7 @@ impl Game<'_> {
             .or_else(|| self.end_destination(target))
             .unwrap_or(Vec3::new(from.x * scale, from.y, from.z * scale));
         self.end_portal_travel = false;
-        if let Err(e) = self.enter_level(None, target) {
+        if let Err(e) = self.enter_level(target) {
             log::error!("could not open {}: {e}", target.id());
             return;
         }
@@ -543,7 +543,7 @@ impl Game<'_> {
             placed: false,
             left: Some(source),
         });
-        if let Err(e) = self.enter_level(None, source) {
+        if let Err(e) = self.enter_level(source) {
             log::error!("could not reopen {}: {e}", source.id());
         }
     }
@@ -911,7 +911,7 @@ impl Game<'_> {
             if t.dim != source {
                 drop_hook(host, t.conn);
             }
-            if let Err(e) = self.enter_level(None, t.dim) {
+            if let Err(e) = self.enter_level(t.dim) {
                 log::error!("could not open {}: {e}", t.dim.id());
                 continue;
             }
@@ -955,7 +955,7 @@ impl Game<'_> {
                 placed: true,
                 left: Some(source),
             });
-            if let Err(e) = self.enter_level(None, source) {
+            if let Err(e) = self.enter_level(source) {
                 log::error!("could not reopen {}: {e}", source.id());
             }
         }
