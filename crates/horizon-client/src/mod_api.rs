@@ -17,10 +17,10 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
-    NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
-    NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
+    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
+    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
+    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
+    NativeShake, PhantomSpawnResult, SleepProblem,
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
@@ -146,8 +146,9 @@ pub struct NativeLootDrops<'a> {
     /// sheep, a mooshroom, a snow golem or a bogged, a brush on an armadillo or
     /// a suspicious block, shears carving a pumpkin, picking sweet berries or
     /// cave vines, a hit taking an item frame or its item, or untying a lead
-    /// or cutting it with shears. `player` names them; `block` or `entity` says
-    /// what dropped them. API 100. A mob that a player killed while
+    /// or cutting it with shears. `player` names them, or is `None` when a
+    /// dispenser's shears sheared a mooshroom; `block` or `entity` says what
+    /// dropped them. API 100. A mob that a player killed while
     /// leashed drops its lead on its next tick as a call of its own (`entity`
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.
@@ -1465,15 +1466,16 @@ mod item_place;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
-pub use resource::{ItemResource, ResourceHandler};
+pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
-pub(crate) use part_table::{
-    Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
-    providers, resolve_parts,
-};
 pub use part_table::{
-    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
+    Attached, BlockEntityProviders, BlockProvider, ItemProvider, Parts, Registrar,
+    block_entity_providers,
+};
+pub(crate) use part_table::{
+    KnownIds, answered, ask_providers, install_parts, mark_game_thread, parts, place_provider,
+    providers, resolve_parts,
 };
 
 mod generated {
@@ -1623,6 +1625,48 @@ mod tests {
                 Flow::Continue
             }
         }
+    }
+
+    #[test]
+    fn conversion_post_reports_both_entities_once() {
+        struct Observer(Arc<Mutex<Vec<(u32, String, u32, String)>>>);
+        impl Hooks for Observer {
+            fn living_conversion_post(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut LivingConversionPostEvent<'_>,
+            ) {
+                self.0.lock().unwrap().push((
+                    event.entity,
+                    event.kind.to_owned(),
+                    event.converted,
+                    event.converted_kind.to_owned(),
+                ));
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        dispatch_living_conversion_post(
+            &mut host,
+            &mods,
+            12,
+            "minecraft:pig",
+            13,
+            "minecraft:zombified_piglin",
+        );
+        assert_eq!(
+            *observed.lock().unwrap(),
+            [(
+                12,
+                "minecraft:pig".into(),
+                13,
+                "minecraft:zombified_piglin".into()
+            )]
+        );
     }
 
     #[test]

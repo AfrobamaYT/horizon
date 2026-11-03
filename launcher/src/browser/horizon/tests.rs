@@ -33,8 +33,7 @@ fn hud(index: &Index) -> Project {
     project_of(index.project("coords_hud").unwrap()).unwrap()
 }
 
-/// Installs the sample's WebAssembly mod as a modpack does: the browser won't, it needs a native
-/// port.
+/// Installs the sample's checked content mod, as a modpack does.
 fn put(index: &Index, local: bool, home: &Path) -> Result<Vec<installed::Entry>, String> {
     let p = index.project("coords_hud").unwrap();
     install_version(index, local, p, &p.versions[0], home, &|_, _| {}).map(|e| vec![e])
@@ -83,9 +82,8 @@ fn searches_by_kind_and_words() {
             .map(|p| p.id)
             .collect()
     };
-    // The sample's only mod is a WebAssembly one: it stays in the index, not in the browser.
-    assert!(found("", Kind::Mod).is_empty());
-    assert!(found("coordinates HUD", Kind::Mod).is_empty());
+    assert_eq!(found("", Kind::Mod), ["coords_hud"]);
+    assert_eq!(found("coordinates HUD", Kind::Mod), ["coords_hud"]);
     assert!(found("zoom", Kind::Mod).is_empty());
     // Modpacks under Modpacks; a kind this launcher can't install yet (a world) never.
     assert_eq!(found("", Kind::Modpack), ["cozy"]);
@@ -176,13 +174,14 @@ fn installs_checked_turns_on_and_removes() {
     let index = sample();
     let home = scratch("install");
     let p = hud(&index);
-    let e = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap_err();
-    assert_eq!(e, format!("Coordinates HUD {NEEDS_PORT}."));
-    let done = put(&index, true, &home).unwrap();
+    let done = install_from(&index, true, &p, &home, &|_, _| {}).unwrap();
     assert_eq!(done[0].file, "horizon-mods/coords_hud.hmod");
-    assert_eq!(done[0].skipped, [format!("its code ({NEEDS_PORT})")]);
+    assert!(done[0].skipped.is_empty());
     assert_eq!(done[0].verdict.as_deref(), Some("Verified"));
-    assert!(done[0].checksum.starts_with("SHA-256:e1135345"));
+    assert_eq!(
+        done[0].checksum,
+        "SHA-256:f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce"
+    );
     assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
     let list = fs::read_to_string(home.join("horizon-mods.txt")).unwrap();
     assert_eq!(list, "mod.coords_hud:true\n");
@@ -217,12 +216,43 @@ fn installs_checked_turns_on_and_removes() {
 }
 
 #[test]
+fn executable_content_is_refused_without_installing_or_skipping_code() {
+    use std::io::Write;
+    let home = scratch("executable");
+    let path = home.join("executable.hmod");
+    fs::copy(fixtures().join("coords_hud-0.1.0.hmod"), &path).unwrap();
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let mut zip = zip::ZipWriter::new_append(file).unwrap();
+    zip.start_file("mod.wasm", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(b"\0asm").unwrap();
+    zip.finish().unwrap();
+    let mut index = sample();
+    let p = &mut index.projects[0];
+    p.key = None;
+    let v = &mut p.versions[0];
+    v.file.url = format!("file://{}", path.display());
+    v.file.size = fs::metadata(&path).unwrap().len();
+    v.file.sha256 = index::sha256_file(&path).unwrap();
+    v.file.signature = None;
+    let e = put(&index, true, &home).unwrap_err();
+    assert_eq!(e, "mod.wasm: unsupported executable file in a content mod");
+    assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
+    assert!(installed::Installed::load(&home).entries.is_empty());
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
 fn installs_a_shader_pack_into_shaderpacks() {
     let index = sample();
     let home = scratch("shader");
     let p = project_of(index.project("glow").unwrap()).unwrap();
     assert_eq!(p.support(), super::super::Support::Works);
-    let done = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap();
+    let done = install_from(&index, true, &p, &home, &|_, _| {}).unwrap();
     assert_eq!(done[0].file, "shaderpacks/glow-1.0.0.hshader");
     assert_eq!(done[0].kind, Kind::Shader);
     assert!(home.join("shaderpacks/glow-1.0.0.hshader").is_file());
@@ -243,7 +273,7 @@ fn installs_a_shader_pack_into_shaderpacks() {
     assert!(!home.join("shaderpacks/glow-1.0.0.hshader").exists());
     // A file of the same name the registry didn't put there is left alone.
     fs::write(home.join("shaderpacks/glow-1.0.0.hshader"), b"mine").unwrap();
-    let e = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap_err();
+    let e = install_from(&index, true, &p, &home, &|_, _| {}).unwrap_err();
     assert_eq!(
         e,
         "shaderpacks/glow-1.0.0.hshader is already there: move it away first."
@@ -294,7 +324,7 @@ fn registry_versions_run_when_made_for_this_game() {
         let p = index.project(id).unwrap();
         p.versions
             .iter()
-            .map(|x| version_of(&index, p, x, None))
+            .map(|x| version_of(&index, p, x))
             .collect()
     };
     assert_eq!(
@@ -303,10 +333,9 @@ fn registry_versions_run_when_made_for_this_game() {
             .number,
         "1.0.0"
     );
-    // A WebAssembly mod is never picked: it needs a native port.
     let hud = versions("coords_hud");
-    assert_eq!(hud[0].blocked.as_deref(), Some(NEEDS_PORT));
-    assert!(pick(Kind::Mod, &hud, false).is_none());
+    assert!(hud[0].blocked.is_none());
+    assert_eq!(pick(Kind::Mod, &hud, false).unwrap().number, "0.1.0");
 }
 
 #[test]
@@ -326,24 +355,6 @@ fn owner_links_only_take_github_logins() {
     ] {
         assert!(!github_login(bad), "{bad}");
     }
-}
-
-/// A version that calls mod API functions the game doesn't have is marked and skipped.
-#[test]
-fn versions_for_a_newer_horizon_are_not_installed() {
-    let mut index = sample();
-    index.projects[0].versions[0].api_level = Some(1);
-    let p = index.project("coords_hud").unwrap();
-    let e = newest(&index, p, Some(0)).unwrap_err();
-    assert_eq!(
-        e,
-        "Coordinates HUD needs a newer Horizon than the game you play: update it first."
-    );
-    assert!(newest(&index, p, Some(1)).is_ok());
-    assert!(newest(&index, p, None).is_ok());
-    // In the browser, a WebAssembly mod needs a native port first.
-    let v = version_of(&index, p, &p.versions[0], Some(0));
-    assert_eq!(v.blocked.as_deref(), Some(NEEDS_PORT));
 }
 
 #[test]
