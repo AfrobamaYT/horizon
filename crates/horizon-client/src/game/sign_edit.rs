@@ -4,7 +4,6 @@
 use super::{
     Game,
     commands::{Target, execute::Source},
-    lan::LanHost,
 };
 use horizon_client::{
     containers::BlockEntity,
@@ -403,10 +402,10 @@ impl Game<'_> {
     /// may no longer write (`playerIsTooFarAwayToEdit`).
     pub(super) fn lan_sign_update(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         mut p: play::SignUpdate,
     ) {
+        let Some(host) = self.lan.as_mut() else { return; };
         let Some(g) = host.hub.guest(conn) else {
             return;
         };
@@ -424,13 +423,12 @@ impl Game<'_> {
         let key = (p.pos[0], p.pos[1], p.pos[2]);
         let lines = p.lines.join(" ");
         if !self.chat_filter_text(
-            host,
             conn,
             &[&lines],
             horizon_client::lan::hub::chat_filter::Place::Sign,
         ) {
             // The sign stays as it was: the editor closes, as after a sign the server refused.
-            if let Some(play) = host.play.get_mut(&conn) {
+            if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
                 play.sign_editing = None;
             }
             // The player's client shows the text it sent: the sign as it is, again.

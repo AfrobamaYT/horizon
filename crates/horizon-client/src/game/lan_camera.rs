@@ -138,7 +138,7 @@ impl Game<'_> {
             return;
         };
         let Some(bounds) = self
-            .guest_target_box(host, gi, id)
+            .guest_target_box(gi, id)
             .or_else(|| self.camera_extra(id).map(|e| e.bounds))
         else {
             return;

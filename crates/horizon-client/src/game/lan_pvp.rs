@@ -103,7 +103,8 @@ impl Strike {
 
 impl Game<'_> {
     /// Whether the player a hit landed on stands on the ground.
-    pub(super) fn pvp_victim_on_ground(host: &LanHost, victim: Victim) -> bool {
+    pub(super) fn pvp_victim_on_ground(&self, victim: Victim) -> bool {
+        let Some(host) = self.lan.as_ref() else { return false; };
         match victim {
             Victim::Guest(conn) => host
                 .hub
@@ -114,8 +115,8 @@ impl Game<'_> {
     }
 
     /// The player `id` that guest `conn` attacks, if it is one.
-    pub(super) fn pvp_victim(host: &LanHost, conn: u32, id: i32) -> Option<Victim> {
-        host.hub
+    pub(super) fn pvp_victim(&self, conn: u32, id: i32) -> Option<Victim> {
+        self.lan.as_ref()?.hub
             .guests
             .iter()
             .find(|g| g.entity_id == id && g.conn != conn && host.hub.here(g) && !g.dead)
