@@ -718,9 +718,9 @@
       }
     },
     {
-      "name": "use_item_on", "side": "server",
+      "name": "use_on", "side": "server",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_use_item_on",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_use_on",
       "mod_api": {
         "contract": "cancel",
         "out": "claimed",
