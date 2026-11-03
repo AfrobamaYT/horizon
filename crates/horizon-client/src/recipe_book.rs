@@ -899,7 +899,7 @@ impl Settings {
         if let Some(i) = recipes.iter().position(|id| !index.contains(id)) {
             return Err(Some(recipes[i].clone()));
         }
-        Ok(self.add_recipes(index, &recipes).1)
+        Ok(recipes)
     }
     /// `ServerRecipeBook.removeRecipes`: the display ids removed, which its
     /// `ClientboundRecipeBookRemovePacket` lists (a transmute recipe has one
