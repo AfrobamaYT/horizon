@@ -1451,6 +1451,7 @@ mod tests {
             .unwrap()
             .hooks;
         assert!(generated.contains("fn recipes_received("));
+        assert!(generated.contains("/// Side: client."));
 
         let dir = root
             .join("target")
