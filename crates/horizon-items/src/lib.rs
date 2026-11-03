@@ -10,6 +10,7 @@ pub mod bundle;
 pub mod content_namespaces;
 pub mod cooldowns;
 pub mod enchant;
+pub mod equipment;
 pub mod firework;
 pub mod flowers;
 pub mod item_data;
