@@ -4,11 +4,12 @@
 
 The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visible, text)` runs at player and mob, armor stand, and item frame name decisions before shared geometry. Set `visible` to override vanilla and `text` to `Some` literal replacement text (NeoForge `RenderNameTagEvent`). Distance and entity availability still apply; the local player's tag is considered only when its own camera and settings gates allow it.
 
-Native mods are **mixin bundles** that change the game's own Rust source before it is compiled, with
-[horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon). A bundle
-is a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game (HEAD, BEFORE_CALL,
-RETURN, MODIFY_ARG, OVERWRITE...; the tool's README lists them). A port such as Veinminer is three HEAD hooks and
-one module. Start a mod from [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template).
+Native mods are Rust projects that implement the game's typed hook API (`impl Hooks`). Start with
+`cargo horizon-mod new my_mod --template native --horizon <commit>` ([Trait mods](#trait-mods-draft)).
+Each project has one `horizon-mod.toml`, with exact build pins in `[native]`, and ships as one `.hmod`.
+For the rare case the API does not cover, raw injections change the game's Rust source before it is compiled,
+using [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon).
+An injection is an escape hatch; request a typed hook for the behavior it needs.
 
 Native mods are native code with the player's rights, not sandboxed. They are always on in the launcher: there is no
 switch. The first install shows a trust notice, and every build waits behind a red warning; the registry lists one only
@@ -58,9 +59,9 @@ requires a farmer at work and `mob_griefing` enabled.
 
 ## Native mod source revisions
 
-A native mod targets one exact Horizon source revision: `[compatibility] horizon_revision` in its
-`horizon-mixin.toml`, and `horizon` in its `horizon-native.json`. Match the mod to the game revision it will run
-with, and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
+A native mod targets one exact Horizon source revision: `horizon` in its `horizon-mod.toml` `[native]` section.
+The same section pins `game` and the exact `mixins` commit. Match the mod to the game revision it will run with,
+and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
 building the mod unchanged.
 
 An installed native build with a missing or invalid build record must be rebuilt from an installed
@@ -303,48 +304,57 @@ the catalog, not a global API number, source comments or documentation histories
 
 ## A bundle
 
-A mod project keeps its native bundle in `native/`, with the exact filename `horizon-mixin.toml` required by
-horizon-mixins. The launcher stages its contents into the tool's `<mods>/<id>/` folder; the package has no id
-directory level. Besides its helpers and modules (horizon-mixins' README) it can
-have its own crate, data files and a post-build step (horizon-mixins 0.6.0). The test bundle
-[`launcher/tests/fixtures/native-crate-demo`](../launcher/tests/fixtures/native-crate-demo) uses all of them:
+The project and its `.hmod` have the same flat layout, with no mod-id directory level inside the archive:
 
+```text
+my_mod/
+  horizon-mod.toml        # the only manifest; mod identity and build pins
+  icon.png               # optional launcher icon
+  assets/my_mod/
+  data/my_mod/
+  Cargo.toml             # one crate; Cargo metadata is not mod identity
+  src/lib.rs             # impl Hooks
+  src/frame.rs           # optional raw injection helper
+  src/bin/bake.rs         # optional post-build program
 ```
-native-crate-demo/
-  native/
-    horizon-mixin.toml
-    data/greeting.txt     # native_data!("crate_demo", "greeting.txt")
-    rust/
-      Cargo.toml          # [dependencies] crc32fast = "1"
-      data/salt.txt       # include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/salt.txt"))
-      src/lib.rs
-      src/frame.rs        # helper, compiled into the game
-      src/bin/bake.rs     # the post-build step
-```
+
+Without `Cargo.toml`, it is a content mod. Code requires both `Cargo.toml` and `[native]`;
+inconsistent declarations are refused. The mod's id and version come only from `horizon-mod.toml`,
+not Cargo's package name or version. An id is a plain `[a-z0-9_]{1,64}` name, also used as its resource namespace.
+There is no input `native/` or `rust/` directory, `horizon-native.json` or hand-written `horizon-mixin.toml`.
+The launcher writes the tool's manifest and stages the crate itself; those internal paths are not package layouts.
+
+The manifest keeps the [content fields](mods.md#the-manifest), including the exact `api = "0.2"`
+contract and `capabilities = ["registries"]`. A code mod adds:
 
 ```toml
-[mod]
-id = "crate_demo"
-version = "0.1.0"
+[native]
+game = "26.3"
+horizon = "<exact 40-character lowercase Horizon commit>"
+mixins = "<exact 40-character lowercase horizon-mixins commit>"
+```
 
-[[injection]]
+The placeholders above must be replaced by exact commits; the native template fills them in.
+Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
+nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
+and code mods; the scaffold does not create one.
+
+Raw injections belong in the same manifest, for example:
+
+```toml
+[[native.injection]]
 id = "frame"
-hook = "frame"            # a name from native-hooks.json, instead of `target`
+hook = "frame"            # a name from native-hooks.json, instead of target
 hook_version = 1
 kind = "HEAD"
-helper = "rust/src/frame.rs"
+helper = "src/frame.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
-
-[[crate]]
-id = "engine"
-path = "rust"             # holds Cargo.toml; a non-dot path is required
-# dependent = "horizon-client"   (the default: the workspace package that depends on it)
-
-[[post_build]]
-crate = "engine"
-bin = "bake"
-args = []
 ```
+
+Each injection chooses exactly one of `hook` or `target`, and exactly one of `helper` or
+`trait_method`. A helper names a packaged `.rs` file under `src/`, or `build.rs`.
+A `trait_method` names a method implemented by the trait mod ([below](#trait-mods-draft)).
+Post-build programs are declared with `[[native.post_build]]` ([Post-build steps](#post-build-steps)).
 
 ### Named hook points
 
@@ -371,7 +381,7 @@ without loaded mods.
 
 ### The build's warnings
 
-Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that
+Before it builds, the launcher reads the mods' `[[native.injection]]` lists and says three things in `native/build.log` that
 horizon-mixins only implies by its order. Two mods injecting at one place — the same function, kind, selector and
 ordinal; the places are the manifest's, horizon-mixins is the one that resolves a selector against the source:
 
@@ -406,27 +416,19 @@ The hook may be called many times a craft; the answer must be the same for the s
 
 ### The mod's crate
 
-A `[[crate]]` is a Cargo package of the bundle's, staged as `native-crates/<mod>/<crate>/` and added to the
-workspace's members and to the `[dependencies]` of its `dependent`, so helpers call it as
-`crate_demo_engine::checksum(…)`. Cargo compiles it once and keeps it: editing a helper, or switching another mod
-on or off, recompiles `horizon-client` but not the mod's crate, so the heavy code of a big mod belongs there and
-only the glue in helpers. A crate can't depend on `horizon-client` (Cargo forbids the cycle) or on any path or git
-crate, and has no `Cargo.lock`, `[workspace]` or build of its own. Horizon's own crates (`horizon-core`…) are path
-crates too, so they are refused the same way, on purpose for now: a mod names game types through its helpers, which
-are compiled into `horizon-client`; a stable API crate for mods' own crates is #3897.
+The root `Cargo.toml` and `src/` form the mod's one crate. It depends on `horizon-client` for
+`mod_api`; the launcher links it into the generated game executable, rather than making the game
+library depend on the mod. The launcher stages the crate as `native-api/<mod>/`, rewrites its game
+dependency to the staged game and resolves [mod dependencies](#dependencies-between-trait-mods).
+A project has no separate workspace or lock file. Arbitrary path and git dependencies are refused;
+the launcher supplies the checked paths needed for the game and declared mod dependencies.
 
-**Dependencies come from Horizon's `Cargo.lock`.** A crate names registry crates by version requirement
-(`crc32fast = "1"`, `{ version, features, default-features, optional }`); each must already be in Horizon's lock
-file in a version that matches, and builds in exactly that version. The lock file is the allow list: horizon-mixins
-refuses a crate the lock lacks (`E_CRATE_DEPENDENCY`) and writes the mod's crates into the staged lock without
-changing any other byte, so the game still builds with `--locked`. The launcher checks it again (every downloaded
-package of the staged lock as in Horizon's: name, version, source, checksum), and a feature that turns on a
-dependency the lock lacks fails at `cargo fetch --locked` with a message saying so. The build stops with:
-
-```
-horizon-mixins failed (exit status: 1). The end of its output, the whole of it in …/native/build.log:
-E_CRATE_DEPENDENCY: crate_lock needs rand ^0.9, which isn't in Horizon's Cargo.lock (…/horizon-mixin.toml)
-```
+**Dependencies come from Horizon's `Cargo.lock`.** In `Cargo.toml`, a mod names registry crates by
+version requirement (`crc32fast = "1"`, `{ version, features, default-features, optional }`); each
+must already be in Horizon's lock file in a matching version. The launcher checks every downloaded
+package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
+workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
+stops the build; the game still builds with `--locked`.
 
 ### Conditional data
 
@@ -556,35 +558,39 @@ and the recipe fails, as an unknown kind does.
 
 ### Data files
 
-A bundle's `data/` folder (any files) is staged as `native-data/<mod>/` at the root of the workspace. A helper or
-module compiles a file in with `horizon_client::native_data!("<mod id>", "path/in/data")` (`&'static [u8; N]`,
-`crate::native_data!` inside the lib). A mod's crate keeps its own data in its folder and
-reads it with `include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/…"))`. The registry's `.hmod` may carry
-both (`native/data/…`, `native/rust/data/…`).
+A mod has one top-level `data/` tree and one `assets/` tree, with the same namespace and
+content checks as a content mod. They are normal pack resources, not a second native-only data folder.
+Code-only tables can stay in a packaged `src/*.toml` file and be compiled in with `include_bytes!`.
 
-Both are compiled in: neither folder is beside the game when it runs. A file the game reads at run time is one a
-post-build step writes into `HORIZON_NATIVE_DATA_DIR` (below), copying it from `HORIZON_NATIVE_BUNDLE_DATA_DIR` or
-making it; the game finds it with `native_built_data("<mod>")` (None only when the game can't tell its own folder).
+The build currently also stages the full `data/` tree as `native-data/<mod>/` at the workspace root.
+A helper compiles a file in with `horizon_client::native_data!("my_mod", "my_mod/greeting.txt")`
+(`&'static [u8; N]`, `crate::native_data!` inside the game library). A post-build step can copy from
+`HORIZON_NATIVE_BUNDLE_DATA_DIR` or generate a file into `HORIZON_NATIVE_DATA_DIR` (below);
+`native_built_data("<mod>")` finds that runtime folder (None only when the game cannot tell its own folder).
+These build-time routes are not resource-reload listeners. Side-typed reload access to server data and
+client assets is separate work; do not read resource files on each tick.
 
-**What a native bundle holds.** `native/horizon-mixin.toml`, `.rs` and `.toml` files under `native/rust/`,
-files under `native/data/` and `native/rust/data/`, and text files (`README*`, `LICENSE*`, `LICENCE*`, `COPYING*`,
-`NOTICE*`, `.gitignore`) in `native/` or `native/rust/`. At most 512 native files and 64 MiB unpacked;
-anything else refuses the archive. Every declared source root is `rust`.
+**What a native bundle holds.** The one manifest, optional icon, root `Cargo.toml` and `build.rs`,
+`.rs` and `.toml` files under `src/`, `assets/` and `data/`, and root text files (`README*`, `LICENSE*`,
+`LICENCE*`, `COPYING*`, `NOTICE*`, `.gitignore`). Source and resource size limits are checked separately;
+anything else refuses the archive ([api/mod-files.md](api/mod-files.md)).
 
-**One `.hmod` for content and code.** A mod's content and its native code ship as one `.hmod`, and what is inside
-decides what happens: only `horizon-mod.toml` with `assets/` and `data/` is a content mod, nothing compiles; with
-`horizon-native.json` and `native/` (a bundle as above) it is a native mod, built into the game. Both may be in
-one file: `horizon-mod.toml`, `assets/` and `data/` are its content, checked as a content mod's
-(`horizon_mods::Content`) and left out of the build, and the two manifests name the same mod id. A `.hmod` with
-native code is never a WebAssembly mod: one carrying `mod.wasm` is refused with
-`horizon_mods::index::native::WASM_GONE`. Every rule of the file is in
-[api/mod-files.md](api/mod-files.md).
+**One `.hmod` for content and code.** Without root `Cargo.toml`, nothing compiles. With it and `[native]`,
+the launcher builds the code and the game loads the same package's content through `horizon_mods::Content`.
+Both kinds use `horizon-mod.toml` for their identity. Executable `mod.wasm` files are unsupported.
 
 ### Post-build steps
 
-A `[[post_build]]` names a bin of one of the mod's crates. After the game compiles, the launcher builds it with the
-same profile into the same `native/target/`, then runs it (at low priority, in mod order) in the new build's version
-folder with:
+A `[[native.post_build]]` names a bin of the mod's sole root crate; there is no crate selector:
+
+```toml
+[[native.post_build]]
+bin = "bake"
+args = []
+```
+
+After the game compiles, the launcher builds it with the same profile into the same `native/target/`,
+then runs it (at low priority, in mod order) in the new build's version folder with:
 
 | Variable | What |
 |---|---|
@@ -1514,17 +1520,18 @@ trusting native code is the player's decision, never an agent's.
    `sudo apt install build-essential pkg-config libasound2-dev libudev-dev`). SteamOS has GCC without the C
    library's headers, and a read-only system: native builds don't work there yet.
    `horizon-launcher rust status|install|remove`.
-2. **horizon-mixins**, at the commit the mods name (their `.hmod`'s `mixins`), else `native_mods::MIXINS_REV`,
+2. **horizon-mixins**, at the exact commit the mods name (`[native] mixins` in `horizon-mod.toml`),
    built once with that cargo (`cargo install --locked --git … --rev …`) into `native/tools/<commit>/`.
 3. **The source** of the pinned commit: GitHub's archive of it, once per commit (`native/source/<commit>/`, about
    63 MB unpacked), with the commit in `.horizon-revision`. Never the player's own checkout. Links in the
    archive are left out: the tool refuses them and nothing needs them to build.
-4. **Mixins.** The bundles are copied first, so the build and its key use that copy whatever happens to the
-   folder meanwhile. `horizon-mixins apply` stages the modded source; the launcher copies only the files that
-   changed into `native/stage/`, so Cargo, which goes by file times, recompiles only the crates the mods touch.
-   With mods' crates, their dependencies are checked against Horizon's `Cargo.lock` ("The mod's crate").
+4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
+   folder meanwhile. For raw injections the launcher writes `horizon-mixin.toml` and runs `horizon-mixins apply`.
+   It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
+   so Cargo, which goes by file times, recompiles only the crates the mods touch. Registry dependencies
+   are checked against Horizon's `Cargo.lock` ([The mod's crate](#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
-   horizon-client`, into `native/target/`, with one of three build profiles:
+   horizon-native-game`, into `native/target/`, with one of three build profiles:
 
    | Profile | Cargo profile | Use |
    |---|---|---|
@@ -1614,12 +1621,12 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   branch that moves. A release with a `.hmod` asset installs that file (its SHA-256 is compared with the one GitHub
   lists). With no release or no such asset, the launcher fetches
   `codeload.github.com/<owner>/<repo>/tar.gz/<sha>` and looks in it for mods by the rules of
-  `native-build <folder>`: a folder with `horizon-mixin.toml`, or an unpacked `.hmod` (`horizon-native.json`).
-  Several mods: they are listed, and the player picks one or installs all. A source folder must pin the Horizon commit
-  (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hmod`.
+  `native-build <folder>`: a flat project with `horizon-mod.toml`, `[native]`, `Cargo.toml` and `src/`.
+  Several mods: they are listed, and the player picks one or installs all. Each source folder pins the Horizon commit
+  in `[native] horizon`; the launcher packs the checked project into a `.hmod`.
   Release packages must contain native code; content-only packages are rejected by this native installer.
 - **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
-  registry file (native source under `native/`, optional content, size limits, nothing run) before it is installed.
+  registry file (flat source and content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
@@ -1721,10 +1728,11 @@ each was built or last used): switching a mod off and on again plays the kept bu
 - **The registry** (horizon-rust/horizon-mods) lists them as their own kind, `native-mod`, only after a maintainer
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hmod` asset is a version once the bundle passes the registry's checks, with no further
-  review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hmod` contains `.rs` and `.toml` files and may contain data files under
-  `native/data/` or a crate's `data/`. The launcher checks the bundle without running anything. Native code is trusted.
-  The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
-  `horizon-native.json`. `revoked.toml` takes a bad release down.
+  review (nothing is built or run by the registry; the player's launcher builds it behind its warning).
+  The `.hmod` contains the flat Rust project and may contain `assets/`, `data/` and an optional `icon.png`.
+  The launcher checks the bundle without running anything. Native code is trusted.
+  The file is pinned by SHA-256 like every registry file; its identity and exact build pins come from
+  `horizon-mod.toml`. `revoked.toml` takes a bad release down.
   A project's kind never changes.
 - **Isolation of data.** Native mods run only in the instance they are installed in, with its worlds, options and
   logs (the default Horizon instance's, when they are installed there); other instances play their own versions.
@@ -2788,33 +2796,37 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Trait mods (draft)
 
-`cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
-`horizon-native.json`, top-level content manifest, assets and data directories, `native/horizon-mixin.toml`,
-pinned to that Horizon commit, and `native/rust/`, whose `hooks()` greets each player who joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
-as it is (`native-build <path>`) and packs it into a `.hmod`.
+`cargo horizon-mod new <path> --template native --horizon <commit>` requires an exact Horizon commit and
+writes a flat project: `horizon-mod.toml` with `[native]`, `Cargo.toml`, `src/lib.rs`, and empty `assets/`
+and `data/` directories. The template greets each player who joins. Build it with
+`horizon-launcher native-build <path> --trust-native-code`; `cargo horizon-mod build` packages the same
+project into a `.hmod` without compiling it ([api/mod-files.md](api/mod-files.md)).
 
-A bundle declares its trait mod package by its path inside `native/`:
+The root Rust package depends on `horizon-client` for `mod_api`. Its root `src/lib.rs` marks one
+`impl Hooks` with the attribute:
 
-```toml
-[api]
-path = "rust"
+```rust,ignore
+use horizon_client::mod_api::{self, Hooks};
+
+#[derive(Default)]
+struct Mod;
+
+#[mod_api::horizon_mod]
+impl Hooks for Mod {
+    // Implement the hooks this mod needs.
+}
 ```
 
-A raw mixin crate instead declares `[[crate]] path = "rust"`; the manifest cannot declare both routes.
-`rust/` is required because the tool rejects a dot crate path. `cargo horizon-mod build` packages this project
-without moving its content into the native directory.
-
-The package may use only crates and versions in Horizon's `Cargo.lock`, like mixin crates.
-The folder contains a Rust package with a `horizon-client` dependency. Its library exports
-`pub fn hooks() -> Box<dyn horizon_client::mod_api::Hooks>`. The launcher links this package
-into a generated game executable and calls `hooks()` in dependency order (a mod after the mods it
-depends on, else in bundle order). The package is not a
-`[[crate]]`: it depends on the game instead of the game depending on it. A bundle with no
-injections, state, bridges, modules, mixin crates or post-build steps skips horizon-mixins.
+The attribute generates the `hooks()` factory and derives optional hook subscriptions from this impl.
+The mod type implements `Default`; do not write a second factory. Keep the marked impl at the crate root.
+The launcher links this package into a generated game executable and calls the generated factory in
+dependency order (a mod after the mods it depends on, else in bundle order). A mod with no raw
+injections skips horizon-mixins; typed hooks need no injection declarations.
 
 ### Dependencies between trait mods
 
-A mod can publish functions and statics from its `[api]` package for another mod to call:
+A mod can publish functions and statics from its root crate for another mod to call.
+Declare dependencies in `horizon-mod.toml`, not `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -2822,14 +2834,15 @@ base_mod = "^1"
 extra_mod = { version = "^2", optional = true }
 ```
 
-Requirements use Cargo semver syntax and are checked against each installed bundle's `[mod] version`,
-not its Cargo package version. The dependent and every installed dependency need an `[api]` package.
+Requirements use Cargo semver syntax and are checked against each installed mod's `horizon-mod.toml`
+`version`, not its Cargo package version. The dependent and every installed dependency need a code crate.
+Nonempty dependencies on content-only mods are not supported yet.
 Missing required dependencies, incompatible versions and cycles stop the build with the mods named.
 An absent optional dependency is permitted; an installed optional dependency must match its requirement.
 
 The launcher adds a path dependency using the mod ID as the Cargo alias and the target's actual Cargo
-package name. In Rust, replace hyphens in the alias with underscores. Optional dependencies also get a
-Cargo feature named exactly as their mod ID, enabled only when that mod is installed. Guard calls with
+package name. Optional dependencies also get a Cargo feature named exactly as their mod ID, enabled
+only when that mod is installed. Guard calls with
 `#[cfg(feature = "extra_mod")]`. Do not define these dependencies or features yourself in Cargo.toml.
 Public statics must use appropriate synchronization for shared and reentrant hooks; private state in
 another mod's hook object is not exposed.
@@ -2843,17 +2856,17 @@ construction, the allocator and the canonical game identity. Source without this
 before staging trait mods: update the game first.
 
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
-and in the server thread's log line, with the bundle's `[mod] id`. Each entry passed to
+and in the server thread's log line, with the `horizon-mod.toml` id. Each entry passed to
 `entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
 The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
 Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
 id for startup errors and hook panics. The game stops. Render hooks and trait injections
 are not named yet.
 
-A bundle with an `[api]` package may declare its own injection in the trait:
+A code mod may declare its own injection in the trait as a rare escape hatch:
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "before-tick"
 target = "horizon_client::game::example"
 kind = "HEAD"
@@ -2861,10 +2874,10 @@ trait_method = "before_tick"
 bindings = [{ name = "amount", ty = "&mut i32", value = "&mut *amount" }]
 ```
 
-The generated trait method is `inject_<mod_id>_<trait_method>` (hyphens in the mod id become
-underscores). Its event, as a catalog hook's, is that name in CamelCase plus `Event`
+The generated trait method is `inject_<mod_id>_<trait_method>`. Its event, as a catalog hook's,
+is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
-returned by that bundle's `hooks()`; it is called only for that bundle's object. Types must be
+returned by that mod's generated factory; it is called only for that mod's object. Types must be
 public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
 or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
 `Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
@@ -2876,7 +2889,7 @@ value passes through unchanged. A borrowed `$value` works only where Rust's elis
 one input. `cancellable` is HEAD-only. Other kinds are rejected. Do not specify `helper` on these entries.
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "points"
 target = "horizon_client::game::example"
 kind = "MODIFY_ARG"
@@ -2957,40 +2970,40 @@ A helper is compiled inside its target, as a [Sponge Mixin](https://github.com/S
 into its target class, so it can use the typed API. On a `Game` method, bind the game and coerce it to `dyn Host`:
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
-helper = "count.rs"
+helper = "src/count.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 ```
+
+With the `COUNTER` declaration from [Server attachments](#server-attachments) in `src/count.rs`:
 
 ```rust
 fn count(game: &mut crate::game::Game<'_>) {
     let host: &mut dyn horizon_client::mod_api::Host = game;
     let holder = horizon_client::mod_api::Holder::Level;
-    if let Ok(old) = crate::game::example::COUNTER.get(&mut *host, holder) {
-        let _ = crate::game::example::COUNTER.set(host, holder, old + 1);
+    if let Ok(old) = COUNTER.get(&mut *host, holder) {
+        let _ = COUNTER.set(host, holder, old + 1);
     }
 }
 ```
 
-`COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in a `[[module]]` of the
-bundle (horizon-mixins' README): one with `file = "crates/horizon-client/src/game.rs"` and `name = "example"` is
-`crate::game::example`. `Game` is not an `AttachmentHost` itself, so the `dyn Host` coercion is the step that matters;
-any `Host` helper works on `host` too.
+`Game` is not an `AttachmentHost` itself, so the `dyn Host` coercion is the step that matters;
+the same host exposes typed helpers.
 
 On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
 `native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
 for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
-A trait injection gives the mod's `[api]` crate the same `Host` at that method. The `[api]` crate depends on
-horizon-client's library, not on the game executable that helpers and modules are compiled into, so it declares its
-own `AttachmentType<i32>` with the same `namespace` and `name`: the pair is the key, so both statics read one value.
+A trait injection gives the mod's root crate the same `Host` at that method. It depends on
+horizon-client's library, not on the game executable. For example, with `COUNTER` declared as the
+`AttachmentType<i32>` in [Server attachments](#server-attachments):
 
 ```toml
-[[injection]]
+[[native.injection]]
 id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
@@ -3004,7 +3017,7 @@ fn inject_example_count(&self, event: &mut InjectExampleCountEvent<'_>) {
 }
 ```
 
-The `[api]` crate reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists the
+The mod's crate reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists the
 limits). `hook` and `hook_version` work in place of `target`.
 
 The helper runs in every `Game` that calls its target, and attachments answer `MissingHolder` outside the server's game,
@@ -3257,10 +3270,10 @@ Reading or writing a minecart's slots unpacks its loot table with no player, as 
 #### A mod's own capability
 
 A mod can define a capability of its own, as Mekanism defines chemicals: a resource type and a key, published from
-its `[api]` package ([Dependencies between trait mods](#dependencies-between-trait-mods)) for other mods to use.
+its root crate ([Dependencies between trait mods](#dependencies-between-trait-mods)) for other mods to use.
 
 ```rust
-// chem-api's [api] package
+// The chemistry mod's root crate
 #[derive(Clone, PartialEq)]
 pub struct Chemical(pub String);
 pub const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> = CapabilityKey::new("chem_api:chemical");
