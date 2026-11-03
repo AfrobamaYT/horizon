@@ -1054,7 +1054,9 @@ unique `Identifier` and the same converters as the server side
 reads their bytes from `assets/*/ui/` with resource-pack overrides already resolved: a selected
 pack's file wins over the mod's packaged one, and a pack added later wins over both. A file
 `assets/my_mod/ui/theme.json` becomes `my_mod:theme`. It cannot read data files, other
-directories, or filesystem paths.
+directories, or filesystem paths. Files resolve like vanilla resource packs: every file
+except `lang/*.json` is delivered as the exact bytes of the winning pack's file, while
+language files arrive key-wise merged across the packs, as vanilla loads them.
 
 Prepare and apply semantics, error handling, crash attribution, dependency ordering and the
 read-only registry views are the [server listener's](#server-data-reload-listeners):
