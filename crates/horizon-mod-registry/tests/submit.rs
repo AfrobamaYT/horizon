@@ -21,7 +21,7 @@ use std::{
 use tower::ServiceExt;
 
 const PUBLIC: &str = "https://playhorizon.test";
-const HMOD_SHA: &str = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53";
+const HMOD_SHA: &str = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce";
 
 #[derive(Default)]
 struct Mock {

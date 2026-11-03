@@ -86,7 +86,7 @@ game = "26.3"
 [[mods]]
 id = "coords_hud"
 version = "0.1.0"
-sha256 = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53"
+sha256 = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce"
 on = true                   # optional, default true: turned on in the profile's horizon-mods.txt
 ```
 
