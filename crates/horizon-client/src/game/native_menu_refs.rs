@@ -6,15 +6,23 @@ use horizon_client::{
         guest::Guest,
         menu::{SlotBacking, VEHICLE_KEY_Y},
     },
-    mod_api::{MenuRef, PlayerRef},
+    mod_api::{LevelRef, MenuRef, PlayerRef},
 };
 
 /// A supported menu slot's underlying storage, for the item-place journal.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MenuBacking {
-    Block((i32, i32, i32), usize),
-    Entity(u32, usize),
+    Block {
+        level: LevelRef,
+        pos: [i32; 3],
+        slot: usize,
+    },
+    Entity {
+        level: LevelRef,
+        id: u32,
+        slot: usize,
+    },
     Inventory(usize),
     Armor(usize),
     Offhand,
@@ -125,11 +133,19 @@ impl Game<'_> {
                 _ => None,
             };
         }
-        Some(match open.slots.backing(&self.world, slot)? {
-            SlotBacking::Block(pos, n) if pos.1 == VEHICLE_KEY_Y => {
-                MenuBacking::Entity(pos.2 as u32, n)
-            }
-            SlotBacking::Block(pos, n) => MenuBacking::Block(pos, n),
+        let level = self.native_level(&guest.dimension)?;
+        let world = self.native_level_world(level)?;
+        Some(match open.slots.backing(world, slot)? {
+            SlotBacking::Block(pos, n) if pos.1 == VEHICLE_KEY_Y => MenuBacking::Entity {
+                level,
+                id: pos.2 as u32,
+                slot: n,
+            },
+            SlotBacking::Block(pos, n) => MenuBacking::Block {
+                level,
+                pos: [pos.0, pos.1, pos.2],
+                slot: n,
+            },
             SlotBacking::Ender(n) => MenuBacking::Ender(n),
             SlotBacking::Native(n) => MenuBacking::Native(n),
         })
@@ -141,9 +157,11 @@ impl Game<'_> {
         let backing = self.native_menu_backing(menu, slot)?;
         let guest = self.native_menu_guest(menu)?;
         Some(match backing {
-            MenuBacking::Block(..) | MenuBacking::Entity(..) => {
-                guest.menu.as_ref()?.slots.get(&self.world, guest, slot)
-            }
+            MenuBacking::Block { level, .. } | MenuBacking::Entity { level, .. } => guest
+                .menu
+                .as_ref()?
+                .slots
+                .get(self.native_level_world(level)?, guest, slot),
             MenuBacking::Inventory(n) => guest.inventory.get(n)?.clone(),
             MenuBacking::Armor(n) => guest.armor.get(n)?.clone(),
             MenuBacking::Offhand => guest.offhand.clone(),
@@ -319,7 +337,11 @@ mod tests {
             let menu = game.native_menu_ref(player).unwrap();
             assert_eq!(
                 game.native_menu_backing(menu, 2),
-                Some(MenuBacking::Block(b, 0))
+                Some(MenuBacking::Block {
+                    level: game.native_level("minecraft:overworld").unwrap(),
+                    pos: [b.0, b.1, b.2],
+                    slot: 0
+                })
             );
             assert_eq!(menu.slot(game, 2), Some(Some(stone.clone())));
             let vehicle = (i32::MAX - 15, VEHICLE_KEY_Y, 42);
@@ -337,9 +359,77 @@ mod tests {
             let menu = game.native_menu_ref(player).unwrap();
             assert_eq!(
                 game.native_menu_backing(menu, 0),
-                Some(MenuBacking::Entity(42, 0))
+                Some(MenuBacking::Entity {
+                    level: game.native_level("minecraft:overworld").unwrap(),
+                    id: 42,
+                    slot: 0
+                })
             );
             assert_eq!(menu.slot(game, 0), Some(Some(stone)));
+
+            // Identical coordinates in different dimensions must not alias.
+            let gold = ItemStack::new("minecraft:gold_ingot", 2);
+            let emerald = ItemStack::new("minecraft:emerald", 3);
+            game.world
+                .block_entities
+                .insert(a, BlockEntity::Chest(vec![Some(gold.clone())]));
+            let title = horizon_world::nbt::Tag::String("dimension".into());
+            game.lan.as_mut().unwrap().hub.open_container(
+                1,
+                "minecraft:generic_9x1",
+                title.clone(),
+                a,
+                Slots::Block(a),
+                vec![Some(gold.clone())],
+            );
+            let overworld_menu = game.native_menu_ref(player).unwrap();
+            let overworld = game.native_level("minecraft:overworld").unwrap();
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            game.world
+                .block_entities
+                .insert(a, BlockEntity::Chest(vec![Some(emerald.clone())]));
+            let mut nether_guest = guest();
+            nether_guest.conn = 2;
+            nether_guest.uuid = 456;
+            nether_guest.entity_id = 2;
+            nether_guest.dimension = "minecraft:the_nether".into();
+            game.lan.as_mut().unwrap().hub.guests.push(nether_guest);
+            game.lan.as_mut().unwrap().hub.open_container(
+                2,
+                "minecraft:generic_9x1",
+                title,
+                a,
+                Slots::Block(a),
+                vec![Some(emerald.clone())],
+            );
+            let other_player = game.native_player_ref(456).unwrap();
+            let nether_menu = game.native_menu_ref(other_player).unwrap();
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            assert_eq!(overworld_menu.slot(game, 0), Some(Some(gold)));
+            assert_eq!(
+                game.native_menu_backing(overworld_menu, 0),
+                Some(MenuBacking::Block {
+                    level: overworld,
+                    pos: [a.0, a.1, a.2],
+                    slot: 0
+                })
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            assert_eq!(nether_menu.slot(game, 0), Some(Some(emerald)));
+            assert_eq!(
+                game.native_menu_backing(nether_menu, 0),
+                Some(MenuBacking::Block {
+                    level: nether,
+                    pos: [a.0, a.1, a.2],
+                    slot: 0
+                })
+            );
         });
     }
 }
