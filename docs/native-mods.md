@@ -91,8 +91,7 @@ Hook and helper authors use [API fragments](../tools/native-hook-fragments/READM
 API 2 adds the item panel beside container screens and its recipe pages (`native_panel_items`,
 `native_panel_recipes`, and the hook `native_panel_event` for the player's clicks, searches and keys over items), and
 the game's items and recipes (`native_recipes`, `native_known_recipes`, `native_place_recipe`, `native_give`): what a
-recipe viewer needs. `native_give` was removed with the Parts core work (#41): a server mod gives through the player's
-[`ENTITY_ITEMS`](#an-entitys-items) handler.
+recipe viewer needs.
 
 API 11 adds `GameLevel::native_send_particles` on authoritative servers. It sends supported
 vanilla particles to nearby players. Block particles require a valid block state. Item, trail and
@@ -110,15 +109,13 @@ API 8 adds server commands and players: `native_register_commands` (the commands
 command tree) and `native_perform_command` (a player's command on the server), with helpers to answer
 ([Server commands and players](#server-commands-and-players)). Bundles that use them need `"hooks": 8`.
 
-API 9 adds the acting player's plain items for server mods (count, take, give). Bundles that use them need `"hooks": 9`.
-These helpers were removed with the Parts core work (#41): a player's [`ENTITY_ITEMS`](#an-entitys-items) handler
-replaces them.
+API 9 adds a player's items for server mods: counting, taking and giving go through the player's
+[`ENTITY_ITEMS`](#an-entitys-items) handler. Bundles that use them need `"hooks": 9`.
 
 API 10 adds server menus: a vanilla chest menu a server mod opens and fills, whose clicks and closing reach the mod
-(`native_menu_clicked`, `native_menu_closed`), and `native_exchange_items`, two players' stacks swapped in one checked
-step ([Server menus](#server-menus)). Bundles that use them need `"hooks": 10`. `native_player_stacks` (since added) and
-`native_exchange_items` were removed with the Parts core work (#41): two `move_resources` between the players'
-[`ENTITY_ITEMS`](#an-entitys-items) handlers in one transaction replace them.
+(`native_menu_clicked`, `native_menu_closed`), and trades on them between the players'
+[`ENTITY_ITEMS`](#an-entitys-items) handlers in one transaction ([Server menus](#server-menus)). Bundles that use them
+need `"hooks": 10`.
 
 API 12 adds item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
 lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip. Bundles that use it
@@ -274,9 +271,8 @@ it read it again; it acts on the level in place and is refused for another dimen
 
 API 39 adds item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
 held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
-`native_carried_stack` reads and changes that stack, and `native_on_equip` hears an equipment slot take a different item. The helpers read the acting player. Bundles
-that use them need `"hooks": 39`. `native_carried_stack` was removed with the Parts core work (#41): the stack is the
-place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place.
+the stack is the place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place, and
+`native_on_equip` hears an equipment slot take a different item. Bundles that use them need `"hooks": 39`.
 
 API 40 adds [mod messages](#mod-messages) between a mod's server and client halves, and hearing players and mobs on the
 server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
@@ -913,8 +909,9 @@ API 96 adds `native_neighbor_signal(dimension, pos)`, the strongest redstone sig
 
 API 97 adds `native_light(pos)` (block and sky light, 0 to 15, both 0 where the chunk isn't loaded), `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `native_world_height()` (min y and height) and `native_max_stack_size(item)`: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals. Bundles that use them need "hooks": 97.
 
-API 98 adds `native_give_stack(uuid, stack)`: gives a whole stack (damage, name, enchantments kept) to any player from a server hook, as `Inventory.add` places it, and returns what did not fit. Bundles need "hooks": 98. It was removed with the Parts core work (#41): `insert_any`
-into the player's [`ENTITY_ITEMS`](#an-entitys-items) handler places a stack as `Inventory.add` does.
+API 98 adds giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
+the player's [`ENTITY_ITEMS`](#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
+Bundles need "hooks": 98.
 
 API 99 adds a mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `native_acting_player` is None), and a mod sets `ran`. `native_feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher as before; the single player owner's console is not covered. Bundles that use it need `"hooks": 99`.
 
@@ -2686,9 +2683,10 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
   is sent the menu, its inventory and its cursor as they were. `slot` counts the menu's own slots first, then the
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
 - `native_menu_closed(uuid, window)`: the player closed it, another menu opened, or the player left.
-- A trade on these menus leaves the offered stacks in their owners' inventories until both sides are settled, then
-  moves them with two `move_resources` between the players' [`ENTITY_ITEMS`](#an-entitys-items) handlers in one
-  `host.transaction`: when the second move falls short, the closure returns an error and the first is put back.
+- A trade on these menus leaves the offered stacks in their owners' inventories until both sides are settled. Then,
+  in one `host.transaction`, each offered inventory index is checked to still hold exactly what was offered, taken
+  out of the player's [`ENTITY_ITEMS`](#an-entitys-items) handler and put into the other's with `insert_any`
+  ([the recipe](#an-entitys-items)). A changed offer or no room returns an error, and every move is put back.
 
 ### Render hook points
 
@@ -3143,17 +3141,26 @@ llama the game answers with their container's slots (`ItemPlace::EntitySlot`). `
 game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
 
 ```rust
-// Swap two players' offers, or nothing: an abort puts the first move back.
+// A trade: each offer is (index, the exact stack it must still hold). A stale offer or no
+// room for one aborts the transaction, and every move in it is put back.
 let (a, b) = (seller.capability(host, &ENTITY_ITEMS)?, buyer.capability(host, &ENTITY_ITEMS)?);
 host.transaction(|host, tx| {
-    let paid = move_resources(host, &b, &a, |item| item == &emerald, 5, tx);
-    let sold = move_resources(host, &a, &b, |item| item == &sword, 1, tx);
-    if paid == 5 && sold == 1 { Ok(()) } else { Err(()) }
+    for (from, to, offer) in [(&a, &b, &seller_offer), (&b, &a, &buyer_offer)] {
+        for (index, stack) in offer {
+            let offered = ItemResource::of(stack);
+            let still = from.resource(host, *index).as_ref() == Some(&offered)
+                && from.amount(host, *index) == stack.count;
+            if !still
+                || from.extract(host, tx, *index, &offered, stack.count) != stack.count
+                || to.insert_any(host, tx, &offered, stack.count) != stack.count
+            {
+                return Err(());
+            }
+        }
+    }
+    Ok(())
 })
 ```
-
-The API 9 item helpers, `native_give_stack`, `native_carried_stack`, `native_player_stacks`, `native_exchange_items`
-and the client's `native_give` were removed for it (#41). Diverges from upstream.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion

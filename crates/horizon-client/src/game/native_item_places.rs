@@ -302,7 +302,7 @@ mod tests {
     use horizon_client::{
         items::ItemStack,
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
-        mod_api::{ENTITY_ITEMS, Host, ItemPlace, ItemResource, move_resources},
+        mod_api::{ENTITY_ITEMS, Host, ItemPlace, ItemResource},
     };
     use horizon_protocol::packets::configuration::ClientInformation;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
@@ -453,64 +453,112 @@ mod tests {
         });
     }
 
+    /// One player's offer in a trade: inventory index `.0` must still hold exactly `.1`.
+    type Offer = (usize, ItemStack);
+
+    /// Two guests' trade on a menu, as the docs' recipe has it: each offer's index must still
+    /// hold exactly what was offered, and goes whole to the other player, or nothing moves.
+    fn trade(game: &mut super::Game<'_>, a: &[Offer], b: &[Offer]) -> Result<(), ()> {
+        let host: &mut dyn Host = game;
+        let items = |host: &mut dyn Host, id| {
+            let entity = host.entity(id).unwrap();
+            entity.capability(host, &ENTITY_ITEMS).unwrap()
+        };
+        let (seller, buyer) = (items(host, 20), items(host, 21));
+        host.transaction(|host, tx| {
+            for (from, to, offer) in [(&seller, &buyer, a), (&buyer, &seller, b)] {
+                for (index, stack) in offer {
+                    let offered = ItemResource::of(stack);
+                    let still = from.resource(host, *index).as_ref() == Some(&offered)
+                        && from.amount(host, *index) == stack.count;
+                    if !still
+                        || from.extract(host, tx, *index, &offered, stack.count) != stack.count
+                        || to.insert_any(host, tx, &offered, stack.count) != stack.count
+                    {
+                        return Err(());
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// A seller with 3 diamonds in slot 0 and a buyer with 5 emeralds in slot 0, beside
+    /// `buyer_rest` in every other slot and the off hand.
+    fn traders(game: &mut super::Game<'_>, buyer_rest: Option<ItemStack>) {
+        open_to_lan(game);
+        let mut seller = guest(1);
+        seller.inventory[0] = Some(ItemStack::new("minecraft:diamond", 3));
+        let mut buyer = guest(2);
+        buyer.inventory[0] = Some(ItemStack::new("minecraft:emerald", 5));
+        for slot in &mut buyer.inventory[1..36] {
+            *slot = buyer_rest.clone();
+        }
+        buyer.offhand = buyer_rest;
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guests
+            .extend([seller, buyer]);
+    }
+
+    fn offers() -> ([Offer; 1], [Offer; 1]) {
+        (
+            [(0, ItemStack::new("minecraft:diamond", 3))],
+            [(0, ItemStack::new("minecraft:emerald", 5))],
+        )
+    }
+
     #[test]
     #[ignore = "needs prepared resources"]
-    fn a_trade_between_two_players_moves_both_ways_or_neither() {
+    fn a_trade_between_two_players_moves_both_offers() {
         with_game(|game| {
-            open_to_lan(game);
-            let mut seller = guest(1);
-            seller.inventory[0] = Some(ItemStack::new("minecraft:diamond", 3));
-            let mut buyer = guest(2);
-            buyer.inventory[0] = Some(ItemStack::new("minecraft:emerald", 10));
-            for slot in &mut buyer.inventory[1..36] {
-                *slot = Some(ItemStack::new("minecraft:stone", 64));
-            }
-            buyer.offhand = Some(ItemStack::new("minecraft:stone", 64));
-            game.lan
-                .as_mut()
-                .unwrap()
-                .hub
-                .guests
-                .extend([seller, buyer]);
-            let diamond = ItemResource::of(&ItemStack::new("minecraft:diamond", 1));
-            let emerald = ItemResource::of(&ItemStack::new("minecraft:emerald", 1));
-            let trade = |game: &mut super::Game<'_>| {
-                let host: &mut dyn Host = game;
-                let seller = host
-                    .entity(20)
-                    .unwrap()
-                    .capability(host, &ENTITY_ITEMS)
-                    .unwrap();
-                let buyer = host
-                    .entity(21)
-                    .unwrap()
-                    .capability(host, &ENTITY_ITEMS)
-                    .unwrap();
-                host.transaction(|host, tx| {
-                    let paid = move_resources(host, &buyer, &seller, |r| r == &emerald, 5, tx);
-                    let sold = move_resources(host, &seller, &buyer, |r| r == &diamond, 3, tx);
-                    if (paid, sold) == (5, 3) {
-                        Ok(())
-                    } else {
-                        Err((paid, sold))
-                    }
-                })
-            };
-            // The buyer pays 5 of their 10 emeralds, and the rest keep the one slot that isn't
-            // stone: the diamonds have nowhere to go, so the payment is put back.
-            let before = inventories(game);
-            assert_eq!(trade(game), Err((5, 0)));
-            assert_eq!(inventories(game), before);
-
-            // With a free slot, both halves move: the emeralds into the seller's first empty
-            // slot, the diamonds into the buyer's.
-            game.lan.as_mut().unwrap().hub.guests[1].inventory[35] = None;
-            assert_eq!(trade(game), Ok(()));
+            traders(game, None);
+            let (diamonds, emeralds) = offers();
+            assert_eq!(trade(game, &diamonds, &emeralds), Ok(()));
+            // The diamonds go first, into the buyer's first empty slot (1: the emeralds are
+            // still in 0), then the emeralds into the seller's emptied slot 0.
             let after = inventories(game);
-            assert_eq!(after[0][0], None);
-            assert_eq!(after[0][1], Some(ItemStack::new("minecraft:emerald", 5)));
-            assert_eq!(after[1][0], Some(ItemStack::new("minecraft:emerald", 5)));
-            assert_eq!(after[1][35], Some(ItemStack::new("minecraft:diamond", 3)));
+            assert_eq!(after[0][0], Some(ItemStack::new("minecraft:emerald", 5)));
+            assert_eq!(after[1][0], None);
+            assert_eq!(after[1][1], Some(ItemStack::new("minecraft:diamond", 3)));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_trade_into_a_full_inventory_moves_nothing() {
+        with_game(|game| {
+            // The buyer's other slots and off hand hold stone, so only slot 0 is free once the
+            // emeralds leave; the diamonds go before the emeralds and find no room.
+            traders(game, Some(ItemStack::new("minecraft:stone", 64)));
+            let before = inventories(game);
+            let (diamonds, emeralds) = offers();
+            assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
+            assert_eq!(inventories(game), before);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_stale_offer_moves_nothing() {
+        with_game(|game| {
+            traders(game, None);
+            let (diamonds, emeralds) = offers();
+            // The seller used a diamond after offering three, and the buyer moved the emeralds
+            // to another slot: each offer no longer matches its index.
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests[0].inventory[0] = Some(ItemStack::new("minecraft:diamond", 2));
+            let before = inventories(game);
+            assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
+            assert_eq!(inventories(game), before);
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests[0].inventory[0] = Some(ItemStack::new("minecraft:diamond", 3));
+            guests[1].inventory[4] = guests[1].inventory[0].take();
+            let before = inventories(game);
+            assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
+            assert_eq!(inventories(game), before);
         });
     }
 

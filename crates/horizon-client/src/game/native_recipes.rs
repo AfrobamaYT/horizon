@@ -114,6 +114,21 @@ impl Game<'_> {
         }
         self.recipe_tables.categories.as_ref()?.get(kind).cloned()
     }
+    /// `native_give`: `count` of `item`, refused outside a world, unless
+    /// creative and for an item the game doesn't have.
+    pub(super) fn recipe_give(&mut self, item: &str, count: u32) -> Result<(), String> {
+        if self.player.is_none() || self.res.rest.get().is_none() {
+            return Err("not in a world".into());
+        }
+        if !self.creative {
+            return Err("only in creative mode".into());
+        }
+        if self.res.items().get(item).is_none() {
+            return Err(format!("no item {item}"));
+        }
+        self.mod_give(item, count.clamp(1, 99), "");
+        Ok(())
+    }
     /// `native_place_recipe`: refused as `recipes.place` refuses it.
     pub(super) fn recipe_place(&mut self, book_id: i32, all: bool) -> Result<(), String> {
         if !self.mod_recipe_screen() {
@@ -126,6 +141,28 @@ impl Game<'_> {
         }
         self.mod_place_recipe(book_id, all);
         Ok(())
+    }
+    /// `recipes.give`: a creative player takes the stack as from the
+    /// creative inventory; a server hears it as `SetCreativeModeSlot`
+    /// through the inventory's sync, and refuses it unless creative.
+    pub(super) fn mod_give(&mut self, item: &str, count: u32, components: &str) {
+        let Some(max) = self.items().get(item).map(|i| i.max_stack) else {
+            return;
+        };
+        if !self.creative {
+            return;
+        }
+        let (damage, extra) = horizon_client::item_data::command_components(components)
+            .map_or((0, None), |tag| {
+                horizon_client::item_data::decode_components(Some(&tag))
+            });
+        let _ = self.give(ItemStack {
+            item: item.into(),
+            // One stack at most, as the creative inventory hands out.
+            count: count.min(max),
+            damage,
+            extra,
+        });
     }
     /// The tables, made on the first call; none while the world resources
     /// they come from are still loading behind the title on a slow start.

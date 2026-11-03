@@ -541,8 +541,7 @@
 //!
 //! API 99 adds a mod's command typed on the dedicated server's console (`native_perform_console_command`).
 //!
-//! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`,
-//! since removed for `ENTITY_ITEMS`).
+//! API 98 adds giving a whole stack to any player from a server hook (`ENTITY_ITEMS`).
 //!
 //! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (`native_light`, `native_weather`, `native_day_time`, `native_world_height`, `native_max_stack_size`).
 //!
@@ -821,8 +820,7 @@
 //! API 10 adds server menus (`native_menu_clicked`, `native_menu_closed`,
 //! and `native_open_menu`... in `native_menus.rs`).
 //!
-//! API 9 adds the acting player's plain items (since removed for
-//! `ENTITY_ITEMS`).
+//! API 9 adds a player's items (`ENTITY_ITEMS`).
 //!
 //! API 8 adds server commands and players (`native_register_commands`,
 //! `native_perform_command`, and the helpers in `native_server.rs`).
@@ -840,8 +838,8 @@
 //! API 2 adds the item panel beside container screens and its recipe pages
 //! (`native_panel_items`, `native_panel_recipes`, `native_panel_event`),
 //! and the game's items and recipes (`native_recipes`,
-//! `native_known_recipes`, `native_place_recipe`): what a recipe viewer
-//! needs.
+//! `native_known_recipes`, `native_place_recipe`, `native_give`): what a
+//! recipe viewer needs.
 //!
 //! Names, parameters and call sites are kept from release to release, and
 //! hook points are only ever added: each addition raises [`NATIVE_HOOKS_API`].
@@ -9821,6 +9819,13 @@ impl Game<'_> {
     /// player's book doesn't hold; one missing items shows as a ghost.
     pub(super) fn native_place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String> {
         self.recipe_place(book_id, all)
+    }
+    /// Creative mode only: gives the player `count` of `item`
+    /// (`minecraft:diamond`) as taking it from the creative inventory does
+    /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
+    /// hotbar, then the inventory. The count is cut to one stack.
+    pub(super) fn native_give(&mut self, item: &str, count: u32) -> Result<(), String> {
+        self.recipe_give(item, count)
     }
 }
 
