@@ -91,12 +91,18 @@ fn native_declared() -> &'static NativeDeclared {
 /// The native mods' standalone models (`native_standalone_models`), set once
 /// before the resources first load.
 pub(super) fn register_standalone_models(role: ExecutionRole) {
+    if let Some(names) = collect_standalone_models(role) {
+        horizon_client::models::register_standalone(names);
+    }
+}
+
+fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     if !role.is_client() {
-        return;
+        return None;
     }
     let mut names = Vec::new();
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
-    horizon_client::models::register_standalone(names);
+    Some(names)
 }
 
 /// `root` with the content mods that are on layered over it
@@ -450,7 +456,7 @@ impl Game<'_> {
 mod tests {
     use super::*;
     #[test]
-    fn standalone_models_register_only_on_the_client() {
+    fn standalone_models_collect_only_on_the_client() {
         use crate::mod_api::{self, Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
         use std::sync::{
             Arc,
@@ -481,16 +487,12 @@ mod tests {
             )]
             .into(),
             || {
-                register_standalone_models(ExecutionRole::IntegratedServer);
-                register_standalone_models(ExecutionRole::DedicatedServer);
+                assert_eq!(collect_standalone_models(ExecutionRole::IntegratedServer), None);
+                assert_eq!(collect_standalone_models(ExecutionRole::DedicatedServer), None);
                 assert_eq!(calls.load(Ordering::Relaxed), 0);
-                register_standalone_models(ExecutionRole::Client);
+                let models = collect_standalone_models(ExecutionRole::Client).unwrap();
                 assert_eq!(calls.load(Ordering::Relaxed), 1);
-                assert!(
-                    horizon_client::models::standalone()
-                        .iter()
-                        .any(|id| id == "registration_test:block/shaft")
-                );
+                assert_eq!(models, ["registration_test:block/shaft"]);
             },
         );
     }
