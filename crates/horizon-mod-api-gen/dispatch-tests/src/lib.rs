@@ -355,10 +355,16 @@ mod tests {
     fn leak<T>(part: T) -> &'static T {
         Box::leak(Box::new(part))
     }
+    fn has_part_hook(_: HookId) -> bool {
+        true
+    }
     fn parts(_: &'static str) -> &'static Parts {
         PARTS.get()
     }
     impl Parts {
+        fn for_hook(&self, _: HookId) -> Option<&Self> {
+            Some(self)
+        }
         fn block_state(&self, _: BlockStateId) -> &[&'static dyn BlockPart] {
             &self.blocks
         }
@@ -556,8 +562,15 @@ mod tests {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
     }
-    impl BlockPart for Mod {}
+    impl BlockPart for Mod {
+        fn block_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
+    }
     impl BlockEntityPart for Mod {
+        fn block_entity_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
         fn menu_button(&self, _: &mut dyn ServerHost, event: &mut MenuButtonEvent<'_>) {
             assert_eq!(event.context.player, 123);
             assert_eq!(event.context.player_entity_id, 42);
@@ -576,12 +589,18 @@ mod tests {
         }
     }
     impl MenuPart for Mod {
+        fn menu_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
         fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
             event.may_place = false;
             event.max_stack = self.id;
         }
     }
     impl ItemPart for Mod {
+        fn item_subscribed(&self) -> &'static [Option<HookId>] {
+            &[]
+        }
         fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
             event.lines.push((Text, self.id));
         }
@@ -799,6 +818,9 @@ mod tests {
         impl LevelHost for Level {}
         struct Refuse(Arc<Mutex<Vec<u32>>>, u32);
         impl BlockPart for Refuse {
+            fn block_subscribed(&self) -> &'static [Option<HookId>] {
+                &[]
+            }
             fn state_for_placement(
                 &self,
                 _: &dyn LevelHost,
