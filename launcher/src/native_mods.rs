@@ -31,7 +31,7 @@ mod package;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "source-only-v1";
+const STAGING: &str = "embedded-inventory-packages-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
@@ -1406,6 +1406,7 @@ fn pipeline(
     folder: &Path,
     profile: Profile,
     target: Target,
+    allow_jar_downloads: bool,
     progress: &impl Fn(Step),
 ) -> Result<Built, String> {
     let started = std::time::Instant::now();
@@ -1476,6 +1477,16 @@ fn pipeline(
     let other = mismatch(&mods, &revision);
     if let Some(list) = &other {
         return Err(format!("{MISMATCH}{list}; rebuild against this game."));
+    }
+    if target == Target::Server {
+        let jars = crate::jars::collect(mods.iter().map(|bundle| &bundle.manifest))
+            .map_err(|error| error.to_string())?;
+        crate::jars::prepare(
+            &backend::game_home(),
+            &jars,
+            crate::jars::Permission::headless(allow_jar_downloads),
+        )
+        .map_err(|error| error.to_string())?;
     }
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
     let blame = |e: String| {
@@ -1672,7 +1683,7 @@ pub fn build(
     progress: impl Fn(Step),
 ) -> Result<String, String> {
     logged(|| {
-        let built = pipeline(base, folder, profile, Target::Client, &progress)?;
+        let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
         })?;
@@ -1703,6 +1714,7 @@ pub fn build_server(
     folder: &Path,
     output: &Path,
     profile: Profile,
+    allow_jar_downloads: bool,
     progress: impl Fn(Step),
 ) -> Result<PathBuf, String> {
     logged(|| {
@@ -1730,7 +1742,14 @@ pub fn build_server(
                 return Err(tr("Export the server outside the launcher's managed folders.").into());
             }
         }
-        let built = pipeline(base, folder, profile, Target::Server, &progress)?;
+        let built = pipeline(
+            base,
+            folder,
+            profile,
+            Target::Server,
+            allow_jar_downloads,
+            &progress,
+        )?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
         let cached = root().join("server-builds");
@@ -2881,6 +2900,7 @@ mod tests {
             Path::new("missing-mod-folder"),
             Profile::Dev,
             Target::Client,
+            false,
             &|_| panic!("invalid records must not start a build"),
         ) else {
             panic!("invalid build must be refused");
@@ -3060,6 +3080,7 @@ mod tests {
             &folder,
             &output,
             Profile::Performance,
+            false,
             |_| {},
         )
         .unwrap_err();
@@ -3071,6 +3092,7 @@ mod tests {
             &folder,
             &managed,
             Profile::Performance,
+            false,
             |_| {},
         )
         .unwrap_err();
@@ -3123,6 +3145,7 @@ mod tests {
             &folder,
             &out.join("server"),
             Profile::Performance,
+            false,
             |_| {},
         )
         .unwrap_err();

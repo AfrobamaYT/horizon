@@ -242,7 +242,7 @@ fn final_launch_combines_only_enabled_content_dev_and_adjacent_native_candidates
     )
     .unwrap();
     fs::write(
-        bin.join(horizon_mods::selection::BUILD_INFO),
+        bin.join("native-mods.json"),
         r#"{"mods":[{"id":"next_build"}]}"#,
     )
     .unwrap();

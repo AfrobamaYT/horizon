@@ -806,6 +806,10 @@ enum Cmd {
             requires = "folder"
         )]
         server_output: Option<PathBuf>,
+        /// Allow exact-hash jar downloads into the local cache for the server export;
+        /// jar bytes are never included in the exported folder
+        #[arg(long, requires = "server_output")]
+        allow_jar_downloads: bool,
         /// The instance whose installed native mods to build, and which then plays the build
         /// (default: the selected one)
         #[arg(long)]
@@ -1261,6 +1265,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::NativeBuild {
             folder,
             server_output,
+            allow_jar_downloads,
             instance,
             version,
             update,
@@ -1290,7 +1295,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     None => native_mods::base_for(None, &backend::installed(), update)
                         .ok_or_else(|| tr("No version is installed yet."))?,
                 };
-                let built = native_mods::build_server(&base, &folder, &output, profile, steps)?;
+                let built = native_mods::build_server(
+                    &base,
+                    &folder,
+                    &output,
+                    profile,
+                    allow_jar_downloads,
+                    steps,
+                )?;
                 let built = std::path::absolute(&built).unwrap_or(built);
                 let path = built.display().to_string();
                 println!(
@@ -3824,6 +3836,21 @@ mod tests {
             }
             _ => panic!("expected native-build"),
         }
+        assert!(matches!(
+            parse(&[
+                "mods",
+                "--server-output",
+                "engine-out",
+                "--allow-jar-downloads"
+            ])
+            .unwrap()
+            .command,
+            Some(Cmd::NativeBuild {
+                allow_jar_downloads: true,
+                ..
+            })
+        ));
+        assert!(parse(&["mods", "--allow-jar-downloads"]).is_err());
         // The mod folder is explicit in export mode: no default from an instance.
         assert!(parse(&["--server-output", "engine-out"]).is_err());
         // Export mode never touches an instance.

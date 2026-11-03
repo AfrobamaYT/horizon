@@ -93,13 +93,23 @@ pub(super) fn content_root(
     } else {
         Vec::new()
     };
-    let native = sources
-        .native
-        .packages()
-        .iter()
-        .map(|p| (&p.path, &p.manifest, false));
-    let content = content.iter().map(|p| (&p.path, &p.package.manifest, true));
-    for (path, m, content_only) in native.chain(content) {
+    struct PackageSource<'a> {
+        path: &'a std::path::Path,
+        manifest: &'a horizon_mods::Manifest,
+        content_only: bool,
+    }
+    let native = sources.native.packages().iter().map(|p| PackageSource {
+        path: &p.path,
+        manifest: &p.manifest,
+        content_only: false,
+    });
+    let content = content.iter().map(|p| PackageSource {
+        path: &p.path,
+        manifest: &p.package.manifest,
+        content_only: true,
+    });
+    for source in native.chain(content) {
+        let m = source.manifest;
         if mods.iter().any(|c| c.id == m.id) {
             continue;
         }
@@ -110,7 +120,7 @@ pub(super) fn content_root(
             .filter(|i| i.id.split_once(':').is_some_and(|(ns, _)| ns == m.id))
             .map(|i| i.id.clone())
             .collect();
-        let content = match Content::read_declaring(path, m, &declared) {
+        let content = match Content::read_declaring(source.path, m, &declared) {
             Ok(content) => content,
             Err(e) => {
                 log::warn!("Horizon: mod {} content not loaded: {e}", m.id);
@@ -132,7 +142,7 @@ pub(super) fn content_root(
             content,
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) if announce && content_only => {
+            Ok(_) if announce && source.content_only => {
                 announced.push(announced_entry(&m.id, &m.version, m.side))
             }
             Ok(_) => {}
