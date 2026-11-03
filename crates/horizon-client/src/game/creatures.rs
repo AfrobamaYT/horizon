@@ -7922,7 +7922,9 @@ mod breeding_tests {
                 game.mobs
                     .push(Mob::new(fox_base + 2, fox, Vec3::new(1.0, 64.0, 0.0), 0.0));
                 game.native_joins_skip();
-                game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
+                );
                 let feeder = horizon_client::lan::playerdata::uuid_ints(game.native_acting_id());
                 game.love_cause.insert(fox_base + 1, None);
                 let fox_child = game.breed(
