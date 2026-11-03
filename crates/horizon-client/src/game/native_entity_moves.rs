@@ -14,10 +14,9 @@ use horizon_core::geometry::Vec3;
 /// `Level.isInSpawnableBounds` and `/tp`'s limits: 30,000,000 blocks out,
 /// 20,000,000 up or down.
 fn in_bounds([x, y, z]: [f64; 3]) -> bool {
-    [x, y, z].iter().all(|v| v.is_finite())
-        && x.abs() < 30_000_000.0
-        && z.abs() < 30_000_000.0
-        && y.abs() < 20_000_000.0
+    (-30_000_000.0..30_000_000.0).contains(&x)
+        && (-30_000_000.0..30_000_000.0).contains(&z)
+        && (-20_000_000.0..20_000_000.0).contains(&y)
 }
 
 /// `Direction.fromYRot`: the horizontal direction a yaw faces.
@@ -257,7 +256,7 @@ mod tests {
             assert!(mob.ai.nav.path.is_none());
             assert!(mob.extra.mount.is_none());
             assert!(!mob.extra.passenger);
-            assert_eq!(mob.fall_distance, 0.0);
+            assert_eq!(mob.fall_distance, 5.0);
             assert_eq!(mob.velocity.y, 0.0);
             assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
             assert_eq!(entity.rotation(game), Some([90.0, 90.0]));
@@ -324,6 +323,11 @@ mod tests {
     #[test]
     fn positions_stay_inside_the_worlds_bounds() {
         assert!(super::in_bounds([29_999_999.0, -64.0, 0.0]));
+        assert!(super::in_bounds([
+            -30_000_000.0,
+            -20_000_000.0,
+            -30_000_000.0
+        ]));
         assert!(!super::in_bounds([30_000_000.0, 64.0, 0.0]));
         assert!(!super::in_bounds([0.0, 20_000_001.0, 0.0]));
         assert!(!super::in_bounds([f64::NAN, 64.0, 0.0]));

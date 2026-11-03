@@ -1503,15 +1503,32 @@ impl Game<'_> {
         pos: [f64; 3],
         rotation: Option<[f32; 2]>,
     ) {
-        // An entity in another level is teleported in the level that holds it.
-        let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation));
+        self.teleport_to_relative(t, pos, rotation, [false; 3]);
     }
-    fn teleport_to_in_level(&mut self, t: Target, pos: [f64; 3], rotation: Option<[f32; 2]>) {
+    fn teleport_to_relative(
+        &mut self,
+        t: Target,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+        relative: [bool; 3],
+    ) {
+        // An entity in another level is teleported in the level that holds it.
+        let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation, relative));
+    }
+    fn teleport_to_in_level(
+        &mut self,
+        t: Target,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+        relative: [bool; 3],
+    ) {
         let from = self.target_position(t);
         let v = Vec3::new(pos[0], pos[1], pos[2]);
         match t {
             Target::Guest(_) => {
-                self.for_player(t, |g| g.teleport_to(Target::Player, pos, rotation));
+                self.for_player(t, |g| {
+                    g.teleport_to_relative(Target::Player, pos, rotation, relative)
+                });
             }
             Target::Player => {
                 // ServerPlayer.teleport: removeVehicle before placing the player.
@@ -1557,15 +1574,22 @@ impl Game<'_> {
                 }
             }
             Target::Mob(id) => {
+                self.dismount_mob(id);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                     m.ai.nav.stop();
+                    if !relative[0] {
+                        m.velocity.x = 0.0;
+                    }
+                    if !relative[1] {
+                        m.velocity.y = 0.0;
+                    }
+                    if !relative[2] {
+                        m.velocity.z = 0.0;
+                    }
                     if !m.extra.fall_flying {
                         m.velocity.y = 0.0;
                         m.on_ground = true;
                     }
-                    m.extra.mount = None;
-                    m.extra.passenger = false;
-                    m.fall_distance = 0.0;
                     m.position = v;
                     m.previous = v;
                     m.needs_sync = true;
@@ -1819,6 +1843,11 @@ impl Game<'_> {
         {
             return Err(err("commands.teleport.invalidPosition", &[]));
         }
+        let relative = match ctx.get("location") {
+            Some(Arg::Coords(Coordinates::World(coords))) => coords.each_ref().map(|c| c.relative),
+            Some(Arg::Coords(Coordinates::Local(_))) => [true; 3],
+            _ => [false; 3],
+        };
         let rotation = match ctx.get("rotation") {
             Some(Arg::Coords(c)) => Some(c.rotation(self.source_rotation())),
             _ => None,
@@ -1869,7 +1898,7 @@ impl Game<'_> {
             if self.teleport_across(t, source_level, pos, rotation) {
                 continue;
             }
-            self.teleport_to(t, pos, rotation);
+            self.teleport_to_relative(t, pos, rotation, relative);
             // LookAt.perform after a successful teleportTo.
             if let Some(f) = facing {
                 self.send_player_look_at(t, anchored_eyes, f, facing_entity);
@@ -4019,6 +4048,15 @@ mod teleport_mob_tests {
             mob.velocity = Vec3::new(1.0, -2.0, 3.0);
             mob.fall_distance = 7.0;
             game.mobs.push(mob);
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:skeleton")
+                .unwrap()
+                .clone();
+            let mut vehicle = Mob::new(42, kind, Vec3::new(0.0, 64.0, 0.0), 0.0);
+            vehicle.extra.rider = Some(12);
+            game.mobs.push(vehicle);
             game.ui.registries.permission = 4;
             assert!(game.run_command("tp @e[type=minecraft:zombie] 10 70 10"));
             let mob = &game.mobs[0];
@@ -4026,17 +4064,36 @@ mod teleport_mob_tests {
             assert!(mob.ai.nav.path.is_none());
             assert!(mob.extra.mount.is_none());
             assert!(!mob.extra.passenger);
-            assert_eq!(mob.fall_distance, 0.0);
-            assert_eq!(mob.velocity.y, 0.0);
+            assert_eq!(mob.fall_distance, 7.0);
+            assert_eq!(mob.velocity, Vec3::ZERO);
             assert!(mob.on_ground);
+            assert!(game.mobs[1].extra.rider.is_none());
             let mob = &mut game.mobs[0];
             mob.extra.fall_flying = true;
-            mob.velocity.y = -3.0;
+            mob.velocity = Vec3::new(1.0, -3.0, 2.0);
             mob.on_ground = false;
-            assert!(game.run_command("tp @e[type=minecraft:zombie] 12 70 12"));
+            assert!(game.run_command("tp @e[type=minecraft:zombie] ~ 70 ~"));
             let mob = &game.mobs[0];
-            assert_eq!(mob.velocity.y, -3.0);
+            assert_eq!(mob.velocity, Vec3::new(1.0, 0.0, 2.0));
             assert!(!mob.on_ground);
+            game.mobs[0].velocity = Vec3::new(1.0, -3.0, 2.0);
+            assert!(game.run_command("tp @e[type=minecraft:zombie] 12 ~ 12"));
+            assert_eq!(game.mobs[0].velocity, Vec3::new(0.0, -3.0, 0.0));
+            game.mobs[0].extra.fall_flying = false;
+            assert!(game.run_command("tp @e[type=minecraft:zombie] ~ ~ ~"));
+            assert_eq!(game.mobs[0].velocity.y, 0.0);
+            assert!(game.mobs[0].on_ground);
+            assert!(
+                game.run_command(
+                    "tp @e[type=minecraft:zombie] -30000000.0 -20000000.0 -30000000.0"
+                )
+            );
+            assert_eq!(
+                game.mobs[0].position,
+                Vec3::new(-30_000_000.0, -20_000_000.0, -30_000_000.0)
+            );
+            game.run_command("tp @e[type=minecraft:zombie] 30000000.0 70 0");
+            assert_eq!(game.mobs[0].position.x, -30_000_000.0);
         });
     }
 }
