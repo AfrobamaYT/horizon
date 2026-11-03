@@ -682,13 +682,9 @@ fn rustfmt(code: &str) -> Result<Vec<u8>, String> {
 /// The doc of [`BlockPart`], the first part trait in the generated file.
 const PART_DOCS: &str = "/// A block's part: code attached through [`Registrar`] to one block, a mod's own or vanilla's.\n/// Its methods are the scoped hooks', asked only for the blocks it is attached to, after\n/// every mod's [`Hooks`] method. They may run on the window's thread or the server thread.\n";
 
-pub fn run(check: bool) -> Result<(), String> {
-    generate(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."), check)
-}
-
 /// Writes the mod API generated from the sources under `root`, and fills new
 /// hooks' placeholder bodies; with `check`, fails instead if either would change.
-fn generate(root: &Path, check: bool) -> Result<(), String> {
+pub fn generate(root: &Path, check: bool) -> Result<(), String> {
     let catalog: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(root.join("native-hooks.json")).map_err(|e| e.to_string())?,
     )
@@ -2056,7 +2052,8 @@ mod tests {
 
     #[test]
     fn generated_output_is_current() {
-        super::run(true).unwrap();
+        // cargo test runs in `xtask/`, inside the checkout under test.
+        super::generate(&crate::repo_root().unwrap(), true).unwrap();
     }
 
     #[test]
