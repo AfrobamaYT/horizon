@@ -1323,10 +1323,6 @@ impl Game<'_> {
     pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
         mod_api::dispatch_client_pause_change_post(self, paused);
     }
-    /// The applied client pause state, not whether a pause screen is open.
-    pub(super) fn native_is_paused(&self) -> bool {
-        self.pause
-    }
     /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player info game type change.
     pub(super) fn native_client_player_change_game_type(
         &mut self,
@@ -7648,6 +7644,10 @@ impl Game<'_> {
         if let Some(log) = self.world.block_log.as_mut() {
             log.push((pos[0], pos[1], pos[2]));
         }
+    }
+    /// The applied client pause state, not whether a pause screen is open.
+    pub(super) fn native_is_paused(&self) -> bool {
+        self.pause
     }
     /// Playing, with nothing over the world: keys and zoom apply.
     pub(super) fn native_playing(&self) -> bool {
