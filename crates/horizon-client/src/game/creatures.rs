@@ -582,6 +582,31 @@ impl Game<'_> {
         let Some(max) = wearable(self, &body, fire, name) else {
             return;
         };
+        // ArmorHurtEvent for a mob's body armor.
+        let mut amount = amount;
+        if !horizon_client::mod_api::mods().is_empty() {
+            let kind = self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map(super::native_hooks::mob_kind)
+                .unwrap_or_default();
+            let mut entries = vec![horizon_client::mod_api::NativeArmorHurt {
+                slot: EquipmentSlot::Body,
+                stack: body.clone(),
+                damage: amount,
+                new_damage: amount,
+            }];
+            let mut cancel = false;
+            self.native_armor_hurt(None, id, &kind, &mut entries, &mut cancel);
+            if cancel {
+                return;
+            }
+            amount = entries[0].new_damage;
+            if amount == 0 {
+                return;
+            }
+        }
         let loss = self.durability_loss(&body, amount);
         if loss == 0 {
             return;
@@ -1910,6 +1935,29 @@ impl Game<'_> {
             self.projectile_event("minecraft:projectile_shoot", owner, at);
         }
     }
+    /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
+    /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
+    fn mob_may_destroy(&mut self, id: u32, pos: [i32; 3]) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return true;
+        }
+        let Some(kind) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == id)
+            .map(super::native_hooks::mob_kind)
+        else {
+            return true;
+        };
+        self.may_destroy(id, &kind, pos)
+    }
+    /// Asks the mods whether the entity `id` of type `kind` may destroy the block at `pos`.
+    pub(super) fn may_destroy(&mut self, id: u32, kind: &str, pos: [i32; 3]) -> bool {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        let mut cancel = false;
+        self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
+        !cancel
+    }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
             match e {
@@ -2588,7 +2636,18 @@ impl Game<'_> {
                     self.with_level(|b, level, ticks| b.set_door_open(level, ticks, pos, open));
                     self.process_level_events()?;
                 }
+                MobEvent::TakeBlock { mob, pos } => {
+                    if self.mob_may_destroy(mob, pos) {
+                        let air = self.world.air;
+                        self.level_set(pos, air)?;
+                    } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                        m.extra.carried = None;
+                    }
+                }
                 MobEvent::BreakDoor { mob, pos } => {
+                    if !self.mob_may_destroy(mob, pos) {
+                        continue;
+                    }
                     // BreakDoorGoal.tick: removeBlock, then level events 1021
                     // and 2001 with the state that is there now.
                     let kind = self
@@ -2687,7 +2746,12 @@ impl Game<'_> {
                         self.mob_poof(mob);
                     }
                 }
-                MobEvent::BreakBlock { pos, drop } => {
+                MobEvent::BreakBlock { pos, drop, by } => {
+                    if let Some(mob) = by
+                        && !self.mob_may_destroy(mob, pos)
+                    {
+                        continue;
+                    }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
                     // InfestedBlock.spawnAfterBreak: its silverfish comes out
                     // when blocks drop.

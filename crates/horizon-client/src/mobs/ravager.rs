@@ -121,6 +121,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                         events.push(MobEvent::BreakBlock {
                             pos: [x, y, z],
                             drop: true,
+                            by: Some(m.id),
                         });
                         destroyed = true;
                     }
@@ -154,6 +155,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                         events.push(MobEvent::BreakBlock {
                             pos: [x, y, z],
                             drop: true,
+                            by: None,
                         });
                     }
                 }

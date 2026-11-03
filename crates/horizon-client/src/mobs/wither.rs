@@ -406,6 +406,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                             events.push(MobEvent::BreakBlock {
                                 pos: [x, y, z],
                                 drop: true,
+                                by: Some(m.id),
                             });
                             // destroyBlock is true when setBlock changed the
                             // cell: a liquid is already its fluid's block.

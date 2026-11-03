@@ -1821,6 +1821,15 @@ pub enum MobEvent {
     BreakBlock {
         pos: [i32; 3],
         drop: bool,
+        /// The mob whose breaking this is, when it is one `LivingDestroyBlockEvent`
+        /// hears (a wither's, a ravager's, a silverfish's, a zombie's).
+        by: Option<u32>,
+    },
+    /// `EndermanTakeBlockGoal`: the enderman `mob` picks up the block at `pos`
+    /// (it already holds it); the block turns to air unless a mod stops it.
+    TakeBlock {
+        mob: u32,
+        pos: [i32; 3],
     },
     Particles {
         kind: &'static str,

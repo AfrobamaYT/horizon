@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "armor_hurt",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_armor_hurt",
+      "neoforge": "ArmorHurtEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "armor about to take durability damage (`native_armor_hurt`).",
+  "doc_summary": "`native_armor_hurt(player, entity, kind, entries, cancel)`, once per hit before armor takes durability damage (`doHurtEquipment`), for the pieces that would wear. `entity` is the wearer's entity id, `player` its UUID (None for a mob), `kind` its type. Each `NativeArmorHurt` has its `slot` (`EquipmentSlot`), the `stack`, the `damage` vanilla worked out and a `new_damage` a mod may change (0 for none; Unbreaking applies after). Set `cancel` for no armor damage. A server player's four armor slots, and a mob's `Body` (a horse's armor). Server-side."
+}

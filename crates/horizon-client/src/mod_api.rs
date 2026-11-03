@@ -63,6 +63,17 @@ use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
 
+/// One armor slot of an `ArmorHurtEvent`: the piece in `slot`, the durability
+/// damage vanilla works out for it (`damage`, at least 1) and the damage it
+/// takes (`new_damage`, starts equal; a mod may change it, 0 for none).
+#[derive(Clone, Debug)]
+pub struct NativeArmorHurt {
+    pub slot: EquipmentSlot,
+    pub stack: ItemStack,
+    pub damage: u32,
+    pub new_damage: u32,
+}
+
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 pub struct NativeCamera {

@@ -12822,7 +12822,8 @@ impl Game<'_> {
             .in_tag(source, "minecraft:is_fire");
         let mut broke = false;
         let mut broken_items = Vec::new();
-        let losses: Vec<Option<(u32, u32)>> = (0..4)
+        // The pieces that may wear, with their maximum (`doHurtEquipment`'s checks).
+        let eligible: Vec<Option<(ItemStack, u32)>> = (0..4)
             .map(|i| {
                 let stack = self.armor[i].clone()?;
                 let info = world_items!(self).get(&stack.item)?;
@@ -12845,7 +12846,52 @@ impl Game<'_> {
                 if max == 0 {
                     return None;
                 }
-                let loss = self.wear(&stack, amount);
+                Some((stack, max))
+            })
+            .collect();
+        // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
+        let mut amounts = [amount; 4];
+        if !horizon_client::mod_api::mods().is_empty()
+            && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
+        {
+            let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| {
+                    Some(horizon_client::mod_api::NativeArmorHurt {
+                        slot: armor_slot(i),
+                        stack: e.as_ref()?.0.clone(),
+                        damage: amount,
+                        new_damage: amount,
+                    })
+                })
+                .collect();
+            let mut cancel = false;
+            self.native_armor_hurt(
+                Some(uuid),
+                player,
+                "minecraft:player",
+                &mut entries,
+                &mut cancel,
+            );
+            if cancel {
+                return;
+            }
+            for entry in &entries {
+                if let Some(i) = (0..4).find(|i| armor_slot(*i) == entry.slot) {
+                    amounts[i] = entry.new_damage;
+                }
+            }
+        }
+        let losses: Vec<Option<(u32, u32)>> = eligible
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let (stack, max) = e?;
+                if amounts[i] == 0 {
+                    return None;
+                }
+                let loss = self.wear(&stack, amounts[i]);
                 (loss > 0).then_some((loss, max))
             })
             .collect();

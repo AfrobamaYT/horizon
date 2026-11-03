@@ -2607,6 +2607,7 @@ impl Goal for EatBlock {
                 if cx.w.mob_griefing {
                     cx.events.push(MobEvent::BreakBlock {
                         pos: [x, y, z],
+                        by: None,
                         drop: false,
                     });
                 }
