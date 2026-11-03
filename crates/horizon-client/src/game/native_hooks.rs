@@ -9308,9 +9308,11 @@ mod tests {
         content.declare(&blocks, &[]).unwrap();
         build(
             &base,
+            std::path::Path::new(""),
             &[ContentMod {
                 id: "ruby".into(),
                 content,
+                jars: Vec::new(),
             }],
             &root,
         )
