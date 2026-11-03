@@ -49,9 +49,11 @@ fn world_attachments(
 
 impl Game<'_> {
     /// A guest's attachments back in their record, for `playerdata` to save.
-    pub(super) fn guest_attachments_into(&self, guest: &mut horizon_client::lan::guest::Guest) {
-        guest.attachments = self
-            .guest_attachments
+    pub(super) fn guest_attachments_into(
+        attachments: &std::collections::HashMap<u128, horizon_world::attachments::Attachments>,
+        guest: &mut horizon_client::lan::guest::Guest,
+    ) {
+        guest.attachments = attachments
             .get(&guest.uuid)
             .cloned()
             .unwrap_or_default();

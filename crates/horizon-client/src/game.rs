@@ -15653,16 +15653,14 @@ impl Game<'_> {
         // (`playerdata::load_owner`).
         if self.options.dedicated.is_some()
             && !self.options.execution_role.is_client()
-            && let Some(host) = self.lan.take()
+            && let Some(host) = self.lan.as_mut()
         {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
-            let mut host = host;
             for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
-                self.guest_attachments_into(g);
+                Self::guest_attachments_into(&self.guest_attachments, g);
                 self.player_autosaves.enqueue(g, &self.world_root);
             }
-            self.lan = Some(host);
         }
         self.save_world_state();
         self.message = Some(("Saved the game".into(), Instant::now()));
