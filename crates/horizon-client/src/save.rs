@@ -640,7 +640,7 @@ pub use horizon_items::item_nbt::{
 };
 /// Whether a mod block entity is temporarily out of the world for its tick.
 pub fn block_entity_placeholder(entity: &crate::containers::BlockEntity) -> bool {
-    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id.is_empty())
+    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id().is_empty())
 }
 
 /// The block entity type ID for the block it sits in (a chest-like container
@@ -665,7 +665,7 @@ pub fn encode_block_entity(
     use crate::containers::BlockEntity;
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
-        map.insert("id".into(), string(&m.id));
+        map.insert("id".into(), string(m.id()));
         if m.items.iter().any(Option::is_some) {
             map.insert("Items".into(), encode_items(&m.items));
         }
@@ -930,15 +930,14 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     } else {
         items.clear();
     }
-    Some(
+    Some(crate::containers::ModBlockEntity::new(
+        id,
         crate::containers::ModBlockEntityFields {
-            id,
             nbt,
             items,
             data: Vec::new(),
-        }
-        .into(),
-    )
+        },
+    ))
 }
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
@@ -6403,7 +6402,7 @@ mod tests {
         let crate::containers::BlockEntity::Mod(m) = &back else {
             panic!("not a mod's");
         };
-        assert_eq!(m.id, "gtmod:macerator");
+        assert_eq!(m.id(), "gtmod:macerator");
         // The mod sees its own fields only.
         for key in ["id", "x", "y", "z"] {
             assert!(!m.nbt.contains_key(&key.into()), "{key}");

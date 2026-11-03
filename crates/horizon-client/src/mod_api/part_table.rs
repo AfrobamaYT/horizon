@@ -7,7 +7,7 @@
 use super::{
     BlockEntityPart, BlockPart, BlockSide, BlockStateId, Capability, CapabilityKey,
     EntityCapabilityKey, EntityRef, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart,
-    ModEntry, PlaceProvider,
+    ModEntry, PlaceProvider, ServerHost,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -96,13 +96,13 @@ pub(crate) struct CapabilityPart {
 
 /// What answers a capability for a block entity of one type: given the block entity and the
 /// side asked about, its handler, or none to leave it to the next provider.
-pub type BlockProvider<T> = dyn Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync;
+pub type BlockProvider<T> = dyn Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync;
 /// What answers an item capability for one item: given where the stack lives, its handler, or
 /// none to leave it to the next provider.
-pub type ItemProvider<T> = dyn Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync;
+pub type ItemProvider<T> = dyn Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync;
 /// What answers an entity capability for one entity type: given the entity, its handler, or none
 /// to leave it to the next provider.
-pub type EntityProvider<T> = dyn Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync;
+pub type EntityProvider<T> = dyn Fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>> + Send + Sync;
 
 /// Which things a capability's providers are registered by.
 #[derive(Clone, Copy)]
@@ -388,11 +388,11 @@ pub(crate) fn providers<'h, S: AsRef<str>>(
 /// registration order; the first to answer wins.
 pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
     parts: &[CapabilityPart],
-    host: &mut dyn Host,
-    call: impl Fn(&P, &mut dyn Host) -> Option<Box<T>>,
-    game: impl FnOnce(&mut dyn Host) -> bool,
+    host: &mut dyn ServerHost,
+    call: impl Fn(&P, &mut dyn ServerHost) -> Option<Box<T>>,
+    game: impl FnOnce(&mut dyn ServerHost) -> bool,
 ) -> Answer<T> {
-    let ask = |before_game: bool, host: &mut dyn Host| {
+    let ask = |before_game: bool, host: &mut dyn ServerHost| {
         parts
             .iter()
             .filter(|part| part.before_game == before_game)
@@ -442,7 +442,7 @@ pub struct BlockEntityProviders<T: ?Sized + 'static> {
 impl<T: ?Sized + 'static> BlockEntityProviders<T> {
     /// A mod's handler where the game would answer with its own unless a mod comes first: one
     /// registered `before_game`, else, where the game has no answer (`game`), the first mod's.
-    pub fn ask(self, host: &mut dyn Host, game: bool) -> Option<Capability<T>> {
+    pub fn ask(self, host: &mut dyn ServerHost, game: bool) -> Option<Capability<T>> {
         let at = self.at;
         let answer = ask_providers::<BlockProvider<T>, T>(
             self.parts,
@@ -547,7 +547,7 @@ impl Registrar {
         &mut self,
         key: &CapabilityKey<T>,
         kind: &str,
-        provider: impl Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<BlockProvider<T>> = Arc::new(provider);
         self.capability::<T, _>(|p| &mut p.capabilities, key.name, kind, false, provider);
@@ -559,7 +559,7 @@ impl Registrar {
         &mut self,
         key: &CapabilityKey<T>,
         kind: &str,
-        provider: impl Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<BlockProvider<T>> = Arc::new(provider);
         self.capability::<T, _>(|p| &mut p.capabilities, key.name, kind, true, provider);
@@ -572,7 +572,7 @@ impl Registrar {
         &mut self,
         key: &ItemCapabilityKey<T>,
         item: &str,
-        provider: impl Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<ItemProvider<T>> = Arc::new(provider);
         self.capability::<T, _>(
@@ -588,7 +588,7 @@ impl Registrar {
         &mut self,
         key: &ItemCapabilityKey<T>,
         item: &str,
-        provider: impl Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<ItemProvider<T>> = Arc::new(provider);
         self.capability::<T, _>(|p| &mut p.item_capabilities, key.name, item, true, provider);
@@ -601,7 +601,7 @@ impl Registrar {
         &mut self,
         key: &EntityCapabilityKey<T>,
         kind: &str,
-        provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<EntityProvider<T>> = Arc::new(provider);
         self.capability::<T, _>(
@@ -618,7 +618,7 @@ impl Registrar {
         &mut self,
         key: &EntityCapabilityKey<T>,
         kind: &str,
-        provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
+        provider: impl Fn(&mut dyn ServerHost, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<EntityProvider<T>> = Arc::new(provider);
         self.capability::<T, _>(
@@ -849,12 +849,13 @@ pub(crate) mod tests {
         fn block_entity_ticks(&self, _: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
             event.ticks = true;
         }
-        fn block_entity_tick(&self, _: &mut dyn Host, event: &mut BlockEntityTickEvent<'_>) {
+        fn block_entity_tick(&self, _: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
             event.entity.data.push(1);
         }
     }
     struct NoHost;
     impl Host for NoHost {}
+    impl ServerHost for NoHost {}
 
     #[test]
     fn a_host_without_a_backend_refuses_handle_calls() {
@@ -989,21 +990,21 @@ pub(crate) mod tests {
     /// side.
     struct Pipe(BlockSide);
     impl ResourceHandler<ItemResource> for Pipe {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             usize::from(self.0.side != Some(Direction::Up))
         }
-        fn resource(&self, _: &mut dyn Host, _: usize) -> Option<ItemResource> {
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             None
         }
-        fn amount(&self, _: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
             0
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, _: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             _: usize,
             resource: &ItemResource,
@@ -1022,7 +1023,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -1035,21 +1036,21 @@ pub(crate) mod tests {
     /// A pipe that hands what it's offered on as [`Pipe`] does, and answers one more than went.
     struct Greedy(BlockSide);
     impl ResourceHandler<ItemResource> for Greedy {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
-        fn resource(&self, _: &mut dyn Host, _: usize) -> Option<ItemResource> {
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             None
         }
-        fn amount(&self, _: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
             0
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, _: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             resource: &ItemResource,
@@ -1059,7 +1060,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -1122,17 +1123,19 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
         }
+    }
+    impl ServerHost for PipeWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
     }
 
@@ -1153,21 +1156,21 @@ pub(crate) mod tests {
     /// damage, for the test), so the handler holds nothing.
     struct Pouch(ItemPlace);
     impl ResourceHandler<ItemResource> for Pouch {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
-        fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+        fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
             (self.amount(host, index) > 0).then(|| ItemResource::of(&stick()))
         }
-        fn amount(&self, host: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
             self.0.stack(host).map_or(0, |pouch| pouch.damage)
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, resource: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, resource: &ItemResource) -> u32 {
             if resource.matches(&stick()) { 64 } else { 0 }
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             _: usize,
             resource: &ItemResource,
@@ -1184,7 +1187,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -1198,22 +1201,22 @@ pub(crate) mod tests {
     /// when empty.
     struct Bag(ItemPlace);
     impl ResourceHandler<ItemResource> for Bag {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
-        fn resource(&self, host: &mut dyn Host, _: usize) -> Option<ItemResource> {
+        fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             let held = self.0.stack(host)?.damage;
             (held > 0).then(|| ItemResource::of(&stack("test:pouch", 1, held - 1)))
         }
-        fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
             u32::from(self.resource(host, index).is_some())
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, resource: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, resource: &ItemResource) -> u32 {
             u32::from(resource.item() == "test:pouch")
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             _: usize,
             resource: &ItemResource,
@@ -1230,7 +1233,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             resource: &ItemResource,
@@ -1249,33 +1252,33 @@ pub(crate) mod tests {
     /// its own and aborts that, as a handler checking what a write would do may.
     struct Case(ItemPlace);
     impl Case {
-        fn held(&self, host: &mut dyn Host, index: usize) -> u32 {
+        fn held(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
             let damage = self.0.stack(host).map_or(0, |case| case.damage);
             [damage / 100, damage % 100][index]
         }
-        fn rewrite(&self, host: &mut dyn Host, tx: &Transaction, damage: u32) -> bool {
+        fn rewrite(&self, host: &mut dyn ServerHost, tx: &Transaction, damage: u32) -> bool {
             let case = ItemResource::of(&stack("test:case", 1, damage));
             self.0.exchange(host, tx, &case, 1) == 1
         }
     }
     impl ResourceHandler<ItemResource> for Case {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             2
         }
-        fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+        fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
             let item = ["minecraft:diamond", "minecraft:stick"][index];
             (self.held(host, index) > 0).then(|| ItemResource::of(&stack(item, 1, 0)))
         }
-        fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
             self.held(host, index)
         }
-        fn capacity(&self, _: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, index: usize, resource: &ItemResource) -> u32 {
             let item = ["minecraft:diamond", "minecraft:stick"][index];
             if resource.item() == item { 99 } else { 0 }
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             resource: &ItemResource,
@@ -1292,7 +1295,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             resource: &ItemResource,
@@ -1322,12 +1325,12 @@ pub(crate) mod tests {
     /// that.
     struct Charms;
     impl PlaceProvider for Charms {
-        fn stack(&self, host: &mut dyn Host, key: u64) -> Option<ItemStack> {
+        fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack> {
             backend_mut_of(host).and_then(|backend| backend.game_stack(&charm_slot(key)))
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             key: u64,
             resource: &ItemResource,
@@ -1344,7 +1347,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             key: u64,
             resource: &ItemResource,
@@ -1474,14 +1477,16 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
-        }
+    }
+    impl ServerHost for Player {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
+        }
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
     }
     impl Player {
@@ -1506,21 +1511,21 @@ pub(crate) mod tests {
     /// A mod robot's three empty slots.
     struct Cargo;
     impl ResourceHandler<ItemResource> for Cargo {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             3
         }
-        fn resource(&self, _: &mut dyn Host, _: usize) -> Option<ItemResource> {
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             None
         }
-        fn amount(&self, _: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
             0
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, _: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
         fn insert(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -1530,7 +1535,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -1554,7 +1559,7 @@ pub(crate) mod tests {
             .collect(),
             ..Player::default()
         };
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let items = entity(1).capability(host, &ENTITY_ITEMS).unwrap();
         assert_eq!(items.owner(), "the game");
         assert_eq!(items.size(host), 41);
@@ -1569,7 +1574,7 @@ pub(crate) mod tests {
         assert_eq!(items.capacity(host, 39, &sticks), 0);
         assert_eq!(items.amount(host, 3), 10);
         // Into one index, no further: 54 of 60 fill slot 3, and nothing goes elsewhere.
-        let insert = |host: &mut dyn Host, index, resource: &ItemResource, amount| {
+        let insert = |host: &mut dyn ServerHost, index, resource: &ItemResource, amount| {
             let went = host.transaction(|host, tx| {
                 Ok::<_, ()>(items.insert(host, tx, index, resource, amount))
             });
@@ -1583,14 +1588,14 @@ pub(crate) mod tests {
         assert!(player.given.is_empty());
         // Without an index, as `Inventory.add`: the selected slot's sticks first, then an
         // empty slot.
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let aborted = host.transaction(|host, tx| {
             assert_eq!(items.insert_any(host, tx, &sticks, 10), 10);
             Err::<(), ()>(())
         });
         assert!(aborted.is_err());
         assert_eq!(player.slots[&5], stack("minecraft:stick", 60, 0));
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let went =
             host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 10)));
         assert_eq!(went, Ok(10));
@@ -1604,7 +1609,7 @@ pub(crate) mod tests {
         game_thread();
         let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
         let mut player = Player::default();
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         // A pig has no items; a mod's robot has its provider's; a player in a parked level
         // is asked nothing.
         assert!(entity(2).capability(host, &ENTITY_ITEMS).is_none());
@@ -1742,9 +1747,6 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
-        }
         fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
             // An iron sword's, as its item report gives them.
             let default = match component {
@@ -1757,14 +1759,19 @@ pub(crate) mod tests {
             };
             (item == "minecraft:iron_sword").then_some(default)
         }
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
+        }
+    }
+    impl ServerHost for Shelf {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
     }
     impl Shelf {
@@ -1777,29 +1784,34 @@ pub(crate) mod tests {
     /// than asked, and an insert keeps nothing and answers 5 more than was offered.
     struct ItemOverstates;
     impl ResourceHandler<ItemResource> for ItemOverstates {
-        fn size(&self, host: &mut dyn Host) -> usize {
+        fn size(&self, host: &mut dyn ServerHost) -> usize {
             backend_of(&*host)
                 .and_then(|backend| backend.container_size(on(SHELF, None)))
                 .unwrap_or(0)
         }
-        fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+        fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<ItemResource> {
             Some(ItemResource::of(
                 &backend_of(&*host)?.container_stack(on(SHELF, None), index)?,
             ))
         }
-        fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
             backend_of(&*host)
                 .and_then(|backend| backend.container_stack(on(SHELF, None), index))
                 .map_or(0, |held| held.count)
         }
-        fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+        fn capacity(
+            &self,
+            host: &mut dyn ServerHost,
+            index: usize,
+            resource: &ItemResource,
+        ) -> u32 {
             backend_of(&*host).map_or(0, |backend| {
                 backend.container_capacity(on(SHELF, None), index, &resource.to_stack(1))
             })
         }
         fn insert(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -1809,7 +1821,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             _: &ItemResource,
@@ -1829,9 +1841,6 @@ pub(crate) mod tests {
     impl LevelHost for Level {
         fn block_state(&self, _: [i32; 3]) -> BlockStateId {
             unimplemented!()
-        }
-        fn is_client_side(&self) -> bool {
-            false
         }
         fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
             None
@@ -1870,7 +1879,7 @@ pub(crate) mod tests {
             let amount = u32::try_from(amount).ok().filter(|&a| a > 0)?;
             Some((Chemical(chemical.to_string_lossy()), amount))
         }
-        fn set(&self, host: &mut dyn Host, chemical: &Chemical, amount: u32) {
+        fn set(&self, host: &mut dyn ServerHost, chemical: &Chemical, amount: u32) {
             let Some(entity) = self.entity(host) else {
                 return;
             };
@@ -1881,21 +1890,21 @@ pub(crate) mod tests {
         }
     }
     impl ResourceHandler<Chemical> for ChemTank {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
-        fn resource(&self, host: &mut dyn Host, _: usize) -> Option<Chemical> {
+        fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<Chemical> {
             self.held(host).map(|(chemical, _)| chemical)
         }
-        fn amount(&self, host: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, _: usize) -> u32 {
             self.held(host).map_or(0, |(_, amount)| amount)
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, _: &Chemical) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &Chemical) -> u32 {
             1000
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             chemical: &Chemical,
@@ -1914,7 +1923,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             chemical: &Chemical,
@@ -2130,7 +2139,7 @@ pub(crate) mod tests {
     fn a_level_not_in_place_asks_no_provider() {
         game_thread();
         let mut world = PipeWorld::default();
-        let host: &mut dyn Host = &mut world;
+        let host: &mut dyn ServerHost = &mut world;
         // The pipe's type has a provider, which answers in the level in place; parked while
         // the server ticks another, the same block entity's level gives none.
         let parked = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether");
@@ -2145,7 +2154,7 @@ pub(crate) mod tests {
             chest: Some(stick()),
             ..PipeWorld::default()
         };
-        let host: &mut dyn Host = &mut world;
+        let host: &mut dyn ServerHost = &mut world;
         // No mod registered an items provider for the chest's type: the game's hoppers have no
         // mod's handler to look for there, yet a mod reading it gets the game's own slots.
         assert!(block_entity_providers(&ITEMS, host, on(CHEST, None)).is_none());
@@ -2159,7 +2168,7 @@ pub(crate) mod tests {
     fn a_capability_part_answers_by_side_and_forwards_to_its_neighbours_capability() {
         game_thread();
         let mut world = PipeWorld::default();
-        let host: &mut dyn Host = &mut world;
+        let host: &mut dyn ServerHost = &mut world;
         let up = here()
             .capability(host, &ITEMS, PIPE, Some(Direction::Up))
             .unwrap();
@@ -2196,7 +2205,7 @@ pub(crate) mod tests {
 
     /// Puts `amount` of `item` into slot 0 of [`ITEM_ITEMS`]' handler for the item at `place`, in a
     /// transaction committed when all went in: how much did.
-    fn fill(host: &mut dyn Host, place: &ItemPlace, item: ItemStack, amount: u32) -> u32 {
+    fn fill(host: &mut dyn ServerHost, place: &ItemPlace, item: ItemStack, amount: u32) -> u32 {
         let handler = place
             .capability(host, &ITEM_ITEMS)
             .expect("the item's part");
@@ -2219,7 +2228,7 @@ pub(crate) mod tests {
             ..Player::default()
         };
         // Aborted, nothing changes.
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let pouch = HAND.capability(host, &ITEM_ITEMS).unwrap();
         let sticks = ItemResource::of(&stick());
         let aborted: Result<(), u32> =
@@ -2228,14 +2237,14 @@ pub(crate) mod tests {
         assert_eq!(player.main_hand, Some(stack("test:pouch", 2, 0)));
         assert!(player.given.is_empty());
         // One of the two pouches is filled: it leaves the hand for the player, the other stays.
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         assert_eq!(fill(host, &HAND, stick(), 3), 3);
         assert_eq!(player.main_hand, Some(stack("test:pouch", 1, 0)));
         assert_eq!(player.given, [stack("test:pouch", 1, 3)]);
         assert_eq!(player.items(), 2 + 3);
         // An item with no part and no game slots has no answer.
         player.main_hand = Some(stack("minecraft:stone", 1, 0));
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         assert!(HAND.capability(host, &ITEM_ITEMS).is_none());
     }
 
@@ -2244,7 +2253,13 @@ pub(crate) mod tests {
     struct Cell(ItemPlace);
     impl Cell {
         /// The cell here rewritten as holding `energy`: `moved` when that goes through, else 0.
-        fn rewrite(&self, host: &mut dyn Host, tx: &Transaction, energy: u32, moved: u32) -> u32 {
+        fn rewrite(
+            &self,
+            host: &mut dyn ServerHost,
+            tx: &Transaction,
+            energy: u32,
+            moved: u32,
+        ) -> u32 {
             let charged = ItemResource::of(&stack("test:cell", 1, energy));
             match self.0.exchange(host, tx, &charged, 1) {
                 1 => moved,
@@ -2253,20 +2268,20 @@ pub(crate) mod tests {
         }
     }
     impl EnergyHandler for Cell {
-        fn amount(&self, host: &mut dyn Host) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost) -> u32 {
             self.0.stack(host).map_or(0, |cell| cell.damage)
         }
-        fn capacity(&self, _: &mut dyn Host) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost) -> u32 {
             1000
         }
-        fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+        fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
             let held = self.amount(host);
             match amount.min(1000 - held) {
                 0 => 0,
                 went => self.rewrite(host, tx, held + went, went),
             }
         }
-        fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+        fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
             let held = self.amount(host);
             match amount.min(held) {
                 0 => 0,
@@ -2284,7 +2299,7 @@ pub(crate) mod tests {
             ..Player::default()
         };
         player.slots.insert(9, stack("test:cell", 1, 900));
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let hand = HAND.capability(host, &ITEM_ENERGY).unwrap();
         let other = slot.capability(host, &ITEM_ENERGY).unwrap();
         // The other cell has room for 100: one of the two in the hand gives that and splits off.
@@ -2294,7 +2309,7 @@ pub(crate) mod tests {
         assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
         assert_eq!(player.given, [stack("test:cell", 1, 500)]);
         // Aborted, a move leaves both as they were.
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let aborted = host.transaction(|host, tx| {
             let moved = move_energy(host, &other, &hand, 400, tx);
             Err::<(), _>(moved)
@@ -2304,7 +2319,7 @@ pub(crate) mod tests {
         assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
         // An item no mod answers for has no energy.
         player.main_hand = Some(stick());
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         assert!(HAND.capability(host, &ITEM_ENERGY).is_none());
     }
 
@@ -2316,7 +2331,7 @@ pub(crate) mod tests {
             ..Player::default()
         };
         player.slots.insert(20 + 4, stack("test:pouch", 1, 2));
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         // The empty pouch in the bag in the hand takes 3 sticks: the pouch is rewritten in the
         // bag, and the bag in the hand.
         let in_bag = ItemPlace::Nested {
@@ -2342,7 +2357,7 @@ pub(crate) mod tests {
     }
 
     /// `place.insert` of `stack` in a transaction of its own: how much went.
-    fn insert(host: &mut dyn Host, place: &ItemPlace, stack: ItemStack) -> u32 {
+    fn insert(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
         let resource = ItemResource::of(&stack);
         let went = host
             .transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &resource, stack.count)));
@@ -2351,7 +2366,7 @@ pub(crate) mod tests {
 
     /// `place.exchange` of `stack.count` of what is there for `stack`, in a transaction of its
     /// own: how many.
-    fn exchange(host: &mut dyn Host, place: &ItemPlace, stack: ItemStack) -> u32 {
+    fn exchange(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
         let resource = ItemResource::of(&stack);
         let swapped = host
             .transaction(|host, tx| Ok::<_, ()>(place.exchange(host, tx, &resource, stack.count)));
@@ -2465,38 +2480,40 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
+        fn block_entity(&self, _: LevelRef, _: [i32; 3]) -> Option<BlockEntityRef> {
+            None
         }
+    }
+    impl ServerHost for TwoChests {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
-        fn block_entity(&self, _: LevelRef, _: [i32; 3]) -> Option<BlockEntityRef> {
-            None
+        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
+            Some(BackendMutRef::of(self))
         }
     }
 
     /// A target that answers one more than it was given, and keeps nothing.
     struct TakesMore;
     impl ResourceHandler<ItemResource> for TakesMore {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
         }
-        fn resource(&self, _: &mut dyn Host, _: usize) -> Option<ItemResource> {
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             None
         }
-        fn amount(&self, _: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
             0
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, _: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             64
         }
         fn insert(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -2506,7 +2523,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -2529,7 +2546,7 @@ pub(crate) mod tests {
         };
         let only_sticks = |r: &ItemResource| r.item() == "minecraft:stick";
         let moved = |world: &mut TwoChests, max| {
-            let host: &mut dyn Host = world;
+            let host: &mut dyn ServerHost = world;
             let from = here().capability(host, &ITEMS, FROM, None).unwrap();
             let to = here().capability(host, &ITEMS, INTO, None).unwrap();
             host.transaction(|host, tx| move_resources(host, &from, &to, only_sticks, max, tx))
@@ -2561,7 +2578,7 @@ pub(crate) mod tests {
             limit: 64,
             kept: Vec::new(),
         };
-        let host: &mut dyn Host = &mut world;
+        let host: &mut dyn ServerHost = &mut world;
         let from = here().capability(host, &ITEMS, FROM, None).unwrap();
         let liar: Capability<dyn ResourceHandler<ItemResource>> = Capability {
             handler: Box::new(TakesMore),
@@ -2580,7 +2597,7 @@ pub(crate) mod tests {
         game_thread();
         let sword = |count, damage| stack("minecraft:iron_sword", count, damage);
         let mut shelf_ = shelf([Some(sword(2, 0)), None, None]);
-        let host: &mut dyn Host = &mut shelf_;
+        let host: &mut dyn ServerHost = &mut shelf_;
         let place = shelf_slot(0);
         let plain = place.resource(host).unwrap();
         let damage = ComponentId::new("minecraft:damage").unwrap();
@@ -2594,7 +2611,7 @@ pub(crate) mod tests {
         });
         assert!(aborted.is_err());
         assert_eq!(shelf_.slots, [Some(sword(2, 0)), None, None]);
-        let host: &mut dyn Host = &mut shelf_;
+        let host: &mut dyn ServerHost = &mut shelf_;
         assert_eq!(exchange(host, &place, sword(1, 5)), 1);
         assert_eq!(shelf_.slots, [Some(sword(1, 0)), Some(sword(1, 5)), None]);
     }
@@ -2846,7 +2863,7 @@ pub(crate) mod tests {
             parent: Box::new(HAND),
             slot: 0,
         };
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let pouch = in_bag.capability(host, &ITEM_ITEMS).unwrap();
         let sticks = ItemResource::of(&stick());
         let aborted: Result<(), u32> =
@@ -2870,7 +2887,7 @@ pub(crate) mod tests {
             parent: Box::new(HAND),
             slot: 1,
         };
-        let host: &mut dyn Host = &mut player;
+        let host: &mut dyn ServerHost = &mut player;
         let resource = ItemResource::of(&stick());
         host.transaction(|host, tx| {
             assert_eq!(sticks.extract(host, tx, &resource, 1), 1);
@@ -2889,22 +2906,22 @@ pub(crate) mod tests {
         /// pouch: 0 when empty.
         pub(super) struct Wrap(pub ItemPlace);
         impl ResourceHandler<ItemResource> for Wrap {
-            fn size(&self, _: &mut dyn Host) -> usize {
+            fn size(&self, _: &mut dyn ServerHost) -> usize {
                 1
             }
-            fn resource(&self, host: &mut dyn Host, _: usize) -> Option<ItemResource> {
+            fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
                 let n = self.0.stack(host)?.damage;
                 (n > 0).then(|| ItemResource::of(&stack("test:bag", 1, n - 1)))
             }
-            fn amount(&self, host: &mut dyn Host, i: usize) -> u32 {
+            fn amount(&self, host: &mut dyn ServerHost, i: usize) -> u32 {
                 u32::from(self.resource(host, i).is_some())
             }
-            fn capacity(&self, _: &mut dyn Host, _: usize, r: &ItemResource) -> u32 {
+            fn capacity(&self, _: &mut dyn ServerHost, _: usize, r: &ItemResource) -> u32 {
                 u32::from(r.item() == "test:bag")
             }
             fn insert(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn ServerHost,
                 tx: &Transaction,
                 _: usize,
                 r: &ItemResource,
@@ -2918,7 +2935,7 @@ pub(crate) mod tests {
             }
             fn extract(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn ServerHost,
                 tx: &Transaction,
                 i: usize,
                 r: &ItemResource,
@@ -2935,12 +2952,12 @@ pub(crate) mod tests {
         /// A mod place that is the player's hand, and answers one more than it moved.
         pub(super) struct LyingPlace;
         impl PlaceProvider for LyingPlace {
-            fn stack(&self, host: &mut dyn Host, _: u64) -> Option<ItemStack> {
+            fn stack(&self, host: &mut dyn ServerHost, _: u64) -> Option<ItemStack> {
                 HAND.stack(host)
             }
             fn insert(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn ServerHost,
                 tx: &Transaction,
                 _: u64,
                 r: &ItemResource,
@@ -2950,7 +2967,7 @@ pub(crate) mod tests {
             }
             fn extract(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn ServerHost,
                 tx: &Transaction,
                 _: u64,
                 r: &ItemResource,
@@ -2977,7 +2994,7 @@ pub(crate) mod tests {
                     main_hand: Some(initial.clone()),
                     ..Player::default()
                 };
-                let host: &mut dyn Host = &mut player;
+                let host: &mut dyn ServerHost = &mut player;
                 let r = ItemResource::of(&stick());
                 let result = host.transaction(|host, _| {
                     let middle = host.transaction(|host, _| {
@@ -3006,7 +3023,7 @@ pub(crate) mod tests {
                 assert_eq!(player.main_hand, Some(initial), "depth {abort_depth}");
                 assert!(player.given.is_empty());
                 // Committed, the outer bag is rewritten whole.
-                let host: &mut dyn Host = &mut player;
+                let host: &mut dyn ServerHost = &mut player;
                 assert_eq!(fill(host, &in_bag, stick(), 3), 3);
                 assert_eq!(player.main_hand, Some(stack("test:outer", 1, 5)));
                 assert!(player.given.is_empty());
@@ -3042,7 +3059,7 @@ pub(crate) mod tests {
                 None,
             ]);
             s.whole_extract = true;
-            let host: &mut dyn Host = &mut s;
+            let host: &mut dyn ServerHost = &mut s;
             let h = here().capability(host, &ITEMS, SHELF, None).unwrap();
             let r = ItemResource::of(&stick());
             host.transaction(|host, tx| {
@@ -3065,7 +3082,7 @@ pub(crate) mod tests {
                 provider: "test:lying-place",
                 key: 0,
             };
-            let host: &mut dyn Host = &mut p;
+            let host: &mut dyn ServerHost = &mut p;
             let r = ItemResource::of(&stick());
             host.transaction(|host, tx| {
                 assert_eq!(at.insert(host, tx, &r, 1), 0);
@@ -3142,21 +3159,21 @@ pub(crate) mod tests {
     /// A handler that only tells which provider made it, by its slot count.
     struct Marked(usize);
     impl ResourceHandler<ItemResource> for Marked {
-        fn size(&self, _: &mut dyn Host) -> usize {
+        fn size(&self, _: &mut dyn ServerHost) -> usize {
             self.0
         }
-        fn resource(&self, _: &mut dyn Host, _: usize) -> Option<ItemResource> {
+        fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             None
         }
-        fn amount(&self, _: &mut dyn Host, _: usize) -> u32 {
+        fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
             0
         }
-        fn capacity(&self, _: &mut dyn Host, _: usize, _: &ItemResource) -> u32 {
+        fn capacity(&self, _: &mut dyn ServerHost, _: usize, _: &ItemResource) -> u32 {
             0
         }
         fn insert(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -3166,7 +3183,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             _: &Transaction,
             _: usize,
             _: &ItemResource,
@@ -3178,6 +3195,7 @@ pub(crate) mod tests {
 
     /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
     struct Ordered;
+    impl ServerHost for Ordered {}
     impl Backend for Ordered {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
@@ -3201,8 +3219,8 @@ pub(crate) mod tests {
     #[test]
     fn providers_are_asked_ahead_of_the_game_then_the_game_then_the_mods_in_order() {
         game_thread();
-        let host: &mut dyn Host = &mut Ordered;
-        let answer = |host: &mut dyn Host, x| {
+        let host: &mut dyn ServerHost = &mut Ordered;
+        let answer = |host: &mut dyn ServerHost, x| {
             let found = here().capability(host, &ITEMS, [x, 64, 0], None).unwrap();
             (found.owner.is_some(), found.size(host))
         };
@@ -3216,7 +3234,7 @@ pub(crate) mod tests {
         assert_eq!(answer(host, 10), (true, 4));
         // The game's own lookup takes a mod's handler only where the game has none or a mod
         // comes first.
-        let mod_only = |host: &mut dyn Host, x| {
+        let mod_only = |host: &mut dyn ServerHost, x| {
             let at = BlockSide {
                 level: here(),
                 pos: [x, 64, 0],
@@ -3249,7 +3267,7 @@ pub(crate) mod tests {
         // items, the one ahead of the game.
         let item = |damage, count| {
             let mut host = HeldItem(stack("test:ordered_item", count, damage));
-            let host: &mut dyn Host = &mut host;
+            let host: &mut dyn ServerHost = &mut host;
             let found = HAND.capability(host, &ITEM_ITEMS).unwrap();
             (found.owner.is_some(), found.size(host))
         };
@@ -3291,6 +3309,8 @@ pub(crate) mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
+    }
+    impl ServerHost for HeldItem {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
@@ -3310,7 +3330,7 @@ pub(crate) mod tests {
         lie: Option<Lie>,
     }
     impl ResourceHandler<FluidResource> for ModTank {
-        fn size(&self, host: &mut dyn Host) -> usize {
+        fn size(&self, host: &mut dyn ServerHost) -> usize {
             if self.at.side == Some(Direction::Up) {
                 return 0;
             }
@@ -3318,25 +3338,30 @@ pub(crate) mod tests {
                 .and_then(|backend| backend.fluid_tank_count(self.at))
                 .unwrap_or(0)
         }
-        fn resource(&self, host: &mut dyn Host, index: usize) -> Option<FluidResource> {
+        fn resource(&self, host: &mut dyn ServerHost, index: usize) -> Option<FluidResource> {
             Some(FluidResource::of(
                 &crate::mod_api::backend_of(host)
                     .and_then(|backend| backend.fluid_tank(self.at, index))?,
             ))
         }
-        fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
             crate::mod_api::backend_of(host)
                 .and_then(|backend| backend.fluid_tank(self.at, index))
                 .map_or(0, |held| held.amount)
         }
-        fn capacity(&self, host: &mut dyn Host, index: usize, resource: &FluidResource) -> u32 {
+        fn capacity(
+            &self,
+            host: &mut dyn ServerHost,
+            index: usize,
+            resource: &FluidResource,
+        ) -> u32 {
             crate::mod_api::backend_of(host).map_or(0, |backend| {
                 backend.fluid_tank_capacity(self.at, index, &resource.to_stack(1))
             })
         }
         fn insert(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             resource: &FluidResource,
@@ -3354,7 +3379,7 @@ pub(crate) mod tests {
         }
         fn extract(
             &self,
-            host: &mut dyn Host,
+            host: &mut dyn ServerHost,
             tx: &Transaction,
             index: usize,
             resource: &FluidResource,
@@ -3430,7 +3455,7 @@ pub(crate) mod tests {
             (to, to_side): ([i32; 3], Option<Direction>),
             max: u32,
         ) -> Result<u32, Overanswered> {
-            let host: &mut dyn Host = self;
+            let host: &mut dyn ServerHost = self;
             let source = here().capability(host, &FLUIDS, from, from_side).unwrap();
             let target = here().capability(host, &FLUIDS, to, to_side).unwrap();
             host.transaction(|host, tx| move_resources(host, &source, &target, |_| true, max, tx))
@@ -3533,17 +3558,19 @@ pub(crate) mod tests {
         }
     }
     impl Host for TankWorld {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
+        }
+    }
+    impl ServerHost for TankWorld {
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
         }
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
@@ -3590,7 +3617,7 @@ pub(crate) mod tests {
         let water = FluidStack::new("minecraft:water", 1000);
         world.tank(SOURCE, Some(water.clone()), true);
         world.tank(TANK, None, false);
-        let host: &mut dyn Host = &mut world;
+        let host: &mut dyn ServerHost = &mut world;
         let target = here().capability(host, &FLUIDS, TANK, None).unwrap();
         assert_eq!(target.capacity(host, 0, &FluidResource::of(&water)), 0);
         assert_eq!(world.moved((SOURCE, None), (TANK, None), 1000), Ok(0));
@@ -3654,8 +3681,8 @@ pub(crate) mod tests {
             world.tank(SOURCE, water(1000), true);
             world.tank(OTHER, water(1000), true);
             world.tank(TANK, None, true).types.insert(at, liar);
-            let host: &mut dyn Host = &mut world;
-            let ends = |host: &mut dyn Host, pos| here().capability(host, &FLUIDS, pos, None);
+            let host: &mut dyn ServerHost = &mut world;
+            let ends = |host: &mut dyn ServerHost, pos| here().capability(host, &FLUIDS, pos, None);
             let (source, other, tank) = (
                 ends(host, SOURCE).unwrap(),
                 ends(host, OTHER).unwrap(),
@@ -3682,15 +3709,15 @@ pub(crate) mod tests {
         lie: Lie,
     }
     impl EnergyHandler for ModBattery {
-        fn amount(&self, host: &mut dyn Host) -> u32 {
+        fn amount(&self, host: &mut dyn ServerHost) -> u32 {
             crate::mod_api::backend_of(host)
                 .and_then(|backend| backend.energy_amount(self.at))
                 .unwrap_or(0)
         }
-        fn capacity(&self, host: &mut dyn Host) -> u32 {
+        fn capacity(&self, host: &mut dyn ServerHost) -> u32 {
             crate::mod_api::backend_of(host).map_or(0, |backend| backend.energy_capacity(self.at))
         }
-        fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+        fn insert(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
             let went = crate::mod_api::backend_mut_of(host)
                 .map_or(0, |backend| backend.energy_insert(self.at, amount, tx));
             match self.lie {
@@ -3698,7 +3725,7 @@ pub(crate) mod tests {
                 Lie::GivesMore => went,
             }
         }
-        fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+        fn extract(&self, host: &mut dyn ServerHost, tx: &Transaction, amount: u32) -> u32 {
             let more = match self.lie {
                 Lie::GivesMore => 100,
                 Lie::TakesMore => 0,
@@ -3728,17 +3755,19 @@ pub(crate) mod tests {
         }
     }
     impl Host for EnergyWorld {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
+        }
+    }
+    impl ServerHost for EnergyWorld {
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
         }
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
@@ -3788,7 +3817,7 @@ pub(crate) mod tests {
         world.batteries.insert(TANK, (700, 1000));
         world.batteries.insert(OTHER, (0, 250));
         let mut moved = |from, to, max| {
-            let host: &mut dyn Host = &mut world;
+            let host: &mut dyn ServerHost = &mut world;
             let source = here().capability(host, &ENERGY, from, None).unwrap();
             let target = here().capability(host, &ENERGY, to, None).unwrap();
             host.transaction(|host, tx| move_energy(host, &source, &target, max, tx))
@@ -3813,8 +3842,8 @@ pub(crate) mod tests {
             world.batteries.insert(OTHER, (500, 1000));
             world.batteries.insert(TANK, (0, 1000));
             world.types.insert(at, liar);
-            let host: &mut dyn Host = &mut world;
-            let ends = |host: &mut dyn Host, pos| here().capability(host, &ENERGY, pos, None);
+            let host: &mut dyn ServerHost = &mut world;
+            let ends = |host: &mut dyn ServerHost, pos| here().capability(host, &ENERGY, pos, None);
             let (source, other, tank) = (
                 ends(host, SOURCE).unwrap(),
                 ends(host, OTHER).unwrap(),
@@ -3866,8 +3895,7 @@ pub(crate) mod tests {
         assert!(ticks("test:press"));
         assert!(!ticks("test:press_entity"));
         let tick = |kind: &str| {
-            let mut entity = ModBlockEntity::default();
-            entity.id = kind.into();
+            let mut entity = ModBlockEntity::new(kind.into(), Default::default());
             dispatch_block_entity_tick(&mut NoHost, [0, 64, 0], &mut entity);
             entity.data.len()
         };
