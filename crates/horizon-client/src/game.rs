@@ -211,9 +211,13 @@ mod native_criteria;
 mod native_data_maps;
 mod native_entities;
 mod native_entity_data;
+mod native_entity_invulnerable;
 mod native_entity_motion;
 mod native_entity_moves;
 mod native_entity_refs;
+mod native_entity_remove;
+mod native_entity_riding;
+mod native_entity_state;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
@@ -224,12 +228,15 @@ mod native_item_entity_refs;
 mod native_item_fluids;
 mod native_item_places;
 mod native_level_effects;
+mod native_level_events;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
+mod native_menu_refs;
 mod native_menus;
 mod native_mob_draw;
+mod native_mob_navigation;
 mod native_mob_refs;
 mod native_mobs;
 mod native_motion;
@@ -238,6 +245,9 @@ mod native_net;
 mod native_panel;
 mod native_panel_recipes;
 mod native_player_cooldowns;
+mod native_player_food;
+mod native_player_modes;
+mod native_player_stats;
 mod native_projectiles;
 mod native_quick_move;
 mod native_recipes;
@@ -1014,6 +1024,8 @@ struct GameLevel<'w> {
     /// Only the integrated or dedicated server dispatches native observations.
     native_authoritative: bool,
     native_player: Option<u128>,
+    /// The acting player's entity id, beside `native_player`.
+    native_player_entity: Option<i32>,
     /// `Level.isDebug`: `setBlock` changes nothing.
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
@@ -1300,7 +1312,7 @@ impl LevelAccess for GameLevel<'_> {
     fn note_block_change(
         &self,
         pos: BlockPos,
-        instrument: &str,
+        instrument: u8,
         old: i32,
         mut new: i32,
     ) -> Option<i32> {
@@ -1309,28 +1321,21 @@ impl LevelAccess for GameLevel<'_> {
             let context = horizon_client::mod_api::NativeNoteBlockChange {
                 dimension: self.dimension,
                 pos,
-                instrument,
+                instrument: horizon_client::mod_api::NativeNoteInstrument::ALL
+                    [usize::from(instrument)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);
         }
         (!cancel).then_some(new)
     }
-    fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
-        let mut cancel = false;
-        if self.native_authoritative {
-            self.native_note_play(
-                self.dimension,
-                self.native_player,
-                pos,
-                instrument,
-                note,
-                &mut cancel,
-            );
-        }
-        !cancel
-    }
-    fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+    fn note_block_play(
+        &self,
+        pos: BlockPos,
+        by_player: bool,
+        instrument: &mut u8,
+        note: &mut i32,
+    ) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;
         if !self.native_authoritative || crate::mod_api::mods().is_empty() {
             return true;
@@ -1338,8 +1343,15 @@ impl LevelAccess for GameLevel<'_> {
         let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
         let mut played = *note;
         let mut cancel = false;
+        let (player, player_entity_id) = if by_player {
+            (self.native_player, self.native_player_entity)
+        } else {
+            (None, None)
+        };
         self.native_note_block_play(
             self.dimension,
+            player,
+            player_entity_id,
             pos,
             &mut played_instrument,
             &mut played,
@@ -4687,6 +4699,7 @@ impl Game<'_> {
             client_side: self.remote.is_some(),
             native_authoritative,
             native_player: self.lan_acting_uuid,
+            native_player_entity: self.lan_acting_entity.map(|id| id as i32),
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
             native_particles: &mut self.creatures.lan_particles,
@@ -15578,14 +15591,16 @@ impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
         self.save.save_forced_chunks(&self.streaming.forced)?;
-        self.streaming.save(&mut self.world, wait);
+        let protos = self.streaming.prepare_save(&mut self.world, wait);
+        self.native_proto_snapshots(&protos);
+        self.streaming.finish_save(protos, wait);
         let keys: Vec<_> = self.world.modified.iter().copied().collect();
-        self.native_full_chunk_saves(&keys);
         self.save.save_attachments(&self.world.attachments)?;
         for key in &keys {
             self.world.modified.remove(key);
         }
         let chunks = self.with_entities(keys.iter().filter_map(|k| self.world.chunks.get(k)));
+        self.native_full_chunk_snapshots(&chunks);
         self.save
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         // Prepare entities while the chunk writer runs, then use one barrier.
@@ -16970,9 +16985,11 @@ impl Game<'_> {
         let plan = horizon_client::spans::time("streaming_plan", || {
             self.streaming.plan_update(&mut self.world)
         });
-        self.native_full_chunk_saves(plan.unloading());
+        let (commit, protos) = self.streaming.prepare_commit(&mut self.world, plan);
+        self.native_proto_snapshots(&protos);
+        self.streaming.submit_protos(protos);
         let (uploads, unloaded) = horizon_client::spans::time("streaming", || {
-            self.streaming.finish_update(&mut self.world, plan)
+            self.streaming.complete_commit(&mut self.world, commit)
         });
         self.streaming.extra.truncate(areas);
         let dirty: Vec<_> = unloaded
@@ -16981,6 +16998,7 @@ impl Game<'_> {
             .cloned()
             .collect();
         let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
+        self.native_full_chunk_snapshots(&modified);
         if !modified.is_empty()
             && let Err(e) = horizon_client::spans::time("save_chunks", || {
                 self.save
@@ -17861,29 +17879,31 @@ impl Game<'_> {
                         && !self.screen_over_playing()
                         && self.sleeping.is_none()
                         && self.player.is_some()
-                        && !self.native_wheel_event(d)
-                        && let Some((wheel, (horizontal_steps, vertical_steps))) = self
-                            .mouse
-                            .on_scroll(raw_x, raw_y, discrete, wheel_sensitivity)
                     {
-                        if !self.pad_synthetic_input() {
-                            let mut canceled = false;
-                            self.native_mouse_scrolling(
-                                [scaled(raw_x), scaled(raw_y)],
-                                [horizontal_steps, vertical_steps],
-                                [
-                                    self.physical_buttons.contains(&MouseButton::Left),
-                                    self.physical_buttons.contains(&MouseButton::Middle),
-                                    self.physical_buttons.contains(&MouseButton::Right),
-                                ],
-                                [self.cursor.0, self.cursor.1],
-                                glfw_modifiers(self.modifiers),
-                                &mut canceled,
-                            );
-                            if canceled {
-                                return Ok(());
-                            }
+                        let scroll =
+                            self.mouse
+                                .on_scroll(raw_x, raw_y, discrete, wheel_sensitivity);
+                        let (horizontal_steps, vertical_steps) =
+                            scroll.map_or((0, 0), |(_, steps)| steps);
+                        let mut canceled = false;
+                        self.native_mouse_scrolling(
+                            [scaled(raw_x), scaled(raw_y)],
+                            [horizontal_steps, vertical_steps],
+                            [
+                                self.physical_buttons.contains(&MouseButton::Left),
+                                self.physical_buttons.contains(&MouseButton::Middle),
+                                self.physical_buttons.contains(&MouseButton::Right),
+                            ],
+                            [self.cursor.0, self.cursor.1],
+                            glfw_modifiers(self.modifiers),
+                            &mut canceled,
+                        );
+                        if canceled {
+                            return Ok(());
                         }
+                        let Some((wheel, _)) = scroll else {
+                            return Ok(());
+                        };
                         if self.spectator() && self.spectator_gui.is_menu_active() {
                             self.spectator_scroll(-wheel);
                         } else if self.spectator() {
