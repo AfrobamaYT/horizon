@@ -53,6 +53,7 @@ pub(super) struct Parked {
     armor_stands: Vec<horizon_client::entities::ArmorStand>,
     cushions: Vec<horizon_client::entities::Cushion>,
     others: Vec<commands::OtherEntity>,
+    fangs: super::fangs::FangState,
     pub(super) boats: Vec<boats::Boat>,
     pub(super) carts: Vec<minecarts::Minecart>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
@@ -203,6 +204,7 @@ impl Game<'_> {
             armor_stands: Vec::new(),
             cushions: Vec::new(),
             others: Vec::new(),
+            fangs: Default::default(),
             boats: Vec::new(),
             carts: Vec::new(),
             jukebox_sounds: HashMap::new(),
@@ -259,6 +261,7 @@ impl Game<'_> {
         swap(&mut self.armor_stands, &mut p.armor_stands);
         swap(&mut self.cushions, &mut p.cushions);
         swap(&mut self.others, &mut p.others);
+        swap(&mut self.fangs, &mut p.fangs);
         swap(&mut self.boats, &mut p.boats);
         swap(&mut self.carts, &mut p.carts);
         swap(&mut self.jukebox_sounds, &mut p.jukebox_sounds);
@@ -668,10 +671,11 @@ impl Game<'_> {
         let back = self.dim;
         for dim in closing {
             self.enter_level(None, dim)?;
-            // Its chunks leave with it: the mods hear before its last save.
-            let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
-            self.native_chunks_changed(&chunks);
+            // Vanilla saves the level's chunks before their unload hooks.
+            self.native_chunks_loaded();
             self.save_level(true)?;
+            let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
+            self.native_chunks_unloaded(&chunks);
             // Its entities' attachments are saved with them; they leave memory too.
             for uuid in self.persist.uuids.values() {
                 self.entity_attachments.remove(uuid);

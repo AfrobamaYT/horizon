@@ -235,11 +235,26 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::Note => {
                     let next = table.cycle(state, p.note);
-                    if !self.note_play_allowed(pos, next) {
+                    let old_note = table.int(state, p.note);
+                    let new_note = table.int(next, p.note);
+                    let instrument = self.note_instrument(state);
+                    let Some(note) = self
+                        .level
+                        .note_block_change(pos, instrument, old_note, new_note)
+                    else {
                         return Success;
-                    }
+                    };
+                    let next = table.set_int(
+                        next,
+                        p.note,
+                        if (0..=24).contains(&note) {
+                            note
+                        } else {
+                            new_note
+                        },
+                    );
                     self.set_block_and_update(pos, next);
-                    self.note_play_unchecked(pos, next);
+                    self.note_play(pos, next, true);
                     Success
                 }
                 Class::RedstoneWire => self.wire_use(pos, state, player),
@@ -671,7 +686,7 @@ impl Behaviours {
             sim.dragon_egg_teleport(pos, state);
         }
         if chain.contains(&Class::Note) {
-            sim.note_play(pos, state);
+            sim.note_play(pos, state, true);
             return true;
         }
         if chain.contains(&Class::RedStoneOre) && !self.table.bool(state, self.props.lit) {

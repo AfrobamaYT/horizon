@@ -68,6 +68,13 @@ pub(crate) struct TestLevel {
     pub openers: HashMap<BlockPos, (i32, i32)>,
     /// Every position whose container openers were recounted, in order.
     pub opener_rechecks: Vec<BlockPos>,
+    /// What `note_block_play` answers: the instrument index and note it
+    /// plays instead, or None to stop the note.
+    pub note_answer: Option<Option<(u8, i32)>>,
+    /// `by_player` of every note the level was asked about, in order.
+    pub note_players: std::cell::RefCell<Vec<bool>>,
+    /// `allow_portal_spawn` refuses every portal.
+    pub refuse_portals: bool,
 }
 impl TestLevel {
     fn new(b: &Behaviours) -> Self {
@@ -88,6 +95,9 @@ impl TestLevel {
             smoke_sources: HashMap::new(),
             openers: HashMap::new(),
             opener_rechecks: Vec::new(),
+            note_answer: None,
+            note_players: std::cell::RefCell::new(Vec::new()),
+            refuse_portals: false,
         }
     }
 }
@@ -180,6 +190,31 @@ impl LevelAccess for TestLevel {
         if let Some(&answer) = self.smoke_sources.get(&state) {
             *smoke = Some(answer);
         }
+    }
+    fn note_block_play(
+        &self,
+        _pos: BlockPos,
+        by_player: bool,
+        instrument: &mut u8,
+        note: &mut i32,
+    ) -> bool {
+        self.note_players.borrow_mut().push(by_player);
+        match self.note_answer {
+            None => true,
+            Some(None) => false,
+            Some(Some((i, n))) => {
+                (*instrument, *note) = (i, n);
+                true
+            }
+        }
+    }
+    fn allow_portal_spawn(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _shape: &PortalShape,
+    ) -> bool {
+        !self.refuse_portals
     }
 }
 
@@ -3693,4 +3728,143 @@ fn a_level_can_answer_what_makes_a_campfire_signal() {
     assert_eq!(w.prop(campfire, "signal_fire"), "true");
     w.set(ground, hay);
     assert_eq!(w.prop(campfire, "signal_fire"), "false");
+}
+
+/// A powered harp note block at the origin; the sounds and game events its
+/// note made.
+fn play_note(w: &mut World) -> (Vec<(std::sync::Arc<str>, f32)>, Vec<BlockStateId>, bool) {
+    let harp = w.id(
+        "note_block",
+        &[("instrument", "harp"), ("note", "0"), ("powered", "false")],
+    );
+    w.put(BlockPos::new(0, 1, 0), harp);
+    let power = w.id("redstone_block", &[]);
+    w.set(BlockPos::new(1, 1, 0), power);
+    w.full_tick();
+    let mut sounds = Vec::new();
+    let mut particles = Vec::new();
+    let mut game_event = false;
+    for event in &w.level.events {
+        match event {
+            LevelEvent::Sound { sound, pitch, .. } if sound.contains("note_block") => {
+                sounds.push((sound.clone(), *pitch));
+            }
+            LevelEvent::BlockEvent {
+                state,
+                kind: "note_particle",
+                ..
+            } => particles.push(*state),
+            LevelEvent::GameEvent {
+                event: "minecraft:note_block_play",
+                ..
+            } => game_event = true,
+            _ => {}
+        }
+    }
+    (sounds, particles, game_event)
+}
+
+#[test]
+fn a_note_plays_the_instrument_and_note_the_level_chose() {
+    let mut w = world!();
+    let bell = data::INSTRUMENTS.iter().position(|n| *n == "bell").unwrap() as u8;
+    w.level.note_answer = Some(Some((bell, 5)));
+    let (sounds, particles, game_event) = play_note(&mut w);
+    // NoteBlock.getPitchFromNote: 2^((note - 12) / 12).
+    let pitch = 2f64.powf(-7.0 / 12.0) as f32;
+    assert_eq!(sounds, [("minecraft:block.note_block.bell".into(), pitch)]);
+    // The block event runs once the note block took the power.
+    let played = w.id(
+        "note_block",
+        &[("instrument", "bell"), ("note", "5"), ("powered", "true")],
+    );
+    assert_eq!(particles, [played]);
+    assert!(game_event);
+}
+
+#[test]
+fn a_stopped_note_still_tunes_the_block() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let harp = w.id(
+        "note_block",
+        &[("instrument", "harp"), ("note", "0"), ("powered", "false")],
+    );
+    w.put(pos, harp);
+    w.level.note_answer = Some(None);
+    assert_eq!(w.use_block(pos), InteractionResult::Success);
+    assert_eq!(w.prop(pos, "note"), "1");
+    // NoteBlock.useWithoutItem plays with its player.
+    assert_eq!(*w.level.note_players.borrow(), [true]);
+    w.full_tick();
+    assert!(!w.level.events.iter().any(|event| matches!(
+        event,
+        LevelEvent::GameEvent {
+            event: "minecraft:note_block_play",
+            ..
+        } | LevelEvent::Sound { .. }
+    )));
+}
+
+#[test]
+fn a_stopped_note_makes_no_sound_or_game_event() {
+    let mut w = world!();
+    let (sounds, _, game_event) = play_note(&mut w);
+    assert_eq!(
+        sounds,
+        [(
+            "minecraft:block.note_block.harp".into(),
+            2f64.powf(-1.0) as f32
+        )]
+    );
+    assert!(game_event);
+    let mut w = world!();
+    w.level.note_answer = Some(None);
+    let (sounds, particles, game_event) = play_note(&mut w);
+    assert!(sounds.is_empty() && particles.is_empty() && !game_event);
+    // NoteBlock.neighborChanged plays with no player.
+    assert_eq!(*w.level.note_players.borrow(), [false]);
+}
+
+#[test]
+fn a_refused_portal_leaves_the_fire_in_its_frame() {
+    for refuse in [false, true] {
+        let mut w = world!();
+        w.level.refuse_portals = refuse;
+        let obsidian = w.id("obsidian", &[]);
+        // An empty frame along X, two wide and three high, inside x 0..=1, y 1..=3.
+        for x in 0..=1 {
+            w.put(BlockPos::new(x, 0, 0), obsidian);
+            w.put(BlockPos::new(x, 4, 0), obsidian);
+        }
+        for y in 1..=3 {
+            w.put(BlockPos::new(-1, y, 0), obsidian);
+            w.put(BlockPos::new(2, y, 0), obsidian);
+        }
+        let fire = w.id(
+            "fire",
+            &[
+                ("age", "0"),
+                ("east", "false"),
+                ("north", "false"),
+                ("south", "false"),
+                ("up", "false"),
+                ("west", "false"),
+            ],
+        );
+        w.set(BlockPos::new(0, 1, 0), fire);
+        let block = |w: &World, p| w.name(p).split('[').next().unwrap().to_owned();
+        let expected = if refuse {
+            ["fire", "air"]
+        } else {
+            ["nether_portal", "nether_portal"]
+        };
+        assert_eq!(
+            [
+                block(&w, BlockPos::new(0, 1, 0)),
+                block(&w, BlockPos::new(1, 3, 0))
+            ],
+            expected
+        );
+    }
 }

@@ -12,7 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, Host, ItemHandler},
+    mod_api::{self, BlockSide, Capability, Host, ItemResource, ResourceHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -903,14 +903,21 @@ impl Game<'_> {
         }
         taken
     }
-    /// The item capability part a mod registered for the type of the mod block entity at `pos`.
-    /// With no capability part registered, one empty-table check.
-    fn item_part_at(&self, pos: Pos) -> Option<Arc<dyn ItemHandler>> {
-        mod_api::block_entity_capability(&mod_api::ITEMS, || {
-            match self.world.block_entities.get(&pos) {
-                Some(BlockEntity::Mod(m)) => Some(m.id.as_str()),
-                _ => None,
-            }
+    /// The item handler a mod's provider gives for the mod block entity at `pos` through
+    /// `side`, where it comes before the game's own slots or the game has none there. With no
+    /// item provider registered, one table check.
+    pub(super) fn item_part_at(
+        &mut self,
+        pos: Pos,
+        side: Direction,
+    ) -> Option<Capability<dyn ResourceHandler<ItemResource>>> {
+        let at = BlockSide {
+            pos: [pos.0, pos.1, pos.2],
+            side: Some(side),
+        };
+        let host: &mut dyn Host = self;
+        mod_api::block_entity_capability(&mod_api::ITEMS, host, at, |host| {
+            host.container_size(at.pos, None).is_some()
         })
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
@@ -920,17 +927,16 @@ impl Game<'_> {
         self.native_inventory_move_item(source, destination, item, &mut cancel);
         cancel
     }
-    /// `ejectItems` into a capability part through its side `face`: the first hopper item
-    /// one of its slots takes, one item, as a hopper moves.
+    /// `ejectItems` into a capability part, looked up through the side it faces: the first hopper item
+    /// one of its slots takes, one item, as a hopper moves, in a transaction. A part taking
+    /// more than the one is a mod bug, and the move is undone.
     fn eject_into_part(
         &mut self,
         hopper: &View,
-        part: &Arc<dyn ItemHandler>,
+        part: &Capability<dyn ResourceHandler<ItemResource>>,
         at: [i32; 3],
-        face: Direction,
     ) -> bool {
         let from = self.container_world_pos(hopper);
-        let slots = part.slots(self, at, Some(face));
         for slot in 0..hopper.len() {
             let Some(stack) = self.containers().get(hopper, slot).cloned() else {
                 continue;
@@ -938,53 +944,58 @@ impl Game<'_> {
             if self.part_move_canceled(from, at, &stack.item) {
                 continue;
             }
-            let one = ItemStack { count: 1, ..stack };
-            let Some(into) = (0..slots).find(|&s| {
-                part.insert(self, at, Some(face), s, one.clone(), true)
-                    .is_none()
-            }) else {
-                continue;
-            };
-            let Some(one) = self.take_one(hopper, slot) else {
-                continue;
-            };
-            let host: &mut dyn Host = self;
-            match host.insert_checked(part, at, Some(face), into, one) {
-                None => return true,
-                Some(rest) => self.put_back(hopper, slot, rest),
+            let one = ItemResource::of(&stack);
+            let moved = mod_api::run_transaction(self, |game, tx| {
+                let host: &mut dyn Host = game;
+                let went = part.insert_any(host, tx, &one, 1);
+                if part.checked(went, 1, &at).ok_or(())? == 0 {
+                    return Err(());
+                }
+                for &(pos, _) in &hopper.parts {
+                    game.journal_block_entity(pos);
+                }
+                game.take_one(hopper, slot).map(drop).ok_or(())
+            });
+            if moved.is_ok() {
+                return true;
             }
         }
         false
     }
     /// `suckInItems` from a capability part through its bottom: one item from the first of its
-    /// slots that gives one the hopper has room for.
-    fn suck_from_part(&mut self, part: &Arc<dyn ItemHandler>, at: [i32; 3], hopper: &View) -> bool {
+    /// slots that gives one the hopper has room for, in a transaction, as `eject_into_part`.
+    fn suck_from_part(
+        &mut self,
+        part: &Capability<dyn ResourceHandler<ItemResource>>,
+        at: [i32; 3],
+        hopper: &View,
+    ) -> bool {
         let into = self.container_world_pos(hopper);
-        for slot in 0..part.slots(self, at, Some(Direction::Down)) {
-            let Some(one) = part.extract(self, at, Some(Direction::Down), slot, 1, true) else {
+        for slot in 0..part.size(self) {
+            let Some(resource) = part.resource(self, slot) else {
                 continue;
             };
+            let one = resource.to_stack(1);
             let c = self.containers();
             if !(0..hopper.len()).any(|s| c.fits(hopper, s, &one) > 0)
                 || self.part_move_canceled(at, into, &one.item)
             {
                 continue;
             }
-            let host: &mut dyn Host = self;
-            let Some(one) = host.extract_checked(part, at, Some(Direction::Down), slot, &one)
-            else {
-                continue;
-            };
-            match self.add_item(None, hopper, one, None) {
-                None => return true,
-                Some(rest) => {
-                    let host: &mut dyn Host = self;
-                    if let Some(rest) =
-                        host.insert_checked(part, at, Some(Direction::Down), slot, rest)
-                    {
-                        host.drop_at(at, rest);
-                    }
+            let moved = mod_api::run_transaction(self, |game, tx| {
+                let host: &mut dyn Host = game;
+                let came = part.extract(host, tx, slot, &resource, 1);
+                if part.checked(came, 1, &at) != Some(1) {
+                    return Err(());
                 }
+                for &(pos, _) in &hopper.parts {
+                    game.journal_block_entity(pos);
+                }
+                game.add_item(None, hopper, one, None)
+                    .map_or(Ok(()), |_| Err(()))
+            });
+            if moved.is_ok() {
+                return true;
             }
         }
         false
@@ -1000,12 +1011,12 @@ impl Game<'_> {
         };
         let front = offset(pos, facing);
         let face = facing.opposite();
-        if let Some(part) = self.item_part_at(front) {
+        if let Some(part) = self.item_part_at(front, face) {
             let at = [front.0, front.1, front.2];
             self.native_hopper_inventory_search([pos.0, pos.1, pos.2], Some(at), None);
-            return self.eject_into_part(hopper, &part, at, face);
+            return self.eject_into_part(hopper, &part, at);
         }
-        if let Some(target) = c.view(front, false) {
+        if let Some(target) = self.containers().view(front, false) {
             self.native_hopper_inventory_search(
                 [pos.0, pos.1, pos.2],
                 Some([front.0, front.1, front.2]),
@@ -1136,7 +1147,7 @@ impl Game<'_> {
     /// (`getSourceContainerOrHandler`). `None` when there is no container. A capability part
     /// above takes the container's place.
     fn suck_from_container(&mut self, above: Pos, at: [f64; 3], hopper: &View) -> Option<bool> {
-        if let Some(part) = self.item_part_at(above) {
+        if let Some(part) = self.item_part_at(above, Direction::Down) {
             let (x, y, z) = hopper.parts[0].0;
             let above = [above.0, above.1, above.2];
             self.native_hopper_inventory_search([x, y, z], Some(above), None);

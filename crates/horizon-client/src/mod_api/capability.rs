@@ -1,21 +1,57 @@
-//! Capability parts (arismoko/horizon#41 §7): code a mod registers for its block entity type to
-//! answer a capability, such as [`ITEMS`], in place of the game's own answer. A handler holds no
-//! borrow of the game: each call is given the host, so a handler may look up and call a
-//! neighbour's capability (a pipe), and it keeps its state where the game keeps the block
-//! entity's (its slots, its saved compound, its attachments).
-use super::{Direction, Host, ItemStack};
-use std::{
-    cell::OnceCell,
-    marker::PhantomData,
-    sync::{Arc, LazyLock},
-};
+//! Capability parts (arismoko/horizon#41 §7): providers a mod registers for its block entity
+//! type to answer a capability, such as [`ITEMS`], beside the game's own (NeoForge's
+//! `RegisterCapabilitiesEvent`). A handler holds no borrow of the game: each call is given the
+//! host, so a handler may look up and call a neighbour's capability (a pipe), and it keeps its
+//! state where the game keeps the block entity's (its slots, its saved compound, its
+//! attachments).
+use super::{Direction, Host, ItemResource, ResourceHandler, Transaction};
+use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
 /// A capability: its name (`horizon:items`, `mymod:chemicals`), the handler trait `T` it answers
-/// with, and the game's own answer where no part is registered, if the game has one.
+/// with, and the game's own provider, if the game has one.
 pub struct CapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    pub(super) default: Option<fn(&dyn Host, [i32; 3]) -> Option<Arc<T>>>,
-    pub(super) handler: PhantomData<fn() -> Arc<T>>,
+    pub(super) default: Option<fn(&mut dyn Host, BlockSide) -> Option<Box<T>>>,
+    pub(super) handler: PhantomData<fn() -> Box<T>>,
+}
+
+/// A block entity a capability is asked of, and the side it is reached through (none: from no
+/// particular side): NeoForge's block capability context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockSide {
+    pub pos: [i32; 3],
+    pub side: Option<Direction>,
+}
+
+/// A capability's handler, with who answered: a mod's provider or the game's own.
+pub struct Capability<T: ?Sized> {
+    pub(super) handler: Box<T>,
+    /// The mod whose provider answered; none for the game.
+    pub(super) owner: Option<usize>,
+}
+
+impl<T: ?Sized> Deref for Capability<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.handler
+    }
+}
+
+impl<T: ?Sized> Capability<T> {
+    /// The id of the mod whose provider answered, or "the game", for warnings.
+    pub fn owner(&self) -> String {
+        self.owner
+            .map_or_else(|| "the game".to_owned(), super::mod_name)
+    }
+    /// `answer`, the handler's amount for a request of `asked` at `at`: itself, or none beyond
+    /// `asked`, a mod bug warned once naming the mod. The caller aborts the move.
+    pub(crate) fn checked(&self, answer: u32, asked: u32, at: &dyn Debug) -> Option<u32> {
+        if answer > asked {
+            super::item_place::warn_broken(self.owner, at);
+            return None;
+        }
+        Some(answer)
+    }
 }
 
 impl<T: ?Sized + 'static> CapabilityKey<T> {
@@ -29,195 +65,95 @@ impl<T: ?Sized + 'static> CapabilityKey<T> {
     }
 }
 
-/// Item slots, as NeoForge 26.3's `Capabilities.Item.BLOCK` (a `ResourceHandler<ItemResource>`).
-/// The game answers it for every block entity with slots: chests (a double chest's two halves as
-/// one), furnaces, hoppers and the other vanilla containers, by their `WorldlyContainer` sides,
-/// and a mod block entity's `block_entity_container`.
-pub const ITEMS: CapabilityKey<dyn ItemHandler> = CapabilityKey {
+/// Item slots, as NeoForge 26.3's `Capabilities.Item.BLOCK`: a block entity's slots as one side
+/// reaches them. The game answers it for every block entity with slots: chests (a double chest's
+/// two halves as one), furnaces, hoppers and the other vanilla containers, by their
+/// `WorldlyContainer` sides, and a mod block entity's `block_entity_container`.
+pub const ITEMS: CapabilityKey<dyn ResourceHandler<ItemResource>> = CapabilityKey {
     name: "horizon:items",
-    default: Some(|host, pos| {
-        static GAME_ITEMS: LazyLock<Arc<dyn ItemHandler>> = LazyLock::new(|| Arc::new(GameItems));
-        host.container_size(pos, None).map(|_| GAME_ITEMS.clone())
+    default: Some(|host, at| {
+        host.container_size(at.pos, None)
+            .map(|_| Box::new(GameItems(at)) as Box<dyn ResourceHandler<ItemResource>>)
     }),
     handler: PhantomData,
 };
 
-/// The item slots of the block entity at `at` as its side `side` reaches them (none: from no
-/// particular side, every slot), numbered from 0 for that side. `simulate` changes nothing and
-/// must answer exactly as the real call would, as NeoForge's handlers must: a write plans with
-/// it, then commits. A handler whose real call disagrees with its own simulation is a mod bug;
-/// the game then puts back what it can, drops the rest at the block and warns once. Moves that
-/// must succeed together across more handlers need transactions, which are not here yet
-/// (#41 §7).
-pub trait ItemHandler: Send + Sync + 'static {
-    /// How many slots `side` reaches.
-    fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize;
-    /// The stack in slot `slot`, if any.
-    fn stack(
-        &self,
-        host: &dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-    ) -> Option<ItemStack>;
-    /// Puts as much of `stack` as slot `slot` takes; what didn't fit.
-    fn insert(
-        &self,
-        host: &mut dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        stack: ItemStack,
-        simulate: bool,
-    ) -> Option<ItemStack>;
-    /// Takes up to `max` out of slot `slot`; what came out.
-    fn extract(
-        &self,
-        host: &mut dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        max: u32,
-        simulate: bool,
-    ) -> Option<ItemStack>;
-    /// How many of `stack` slot `slot` holds when empty, whatever it holds now: none where
-    /// `stack` may not go in, such as an output slot. NeoForge's `isValid` and
-    /// `getCapacityAsLong` in one; a write that replaces a slot's stack asks it before taking
-    /// anything out.
-    fn capacity(
-        &self,
-        host: &dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        stack: &ItemStack,
-    ) -> u32;
-}
-
-/// The game's own [`ITEMS`]: the block entity's slots, by the rules hoppers follow.
-struct GameItems;
-impl ItemHandler for GameItems {
-    fn slots(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
-        host.container_size(at, side).unwrap_or(0)
+/// The game's own [`ITEMS`]: the block entity's slots `.side` reaches, by the rules hoppers
+/// follow.
+struct GameItems(BlockSide);
+impl ResourceHandler<ItemResource> for GameItems {
+    fn size(&self, host: &mut dyn Host) -> usize {
+        host.container_size(self.0.pos, self.0.side).unwrap_or(0)
     }
-    fn stack(
-        &self,
-        host: &dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-    ) -> Option<ItemStack> {
-        host.container_stack(at, side, slot)
+    fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+        let stack = host.container_stack(self.0.pos, self.0.side, index)?;
+        Some(ItemResource::of(&stack))
+    }
+    fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+        host.container_stack(self.0.pos, self.0.side, index)
+            .map_or(0, |stack| stack.count)
+    }
+    fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+        host.container_capacity(self.0.pos, self.0.side, index, &resource.to_stack(1))
     }
     fn insert(
         &self,
         host: &mut dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        stack: ItemStack,
-        simulate: bool,
-    ) -> Option<ItemStack> {
-        host.container_insert(at, side, slot, stack, simulate)
-    }
-    fn extract(
-        &self,
-        host: &mut dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        max: u32,
-        simulate: bool,
-    ) -> Option<ItemStack> {
-        host.container_extract(at, side, slot, max, simulate)
-    }
-    fn capacity(
-        &self,
-        host: &dyn Host,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        stack: &ItemStack,
+        tx: &Transaction,
+        index: usize,
+        resource: &ItemResource,
+        amount: u32,
     ) -> u32 {
-        host.container_capacity(at, side, slot, stack)
+        let stack = resource.to_stack(amount);
+        let rest = host.container_insert(self.0.pos, self.0.side, index, stack, tx);
+        amount - rest.map_or(0, |rest| rest.count.min(amount))
+    }
+    fn extract(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        index: usize,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32 {
+        let held = host.container_stack(self.0.pos, self.0.side, index);
+        if !held.is_some_and(|held| resource.matches(&held)) {
+            return 0;
+        }
+        host.container_extract(self.0.pos, self.0.side, index, amount, tx)
+            .map_or(0, |out| out.count.min(amount))
     }
 }
 
 impl dyn Host + '_ {
-    /// `key`'s handler for the block entity at `pos`: the part a mod registered for its type,
-    /// else the game's own answer, if the game has one there.
+    /// `key`'s handler for the block entity at `pos`, reached through `side`: the first provider
+    /// to answer, of those mods registered for its type `before_game`, the game's own, and the
+    /// mods' others, each in registration order.
     pub fn capability<T: ?Sized + 'static>(
-        &self,
+        &mut self,
         key: &CapabilityKey<T>,
         pos: [i32; 3],
-    ) -> Option<Arc<T>> {
-        let kind = OnceCell::new();
-        super::block_entity_capability(key, || {
-            kind.get_or_init(|| self.block_entity_type(pos)).as_deref()
-        })
-        .or_else(|| key.default.and_then(|default| default(self, pos)))
-    }
-
-    /// `handler`'s real insert of `stack` into `slot` of the block entity at `at`, through
-    /// `side`: what is left, of the offered item and never more than was offered. A handler
-    /// answering more, or another item, is a mod bug, warned once naming its mod.
-    pub(crate) fn insert_checked(
-        &mut self,
-        handler: &Arc<dyn ItemHandler>,
-        at: [i32; 3],
         side: Option<Direction>,
-        slot: usize,
-        stack: ItemStack,
-    ) -> Option<ItemStack> {
-        let rest = handler
-            .insert(self, at, side, slot, stack.clone(), false)
-            .filter(|rest| rest.count > 0)?;
-        if rest.count > stack.count || !rest.same_item_same_components(&stack) {
-            super::item_place::warn_broken(super::capability_mod(handler), &at);
+    ) -> Option<Capability<T>> {
+        let at = BlockSide { pos, side };
+        let mut game = None;
+        let parts = super::providers(false, key.name, self, |host| host.block_entity_type(pos));
+        let answer = super::ask_providers::<super::BlockProvider<T>, T>(
+            parts,
+            self,
+            |provider, host| provider(host, at),
+            |host| {
+                game = key.default.and_then(|default| default(host, at));
+                game.is_some()
+            },
+        );
+        match answer {
+            super::Answer::Mod(found) => Some(found),
+            super::Answer::Game => game.map(|handler| Capability {
+                handler,
+                owner: None,
+            }),
+            super::Answer::Nobody => None,
         }
-        Some(ItemStack {
-            count: rest.count.min(stack.count),
-            ..stack
-        })
-    }
-
-    /// `handler`'s real extract from `slot` of the block entity at `at`, through `side`, of what
-    /// its simulation gave, `simulated`: what came out, of that item and never more. Another item,
-    /// or the same with other components, is a mod bug, warned once naming its mod: it goes back
-    /// into the slot, else is dropped at the block, and nothing comes out. So is what it gives
-    /// beyond `simulated`'s count, which goes back the same way.
-    pub(crate) fn extract_checked(
-        &mut self,
-        handler: &Arc<dyn ItemHandler>,
-        at: [i32; 3],
-        side: Option<Direction>,
-        slot: usize,
-        simulated: &ItemStack,
-    ) -> Option<ItemStack> {
-        let max = simulated.count;
-        let out = handler
-            .extract(self, at, side, slot, max, false)
-            .filter(|out| out.count > 0)?;
-        if !out.same_item_same_components(simulated) {
-            super::item_place::warn_broken(super::capability_mod(handler), &at);
-            if let Some(rest) = self.insert_checked(handler, at, side, slot, out) {
-                self.drop_at(at, rest);
-            }
-            return None;
-        }
-        if out.count > max {
-            super::item_place::warn_broken(super::capability_mod(handler), &at);
-            let excess = ItemStack {
-                count: out.count - max,
-                ..out.clone()
-            };
-            if let Some(rest) = self.insert_checked(handler, at, side, slot, excess) {
-                self.drop_at(at, rest);
-            }
-        }
-        (max > 0).then(|| ItemStack {
-            count: out.count.min(max),
-            ..out
-        })
     }
 }

@@ -54,6 +54,12 @@ pub fn can_glide_using(stack: &ItemStack, slot: &str, items: &crate::items::Item
     glider && equip_slot.as_deref() == Some(slot)
 }
 
+/// The effective equippable slot after the stack's component patch.
+pub fn equippable_slot(stack: &ItemStack, items: &crate::items::Items) -> Option<String> {
+    let info = items.get(&stack.item)?;
+    glider_and_slot(stack, info.glider, info.equip_slot.clone()).1
+}
+
 /// The `glider` and `equippable` slot `stack` has, from its item's own: the
 /// saved components (a command's, a save's) patch them, then the server's
 /// patch, which may also remove them and whose `equippable` isn't kept as a
