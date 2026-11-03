@@ -795,6 +795,149 @@ impl MobRef {
     }
 }
 
+/// The player, or mobs of the given species: the class filter of a
+/// [`NativeGoal::NearestTarget`] and of a [`NativeGoal::AvoidEntity`]. The
+/// species ids are namespaced (`minecraft:zombie`); a bare id reads as
+/// `minecraft:`'s, like the effects' ids.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum NativeMobFilter {
+    /// The nearest player.
+    Player,
+    /// Mobs of these species (`Vec` of namespaced ids).
+    Species(Vec<String>),
+}
+
+/// A vanilla AI goal, as a mob's `add_goal` and `add_target_goal` give one:
+/// only the kinds Horizon's own species code runs, with the vanilla
+/// constructor's parameters (`MeleeAttackGoal(speed, followUnseen)`). Goals
+/// with behavior of their own (a `MoveToBlockGoal` subclass's block test)
+/// stay out: they take code, not parameters.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum NativeGoal {
+    /// `FloatGoal`: swim up in water or lava. Vanilla parameters: none.
+    Float,
+    /// `ClimbOnTopOfPowderSnowGoal`: jump onto powder snow. Parameters: none.
+    ClimbOnTopOfPowderSnow,
+    /// `PanicGoal(speed)`, or `TurtlePanicGoal(speed)` with `water_range`
+    /// set: always head for water this far away, not only when on fire.
+    Panic {
+        speed: f64,
+        water_range: Option<i32>,
+    },
+    /// `RandomStrollGoal(speed, interval)`; `water_avoiding` set to its
+    /// probability makes `WaterAvoidingRandomStrollGoal`, `swim`
+    /// `RandomSwimmingGoal`, `flying` `WaterAvoidingRandomFlyingGoal`.
+    Stroll {
+        speed: f64,
+        interval: i32,
+        water_avoiding: Option<f32>,
+        swim: bool,
+        flying: bool,
+    },
+    /// `LookAtPlayerGoal(range, probability, onlyHorizontal)`: the nearest
+    /// player, the nearest mob with `mobs`, or only mobs of `only`'s
+    /// species.
+    LookAtPlayer {
+        range: f32,
+        probability: f32,
+        only_horizontal: bool,
+        mobs: bool,
+        only: Option<String>,
+    },
+    /// `RandomLookAroundGoal`. Vanilla parameters: none.
+    RandomLookAround,
+    /// `MeleeAttackGoal(speed, followUnseen)`.
+    MeleeAttack { speed: f64, follow_unseen: bool },
+    /// `LeapAtTargetGoal(leapMotion)`.
+    LeapAtTarget { yd: f32 },
+    /// `AvoidEntityGoal(what, maxDist, walk, sprint)`: sprint away from
+    /// `what` once it is closer than `max_dist`.
+    AvoidEntity {
+        what: NativeMobFilter,
+        max_dist: f32,
+        walk: f64,
+        sprint: f64,
+    },
+    /// `TemptGoal(speed, items, canScare)`: `items` are item ids
+    /// (`minecraft:wheat`; a bare id reads as `minecraft:`'s).
+    Tempt {
+        speed: f64,
+        items: Vec<String>,
+        can_scare: bool,
+    },
+    /// `BreedGoal(speed)`. An animal keeps it; other mobs refuse it.
+    Breed { speed: f64 },
+    /// `FollowParentGoal(speed)`. An animal keeps it; other mobs refuse it.
+    FollowParent { speed: f64 },
+    /// `FollowMobGoal(speed, stopDistance, areaSize)`.
+    FollowMob { speed: f64, stop: f32, area: f32 },
+    /// `RestrictSunGoal`. Vanilla parameters: none.
+    RestrictSun,
+    /// `FleeSunGoal(speed)`.
+    FleeSun { speed: f64 },
+    /// `EatBlockGoal`. Vanilla parameters: none.
+    EatBlock,
+    /// `BreathAirGoal`. Vanilla parameters: none.
+    BreathAir,
+    /// `TryFindWaterGoal`. Vanilla parameters: none.
+    TryFindWater,
+    /// `NearestAttackableTargetGoal` (the target selector): hunt `prey`,
+    /// checking every `interval` ticks, `must_see` (`mustSee`) and
+    /// `must_reach` (`mustReach`).
+    NearestTarget {
+        prey: NativeMobFilter,
+        must_see: bool,
+        must_reach: bool,
+        interval: i32,
+    },
+    /// `HurtByTargetGoal`, `alert` as its `setAlert()`.
+    HurtByTarget { alert: bool },
+}
+
+impl NativeGoal {
+    /// The goal's kind id: the same snake_case spelling `goals` and
+    /// `target_goals` read and `remove_goal` and `remove_target_goal` take
+    /// (`melee_attack`). A species variant of a vanilla goal (a bee's
+    /// `BeeHurtByOtherGoal`) keeps its own vanilla name instead.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Float => "float",
+            Self::ClimbOnTopOfPowderSnow => "climb_on_top_of_powder_snow",
+            Self::Panic { .. } => "panic",
+            Self::Stroll { .. } => "stroll",
+            Self::LookAtPlayer { .. } => "look_at_player",
+            Self::RandomLookAround => "random_look_around",
+            Self::MeleeAttack { .. } => "melee_attack",
+            Self::LeapAtTarget { .. } => "leap_at_target",
+            Self::AvoidEntity { .. } => "avoid_entity",
+            Self::Tempt { .. } => "tempt",
+            Self::Breed { .. } => "breed",
+            Self::FollowParent { .. } => "follow_parent",
+            Self::FollowMob { .. } => "follow_mob",
+            Self::RestrictSun => "restrict_sun",
+            Self::FleeSun { .. } => "flee_sun",
+            Self::EatBlock => "eat_block",
+            Self::BreathAir => "breath_air",
+            Self::TryFindWater => "try_find_water",
+            Self::NearestTarget { .. } => "nearest_target",
+            Self::HurtByTarget { .. } => "hurt_by_target",
+        }
+    }
+}
+
+/// One goal of a mob's selector, as `goals` and `target_goals` read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeMobGoalEntry {
+    /// The goal's priority: a lower number preempts a higher one.
+    pub priority: i32,
+    /// The goal's kind id (see [`NativeGoal::id`]).
+    pub id: &'static str,
+    /// Whether the goal is running now.
+    pub running: bool,
+}
+
 /// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
 /// It is also a [`MobRef`] and a [`LivingRef`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1262,6 +1405,15 @@ impl ChunkRef {
 pub enum ChunkStatus {
     /// A full chunk in a level's live world.
     Full,
+}
+
+/// A kind of light (`LightLayer`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LightLayer {
+    /// Light from emitting blocks (`BLOCK`).
+    Block,
+    /// Light from the sky (`SKY`).
+    Sky,
 }
 
 /// What an explosion a mod sets off does to blocks
@@ -2416,6 +2568,22 @@ pub trait LevelHost {
     ) -> Option<BlockStateId> {
         unimplemented!("LevelHost::state_with_property")
     }
+    /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
+    /// It reads the game's own light query: above the build height the sky is 15 and below it 0,
+    /// and a chunk that isn't loaded reads as full sky and no block light. It never loads a chunk.
+    fn brightness(&self, _layer: LightLayer, _pos: [i32; 3]) -> i32 {
+        unimplemented!("LevelHost::brightness")
+    }
+    /// `BlockAndLightGetter.getRawBrightness(pos, darkening)`: the brighter of the block light
+    /// and the sky light less `sky_darken`. `CropBlock.randomTick` asks it with 0.
+    fn raw_brightness(&self, _pos: [i32; 3], _sky_darken: i32) -> i32 {
+        unimplemented!("LevelHost::raw_brightness")
+    }
+    /// `Level.isLoaded`: `pos` is inside the build height and its chunk is loaded. Asking never
+    /// loads the chunk.
+    fn is_loaded(&self, _pos: [i32; 3]) -> bool {
+        unimplemented!("LevelHost::is_loaded")
+    }
 }
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
@@ -2515,6 +2683,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod block_entity_type;
+pub use block_entity_type::{BlockEntityTypeBuilder, BlockEntityTypeKey};
 mod ticket_controller;
 pub use ticket_controller::TicketController;
 mod part_table;
@@ -2523,8 +2693,9 @@ pub use part_table::{
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, install_parts, mark_game_thread, parts,
-    place_provider, providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
+    has_scoped_hook, install_parts, mark_game_thread, parts, place_provider, providers,
+    resolve_parts,
 };
 
 mod generated {
@@ -2566,7 +2737,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::horizon_mod;
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
 
 #[cfg(test)]
 pub(crate) use part_table::tests as part_tests;
@@ -2728,11 +2899,26 @@ mod tests {
         assert_eq!(render.translation, [3.0, 0.0, 0.0]);
     }
 
+    /// Installs one mod, `id`, that attaches `part` to sticks.
+    fn stick_part<P: ItemPart + Clone>(id: &'static str, part: P) {
+        struct StickMod<P>(P);
+        #[mod_api::__subscriptions]
+        impl<P: ItemPart + Clone> Hooks for StickMod<P> {
+            fn register(&self, r: &mut Registrar) {
+                r.item_part("minecraft:stick", self.0.clone());
+            }
+        }
+        let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
+        install(mods.clone());
+        install_parts(&mods).unwrap();
+    }
+
     /// Claims a use on stone, after telling the player what the block is.
+    #[derive(Clone)]
     struct Probe;
 
-    #[mod_api::__subscriptions]
-    impl Hooks for Probe {
+    #[mod_api::horizon_part]
+    impl ItemPart for Probe {
         fn use_on(&self, host: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
             let level = host.level(&player.dimension).expect("a loaded level");
@@ -2853,10 +3039,11 @@ mod tests {
     }
 
     /// Asks the host to tell a player without anyone having implemented it.
+    #[derive(Clone)]
     struct Chatty;
 
-    #[mod_api::__subscriptions]
-    impl Hooks for Chatty {
+    #[mod_api::horizon_part]
+    impl ItemPart for Chatty {
         fn use_on(&self, host: &mut dyn ServerHost, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
             Flow::Continue
@@ -2955,8 +3142,7 @@ mod tests {
     fn a_test_host_implements_only_what_its_hook_calls() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
-        let mods = [ModEntry::new("probe", Box::new(Probe))];
-        install(mods.into());
+        stick_part("probe", Probe);
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
             let mut host = Reader {
@@ -3119,8 +3305,7 @@ mod tests {
     fn an_unexpected_host_call_names_the_method() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
-        let mods = [ModEntry::new("chatty", Box::new(Chatty))];
-        install(mods.into());
+        stick_part("chatty", Chatty);
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -3145,15 +3330,29 @@ mod tests {
         BlockHit::new([0.5, 1.0, 0.5], [0, 1, 0], false)
     }
 
-    /// Takes a click with the off hand on a block's top half.
+    /// Takes a click with the off hand on a block's top half; its sticks check what they hear.
     struct OffHandTop;
 
-    #[mod_api::__subscriptions]
-    impl Hooks for OffHandTop {
+    /// A stick's use, checking the hand, the hit and the player.
+    #[derive(Clone)]
+    struct HeardStick;
+
+    #[mod_api::horizon_part]
+    impl ItemPart for HeardStick {
         fn use_on(&self, _: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
             assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
+            HEARD_STICK.store(true, std::sync::atomic::Ordering::SeqCst);
             Flow::Continue
+        }
+    }
+
+    static HEARD_STICK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for OffHandTop {
+        fn register(&self, r: &mut Registrar) {
+            r.item_part("minecraft:stick", HeardStick);
         }
 
         fn right_click_block(
@@ -3186,8 +3385,9 @@ mod tests {
     #[test]
     fn a_block_use_hears_the_hand_the_hit_and_the_player() {
         mark_game_thread();
-        let mods = [ModEntry::new("off-hand-top", Box::new(OffHandTop))];
-        install(mods.into());
+        let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
+        install(mods.clone());
+        install_parts(&mods).unwrap();
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -3205,6 +3405,7 @@ mod tests {
             &mut claimed,
         );
         assert!(!claimed);
+        assert!(HEARD_STICK.load(std::sync::atomic::Ordering::SeqCst));
         let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
         let held = stick();
         for (hand, hit, stack, canceled, answer, use_block) in [
@@ -3631,6 +3832,8 @@ mod tests {
             names: &names,
             trade: None,
             maps: None,
+            limited_crafting: false,
+            known_recipes: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);
         let seen = Arc::new(Mutex::new(Vec::new()));

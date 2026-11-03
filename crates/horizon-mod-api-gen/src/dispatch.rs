@@ -325,30 +325,33 @@ pub(super) fn emit(
             HelperSide::Both => "both",
         };
         method_source.push_str(&format!("/// Side: {side}.\n"));
+        // A scoped hook is its part's method alone: a global moment beside it is its own hook.
+        let callee = if scoped.is_some() { "part" } else { "mod" };
         match (contract, out) {
             ("cancel", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped.\n"
+                "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later {callee}s are skipped.\n"
             )),
             ("replace", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Return `Some` to set `{out}`; the first mod returning `Some` wins.\n"
+                "///\n/// Return `Some` to set `{out}`; the first {callee} returning `Some` wins.\n"
             )),
             ("collect", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Every mod gets `{event}.{out}` in order and may add, change or remove {out}.\n"
+                "///\n/// Every {callee} gets `{event}.{out}` in order and may add, change or remove {out}.\n"
             )),
             _ => {}
-        }
-        if let Some((part_trait, _)) = &scoped {
-            part_traits
-                .entry(*part_trait)
-                .or_default()
-                .push_str(&format!(
-                    "{method_source}fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
-                ));
         }
         method_source.push_str(&format!(
             "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
         ));
-        traits.push_str(&method_source);
+        match &scoped {
+            Some((part_trait, _)) => part_traits
+                .entry(*part_trait)
+                .or_default()
+                .push_str(&method_source),
+            None => traits.push_str(&method_source),
+        }
+        let trait_name = scoped
+            .as_ref()
+            .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
@@ -359,7 +362,7 @@ pub(super) fn emit(
         } else {
             format!("super::entered(HookId::{hook_id}, \"{name}\")")
         };
-        // One callee's call: a mod's, then a scoped hook's parts' after the mods.
+        // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| match contract {
             "cancel" => format!(
                 "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
@@ -379,24 +382,16 @@ pub(super) fn emit(
                     call(&mod_item, "break")
                 ),
             ),
-            Some((_, lookup)) => {
+            Some((_, lookup)) => (
                 // The parts are looked up first: the key may be moved into the event.
-                let calls = format!(
-                    "for {mod_item} in {each} {{ {} }} for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
-                    call(&mod_item, "break 'hook"),
-                    call(&part_item, "break 'hook"),
-                );
-                (
-                    format!(
-                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup}; if {part_list}.is_empty() && !super::listened(HookId::{hook_id}) {{ return; }}"
-                    ),
-                    if matches!(contract, "cancel" | "replace") {
-                        format!("'hook: {{ {calls} }}")
-                    } else {
-                        calls
-                    },
-                )
-            }
+                format!(
+                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                ),
+                format!(
+                    "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
+                    call(&part_item, "break"),
+                ),
+            ),
         };
         let body = match contract {
             "cancel" => format!(

@@ -48,9 +48,6 @@ pub fn check_path(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A vanilla identifier, `minecraft:path`.
-/// `Identifier.isValidNamespace` and `isValidPath` on an id with both parts
-/// given: `[a-z0-9_.-]`, and `/` in the path too.
 /// The shared resource namespace fence for folders and native archives.
 pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), String> {
     let mut parts = name.splitn(3, '/');
@@ -81,7 +78,10 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
     Ok(())
 }
 
-fn namespaced_id(id: &str) -> bool {
+/// A vanilla identifier, `minecraft:path`.
+/// `Identifier.isValidNamespace` and `isValidPath` on an id with both parts
+/// given: `[a-z0-9_.-]`, and `/` in the path too.
+pub fn namespaced_id(id: &str) -> bool {
     let ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b);
     id.split_once(':').is_some_and(|(namespace, path)| {
         !namespace.is_empty()
@@ -123,6 +123,9 @@ pub struct BlockProperties {
     /// Vanilla's piston push reaction, or the template's when unset.
     #[serde(default, deserialize_with = "deserialize_push_reaction")]
     pub push_reaction: Option<PushReaction>,
+    /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
+    /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
+    pub occludes: Option<bool>,
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -357,6 +360,26 @@ struct CreativeTabFile {
     items: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FluidFile {
+    sprite: Option<String>,
+    tint: Option<u32>,
+}
+
+/// How a fluid the mod names looks on the client (`data/<id>/horizon/fluid/`), as
+/// NeoForge's `IClientFluidTypeExtensions`: `getStillTexture` and `getTintColor`.
+/// The fluid needs no block, so it can be a fluid only a tank holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FluidLook {
+    /// `<mod id>:<path>`.
+    pub id: String,
+    /// An atlas sprite id (`namespace:path`); none draws a flat square of the tint.
+    pub sprite: Option<String>,
+    /// `0xAARRGGBB`.
+    pub tint: Option<u32>,
+}
+
 /// A creative inventory tab the mod adds (`data/<id>/horizon/creative_tab/`):
 /// its title, the item on its button, and its items in order. Items no mod
 /// or vanilla registers are left out when the game loads.
@@ -451,6 +474,13 @@ pub struct EntityType {
     pub damage: f32,
 }
 
+/// A block entity type declared in code, with the blocks it supports.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockEntityType {
+    pub id: String,
+    pub blocks: Vec<String>,
+}
+
 /// a menu type the mod adds (vanilla's `MenuType`, NeoForge's
 /// `IMenuTypeExtension.create`): its container's slot count, the
 /// `ContainerData` count its menu syncs, and its take-only slots
@@ -480,7 +510,7 @@ pub const MAX_MENU_SLOTS: u16 = 256;
 enum Source {
     Dir(PathBuf),
     Zip(PathBuf),
-    /// No files: blocks and items a native mod declares in code.
+    /// No files: content a native mod declares in code.
     Code,
 }
 
@@ -495,7 +525,11 @@ pub struct Content {
     pub effects: Vec<MobEffect>,
     /// Its creative inventory tabs, by id.
     pub creative_tabs: Vec<CreativeTab>,
+    /// How its fluids look, by id.
+    pub fluids: Vec<FluidLook>,
     pub entity_types: Vec<EntityType>,
+    /// Block entity types declared by native code, not content files.
+    pub block_entity_types: Vec<BlockEntityType>,
     pub menu_types: Vec<MenuType>,
     /// The namespaces it owns: the mod id, then the manifest's `namespaces`.
     pub namespaces: Vec<String>,
@@ -591,7 +625,9 @@ impl Content {
             items: Vec::new(),
             effects: Vec::new(),
             creative_tabs: Vec::new(),
+            fluids: Vec::new(),
             entity_types: Vec::new(),
+            block_entity_types: Vec::new(),
             menu_types: Vec::new(),
             namespaces: manifest.owned_namespaces().map(str::to_owned).collect(),
         };
@@ -599,8 +635,8 @@ impl Content {
         Ok(content)
     }
 
-    /// Content with no files, for the blocks and items native mods declare
-    /// in code in `namespace` ([`Content::declare`]).
+    /// Content with no files, for native declarations in `namespace`
+    /// ([`Content::declare`]).
     pub fn declared(namespace: &str) -> Content {
         Content {
             source: Source::Code,
@@ -609,7 +645,9 @@ impl Content {
             items: Vec::new(),
             effects: Vec::new(),
             creative_tabs: Vec::new(),
+            fluids: Vec::new(),
             entity_types: Vec::new(),
+            block_entity_types: Vec::new(),
             menu_types: Vec::new(),
             namespaces: vec![namespace.to_owned()],
         }
@@ -720,6 +758,7 @@ impl Content {
         let mut items = Vec::new();
         let mut effects = Vec::new();
         let mut tabs = Vec::new();
+        let mut fluids = Vec::new();
         let mut types = Vec::new();
         let mut menus = Vec::new();
         for name in &self.files {
@@ -752,13 +791,15 @@ impl Content {
                 effects.push((effect, name.clone()));
             } else if let Some(tab) = parse("creative_tab") {
                 tabs.push((tab, name.clone()));
+            } else if let Some(fluid) = parse("fluid") {
+                fluids.push((fluid, name.clone()));
             } else if let Some(kind) = parse("entity_type") {
                 types.push((kind, name.clone()));
             } else if let Some(menu) = parse("menu") {
                 menus.push((menu, name.clone()));
             } else {
                 return Err(format!(
-                    "{name}: data/{id}/horizon/ holds block/, item/, mob_effect/, creative_tab/, entity_type/ and menu/*.json only"
+                    "{name}: data/{id}/horizon/ holds block/, item/, mob_effect/, creative_tab/, fluid/, entity_type/ and menu/*.json only"
                 ));
             }
         }
@@ -861,6 +902,20 @@ impl Content {
                 title: file.title,
                 icon: file.icon,
                 items: file.items,
+            });
+        }
+        for (fluid, name) in fluids {
+            let file: FluidFile =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            if file.sprite.as_deref().is_some_and(|s| !namespaced_id(s)) {
+                return Err(format!(
+                    "{name}: sprite is an atlas sprite id (namespace:path)"
+                ));
+            }
+            self.fluids.push(FluidLook {
+                id: fluid,
+                sprite: file.sprite,
+                tint: file.tint,
             });
         }
         for (kind, name) in types {
@@ -1678,6 +1733,22 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn a_block_may_occlude_nothing() {
+        let block = |occludes: &str| {
+            let text = format!(
+                r#"{{"template": "minecraft:barrel", "properties": {{"occludes": {occludes}}}}}"#
+            );
+            let files: &[(&str, &[u8])] =
+                &[("data/ruby/horizon/block/panel.json", text.as_bytes())];
+            hmod("occludes", MANIFEST_TEXT, files)
+        };
+        let occludes = |c: Result<Content, String>| c.unwrap().blocks[0].properties.occludes;
+        assert_eq!(occludes(block("false")), Some(false));
+        assert_eq!(occludes(block("true")), Some(true));
+        assert!(block(r#""no""#).is_err());
+    }
+
+    #[test]
     fn blocks_choose_their_render_shape() {
         let block = |shape: &str| {
             let text = format!(
@@ -1952,6 +2023,43 @@ capabilities = ["registries"]
     }
 
     /// A creative tab: a title, an icon and its items, all item ids.
+    #[test]
+    fn fluids_declare_a_sprite_and_a_tint() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/fluid/steam.json",
+                br#"{"sprite":"ruby:gui/fluids/steam","tint":4291343520}"#,
+            ),
+            ("data/ruby/horizon/fluid/bare.json", b"{}"),
+        ];
+        let content = hmod("fluid", MANIFEST_TEXT, files).unwrap();
+        assert_eq!(
+            content.fluids,
+            [
+                FluidLook {
+                    id: "ruby:bare".into(),
+                    sprite: None,
+                    tint: None
+                },
+                FluidLook {
+                    id: "ruby:steam".into(),
+                    sprite: Some("ruby:gui/fluids/steam".into()),
+                    tint: Some(4291343520)
+                },
+            ]
+        );
+        for sprite in [
+            &br#"{"sprite":"steam"}"#[..],
+            br#"{"sprite":"ruby:has space"}"#,
+            br#"{"sprite":"Ruby:steam"}"#,
+            br#"{"sprite":"ruby:"}"#,
+        ] {
+            let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", sprite)];
+            let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
+            assert!(e.contains("sprite"), "{e}");
+        }
+    }
+
     #[test]
     fn creative_tabs_name_their_items() {
         let tab = |json: &str| {
