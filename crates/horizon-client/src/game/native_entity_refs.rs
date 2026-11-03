@@ -432,6 +432,42 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_part_connects_wire_in_a_real_game_level() {
+        use horizon_client::chunk::Chunk;
+        use horizon_core::{geometry::Direction, position::BlockPos};
+        use std::sync::Arc;
+
+        horizon_client::mod_api::part_tests::redstone_game_thread();
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let wire = registry.default_state("minecraft:redstone_wire").unwrap();
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let pos = BlockPos::new(5, 64, 5);
+            let neighbour = BlockPos::new(6, 64, 5);
+            game.world.set(5, 63, 5, stone).unwrap();
+            game.world.set(6, 64, 5, glass).unwrap();
+            let connected = game.with_level(|b, level, ticks| {
+                b.update_shape(level, ticks, wire, pos, Direction::East, neighbour, glass)
+            });
+            assert_eq!(
+                registry.state(connected).unwrap().properties["east"],
+                "side"
+            );
+            game.world.set(6, 64, 5, stone).unwrap();
+            let vanilla = game.with_level(|b, level, ticks| {
+                b.update_shape(level, ticks, wire, pos, Direction::East, neighbour, stone)
+            });
+            assert_eq!(registry.state(vanilla).unwrap().properties["east"], "none");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn side_guards_agree_across_integrated_dedicated_and_client() {
         use super::super::execution_role::ExecutionRole;
         use horizon_client::chunk::Chunk;

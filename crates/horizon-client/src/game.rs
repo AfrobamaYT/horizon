@@ -1453,6 +1453,26 @@ impl LevelAccess for GameLevel<'_> {
         }
         source
     }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        self.native_should_redstone_wire_connect_to(
+            self.dimension,
+            pos,
+            state,
+            direction,
+            &mut connected,
+        );
+        connected
+    }
     fn adjust_signal(
         &self,
         pos: BlockPos,
