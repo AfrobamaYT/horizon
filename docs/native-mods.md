@@ -945,11 +945,13 @@ there is no per-particle code hook.
 Trait mods implement `Hooks::add_server_reload_listeners` (server only), the counterpart of
 NeoForge 26.3's `AddServerReloadListenersEvent`. Registration runs on world open, `/reload`
 and `/datapack` changes, after pack selection. Register an `Arc<impl ServerReloadListener>`
-with a unique listener ID and a directory prefix such as `my_mod:machines/`. The listener's
-`ServerReloadContext` lists resource IDs and reads their bytes, including a mod's packaged
-`data/my_mod/machines/` files and later selected datapack overrides. It cannot read assets,
-files outside the prefix, or filesystem paths. Prefixes must be nonempty namespaced directory
-paths ending in `/`, with no empty, `.` or `..` components. Other namespaces are allowed.
+with a unique `Identifier` and `FileToIdConverter::json("machines")`, or `::new("machines", ".bin")`
+for another suffix. The listener's `ServerReloadContext` lists converted IDs and reads their
+bytes from `data/*/machines/`, including a mod's packaged files and later selected datapack
+overrides. A file `data/other/machines/heavy/press.json` becomes `other:heavy/press`: the directory
+and extension are removed, subdirectories preserved, and all namespaces included. It cannot
+read assets, other directories, or filesystem paths. Converter directories have no leading or
+trailing `/`, or empty, `.` or `..` components. Converter fields and reload-view fields are private.
 
 The prepare context is the pack view only, as vanilla's `ResourceManager`. Like vanilla's
 `SimplePreparableReloadListener`, `ServerReloadListener::prepare` parses and validates without
@@ -957,16 +959,16 @@ changing live state and returns `ServerReloadApply::new(move || { /* publish par
 All listeners prepare before **any** apply runs. Do not read another listener's new published
 state in prepare: dependencies order both phases but do not remove this barrier. Publication
 cannot fail. Any preparation, registration or ordering error drops all pending applies and
-keeps the old mod data and vanilla function library. The error names the owner mod, listener
+keeps the old mod data and vanilla function library. The error names the namespaced listener
 and, for file errors, resource ID; world open fails, and `/reload` reports the failure. A failed
 `/datapack` change also preserves the selected packs on disk.
 
 `event.listeners.add_dependency(first, second)` orders named listeners. Both names must
 already be registered; unknown names fail immediately, and cycles fail after registration.
-`VanillaServerListeners::FUNCTIONS` names Horizon's function-library listener; `FIRST` and
-`LAST` are ordering boundaries. Mod listeners run after vanilla by default, in registration
-order; an explicit dependency before `FUNCTIONS` works without a false cycle. Use these
-constants rather than depending on their string values. The read-only `get_registry`,
+`VanillaServerListeners::functions()` names Horizon's function-library listener; `first()` and
+`last()` are ordering boundaries. These anchors and dependency ends use `Identifier`. Mod
+listeners run after vanilla by default, in registration order; an explicit dependency before
+`functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
 `get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
 objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
 context or retained-listener lookup here.
@@ -974,14 +976,14 @@ context or retained-listener lookup here.
 ```rust,ignore
 use std::sync::{Arc, RwLock};
 use horizon_client::mod_api::{
-    AddServerReloadListenersEvent, Hooks, Identifier, ServerReloadApply,
+    AddServerReloadListenersEvent, FileToIdConverter, Hooks, Identifier, ServerReloadApply,
     ServerReloadContext, ServerReloadError, ServerReloadListener,
 };
 
 struct MachineData(Arc<RwLock<serde_json::Value>>);
 impl ServerReloadListener for MachineData {
     fn prepare(&self, context: &ServerReloadContext) -> Result<ServerReloadApply, ServerReloadError> {
-        let id = Identifier::parse("my_mod:machines/press.json").unwrap();
+        let id = Identifier::parse("my_mod:press").unwrap();
         let next = match context.read(&id) {
             Some(bytes) => serde_json::from_slice(bytes)
                 .map_err(|error| ServerReloadError::new(id, error))?,
@@ -996,7 +998,7 @@ impl Hooks for MyMod {
     fn add_server_reload_listeners(&self, event: &mut AddServerReloadListenersEvent<'_>) {
         event.listeners.add_listener(
             Identifier::parse("my_mod:machines").unwrap(),
-            Identifier::parse("my_mod:machines/").unwrap(),
+            FileToIdConverter::json("machines").unwrap(),
             self.0.clone(),
         ).unwrap();
     }

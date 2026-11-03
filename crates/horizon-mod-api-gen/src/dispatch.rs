@@ -121,20 +121,6 @@ pub(super) fn emit(
         ) {
             return Err(format!("invalid contract for {name}"));
         }
-        let owner_field = match api.get("owner") {
-            None => None,
-            Some(value) => {
-                let field = value
-                    .as_str()
-                    .ok_or_else(|| format!("owner of {name} must name an argument"))?;
-                if is_render || !args.iter().any(|(arg, ty)| {
-                    arg == field && matches!(ty, Type::Reference(reference) if reference.mutability.is_some())
-                }) {
-                    return Err(format!("owner of {name} must name a mutable gameplay argument"));
-                }
-                Some(field)
-            }
-        };
         let output = if let Some(out) = out {
             let index = args
                 .iter()
@@ -365,27 +351,19 @@ pub(super) fn emit(
             ),
             _ => format!("{callee}.{name}({invoke});"),
         };
-        let mod_callee = if is_render {
-            mod_item.clone()
-        } else {
-            format!("{mod_item}.hooks")
-        };
-        let set_owner = owner_field.map_or_else(String::new, |field| {
-            format!("{event}.{field}.set_owner({mod_item}.id);")
-        });
         let (lookup, calls) = match &scoped {
             None => (
                 String::new(),
                 format!(
-                    "for {mod_item} in {each} {{ {set_owner} {} }}",
-                    call(&mod_callee, "break")
+                    "for {mod_item} in {each} {{ {} }}",
+                    call(&mod_item, "break")
                 ),
             ),
             Some((_, lookup)) => {
                 // The parts are looked up first: the key may be moved into the event.
                 let calls = format!(
-                    "for {mod_item} in {each} {{ {set_owner} {} }} for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
-                    call(&mod_callee, "break 'hook"),
+                    "for {mod_item} in {each} {{ {} }} for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
+                    call(&mod_item, "break 'hook"),
                     call(&part_item, "break 'hook"),
                 );
                 (

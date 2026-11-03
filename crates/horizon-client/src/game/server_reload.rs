@@ -7,7 +7,7 @@ use super::{Game, functions::PackStack};
 use horizon_client::{
     datapack::DataStore,
     mod_api::{
-        Identifier, ReloadOrderError, ServerReloadApply, ServerReloadContext, ServerReloadError,
+        FileToIdConverter, Identifier, ReloadOrderError, ServerReloadApply, ServerReloadContext, ServerReloadError,
         ServerReloadListeners, VanillaServerListeners,
     },
 };
@@ -16,8 +16,7 @@ use horizon_client::{
 pub(super) enum ServerDataReloadError {
     Order(ReloadOrderError),
     Listener {
-        owner: String,
-        listener: String,
+        listener: Identifier,
         source: ServerReloadError,
     },
 }
@@ -25,11 +24,7 @@ impl std::fmt::Display for ServerDataReloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Order(error) => error.fmt(f),
-            Self::Listener {
-                owner,
-                listener,
-                source,
-            } => write!(f, "mod {owner}: reload listener {listener}: {source}"),
+            Self::Listener { listener, source } => write!(f, "reload listener {listener}: {source}"),
         }
     }
 }
@@ -50,22 +45,12 @@ pub(super) enum PreparedReload {
 impl PackStack {
     fn reload_context(
         &self,
-        prefix: &Identifier,
+        converter: &FileToIdConverter,
     ) -> Result<ServerReloadContext, ServerReloadError> {
-        let namespace_path = format!("data/{}/", prefix.namespace());
-        let path = format!("{namespace_path}{}", prefix.path());
         let mut selected = std::collections::BTreeMap::new();
         for pack in self.builtin.iter().chain(self.enabled_packs()) {
-            for file in pack.list(&path) {
-                let resource_path = &file[namespace_path.len()..];
-                // Zip entry names are untrusted, unlike the registered prefix.
-                if resource_path
-                    .split('/')
-                    .any(|p| p.is_empty() || p == "." || p == "..")
-                {
-                    continue;
-                }
-                if let Ok(id) = Identifier::from_parts(prefix.namespace(), resource_path) {
+            for file in pack.list_kinds(&[converter.directory()]) {
+                if let Some(id) = file.strip_prefix("data/").and_then(|path| converter.file_to_id(path)) {
                     selected.insert(id, (pack, file));
                 }
             }
@@ -94,17 +79,16 @@ impl Game<'_> {
         let listeners = listeners.finish().map_err(ServerDataReloadError::Order)?;
         let mut prepared = Vec::new();
         for listener in listeners {
-            if let Some(prefix) = &listener.prefix {
+            if let Some(converter) = &listener.converter {
                 let apply = stack
-                    .reload_context(prefix)
+                    .reload_context(converter)
                     .and_then(|context| listener.listener.prepare(&context))
                     .map_err(|source| ServerDataReloadError::Listener {
-                        owner: listener.owner,
                         listener: listener.id,
                         source,
                     })?;
                 prepared.push(PreparedReload::Mod(apply));
-            } else if listener.id == VanillaServerListeners::FUNCTIONS {
+            } else if listener.id == VanillaServerListeners::functions() {
                 let packs: Vec<_> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
                 let store = DataStore::load(&packs);
                 for (id, e) in &store.errors {

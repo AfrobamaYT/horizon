@@ -5,6 +5,8 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
+mod file_to_id_converter;
+pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod reload_order;
 pub(crate) mod server_reload;
 pub use horizon_world::identifier::Identifier;
@@ -1895,12 +1897,10 @@ fn entered_registration<'a>(mods: &'a [ModEntry], hook: &'static str) -> Entered
     }
 }
 
-struct EnteredMod {
-    id: &'static str,
-    hooks: &'static dyn Hooks,
-}
-
-fn entered(hook_id: generated::HookId, hook: &'static str) -> impl Iterator<Item = EnteredMod> {
+fn entered(
+    hook_id: generated::HookId,
+    hook: &'static str,
+) -> impl Iterator<Item = &'static dyn Hooks> {
     installed().into_iter().flat_map(move |installed| {
         let mut crash_guard = None;
         let mut subscriber_guard = None;
@@ -1920,10 +1920,7 @@ fn entered(hook_id: generated::HookId, hook: &'static str) -> impl Iterator<Item
                     installed.types[index],
                 ));
                 crash_guard = Some(mark_mod(entry.id, hook));
-                EnteredMod {
-                    id: entry.id,
-                    hooks,
-                }
+                hooks
             })
     })
 }
