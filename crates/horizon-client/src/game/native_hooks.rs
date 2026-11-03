@@ -1323,6 +1323,10 @@ impl Game<'_> {
     pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
         mod_api::dispatch_client_pause_change_post(self, paused);
     }
+    /// The applied client pause state, not whether a pause screen is open.
+    pub(super) fn native_is_paused(&self) -> bool {
+        self.pause
+    }
     /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player info game type change.
     pub(super) fn native_client_player_change_game_type(
         &mut self,
@@ -9321,6 +9325,22 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_host_reads_current_pause_state() {
+        use super::super::execution_role::ExecutionRole;
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mod_api::ClientHost;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.pause = false;
+            assert!(!ClientHost::is_paused(game));
+            game.pause = true;
+            assert!(ClientHost::is_paused(game));
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {
