@@ -893,6 +893,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
+    mod_api::NativePermissionLevel,
     mod_list::{self, Installed, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
@@ -2219,6 +2220,35 @@ impl Game<'_> {
             uuid,
             died,
             dimension_changed,
+        );
+    }
+    /// NeoForge's `ServerChatEvent`: a player's chat message, through their
+    /// chain and the chat filter, is about to be broadcast.
+    /// `player_id` is the server's entity id for the player, `player` their
+    /// UUID, `username` their name and `raw_text` what they typed. `message`
+    /// starts as that text; replace it and players see the new message
+    /// (`withUnsignedContent`: a signed message keeps its signature), and
+    /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
+    /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
+    /// not chat here. Server-side, with no player's state swapped in.
+    pub(super) fn native_server_chat(
+        &mut self,
+        player_id: i32,
+        player: u128,
+        username: &str,
+        raw_text: &str,
+        message: &mut Text,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_server_chat(
+            self,
+            mod_api::mods(),
+            player_id,
+            player,
+            username,
+            raw_text,
+            message,
+            cancel,
         );
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
@@ -4798,6 +4828,57 @@ impl Game<'_> {
             pos,
             forced,
             cancel,
+        );
+    }
+    /// NeoForge's `PermissionsChangedEvent`: the operator list is about to give player
+    /// `player` (`name`) the permission level `new` in place of `old`, through `PlayerList.op`
+    /// (`/op`, the console's `op`, the management API's `operators/add` and `operators/set`)
+    /// or `PlayerList.deop` (`/deop` and the same on the console and the management API;
+    /// `new` is then `All`). Set `cancel` and the list keeps the old level. The player need
+    /// not be online: `player_entity_id` is their server entity id when they are. Clearing
+    /// the list (`operators/clear`) is not a call to either, as in vanilla. Dedicated
+    /// servers only; a single-player world has no operator list. Server-side.
+    pub(super) fn native_permissions_changed(
+        &mut self,
+        player: u128,
+        player_entity_id: Option<i32>,
+        name: &str,
+        old: NativePermissionLevel,
+        new: NativePermissionLevel,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_permissions_changed(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            old,
+            new,
+            cancel,
+        );
+    }
+    /// NeoForge's `PlayerFlyableFallEvent`: server player `player` (`name`) landed after
+    /// falling `distance` blocks at damage multiplier `multiplier` while allowed to fly (a
+    /// creative or spectator player walking), so `Player.causeFallDamage` returned early
+    /// and nothing was hurt. Listen only. Once for each landing, after the fall's
+    /// block reaction. The player's state is swapped in. Server-side.
+    pub(super) fn native_player_flyable_fall(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        distance: f64,
+        multiplier: f32,
+    ) {
+        mod_api::dispatch_player_flyable_fall(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            distance,
+            multiplier,
         );
     }
     /// A server player is about to travel through a Nether portal, End portal

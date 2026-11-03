@@ -817,6 +817,39 @@ pub enum NativeChatVisibility {
     Hidden,
 }
 
+/// `PermissionLevel`: how much a player may do, as `op-permission-level` and
+/// the operator list name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativePermissionLevel {
+    /// 0: every player.
+    All,
+    /// 1: moderators.
+    Moderators,
+    /// 2: game masters.
+    Gamemasters,
+    /// 3: admins.
+    Admins,
+    /// 4: owners.
+    Owners,
+}
+
+impl NativePermissionLevel {
+    /// The level a list entry's number names; out of range keeps to 0 or 4.
+    pub fn from_level(level: i32) -> Self {
+        match level {
+            i32::MIN..=0 => Self::All,
+            1 => Self::Moderators,
+            2 => Self::Gamemasters,
+            3 => Self::Admins,
+            _ => Self::Owners,
+        }
+    }
+    /// The level as the list stores it, 0 to 4.
+    pub fn level(self) -> u8 {
+        self as u8
+    }
+}
+
 /// `HumanoidArm`: a player's main hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeMainHand {

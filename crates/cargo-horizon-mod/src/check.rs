@@ -80,11 +80,11 @@ impl Report {
     }
 }
 
-/// The kind a file's extension says.
+/// The kind of a package, inspecting mod archives for their native manifest.
 pub fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
+        "hmod" if index::native::holds(path) => Some(Kind::NativeMod),
         "hmod" => Some(Kind::Mod),
-        "hnmod" => Some(Kind::NativeMod),
         "hpack" => Some(Kind::Modpack),
         "zip" => Some(Kind::ResourcePack),
         "hshader" => Some(Kind::Shader),
