@@ -2,10 +2,7 @@
 //! off), riding, getting off on top, and the ghastling a dried ghast block
 //! hatches.
 use super::Game;
-use horizon_client::{
-    items::ItemStack,
-    mobs::{MobEvent, happy_ghast},
-};
+use horizon_client::mobs::{MobEvent, happy_ghast};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
@@ -69,6 +66,7 @@ impl Game<'_> {
         let harnessed = m.extra.body.is_some();
         // Equippable.equipOnInteract: a harness goes on a bare adult.
         if item.ends_with("_harness") && item.starts_with("minecraft:") && !harnessed {
+            self.mobs[index].extra.body_count = 0;
             self.mobs[index].extra.body = Some(item.into());
             self.audio
                 .play("minecraft:entity.happy_ghast.equip", Some(at), 1.0, 1.0);
@@ -79,11 +77,11 @@ impl Game<'_> {
         if item == "minecraft:shears"
             && harnessed
             && !sneaking
-            && let Some(harness) = self.mobs[index].extra.body.take()
+            && let Some(harness) = self.mobs[index].take_body_equipment()
         {
             self.audio
                 .play("minecraft:entity.happy_ghast.unequip", Some(at), 1.0, 1.0);
-            self.spawn_item(ItemStack::new(&harness, 1), at, [0.0, 0.2, 0.0], 10);
+            self.spawn_item(harness, at, [0.0, 0.2, 0.0], 10);
             self.damage_held_tool();
             return true;
         }

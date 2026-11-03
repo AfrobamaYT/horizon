@@ -89,7 +89,7 @@ impl Game<'_> {
         }
         let at = m.center();
         if item == "minecraft:saddle" && !m.extra.saddled {
-            m.set_saddle(held);
+            m.set_saddle(held.map(|s| ItemStack { count: 1, ..s }));
             let sound = if m.species() == Species::Strider {
                 "minecraft:entity.strider.saddle"
             } else {
@@ -233,7 +233,7 @@ impl Game<'_> {
         let at = m.center();
         let tamed = m.extra.tame;
         let sound = if item == "minecraft:saddle" && tamed && !m.extra.saddled {
-            m.set_saddle(held);
+            m.set_saddle(held.map(|s| ItemStack { count: 1, ..s }));
             // Camel.getSaddleSound (the equip sound of a camel's saddle).
             Some(match species {
                 Species::Camel => "minecraft:entity.camel.saddle",
@@ -245,6 +245,7 @@ impl Game<'_> {
             && tamed
             && m.extra.body.is_none()
         {
+            m.extra.body_count = 0;
             m.extra.body = Some(item.into());
             Some("minecraft:entity.horse.armor")
         } else if item == "minecraft:chest"

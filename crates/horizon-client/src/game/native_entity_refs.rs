@@ -256,8 +256,8 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 }
 
 #[cfg(test)]
-mod tests {
-    fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
+pub(super) mod tests {
+    pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
         use super::super::{
             Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
         };
@@ -293,6 +293,37 @@ mod tests {
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
         test(&mut game);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shearing_llama_and_happy_ghast_returns_full_body_stacks() {
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            for (id, kind, item) in [
+                (12, "minecraft:llama", "minecraft:red_carpet"),
+                (13, "minecraft:happy_ghast", "minecraft:red_harness"),
+            ] {
+                let kind = game.res.mob_types().get(kind).unwrap().clone();
+                let mut mob = Mob::new(id, kind, Vec3::ZERO, 0.0);
+                mob.extra.tame = true;
+                let mut stack = ItemStack::new(item, 3);
+                stack.damage = 7;
+                stack.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                mob.extra.set_body_stack(Some(stack.clone()));
+                let index = game.mobs.len();
+                game.mobs.push(mob);
+                let used = if item.ends_with("carpet") {
+                    game.interact_llama(index, "minecraft:shears")
+                } else {
+                    game.interact_happy_ghast(index, "minecraft:shears")
+                };
+                assert!(used);
+                assert!(game.dropped.iter().any(|drop| drop.stack == stack));
+                assert!(game.mobs[index].extra.body.is_none());
+            }
+        });
     }
 
     #[test]

@@ -46,6 +46,7 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
         to.extra.off_hand = from.extra.off_hand.clone();
         to.extra.head = from.extra.head.clone();
         to.extra.body = from.extra.body.clone();
+        to.extra.body_count = from.extra.body_count;
         to.extra.body_damage = from.extra.body_damage;
         to.extra.body_extra = from.extra.body_extra.clone();
         to.extra.chest = from.extra.chest.clone();
@@ -123,6 +124,13 @@ mod tests {
             s.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
             s.extra.chest = Some("minecraft:chainmail_chestplate".into());
+            let mut offhand = ItemStack::new("minecraft:shield", 2);
+            offhand.damage = 5;
+            crate::mobs::finalize::set_item_stack(
+                &mut s,
+                crate::mobs::finalize::OFFHAND,
+                offhand.clone(),
+            );
             s.extra.body = Some("minecraft:wolf_armor".into());
             s.extra.body_damage = 7;
             let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
@@ -151,6 +159,7 @@ mod tests {
             assert_eq!(st.extra.mount, Some(7));
             assert_eq!(st.extra.body.as_deref(), Some("minecraft:wolf_armor"));
             assert_eq!(st.extra.body_damage, 7);
+            assert_eq!(st.equipment_stacks()[1], Some(offhand));
             assert_eq!(st.extra.body_extra, s.extra.body_extra);
             // Health is the new type's own, not copied.
             assert_eq!(st.health, mob(3, "minecraft:stray").health);

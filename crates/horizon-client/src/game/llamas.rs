@@ -2,10 +2,7 @@
 //! `Llama.handleEating` (wheat and hay), chests, carpets, shearing a carpet
 //! off and riding.
 use super::Game;
-use horizon_client::{
-    items::ItemStack,
-    mobs::{equine, llama},
-};
+use horizon_client::mobs::{equine, llama};
 use horizon_core::random::RandomSource;
 
 impl Game<'_> {
@@ -113,14 +110,15 @@ impl Game<'_> {
             if item == "minecraft:shears" && m.extra.body.as_deref().is_some_and(carpet) {
                 // Equippable.canBeSheared: the carpet comes off.
                 let at = m.center();
-                let carpet = self.mobs[index].extra.body.take().unwrap_or_default();
+                let carpet = self.mobs[index].take_body_equipment().unwrap();
                 self.audio
                     .play("minecraft:item.llama_carpet.unequip", Some(at), 1.0, 1.0);
-                self.spawn_item(ItemStack::new(&carpet, 1), at, [0.0, 0.2, 0.0], 10);
+                self.spawn_item(carpet, at, [0.0, 0.2, 0.0], 10);
                 self.damage_held_tool();
                 return true;
             }
             if carpet(item) && m.extra.body.is_none() {
+                self.mobs[index].extra.body_count = 0;
                 self.mobs[index].extra.body = Some(item.into());
                 self.llama_sound(index, "entity.llama.swag", 1.0);
                 self.consume_held();
