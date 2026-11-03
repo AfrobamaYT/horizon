@@ -3,7 +3,7 @@
 //! transaction commits; an abort puts back everything its closure changed.
 use super::Host;
 
-/// What the game's raw transaction helpers take, and only [`transaction`](dyn Host::transaction)
+/// What the game's raw transaction helpers take, and only `host.transaction`
 /// makes: a mod opens and closes transactions through it alone, so its drop guard closes every
 /// one a mod opens.
 pub struct TransactionSeal(());
@@ -16,8 +16,9 @@ impl dyn Host + '_ {
     /// unwinding out of `f` aborts this transaction as it passes, so whoever catches it sees
     /// nothing `f` changed, and the transaction around it stays open.
     ///
-    /// Covered: block entities (item slots, saved compound and attachments) and cauldrons.
-    /// What an item entity's or a player's inventory does inside one is final at once.
+    /// Covered: block entities (item slots, saved compound and attachments), cauldrons,
+    /// players' inventories and cursors, and entities' inventories ([`ItemPlace::EntitySlot`](super::ItemPlace::EntitySlot)).
+    /// What an item entity's stack does inside one is final at once.
     pub fn transaction<T, E>(
         &mut self,
         f: impl FnOnce(&mut dyn Host) -> Result<T, E>,

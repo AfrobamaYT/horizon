@@ -34,6 +34,8 @@ pub(super) struct Level {
     blocks: HashMap<Pos, BlockStateId>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
+    /// Each entity's inventory (`entity_slots`) before this transaction first wrote it.
+    entities: HashMap<u32, Vec<Option<ItemStack>>>,
     /// What the root commit does, in order.
     after: Vec<After>,
 }
@@ -102,6 +104,9 @@ impl Game<'_> {
                 for (uuid, kept) in level.players {
                     outer.players.entry(uuid).or_insert(kept);
                 }
+                for (id, kept) in level.entities {
+                    outer.entities.entry(id).or_insert(kept);
+                }
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -140,6 +145,19 @@ impl Game<'_> {
             offhand: self.offhand.clone(),
             carried: self.carried.clone(),
         });
+    }
+    /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
+    pub(super) fn journal_entity(&mut self, id: u32) {
+        if self.transactions.is_empty() {
+            return;
+        }
+        let Some((slots, _)) = self.entity_slots(id) else {
+            return;
+        };
+        let slots = slots.to_vec();
+        if let Some(level) = self.transactions.last_mut() {
+            level.entities.entry(id).or_insert(slots);
+        }
     }
     /// `drop_plain` by the player whose state is in `Game` now, `uuid`: at once, or at the root
     /// commit inside a transaction.
@@ -245,6 +263,13 @@ impl Game<'_> {
         }
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
+        }
+        for (id, kept) in level.entities {
+            if let Some((slots, _)) = self.entity_slots(id) {
+                for (slot, kept) in slots.iter_mut().zip(kept) {
+                    *slot = kept;
+                }
+            }
         }
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
@@ -522,5 +547,51 @@ mod tests {
         assert_eq!(game.dropped.len(), dropped + 1);
         let thrown = &game.dropped[game.dropped.len() - 1].stack;
         assert_eq!(&*thrown.item, "minecraft:water_bucket");
+
+        // A chest minecart's, a chest boat's and a chested donkey's slots: an abort puts back
+        // what a write and a split changed; a commit keeps it.
+        let mut chested = horizon_world::nbt::Compound::new();
+        chested.insert("ChestedHorse".into(), horizon_world::nbt::Tag::Byte(1));
+        let vehicles = [
+            (
+                "minecraft:chest_minecart",
+                horizon_world::nbt::Compound::new(),
+            ),
+            (
+                "minecraft:oak_chest_boat",
+                horizon_world::nbt::Compound::new(),
+            ),
+            ("minecraft:donkey", chested),
+        ];
+        for (kind, nbt) in vehicles {
+            let id = game
+                .native_summon("minecraft:overworld", kind, [8.5, 70.0, 8.5], nbt)
+                .unwrap_or_else(|| panic!("{kind} not summoned"));
+            let place = |slot| horizon_client::mod_api::ItemPlace::EntitySlot { entity: id, slot };
+            let host: &mut dyn Host = &mut game;
+            assert!(
+                host.set_place_stack(&place(0), sticks(5), false, false)
+                    .is_none(),
+                "{kind}"
+            );
+            let _ = host.transaction(|host| {
+                host.set_place_stack(&place(0), sticks(9), false, false);
+                // From five, one splits off changed into the next free slot.
+                host.set_place_stack(&place(1), sticks(2), false, false);
+                Err::<(), ()>(())
+            });
+            let host: &mut dyn Host = &mut game;
+            assert_eq!(host.place_stack(&place(0)), Some(sticks(5)), "{kind}");
+            assert_eq!(host.place_stack(&place(1)), None, "{kind}");
+            let _ = host.transaction(|host| {
+                let one = ItemStack::new("minecraft:blaze_rod", 1);
+                host.set_place_stack(&place(0), one, true, false);
+                Ok::<_, ()>(())
+            });
+            let host: &mut dyn Host = &mut game;
+            assert_eq!(host.place_stack(&place(0)), Some(sticks(4)), "{kind}");
+            let rod = host.place_stack(&place(1)).map(|s| s.item);
+            assert_eq!(rod.as_deref(), Some("minecraft:blaze_rod"), "{kind}");
+        }
     }
 }

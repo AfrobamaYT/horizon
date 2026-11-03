@@ -146,7 +146,7 @@ fn offset(p: Pos, d: Direction) -> Pos {
     (p.0 + s[0], p.1 + s[1], p.2 + s[2])
 }
 /// State-level container queries shared by the game and comparator signals.
-struct Containers<'a> {
+pub(super) struct Containers<'a> {
     world: &'a World,
     behaviours: &'a Behaviours,
     items: &'a Items,
@@ -168,7 +168,7 @@ impl Containers<'_> {
         self.registry.state(state).map_or("", |s| s.name.as_str())
     }
     /// `ItemStack.getMaxStackSize`: its component, else the item's.
-    fn max_stack(&self, stack: &ItemStack) -> u32 {
+    pub(super) fn max_stack(&self, stack: &ItemStack) -> u32 {
         if let Some(horizon_world::nbt::Tag::Int(n)) = stack
             .data()
             .and_then(|d| d.other("minecraft:max_stack_size"))
@@ -570,7 +570,7 @@ pub(super) fn shelf_signal(
 }
 
 impl Game<'_> {
-    fn containers(&self) -> Containers<'_> {
+    pub(super) fn containers(&self) -> Containers<'_> {
         Containers {
             world: &self.world,
             behaviours: self.res.behaviours(),
