@@ -696,7 +696,9 @@ pub enum Flow {
     Cancel,
 }
 
-mod generated_host;
+mod generated_host {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
+}
 pub use generated_host::Host;
 
 /// Result of accessing or decoding an attachment.
@@ -788,7 +790,9 @@ pub(crate) use part_table::{
     KnownIds, capability_mod, install_parts, mark_game_thread, parts, resolve_parts,
 };
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
+}
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
@@ -936,6 +940,32 @@ mod tests {
             errors[0]
         );
         assert!(!errors[1].contains("in native mod"), "{}", errors[1]);
+    }
+
+    #[test]
+    fn player_turn_mods_receive_identity_and_chain_changes() {
+        struct Turn;
+        impl Hooks for Turn {
+            fn calculate_player_turn(
+                &self,
+                _host: &dyn Host,
+                event: &mut CalculatePlayerTurnEvent,
+            ) {
+                assert_eq!((event.player_entity_id, event.player_uuid), (42, 123));
+                event.mouse_sensitivity *= 2.0;
+                event.cinematic_camera_enabled = !event.cinematic_camera_enabled;
+            }
+        }
+        let host = Reader {
+            block: "",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Turn), Box::new(Turn)];
+        let mut sensitivity = 0.25;
+        let mut cinematic = false;
+        dispatch_calculate_player_turn(&host, &mods, 42, 123, &mut sensitivity, &mut cinematic);
+        assert_eq!(sensitivity, 1.0);
+        assert!(!cinematic);
     }
 
     #[test]
