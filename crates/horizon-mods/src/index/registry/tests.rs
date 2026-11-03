@@ -2,8 +2,8 @@
 //! builds the sample index (`tests/index/index-v1.json`) exactly.
 use super::*;
 
-const HMOD: &str = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53";
-const HPACK: &str = "241ac840f9c5ea3f6252d849da10c90d36cb1da4d6cd8d1d268c2760a353cd65";
+const HMOD: &str = "f891bde88f4b841fd35c4f3305bc8904b671ebe9d5ad28d5aecc57e8b23fc3ce";
+const HPACK: &str = "4ad64fdf094fe3d4a52d7b0d22ee8ea5889d0b76cc3f12c588db501a0ad0c4bd";
 const HSHADER: &str = "331cfe29a666a0de804e9a9ff3d19d246eebcfbfa70b4f49bba8482d30ad9f02";
 
 fn fixtures() -> PathBuf {
@@ -25,14 +25,14 @@ fn hud_entry() -> String {
         r#"id = "coords_hud"
 kind = "mod"
 name = "Coordinates HUD"
-summary = "Your coordinates, facing and the time of day in a corner of the screen."
-description = "`/where` puts them in chat, `/coords` hides or shows the panel."
+summary = "Sample content: a resource translation."
+description = "A signed content-only package for registry tests."
 authors = ["Horizon"]
 owners = ["ludovic111"]
 license = "MIT"
-source = "https://github.com/horizon-rust/horizon/tree/main/crates/horizon-mod-sdk/examples/coords-hud"
+source = "https://github.com/horizon-rust/horizon"
 icon = "icons/coords_hud.png"
-key = "RWTVtuGb/GRXcBf3Re5hzM07EzoStr2sLTJjghJia0xX15ULoZRFFZDb"
+key = "RWS/AoT50ekAULLFG7HiTPTE4eTQEONCCMbKsPE7JBxt3XJ37BY4w7bp"
 
 [[versions]]
 version = "0.1.0"
@@ -59,7 +59,7 @@ version = "1.0.0"
 published = "2026-10-24"
 game = "26.3"
 file = "cozy-1.0.0.hpack"
-sha256 = "241ac840f9c5ea3f6252d849da10c90d36cb1da4d6cd8d1d268c2760a353cd65"
+sha256 = "4ad64fdf094fe3d4a52d7b0d22ee8ea5889d0b76cc3f12c588db501a0ad0c4bd"
 "#;
 
 const GLOW: &str = r#"id = "glow"
@@ -244,47 +244,34 @@ fn a_review_protects_published_files() {
 }
 
 #[test]
-fn a_mod_may_turn_native_once() {
-    let base: Entry = toml::from_str(&hud_entry()).unwrap();
-    let mut native = base.clone();
+fn a_project_cannot_change_between_mod_and_native_mod() {
+    let content: Entry = toml::from_str(&hud_entry()).unwrap();
+    let mut native = content.clone();
     native.kind = Kind::NativeMod;
-    let mut next = native.versions[0].clone();
-    next.version = "2.0.0".into();
-    next.file = "coords_hud-2.0.0.hnmod".into();
-    native.versions.insert(0, next);
-    let r = review(
-        std::slice::from_ref(&base),
-        std::slice::from_ref(&native),
-        "ludovic111",
+    for (old, new) in [(&content, &native), (&native, &content)] {
+        let r = review(
+            std::slice::from_ref(old),
+            std::slice::from_ref(new),
+            "ludovic111",
+        );
+        assert!(
+            r.errors.iter().any(|e| e.contains("kind can't change")),
+            "{r:?}"
+        );
+    }
+}
+
+#[test]
+fn native_project_rejects_a_content_only_version() {
+    let s = Scratch::new("native-kind");
+    s.write(
+        "mods/coords_hud.toml",
+        &hud_entry().replace("kind = \"mod\"", "kind = \"native-mod\""),
     );
-    assert!(r.errors.is_empty(), "{r:?}");
-    assert!(r.notes.iter().any(|n| n.contains("turns native")), "{r:?}");
-    // Its content-only .hmod versions are from before; the new ones native, and a .hmod
-    // holding native code is native too.
-    let none = Path::new("no-such-file");
-    assert_eq!(file_kind(&native, &native.versions[1], none), Kind::Mod);
-    assert_eq!(
-        file_kind(&native, &native.versions[0], none),
-        Kind::NativeMod
-    );
-    let unified = std::env::temp_dir().join(format!("unified-{}.hmod", std::process::id()));
-    let mut zip = zip::ZipWriter::new(std::fs::File::create(&unified).unwrap());
-    zip.start_file(
-        super::super::native::MANIFEST,
-        zip::write::SimpleFileOptions::default(),
-    )
-    .unwrap();
-    zip.finish().unwrap();
-    assert_eq!(
-        file_kind(&native, &native.versions[1], &unified),
-        Kind::NativeMod
-    );
-    std::fs::remove_file(unified).unwrap();
-    // And never back.
-    let r = review(&[native], &[base], "ludovic111");
+    let errors = s.build().unwrap_err();
     assert!(
-        r.errors.iter().any(|e| e.contains("kind can't change")),
-        "{r:?}"
+        errors.iter().any(|e| e.contains("coords_hud 0.1.0:")),
+        "{errors:?}"
     );
 }
 

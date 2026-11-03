@@ -52,8 +52,6 @@ mod tests {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
         pub(super) struct Corners;
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-        pub(super) struct ItemEnergyBuffer;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct BiomeColors;
@@ -63,6 +61,9 @@ mod tests {
         pub(super) struct Hand;
         #[derive(Clone, Copy)]
         pub(super) struct BlockHit;
+        pub(super) struct NativeBlockClick<'a>(pub &'a ());
+        pub(super) struct NativeTriState;
+        pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
@@ -143,7 +144,7 @@ mod tests {
                 pub struct Item;
             }
         }
-        mod horizon_client {
+        pub(super) mod horizon_client {
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
@@ -152,6 +153,12 @@ mod tests {
                 pub struct NativeClientInfo;
             }
             pub mod menu {
+                pub struct MenuButtonContext {
+                    pub player: u128,
+                    pub player_entity_id: i32,
+                    pub pos: [i32; 3],
+                    pub id: i32,
+                }
                 pub struct AnvilCraft;
                 pub struct AnvilUpdate;
                 pub struct GrindstonePlace;
@@ -275,6 +282,16 @@ mod tests {
         calls: Arc<Mutex<Vec<u32>>>,
     }
     impl Hooks for Mod {
+        fn menu_button(&self, _: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+            assert_eq!(event.context.player, 123);
+            assert_eq!(event.context.player_entity_id, 42);
+            assert_eq!(event.context.pos, [1, 2, 3]);
+            assert_eq!(event.context.id, 9);
+            event.entity.id.push_str("-changed");
+            *event.carried = Some(ItemStack {
+                item: "bucket".into(),
+            });
+        }
         fn block_entity_submit(&self, _: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
@@ -356,6 +373,27 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn menu_button_mutates_entity_and_cursor_once() {
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Mod {
+            id: 1,
+            calls: Arc::new(Mutex::new(Vec::new())),
+        })];
+        let context = generated::horizon_client::menu::MenuButtonContext {
+            player: 123,
+            player_entity_id: 42,
+            pos: [1, 2, 3],
+            id: 9,
+        };
+        let mut entity = ModBlockEntity {
+            id: "machine".into(),
+        };
+        let mut carried = None;
+        dispatch_menu_button(&mut TestHost, &mods, &context, &mut entity, &mut carried);
+        assert_eq!(entity.id, "machine-changed");
+        assert_eq!(carried.unwrap().item.as_ref(), "bucket");
+    }
+
     #[test]
     fn block_entity_submit_dispatches_in_order_with_shared_draw() {
         let calls = Arc::new(Mutex::new(Vec::new()));

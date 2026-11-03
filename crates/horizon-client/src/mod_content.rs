@@ -583,7 +583,7 @@ fn resolve_shapes<'a>(
     combos: &[Vec<(String, String)>],
     properties: impl Fn(u32) -> Option<&'a J>,
 ) -> Result<Vec<VoxelShape>> {
-    let names = spec.property_names();
+    let names = &spec.properties;
     let mut used = BTreeSet::new();
     let mut shapes = Vec::with_capacity(order.len());
     for &(state, combo) in order {
@@ -2439,15 +2439,6 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         let declarations = format!("data/{}/horizon/", m.id);
         let mut reader = m.content.reader()?;
         for file in &m.content.files {
-            if let Some((_, path)) = file.strip_prefix("data/").and_then(|p| p.split_once('/'))
-                && path.starts_with("worldgen/configured_feature/")
-            {
-                warnings.push(format!(
-                    "mod {}: {file}: use worldgen/feature/ in 26.3; file ignored",
-                    m.id
-                ));
-                continue;
-            }
             let bytes = reader.read(file)?;
             let is_tag = file.starts_with("data/") && file.contains("/tags/");
             if is_tag && file.ends_with(".json") {
