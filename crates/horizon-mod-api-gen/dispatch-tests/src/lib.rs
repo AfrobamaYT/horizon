@@ -99,6 +99,11 @@ mod tests {
             Grant,
             Revoke,
         }
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativePermissionLevel {
+            All,
+            Owners,
+        }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
