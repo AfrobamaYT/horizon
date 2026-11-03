@@ -3124,29 +3124,35 @@ rules hoppers follow, and a mod block entity's `block_entity_container`), then t
 order, and the first to answer wins. That order is the fork's choice, the game first and `_before_game` to go ahead
 of it: NeoForge 26.3's javadoc doesn't state one between mods' providers and the game's. It returns a `Capability`, the handler and who answered. A handler holds
 no borrow: each call is given the host, so it may call a
-neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
-`insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
-mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
+neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. A provider
+is given the block entity and side, so the handler it makes knows where its contents live. Item handlers are
+NeoForge 26.3's `ResourceHandler<ItemResource>`: indices from 0 (`size`), what each holds (`resource`, an
+`ItemResource`: an item and its components, without a count) and how much (`amount`), how much of a resource an
+index holds when it holds that (`capacity`, none where it may not go), and `insert` and `extract`, which take a
+`&Transaction` and answer how much moved. There is no `simulate`: a write happens in a transaction
+(`host.transaction(|host, tx| …)`, below), and to try one, abort it. Hoppers and `insert_item` use a mod's handler
+where one is registered, each move in a transaction of its own. A mod's own capability is a
+`CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
 An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
 block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
 (`ItemPlace::Mod`, read and written by the `PlaceProvider` it registers with `r.place_provider`).
 `r.item_capability(&ITEM_ITEMS, "mymod:backpack", |host, place| Some(Box::new(Backpack)))` answers
-`ITEM_ITEMS` for an item with a `StackItemHandler`, and `r.item_capability_before_game` ahead of the game's
-own over `item_container`; `host.item_capability(&ITEM_ITEMS, &place)` asks them in the same order. A handler keeps its contents in the stack, and reads and writes it only with
-`host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one, simulate)`. A write plans with
-`simulate` first, then commits: the old stack must come out whole and the new one go in whole, or it refuses and
-hands the stack back with nothing moved. An occupied slot can't be asked whether the new stack fits until it is
-empty: its `capacity` (NeoForge's `isValid` and `getCapacityAsLong`, how many if the slot were empty) is asked
-first, as a hint; then the old stack comes out, the empty slot is asked with a simulated insert, and where that
-falls short the old stack goes back and the write is refused, with no warning. So a handler's `simulate` must
-answer exactly as its real call does, as NeoForge's must, and pass it on to `set_place_stack`; one whose real call
-disagrees is a mod bug: what it leaves out goes back, else is dropped at the block, and the game warns once,
-naming the mod. With `one_by_one`, a changed item is split off a
-bigger stack: from a player's hand as vanilla's filled bucket (into the inventory, else dropped with no thrower,
-and in creative the hand is kept), from a block entity's or an item's slot into that container's other slots.
-A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and
-the other stays as it was.
+`ITEM_ITEMS` for an item with a `ResourceHandler<ItemResource>` made for that place, and
+`r.item_capability_before_game` ahead of the game's own over `item_container`;
+`host.item_capability(&ITEM_ITEMS, &place)` asks them in the same order. A handler keeps its contents in the
+stack, and reads and writes it through the place, as NeoForge 26.3's `ItemAccess`: `place.stack(host)`,
+`place.resource(host)` and `place.amount(host)`, and `place.insert`, `place.extract` and `place.exchange(host, tx,
+&resource, amount)`, which answer how much moved. Each runs in a transaction of its own, nested in `tx`, and changes
+the place where it is, journaled, so an abort puts it back at every level of an item inside an item. A handler
+answering more than it was asked or offered is a mod bug: the move it was part of is undone, and the game warns
+once, naming the mod. What doesn't stack with the place, or doesn't fit, goes where vanilla puts an item split off
+it, so `exchange(host, tx, &filled, 1)` on a stack of empty buckets is vanilla's filled bucket: from a player's
+place into their inventory, else dropped with no thrower (a creative player's hand takes anything and gives them
+one if they have none, as `forInfiniteMaterials`); from an item entity dropped beside it; from a block entity's,
+an entity's or an item's slot into that container's other slots (`forHandlerIndex`). A handler rewrites its item
+with an `exchange` of one. An exchange inside one of two backpacks is done in one of them: that one is rewritten
+holding the change and splits off, and the other stays as it was.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
@@ -3168,22 +3174,25 @@ mod: what it leaves over in a move goes back into the source tank, else into the
 to drop at the block, so what neither end takes is lost, with a warning naming the mod. It is the one thing a
 broken handler can void.
 
-The game never trusts an answer past what it asked, offered or simulated. A real extract must give the item or
-fluid, with the components, that its simulation showed: another is given back and nothing comes out, and a
-leftover of another item counts as the offered one. A leftover larger than the offer counts as the offer, and what an extract gives beyond the request goes back into its slot or tank, else is
-dropped at the block (items) or, as above, lost with a warning (fluids). Either is a mod bug, warned once naming
-the mod; a broken handler can't make a move overflow, duplicate items or panic the game.
+The game never trusts an answer past what it asked, offered or simulated. An item handler answering more than it
+was asked has its move undone, in its transaction. A fluid handler's real extract must give the fluid, with the
+components, that its simulation showed: another is given back and nothing comes out. A leftover larger than the
+offer counts as the offer, and what an extract gives beyond the request goes back into its tank or, as above, is
+lost with a warning. Either is a mod bug, warned once naming the mod; a broken handler can't make a move overflow,
+duplicate items or panic the game.
 
-`host.transaction(|host| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose `Err`
-aborts, nested in the open transaction if any. Inside, a capability write applies at once, so later steps see it,
+`host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
+`Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
+what every handler and place write takes, so none happens outside one. Inside, a capability write applies at once, so later steps see it,
 and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
 compound and attachments, a hopper's cooldown, a cauldron's block state, a player's inventory (slots, armour, off
-hand and cursor, whether the player is the host or a guest), and an entity's inventory (a chest or hopper minecart,
-a chest boat, a chested donkey, mule or llama). A nested commit hands its changes to
+hand and cursor, whether the player is the host or a guest), an entity's inventory (a chest or hopper minecart,
+a chest boat, a chested donkey, mule or llama) and an item entity's stack (one emptied stays, empty, until the
+outermost commit removes it). A nested commit hands its changes to
 the transaction around it, and only the outermost commit makes them final. Then the world is told of each change
 once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox starting or stopping, a cauldron's
 block update, and an item dropped at a block, thrown by a player (what a filled bucket's split no longer fits) or
-by an entity. An abort puts every storage back quietly, so nothing outside saw the
+by an entity or split off an item entity. An abort puts every storage back quietly, so nothing outside saw the
 change. A panic unwinding out of the closure aborts that transaction as it passes, and the one around it stays open. `host.transaction` is the only way to open one: the raw `transaction_open` and `transaction_close` helpers take a `TransactionSeal` that only it makes. A handler keeps no journal of its own:
 its state is the game's, so the game's journal covers it. Direct writes are not covered: an item entity's stack,
 `LivingRef::set_equipment`, and the player and armor-stand `slot_set` paths take effect and are final at once, even
@@ -3191,7 +3200,7 @@ inside a transaction. Any equip/unequip event and equip sound from `set_equipmen
 abort does not undo them. This differs from writes through journaled capability handlers.
 
 `ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
-`Capabilities.Item.ENTITY`), read and written through `place_stack` and `set_place_stack` like any other place.
+`Capabilities.Item.ENTITY`), read and written like any other place.
 Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
 
 ### Testing a trait mod

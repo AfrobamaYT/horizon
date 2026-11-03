@@ -1243,13 +1243,15 @@ macro_rules! level_attachment_host {
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
-pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS, ItemHandler};
+pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
 mod transaction;
-pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
-pub use transaction::TransactionSeal;
+pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
+mod resource;
+pub use resource::{ItemResource, ResourceHandler};
+pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub(crate) use part_table::{
     Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
