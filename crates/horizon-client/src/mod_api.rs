@@ -1894,6 +1894,7 @@ impl BossBarOverlay {
 }
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
+/// Client menu handles are also invalidated on respawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
