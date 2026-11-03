@@ -142,14 +142,6 @@ impl Game<'_> {
         if current.is_some() {
             return false;
         }
-        let allowed = match rider {
-            Target::Player => self.native_may_board(vehicle_id),
-            Target::Mob(id) => self.native_mob_may_ride(id, vehicle_id, true),
-            _ => false,
-        };
-        if !allowed {
-            return false;
-        }
         if !force {
             match rider {
                 Target::Player if self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft) => {
@@ -206,6 +198,14 @@ impl Game<'_> {
                 }
             }
             _ => return false,
+        }
+        let allowed = match rider {
+            Target::Player => self.native_may_board(vehicle_id),
+            Target::Mob(id) => self.native_mob_may_ride(id, vehicle_id, true),
+            _ => false,
+        };
+        if !allowed {
+            return false;
         }
         if self.native_vehicle_id(rider).is_some() {
             match rider {
@@ -346,6 +346,56 @@ mod tests {
                 assert!(!game.start_riding_target(Target::Mob(40), Target::Mob(42), true));
                 assert_eq!(game.mobs[0].extra.mount, Some(41));
                 assert_eq!(*events.lock().unwrap(), [true, true, false]);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn full_vehicles_do_not_fire_mount_hooks_for_commands_or_handles() {
+        use super::super::boats::Boat;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mount_observer",
+            Box::new(MountObserver(events.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.ui.registries.permission = 4;
+                for (id, name) in [
+                    (40, "minecraft:zombie"),
+                    (41, "minecraft:pig"),
+                    (42, "minecraft:sheep"),
+                    (43, "minecraft:cow"),
+                ] {
+                    let kind = game.res.mob_types().get(name).unwrap().clone();
+                    game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+                }
+                game.boats
+                    .push(Boat::new(44, "oak".into(), Vec3::ZERO, 0.0));
+                let pig =
+                    "ride @e[type=minecraft:zombie,limit=1] mount @e[type=minecraft:pig,limit=1]";
+                let boat = "ride @e[type=minecraft:zombie,limit=1] mount @e[type=minecraft:oak_boat,limit=1]";
+                assert!(game.run_command(pig));
+                game.mobs[0].extra.mount = None;
+                game.mobs[1].extra.rider = None;
+                assert!(game.run_command(boat));
+                game.mobs[0].extra.mount = None;
+                game.mobs[2].extra.mount = Some(41);
+                game.mobs[1].extra.rider = Some(42);
+                game.mobs[3].extra.mount = Some(44);
+                game.riding = Some(44);
+                events.lock().unwrap().clear();
+                assert!(!game.run_command(pig));
+                assert!(!game.run_command(boat));
+                let rider = game.native_entity(40).unwrap();
+                for id in [41, 44] {
+                    let vehicle = game.native_entity(id).unwrap();
+                    assert!(!game.native_entity_start_riding(rider, vehicle, true));
+                }
+                assert!(events.lock().unwrap().is_empty());
             });
         });
     }
