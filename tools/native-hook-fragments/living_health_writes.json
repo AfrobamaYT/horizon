@@ -1,0 +1,22 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "living_set_health",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_health",
+      "receiver": "living",
+      "side": "server"
+    },
+    {
+      "name": "living_heal",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_heal",
+      "receiver": "living",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "a living entity's health writes (`native_living_set_health`,\n`native_living_heal`: `setHealth` and `heal`); `set_mob_health` is gone.",
+  "doc_summary": "A living entity's health writes: `living.set_health(host, health)` (`LivingEntity.setHealth`, cut to the maximum, no hook, never kills) and `living.heal(host, amount)` (`LivingEntity.heal`, through `living_heal`). Players, guests and mobs; false for armor stands and the dragon. Replaces `set_mob_health`. Bundles need \"hooks\": @API:living_health_writes@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_living_refs.rs"
+  ]
+}

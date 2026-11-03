@@ -185,6 +185,62 @@ impl Game<'_> {
         self.native_living_health(living).map(alive_at)
     }
 
+    /// Sets the entity's health (`LivingEntity.setHealth`; Paper's
+    /// `Damageable#setHealth`), cut to its maximum health. No heal or damage
+    /// hook runs. False for a stale handle, a health that isn't finite or
+    /// above 0 (a write doesn't kill), an armor stand or the dragon.
+    /// API @API:living_health_writes@.
+    pub(super) fn native_living_set_health(&mut self, living: LivingRef, health: f32) -> bool {
+        if !health.is_finite() || health <= 0.0 {
+            return false;
+        }
+        match self.native_living_target(living) {
+            Some(t @ (Target::Player | Target::Guest(_))) => self
+                .for_player(t, |g| {
+                    let p = g.player.as_mut()?;
+                    let max = p.attribute("minecraft:max_health").ok()? as f32;
+                    p.set_health(health.min(max), false).ok()
+                })
+                .flatten()
+                .is_some(),
+            Some(Target::Mob(id)) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                    return false;
+                };
+                m.health = health.min(m.attrs.max_health);
+                m.needs_sync = true;
+                true
+            }
+            _ => false,
+        }
+    }
+    /// Heals the entity by `amount` (`LivingEntity.heal`), through the
+    /// `living_heal` hook, which may change or cancel it. A dead or dying
+    /// entity isn't healed, and health stops at the maximum. False for a stale
+    /// handle, an amount that isn't finite or above 0, an armor stand or the
+    /// dragon. API @API:living_health_writes@.
+    pub(super) fn native_living_heal(&mut self, living: LivingRef, amount: f32) -> bool {
+        if !amount.is_finite() || amount <= 0.0 {
+            return false;
+        }
+        match self.native_living_target(living) {
+            Some(t @ (Target::Player | Target::Guest(_))) => self
+                .for_player(t, |g| {
+                    g.apply_effect_action(horizon_client::effects::EffectAction::Heal(amount));
+                })
+                .is_some(),
+            Some(Target::Mob(id)) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                    return false;
+                };
+                m.heal(amount);
+                m.needs_sync = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// The stack in `slot` (`LivingEntity.getItemBySlot`). Players, guests,
     /// mobs and armor stands store main hand, off hand, head, chest, legs and
     /// feet. Players, guests and mobs also store body and saddle. Dragon
