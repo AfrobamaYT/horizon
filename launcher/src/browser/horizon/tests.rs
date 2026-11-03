@@ -216,6 +216,23 @@ fn installed_kind_comes_from_the_archive_not_its_folder() {
 }
 
 #[test]
+fn corrupt_installed_archive_is_not_treated_as_content() {
+    let index = sample();
+    let home = scratch("corrupt-installed");
+    put(&index, true, &home).unwrap();
+    let path = home.join("horizon-mods/coords_hud.hmod");
+    fs::write(&path, b"not a zip").unwrap();
+    let before = fs::read(&path).unwrap();
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let p = index.project("coords_hud").unwrap();
+    let error = install_version(&index, true, p, &p.versions[0], &home, &|_, _| {}).unwrap_err();
+    assert!(error.contains("Cannot inspect installed"), "{error}");
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
 fn removing_native_mod_does_not_remove_a_separate_content_file() {
     let index = sample();
     let home = scratch("native-remove");
