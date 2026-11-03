@@ -224,6 +224,10 @@ pub(super) struct GuestSwap {
     entity_events: Vec<i8>,
     /// The equipment breaks queued for that guest.
     equipment_breaks: Vec<(i8, [f64; 3])>,
+    /// The cooldown packets queued for that guest.
+    cooldown_events: Vec<(std::sync::Arc<str>, i32)>,
+    /// The player-source sounds queued for that guest.
+    player_sounds: Vec<(String, [f64; 3], f32, f32)>,
     /// The host's count of swings started, kept while the guest acts.
     swings: u32,
     /// How many projectiles there were: those added since are the guest's.
@@ -574,6 +578,8 @@ impl Game<'_> {
         );
         let packets = std::mem::take(&mut self.guest_packets);
         let entity_events = std::mem::take(&mut self.guest_entity_events);
+        let cooldown_events = std::mem::take(&mut self.guest_cooldowns);
+        let player_sounds = std::mem::take(&mut self.guest_player_sounds);
         let equipment_breaks = std::mem::take(&mut self.guest_equipment_breaks);
         let swings = self.swings_started;
         let projectiles = self.creatures.projectiles.len();
@@ -656,6 +662,8 @@ impl Game<'_> {
             swings,
             projectiles,
             modifiers,
+            cooldown_events,
+            player_sounds,
             combat: host_combat,
         })
     }
@@ -756,6 +764,8 @@ impl Game<'_> {
             swings,
             projectiles,
             modifiers,
+            cooldown_events,
+            player_sounds,
         } = swap;
         // `ServerPlayer.permissions()` back to the host's after the turn.
         self.ui.registries.permission = permission;
@@ -801,19 +811,25 @@ impl Game<'_> {
         // The guest's swings are theirs: the host's own count stays the host's.
         play.swings += self.swings_started.wrapping_sub(swings);
         self.swings_started = swings;
-        for packet in std::mem::replace(&mut self.guest_packets, packets) {
-            host.hub.send_to(conn, &packet);
+        let outgoing = std::mem::replace(&mut self.guest_packets, packets);
+        if host.hub.guests[i].participates_online() {
+            for packet in outgoing {
+                host.hub.send_to(conn, &packet);
+            }
         }
         // ServerPlayer.connection.send: the guest's own entity events.
         let entity_id = host.hub.guests[i].entity_id;
-        for event in std::mem::replace(&mut self.guest_entity_events, entity_events) {
-            host.hub.send_to(
-                conn,
-                &C::EntityEvent(play::EntityEvent {
-                    id: entity_id,
-                    event,
-                }),
-            );
+        let outgoing_events = std::mem::replace(&mut self.guest_entity_events, entity_events);
+        if host.hub.guests[i].participates_online() {
+            for event in outgoing_events {
+                host.hub.send_to(
+                    conn,
+                    &C::EntityEvent(play::EntityEvent {
+                        id: entity_id,
+                        event,
+                    }),
+                );
+            }
         }
         // LivingEntity.onEquippedItemBroken: `broadcastEntityEvent`, the guest too.
         for (event, at) in std::mem::replace(&mut self.guest_equipment_breaks, equipment_breaks) {
@@ -824,19 +840,24 @@ impl Game<'_> {
             .iter()
             .position(|s| *s == "player")
             .unwrap_or(0) as i32;
-        for (name, at, volume, pitch) in std::mem::take(&mut self.guest_player_sounds) {
+        for (name, at, volume, pitch) in
+            std::mem::replace(&mut self.guest_player_sounds, player_sounds)
+        {
             host.hub
                 .sound(&name, at, volume, pitch, players, Some(conn));
         }
         // ServerItemCooldowns.onCooldownStarted: the guest's own cooldown.
-        for (group, duration) in std::mem::take(&mut self.guest_cooldowns) {
-            host.hub.send_to(
-                conn,
-                &C::Cooldown(play::Cooldown {
-                    group: group.to_string(),
-                    duration,
-                }),
-            );
+        let outgoing_cooldowns = std::mem::replace(&mut self.guest_cooldowns, cooldown_events);
+        if host.hub.guests[i].participates_online() {
+            for (group, duration) in outgoing_cooldowns {
+                host.hub.send_to(
+                    conn,
+                    &C::Cooldown(play::Cooldown {
+                        group: group.to_string(),
+                        duration,
+                    }),
+                );
+            }
         }
         debug_assert_eq!(self.lan_guest_swaps.last(), Some(&conn));
         self.lan_guest_swaps.pop();
@@ -1739,7 +1760,10 @@ impl Game<'_> {
         if host.hub.guests[gi].dead
             && !matches!(
                 packet,
-                S::ClientCommand(_) | S::ChatCommand(_) | S::ChatCommandSigned(_)
+                S::ClientCommand(_)
+                    | S::ChatCommand(_)
+                    | S::ChatCommandSigned(_)
+                    | S::CustomClickAction(_)
             )
         {
             return;
@@ -2450,6 +2474,28 @@ impl Game<'_> {
                 self.guest_far_terrain(host, conn, &p.data)
             }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
+            // ServerCommonPacketListenerImpl.handleCustomClickAction: the server only logs
+            // the click, so a mod's cancel leaves nothing else to skip.
+            S::CustomClickAction(p) => {
+                let g = &host.hub.guests[gi];
+                let (uuid, entity_id, name) = (g.uuid, g.entity_id, g.name.clone());
+                let mut cancel = false;
+                self.native_custom_click_action(
+                    uuid,
+                    entity_id,
+                    &name,
+                    &p.id,
+                    p.payload.as_ref(),
+                    &mut cancel,
+                );
+                if !cancel {
+                    log::debug!(
+                        "Received custom click action {} with payload {:?}",
+                        p.id,
+                        p.payload
+                    );
+                }
+            }
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {
                     self.ui.difficulty = if self.level.hardcore {
@@ -2501,15 +2547,14 @@ impl Game<'_> {
                         if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
                             && let Some(value) = self.ui.rules.get(rule.name)
                         {
-                            self.game_rule_changed(rule.name, value);
+                            let guest = &host.hub.guests[gi];
+                            let actor = crate::mod_api::GameRuleActor {
+                                uuid: guest.uuid,
+                                entity_id: guest.entity_id,
+                                name: &guest.name,
+                            };
+                            self.game_rule_changed(rule.name, value, Some(&actor));
                         }
-                        let guest = &host.hub.guests[gi];
-                        self.native_world_game_rule_change(
-                            guest.uuid,
-                            &guest.name,
-                            &entry.name,
-                            &entry.value,
-                        );
                         let message = horizon_client::text::Text::tr(
                             "commands.gamerule.set",
                             &[&entry.name, &entry.value],
@@ -3616,9 +3661,32 @@ impl Game<'_> {
                     .set_game_mode(conn, SPECTATOR, &self.world, Some(self.collision));
             }
         }
+        // PlayerList.respawn: `copyRespawnPosition` hands the new player the
+        // old point through `setRespawnPosition`: none, or an Overworld forced
+        // point (`spawn`). A point with a block is copied once the block is
+        // found. A cancel leaves the new player with none; it still comes
+        // back here this time, as vanilla placed it before the copy.
+        let forced_spawn = host.hub.guests[i].spawn;
+        if let Some(point) = copied_respawn_point(own.is_some(), forced_spawn) {
+            let g = &host.hub.guests[i];
+            let (uuid, id, name) = (g.uuid, g.entity_id, g.name.clone());
+            let mut cancel = false;
+            self.native_player_set_spawn(
+                uuid,
+                id,
+                &name,
+                level.id(),
+                point,
+                point.is_some(),
+                &mut cancel,
+            );
+            if cancel {
+                host.hub.guests[i].spawn = None;
+            }
+        }
         if let Some(config) = elsewhere {
             self.respawn_trip(conn, config);
-        } else if in_frame_bed.is_none() && host.hub.guests[i].spawn.is_none() {
+        } else if in_frame_bed.is_none() && forced_spawn.is_none() {
             // TeleportTransition.createDefault: no point of its own, so the
             // world spawn's free column once its chunks have loaded.
             self.world_spawn_trip(conn);
@@ -5087,14 +5155,7 @@ impl Game<'_> {
         self.as_guest(host, conn, |game| {
             let rest = game.mending(value);
             if rest > 0 {
-                let (Some(player), Some(name)) =
-                    (game.lan_acting_uuid, game.lan_acting_name.clone())
-                else {
-                    return;
-                };
-                let mut amount = rest.min(i32::MAX as u32) as i32;
-                game.native_player_exp_change(player, &name, &mut amount);
-                game.give_experience_points(amount.max(0), false);
+                game.give_experience_points(rest.min(i32::MAX as u32) as i32);
             }
         });
     }
@@ -5307,10 +5368,30 @@ fn stop_dig(play: &GuestPlay, pos: [i32; 3], air: bool, ticks: u64, per_tick: f3
     }
 }
 
+/// What `copyRespawnPosition` sets at respawn time, when it is decided here:
+/// nothing to decide for a point with a block (`has_config`, copied once the
+/// block is found); otherwise the Overworld forced point's block (`spawn`,
+/// stored at its bottom centre), or none.
+fn copied_respawn_point(has_config: bool, spawn: Option<[f64; 3]>) -> Option<Option<[i32; 3]>> {
+    (!has_config).then(|| spawn.map(|s| s.map(|c| c.floor() as i32)))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::eye_columns;
+    use super::{copied_respawn_point, eye_columns};
     use horizon_client::pose::Pose;
+
+    /// `copyRespawnPosition` copies an Overworld forced point, not none; a
+    /// point with a block is left to its block check.
+    #[test]
+    fn respawn_copies_the_forced_point() {
+        assert_eq!(
+            copied_respawn_point(false, Some([12.5, 64.0, -3.5])),
+            Some(Some([12, 64, -4]))
+        );
+        assert_eq!(copied_respawn_point(false, None), Some(None));
+        assert_eq!(copied_respawn_point(true, Some([0.5, 64.0, 0.5])), None);
+    }
 
     /// #4124: a STOP is measured from the START that named its block (`destroyPos`) — an abort, or
     /// a STOP from out of reach, ends the dig the guest's button held but leaves that clock — and

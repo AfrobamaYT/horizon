@@ -178,6 +178,16 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         living_jump: |entity, kind| {
             crate::mod_api::dispatch_living_jump(crate::mod_api::mods(), entity, kind);
         },
+        ender_entity_teleport: |entity, kind, from, target, cancel| {
+            crate::mod_api::dispatch_ender_entity_teleport(
+                crate::mod_api::mods(),
+                entity,
+                kind,
+                from,
+                target,
+                cancel,
+            );
+        },
         ingredient: |kind, data, items| {
             crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
         },

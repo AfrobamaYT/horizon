@@ -36,12 +36,15 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) struct Tag;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
+        pub(super) struct GameRuleActor<'a>(pub(super) &'a str);
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
-        pub(super) struct NativeNoteBlockChange<'a>(pub &'a ());
+        pub(super) struct NativeNoteBlockChange;
+        pub(super) struct NativeHandRender<'a>(pub &'a ());
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
@@ -60,6 +63,9 @@ mod tests {
         pub(super) struct Hand;
         #[derive(Clone, Copy)]
         pub(super) struct BlockHit;
+        pub(super) struct NativeBlockClick<'a>(pub &'a ());
+        pub(super) struct NativeTriState;
+        pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
@@ -91,6 +97,11 @@ mod tests {
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
         pub(super) struct NativeCommand;
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativeProgressType {
+            Grant,
+            Revoke,
+        }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
@@ -130,12 +141,21 @@ mod tests {
                 pub struct Item;
             }
         }
-        mod horizon_client {
+        pub(super) mod horizon_client {
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
             }
+            pub mod mod_api {
+                pub struct NativeClientInfo;
+            }
             pub mod menu {
+                pub struct MenuButtonContext {
+                    pub player: u128,
+                    pub player_entity_id: i32,
+                    pub pos: [i32; 3],
+                    pub id: i32,
+                }
                 pub struct AnvilCraft;
                 pub struct AnvilUpdate;
                 pub struct GrindstonePlace;
@@ -227,11 +247,57 @@ mod tests {
     ) -> impl Iterator<Item = &'a P> {
         parts.iter().copied()
     }
+    #[test]
+    fn advancement_progress_reports_grant_and_revoke_identity() {
+        struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
+        impl Hooks for Observer {
+            fn player_advancement_progress(
+                &self,
+                _: &mut dyn Host,
+                event: &mut PlayerAdvancementProgressEvent<'_>,
+            ) {
+                assert_eq!(event.player, 123);
+                assert_eq!(event.player_entity_id, 42);
+                assert_eq!(event.name, "Alex");
+                assert_eq!(event.advancement, "example:advancement");
+                assert_eq!(event.criterion, "criterion");
+                self.0.lock().unwrap().push(event.progress_type);
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Observer(observed.clone()))];
+        for progress_type in [NativeProgressType::Grant, NativeProgressType::Revoke] {
+            dispatch_player_advancement_progress(
+                &mut TestHost,
+                &mods,
+                123,
+                42,
+                "Alex",
+                "example:advancement",
+                "criterion",
+                progress_type,
+            );
+        }
+        assert_eq!(
+            *observed.lock().unwrap(),
+            vec![NativeProgressType::Grant, NativeProgressType::Revoke]
+        );
+    }
     struct Mod {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
     }
     impl Hooks for Mod {
+        fn menu_button(&self, _: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+            assert_eq!(event.context.player, 123);
+            assert_eq!(event.context.player_entity_id, 42);
+            assert_eq!(event.context.pos, [1, 2, 3]);
+            assert_eq!(event.context.id, 9);
+            event.entity.id.push_str("-changed");
+            *event.carried = Some(ItemStack {
+                item: "bucket".into(),
+            });
+        }
         fn block_entity_submit(&self, _: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
@@ -313,6 +379,27 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn menu_button_mutates_entity_and_cursor_once() {
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Mod {
+            id: 1,
+            calls: Arc::new(Mutex::new(Vec::new())),
+        })];
+        let context = generated::horizon_client::menu::MenuButtonContext {
+            player: 123,
+            player_entity_id: 42,
+            pos: [1, 2, 3],
+            id: 9,
+        };
+        let mut entity = ModBlockEntity {
+            id: "machine".into(),
+        };
+        let mut carried = None;
+        dispatch_menu_button(&mut TestHost, &mods, &context, &mut entity, &mut carried);
+        assert_eq!(entity.id, "machine-changed");
+        assert_eq!(carried.unwrap().item.as_ref(), "bucket");
+    }
+
     #[test]
     fn block_entity_submit_dispatches_in_order_with_shared_draw() {
         let calls = Arc::new(Mutex::new(Vec::new()));
