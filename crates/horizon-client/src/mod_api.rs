@@ -2550,8 +2550,9 @@ pub use part_table::{
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, install_parts,
-    mark_game_thread, parts, place_provider, providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
+    has_scoped_hook, install_parts, mark_game_thread, parts, place_provider, providers,
+    resolve_parts,
 };
 
 mod generated {
@@ -2593,7 +2594,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::horizon_mod;
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
 
 #[cfg(test)]
 pub(crate) use part_table::tests as part_tests;
@@ -2773,6 +2774,7 @@ mod tests {
     #[derive(Clone)]
     struct Probe;
 
+    #[mod_api::horizon_part]
     impl ItemPart for Probe {
         fn use_on(&self, host: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
@@ -2897,6 +2899,7 @@ mod tests {
     #[derive(Clone)]
     struct Chatty;
 
+    #[mod_api::horizon_part]
     impl ItemPart for Chatty {
         fn use_on(&self, host: &mut dyn ServerHost, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
@@ -3191,6 +3194,7 @@ mod tests {
     #[derive(Clone)]
     struct HeardStick;
 
+    #[mod_api::horizon_part]
     impl ItemPart for HeardStick {
         fn use_on(&self, _: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
