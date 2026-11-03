@@ -1,134 +1,78 @@
-//! Prepare client listeners against the staged resources before publishing any.
+//! Prepare client listeners against the new pack selection before publishing
+//! any assets, and apply them on the thread that owns the game. The initial
+//! load runs the same three steps: the loader thread registers and stages,
+//! and the game applies once it exists (`start_game`).
 
 #[cfg(test)]
 #[path = "client_reload_tests.rs"]
 mod tests;
-
 use super::Game;
 use horizon_client::{
     datapack::DataPack,
     mod_api::{
-        ClientReloadContext, ClientReloadListeners, FileToIdConverter, Identifier, ReloadApply,
-        ReloadOrderError, ReloadResourceError, reload::ReloadMark,
+        ClientHost, ClientReloadContext, ClientReloadListener, ClientReloadListeners, HookId, Host,
+        reload::{
+            PreparedStep, ReloadStageError, apply_listeners, prepare_listeners, reload_files,
+        },
     },
 };
-use std::collections::BTreeMap;
 
-#[derive(Debug)]
-pub(super) enum ClientAssetReloadError {
-    Order(ReloadOrderError),
-    Listener {
-        listener: Identifier,
-        source: ReloadResourceError,
-    },
-}
-impl std::fmt::Display for ClientAssetReloadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Order(error) => error.fmt(f),
-            Self::Listener { listener, source } => {
-                write!(f, "reload listener {listener}: {source}")
-            }
-        }
-    }
-}
-impl std::error::Error for ClientAssetReloadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(match self {
-            Self::Order(error) => error,
-            Self::Listener { source, .. } => source,
-        })
-    }
-}
+/// One client reload step to run later on the game-owning thread: a mod
+/// listener's prepared apply.
+pub(super) type PreparedClientReload = PreparedStep<()>;
 
-pub(super) struct PreparedClientReload {
-    apply: ReloadApply,
-    owner: Option<&'static str>,
-    id: Identifier,
-}
-
-/// One listener's asset view from the merged resource root of the coming
-/// reload, where pack overrides are already resolved.
-fn reload_context(
-    pack: &DataPack,
-    listener: &Identifier,
-    converter: &FileToIdConverter,
-) -> ClientReloadContext {
-    let mut files = BTreeMap::new();
-    for file in pack.list_under("assets", &[converter.directory()]) {
-        if let Some(id) = file
-            .strip_prefix("assets/")
-            .and_then(|path| converter.file_to_id(path))
-        {
-            // A file that vanishes or fails to read between listing and reading is one bad
-            // entry, as vanilla's `scanDirectory` treats a parse failure: log it, skip it.
-            match pack.read(&file) {
-                Some(bytes) => {
-                    files.insert(id, bytes);
-                }
-                None => log::error!(
-                    "Couldn't read asset file '{id}' from '{}/{}' for listener {}",
-                    pack.id,
-                    file,
-                    listener
-                ),
-            }
-        }
-    }
-    ClientReloadContext::new(files)
-}
+/// The registration host of the first load: no game exists yet, so it reads
+/// nothing — a host read during registration panics, as its contract forbids
+/// one. The reload itself reads through the game's host.
+pub(super) struct StartupClientHost;
+impl Host for StartupClientHost {}
+impl ClientHost for StartupClientHost {}
 
 impl Game<'_> {
-    /// The registered listeners for the coming resource reload: empty when no
-    /// mod subscribes, so an ordinary reload builds no graph and reads no
-    /// files. The registrations are collected here, on the thread that owns
-    /// the game, so each listener keeps its registering mod for crash
-    /// attribution; the reload's worker orders and prepares them.
+    /// Registers a later reload's client listeners through the game
+    /// (`native_add_client_reload_listeners`), gated on the hook being
+    /// listened to.
     pub(super) fn register_client_reload_listeners(&self) -> ClientReloadListeners {
         let mut listeners = ClientReloadListeners::new();
-        if crate::mod_api::listened(crate::mod_api::HookId::AddClientReloadListeners) {
+        if crate::mod_api::listened(HookId::AddClientReloadListeners) {
             self.native_add_client_reload_listeners(&mut listeners);
         }
         listeners
     }
 }
 
+/// Registers the first load's client listeners: no game exists yet, so
+/// [`StartupClientHost`] stands in, as NeoForge's construction-time event
+/// fires on a client whose resources are not loaded either.
+pub(super) fn register_startup_client_reload_listeners() -> ClientReloadListeners {
+    let mut listeners = ClientReloadListeners::new();
+    if crate::mod_api::listened(HookId::AddClientReloadListeners) {
+        crate::mod_api::dispatch_add_client_reload_listeners(&StartupClientHost, &mut listeners);
+    }
+    listeners
+}
+
 /// Orders the registered listeners, then prepares each against `root`, the
 /// merged resource root the reload will publish; runs on the reload's worker,
-/// off the main thread.
+/// off the game-owning thread.
 pub(super) fn stage_client_reload(
     root: &std::path::Path,
     listeners: ClientReloadListeners,
-) -> Result<Vec<PreparedClientReload>, ClientAssetReloadError> {
+) -> Result<Vec<PreparedClientReload>, ReloadStageError> {
     let pack = DataPack::builtin(root);
-    let mut prepared = Vec::new();
-    for listener in listeners.finish().map_err(ClientAssetReloadError::Order)? {
-        // The vanilla anchor and boundaries have no converter and no work.
-        let Some(converter) = &listener.converter else {
-            continue;
-        };
-        let context = reload_context(&pack, &listener.id, converter);
-        let _mark = ReloadMark::enter(listener.owner, &listener.id, "client_reload_prepare");
-        let apply = listener.listener.prepare(&context).map_err(|source| {
-            ClientAssetReloadError::Listener {
-                listener: listener.id.clone(),
-                source,
-            }
-        })?;
-        prepared.push(PreparedClientReload {
-            apply,
-            owner: listener.owner,
-            id: listener.id,
-        });
-    }
-    Ok(prepared)
+    let ordered = listeners.finish().map_err(ReloadStageError::Order)?;
+    prepare_listeners(
+        ordered,
+        "client_reload_prepare",
+        |_| None,
+        |id, converter| ClientReloadContext::new(reload_files("assets", &[&pack], id, converter)),
+        ClientReloadListener::prepare,
+    )
 }
 
-/// Applies the prepared listeners on the main thread, after the rest of the
-/// staged pack is published and before the resources-reloaded notice.
+/// Applies the prepared listeners in order on the game-owning thread, after
+/// the rest of the staged pack is published and before the
+/// resources-reloaded notice.
 pub(super) fn apply_client_reload(prepared: Vec<PreparedClientReload>) {
-    for listener in prepared {
-        let _mark = ReloadMark::enter(listener.owner, &listener.id, "client_reload_apply");
-        listener.apply.apply();
-    }
+    apply_listeners(prepared, "client_reload_apply", |()| {});
 }

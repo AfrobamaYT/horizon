@@ -10,10 +10,7 @@ use super::{
     reload::{Boundary, ReloadCore, ReloadFiles},
     reload_order::ReloadOrderError,
 };
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 /// Horizon's vanilla client reload listeners and ordering boundaries, from the
 /// 26.3 `Minecraft` resource-manager registration order: language, textures,
@@ -51,10 +48,8 @@ pub struct ClientReloadContext {
     files: ReloadFiles,
 }
 impl ClientReloadContext {
-    pub(crate) fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {
-        Self {
-            files: ReloadFiles::new(files),
-        }
+    pub(crate) fn new(files: ReloadFiles) -> Self {
+        Self { files }
     }
     /// Converted IDs, across all namespaces, in deterministic resource-ID order.
     pub fn list(&self) -> impl Iterator<Item = &Identifier> {

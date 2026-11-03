@@ -1,7 +1,8 @@
 use super::*;
 use crate::game::{native_entity_refs::tests::with_game, world_loading::WorldRequest};
 use horizon_client::mod_api::{
-    self, AddServerReloadListenersEvent, Hooks, Host, ListenerKey, ModEntry, ServerReloadListener,
+    self, AddServerReloadListenersEvent, Hooks, Host, ListenerKey, ModEntry, ReloadApply,
+    ReloadResourceError, ServerReloadListener,
 };
 use std::{
     path::Path,

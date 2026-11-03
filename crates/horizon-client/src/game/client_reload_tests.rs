@@ -123,13 +123,120 @@ fn a_converted_file_outside_the_pack_is_absent_not_empty() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// The initial load runs the client reload listeners: `spawn_loader`
+/// registers and stages them against the real merged root on its loader
+/// thread, and the applies it delivers run once the game exists — before any
+/// F3+T reload.
+#[test]
+#[ignore = "needs prepared resources"]
+fn initial_load_stages_and_applies_client_reload_listeners() {
+    use crate::game::{
+        LoaderMsg, Progress, native_entity_refs::tests::with_game, startup_menu::spawn_loader,
+    };
+    use crate::mod_api::testing::with_mods;
+    use crate::mod_api::{self, ModEntry};
+    use horizon_client::mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// Counts the real root's own `post_effect` assets, like a mod reading
+    /// vanilla files on the first load.
+    struct StartupProbe {
+        applied: Arc<AtomicBool>,
+        count: Arc<AtomicUsize>,
+    }
+    impl ClientReloadListener for StartupProbe {
+        fn prepare(
+            &self,
+            context: &ClientReloadContext,
+        ) -> Result<ReloadApply, ReloadResourceError> {
+            let seen = context
+                .list()
+                .filter(|id| id.namespace() == "minecraft")
+                .count();
+            let applied = self.applied.clone();
+            let count = self.count.clone();
+            Ok(ReloadApply::new(move || {
+                count.fetch_max(seen, Ordering::SeqCst);
+                applied.store(true, Ordering::SeqCst);
+            }))
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for StartupProbe {
+        fn add_client_reload_listeners(
+            &self,
+            _host: &dyn ClientHost,
+            event: &mut AddClientReloadListenersEvent<'_>,
+        ) {
+            event
+                .listeners
+                .add_listener(
+                    id("client_test:startup"),
+                    FileToIdConverter::json("post_effect").unwrap(),
+                    Arc::new(StartupProbe {
+                        applied: self.applied.clone(),
+                        count: self.count.clone(),
+                    }),
+                )
+                .unwrap();
+        }
+    }
+
+    let applied = Arc::new(AtomicBool::new(false));
+    let count = Arc::new(AtomicUsize::new(0));
+    let mods = vec![ModEntry::new(
+        "client_test",
+        Box::new(StartupProbe {
+            applied: applied.clone(),
+            count: count.clone(),
+        }),
+    )]
+    .into();
+    with_mods(mods, || {
+        with_game(|game| {
+            let progress = Progress::new();
+            let (receiver, handle) = spawn_loader(
+                &game.options,
+                &game.settings,
+                &game.options.resources,
+                std::time::Instant::now(),
+                &progress,
+            )
+            .unwrap();
+            let mut loaded = None;
+            for message in receiver {
+                match message {
+                    LoaderMsg::Ui(..) => {}
+                    LoaderMsg::Done(result) => loaded = Some(result),
+                }
+            }
+            handle.join().unwrap();
+            let mut loaded = loaded.expect("loader finished").expect("initial load");
+            assert!(
+                !loaded.client_applies.is_empty(),
+                "the loader thread registered and staged the listener"
+            );
+            assert!(
+                !applied.load(Ordering::SeqCst),
+                "nothing applied before handoff"
+            );
+            // The same call `start_game` makes once the game owns the assets.
+            apply_client_reload(std::mem::take(&mut loaded.client_applies));
+            assert!(applied.load(Ordering::SeqCst), "the first load applies");
+            assert!(
+                count.load(Ordering::SeqCst) >= 5,
+                "the initial stage read the real root's own assets"
+            );
+        });
+    });
+}
+
 /// A listener registered through the real dispatch, staged against a real
 /// merged root (the game's own resources with a dev mod and a resource pack).
 #[test]
 #[ignore = "needs prepared resources"]
 fn client_reload_reads_real_assets_with_pack_overrides() {
     use crate::game::native_entity_refs::tests::with_game;
-    use crate::game::packs::startup_root;
     use crate::mod_api::testing::with_mods;
     use crate::mod_api::{self, ModEntry};
     use horizon_client::mod_api::{AddClientReloadListenersEvent, ClientHost, Hooks};
@@ -251,9 +358,19 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             let resources = game.options.resources.clone();
             let enabled = BTreeSet::new();
             let dev = [mod_dir.clone()];
+            // The merged root without `startup_root`'s process-wide mod
+            // registrations, which a test must not freeze for the others
+            // (`brewing`'s mod effects among them).
+            let merged = |packs: &[horizon_client::packs::Pack]| {
+                let base = crate::game::mods::content_overlay(&resources, &enabled, &dev)
+                    .unwrap()
+                    .root;
+                horizon_client::packs::resource_root(&base, packs, &crate::game::packs::cache_dir())
+                    .unwrap()
+            };
             // The mod's packaged asset over nothing, with the real root's own
             // assets in the same view.
-            let root = startup_root(&resources, &[], &[], &enabled, &dev).unwrap();
+            let root = merged(&[]);
             let prepared =
                 stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
             assert!(live.lock().unwrap().is_empty(), "nothing published yet");
@@ -269,14 +386,14 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
                 horizon_client::packs::RESOURCE_FORMAT,
             );
             assert_eq!(packs.len(), 1);
-            let root = startup_root(&resources, &[], &packs, &enabled, &dev).unwrap();
+            let root = merged(&packs);
             let prepared =
                 stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
             apply_client_reload(prepared);
             assert_eq!(live.lock().unwrap().as_slice(), ["mod", "pack"]);
             // A rejected prepare aborts the reload and keeps the previous state.
             reject.store(true, Ordering::Relaxed);
-            let root = startup_root(&resources, &[], &[], &enabled, &dev).unwrap();
+            let root = merged(&[]);
             let Err(error) = stage_client_reload(&root, game.register_client_reload_listeners())
             else {
                 panic!("a failing listener stops the whole reload")

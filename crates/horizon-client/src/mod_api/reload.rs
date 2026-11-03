@@ -1,11 +1,12 @@
 //! The side-neutral machinery of reload listeners: the error and apply types,
-//! crash attribution, and the registration core both sides build on. The
-//! per-side `server_reload` and `client_reload` hold only their context,
-//! listener trait and vanilla anchors.
+//! crash attribution, the shared prepare and apply loops, and the registration
+//! core both sides build on. The per-side `server_reload` and `client_reload`
+//! hold only their context, listener trait and vanilla anchors.
 use super::{
     FileToIdConverter, Identifier,
     reload_order::{ReloadOrder, ReloadOrderError},
 };
+use crate::datapack::DataPack;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// An error loading a resource, including the resource that caused it.
@@ -229,6 +230,108 @@ impl<L: ?Sized + 'static> ReloadCore<L> {
     }
 }
 
+/// A failed reload of one side's listeners: the ordering failed, or a
+/// listener's `prepare` returned an error. Both sides share this form, so the
+/// reload paths report listeners alike.
+#[derive(Debug)]
+pub(crate) enum ReloadStageError {
+    Order(ReloadOrderError),
+    Listener {
+        listener: Identifier,
+        source: ReloadResourceError,
+    },
+}
+impl std::fmt::Display for ReloadStageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Order(error) => error.fmt(f),
+            Self::Listener { listener, source } => {
+                write!(f, "reload listener {listener}: {source}")
+            }
+        }
+    }
+}
+impl std::error::Error for ReloadStageError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Order(error) => error,
+            Self::Listener { source, .. } => source,
+        })
+    }
+}
+
+/// One mod listener's prepared step, between its `prepare` and its `apply`.
+/// The server's vanilla function library rides along as the `Vanilla` step of
+/// its own reload; the client's has none.
+pub(crate) enum PreparedStep<V = ()> {
+    Mod {
+        apply: ReloadApply,
+        owner: Option<&'static str>,
+        id: Identifier,
+    },
+    Vanilla(V),
+}
+
+/// Orders the registered listeners, then prepares each with a converter
+/// against the reload's own view: the shared loop of both sides' reloads.
+/// `context_of` builds the side's context for one listener from its converter,
+/// `prepare_of` calls the side's listener trait, and `vanilla` turns a
+/// converter-less vanilla anchor into its own step (the server's function
+/// library); the boundaries prepare nothing. Runs wherever the side stages its
+/// reload, off the thread that owns the game.
+pub(crate) fn prepare_listeners<L: ?Sized, C, V>(
+    ordered: Vec<RegisteredListener<L>>,
+    phase: &'static str,
+    vanilla: impl Fn(&RegisteredListener<L>) -> Option<V>,
+    context_of: impl Fn(&Identifier, &FileToIdConverter) -> C,
+    prepare_of: impl Fn(&L, &C) -> Result<ReloadApply, ReloadResourceError>,
+) -> Result<Vec<PreparedStep<V>>, ReloadStageError> {
+    let mut prepared = Vec::new();
+    for listener in ordered {
+        if let Some(step) = vanilla(&listener) {
+            prepared.push(PreparedStep::Vanilla(step));
+            continue;
+        }
+        // The boundaries have no converter and no work.
+        let Some(converter) = &listener.converter else {
+            continue;
+        };
+        let context = context_of(&listener.id, converter);
+        let _mark = ReloadMark::enter(listener.owner, &listener.id, phase);
+        let apply = prepare_of(&*listener.listener, &context).map_err(|source| {
+            ReloadStageError::Listener {
+                listener: listener.id.clone(),
+                source,
+            }
+        })?;
+        prepared.push(PreparedStep::Mod {
+            apply,
+            owner: listener.owner,
+            id: listener.id,
+        });
+    }
+    Ok(prepared)
+}
+
+/// Applies the prepared steps in order on the thread that owns the game,
+/// attributing each mod listener's apply to its registering mod. `vanilla`
+/// publishes the side's own step.
+pub(crate) fn apply_listeners<V>(
+    prepared: Vec<PreparedStep<V>>,
+    phase: &'static str,
+    mut vanilla: impl FnMut(V),
+) {
+    for step in prepared {
+        match step {
+            PreparedStep::Mod { apply, owner, id } => {
+                let _mark = ReloadMark::enter(owner, &id, phase);
+                apply.apply();
+            }
+            PreparedStep::Vanilla(step) => vanilla(step),
+        }
+    }
+}
+
 /// The files one converter selected from a reload's packs, shared by both
 /// sides' contexts; each side keeps its own context type so a wrong-side read
 /// does not compile.
@@ -245,4 +348,43 @@ impl ReloadFiles {
     pub(crate) fn read(&self, id: &Identifier) -> Option<&[u8]> {
         self.0.get(id).map(Vec::as_slice)
     }
+}
+
+/// Reads one converter's directory from `packs`, later packs winning, and
+/// collects the converted files: the shared read-and-log loop of both sides'
+/// reloads. `top` is `"data"` or `"assets"`.
+pub(crate) fn reload_files(
+    top: &str,
+    packs: &[&DataPack],
+    listener: &Identifier,
+    converter: &FileToIdConverter,
+) -> ReloadFiles {
+    let mut selected = BTreeMap::new();
+    for pack in packs {
+        for file in pack.list_under(top, &[converter.directory()]) {
+            if let Some(id) = file
+                .strip_prefix(&format!("{top}/"))
+                .and_then(|path| converter.file_to_id(path))
+            {
+                selected.insert(id, (*pack, file));
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    for (id, (pack, path)) in selected {
+        // A file that vanishes or fails to read between listing and reading is one bad
+        // entry, as vanilla's `scanDirectory` treats a parse failure: log it, skip it.
+        match pack.read(&path) {
+            Some(bytes) => {
+                files.insert(id, bytes);
+            }
+            None => log::error!(
+                "Couldn't read file '{id}' from '{}/{}' for listener {}",
+                pack.id,
+                path,
+                listener
+            ),
+        }
+    }
+    ReloadFiles::new(files)
 }

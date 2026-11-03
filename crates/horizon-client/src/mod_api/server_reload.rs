@@ -46,10 +46,8 @@ pub struct ServerReloadContext {
     files: ReloadFiles,
 }
 impl ServerReloadContext {
-    pub(crate) fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {
-        Self {
-            files: ReloadFiles::new(files),
-        }
+    pub(crate) fn new(files: ReloadFiles) -> Self {
+        Self { files }
     }
     /// Converted IDs, across all namespaces, in deterministic resource-ID order.
     pub fn list(&self) -> impl Iterator<Item = &Identifier> {

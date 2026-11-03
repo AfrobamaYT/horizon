@@ -1081,8 +1081,13 @@ registering mod in the crash report. `VanillaClientListeners::model_manager()` n
 model manager, the anchor of the 26.3 `Minecraft` registration order; `first()` and `last()`
 are the ordering boundaries. Mod applies run on the main thread after the staged pack is
 published, before `client_resources_reloaded`. Listeners are registered fresh for every
-reload. The game's initial resource load assembles its own tables and fires no reload hooks;
-read such assets where they are first drawn instead. NeoForge's client event offers no
+load: the initial resource load registers them before its loader thread runs (as
+NeoForge's construction-time event does — no game exists yet, and a host read during
+registration panics), the loader thread stages them against the same merged root, and the
+game applies them once it owns the assets; every later reload — F3+T, a pack change, a
+server's packs — registers through the game the same way. A listener whose prepare fails
+on the initial load leaves the game running without mod reload listeners, logged as a
+warning. NeoForge's client event offers no
 retained listeners, and Horizon has none: the `Arc` the mod registers with is the listener's
 own live state.
 
