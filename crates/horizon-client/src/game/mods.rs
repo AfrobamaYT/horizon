@@ -163,6 +163,7 @@ pub(super) fn content_root(
     register_mob_effects(&mods);
     register_entity_types(&mods);
     register_menu_types(&mods);
+    horizon_client::mod_content::set_fluid_looks(&mods);
     Ok(out)
 }
 

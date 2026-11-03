@@ -251,6 +251,7 @@ mod native_menus;
 mod native_merchant_refs;
 mod native_minecart_refs;
 mod native_mob_draw;
+mod native_mob_goals;
 mod native_mob_navigation;
 mod native_mob_refs;
 mod native_mobs;
@@ -1470,7 +1471,10 @@ impl LevelAccess for GameLevel<'_> {
         source
     }
     fn has_weak_power_hook(&self) -> bool {
-        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+        self.native_authoritative
+            && horizon_client::mod_api::has_scoped_hook(
+                horizon_client::mod_api::HookId::ShouldCheckWeakPower,
+            )
     }
     fn adjust_should_check_weak_power(
         &self,
@@ -1484,7 +1488,10 @@ impl LevelAccess for GameLevel<'_> {
         check
     }
     fn has_redstone_wire_connection_hook(&self) -> bool {
-        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+        self.native_authoritative
+            && horizon_client::mod_api::has_scoped_hook(
+                horizon_client::mod_api::HookId::ShouldRedstoneWireConnectTo,
+            )
     }
     fn adjust_should_redstone_wire_connect_to(
         &self,
@@ -6670,7 +6677,11 @@ impl Game<'_> {
             let held = self.held().cloned();
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
             let mut block_answer = None;
-            if !horizon_client::mod_api::mods().is_empty() {
+            if horizon_client::mod_api::has_part_hook(horizon_client::mod_api::HookId::UseItemOn)
+                && horizon_client::mod_api::parts("use_item_on")
+                    .for_hook(horizon_client::mod_api::HookId::UseItemOn)
+                    .is_some_and(|parts| !parts.block_state(state).is_empty())
+            {
                 let click = self.block_click(hit, self.hand, held.as_ref());
                 self.native_use_item_on(state, &click, &mut block_answer);
             }
@@ -22439,7 +22450,15 @@ mod tests {
     fn reload_resolves_parts_against_reloaded_tags() {
         use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
         struct TagPart;
-        impl BlockPart for TagPart {}
+        #[mod_api::horizon_part]
+        impl BlockPart for TagPart {
+            fn analog_output(
+                &self,
+                _: &dyn crate::mod_api::LevelHost,
+                _: &mut crate::mod_api::AnalogOutputEvent,
+            ) {
+            }
+        }
         struct ReloadMod;
         #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
@@ -22472,7 +22491,13 @@ mod tests {
                 .registry
                 .default_state("minecraft:stone")
                 .unwrap();
-            assert!(!mod_api::parts("test").block_state(stone).is_empty());
+            assert!(
+                !mod_api::parts("test")
+                    .for_hook(mod_api::HookId::AnalogOutput)
+                    .unwrap()
+                    .block_state(stone)
+                    .is_empty()
+            );
         });
     }
     use super::*;
