@@ -757,7 +757,7 @@ impl RecipeIndex {
                 },
             );
         };
-        match Recipes::sources(root, overlay) {
+        match horizon_items::recipe_sources::sources(root, overlay) {
             Ok(sources) => {
                 for (id, v) in sources {
                     insert(crate::crafting::qualified(&id), &v);

@@ -386,7 +386,7 @@ impl Game<'_> {
         let sources = if types.is_empty() {
             Vec::new()
         } else {
-            horizon_client::crafting::Recipes::sources(&self.options.resources, &self.pack_files())
+            horizon_items::recipe_sources::sources(&self.options.resources, &self.pack_files())
                 .unwrap_or_else(|e| {
                     log::warn!("Horizon: the recipes for the clients were not read: {e}");
                     Vec::new()
@@ -433,7 +433,7 @@ impl Game<'_> {
         }
         let root = &self.options.resources;
         let overlay = horizon_world::loot::PackOverlay::NONE;
-        let built = horizon_client::crafting::Recipes::sources(root, &overlay).and_then(|own| {
+        let built = horizon_items::recipe_sources::sources(root, &overlay).and_then(|own| {
             let of = |v: &serde_json::Value| types.iter().any(|t| v["type"].as_str() == Some(t));
             let mut all: Vec<_> = own.into_iter().filter(|(_, v)| !of(v)).collect();
             all.extend(received);
