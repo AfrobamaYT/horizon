@@ -153,13 +153,12 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use crate::game::LevelDimension;
-    use horizon_client::mod_api::{self, Flow, Hooks, RandomTickEvent};
+    use horizon_client::mod_api::{self, BlockPart, Flow, Hooks, RandomTickEvent, Registrar};
     use horizon_world::level::LevelEvent;
 
-    /// A mod whose random-tick hook plays level events through the write host.
+    /// A stone part whose random tick plays level events through the write host.
     struct Events;
-    #[mod_api::__subscriptions]
-    impl Hooks for Events {
+    impl BlockPart for Events {
         fn random_tick(
             &self,
             level: &mut dyn mod_api::LevelWriteHost,
@@ -173,15 +172,34 @@ mod tests {
             Flow::Continue
         }
     }
+    struct EventsMod;
+    #[mod_api::__subscriptions]
+    impl Hooks for EventsMod {
+        fn register(&self, r: &mut Registrar) {
+            r.block_part("minecraft:stone", Events);
+        }
+    }
 
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn a_level_event_in_a_write_hook_joins_the_events_in_order() {
         let mods: mod_api::Mods =
-            vec![mod_api::ModEntry::new("level-events", Box::new(Events))].into();
+            vec![mod_api::ModEntry::new("level-events", Box::new(EventsMod))].into();
+        mod_api::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.options.dedicated = Some(Vec::new());
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(0, 64, 0, stone).unwrap();
                 let before = LevelEvent::LevelEvent {
                     id: 1000,
                     pos: horizon_core::position::BlockPos::new(0, 64, 0),

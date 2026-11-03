@@ -2357,12 +2357,15 @@ impl Game<'_> {
         let Tag::Compound(fields) = tag else {
             return;
         };
-        // A mod block entity's type is named after its block (`mod_content`):
-        // its update tag merges into what the client keeps of it (`handleUpdateTag`).
+        // Only the declared type on one of its valid blocks accepts an update tag.
         // Nothing is drawn from it yet, so its section stays as it is.
         let block = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
-            if *self.res.facts().get(block).name == *name {
+            if m.id() == name
+                && horizon_client::containers::block_entity_types::type_for(
+                    &self.res.facts().get(block).name,
+                ) == Some(name)
+            {
                 m.merge_update_tag(fields);
             }
             return;
@@ -3143,6 +3146,7 @@ impl Game<'_> {
                     r.view_distance = p.chunk_radius;
                     r.simulation_distance = p.simulation_distance;
                     r.show_death_screen = p.show_death_screen;
+                    r.do_limited_crafting = p.limited_crafting;
                 }
                 self.streaming.radius =
                     self.render_distance_in_use().min(p.chunk_radius + 1).max(2);
@@ -7899,9 +7903,18 @@ impl Game<'_> {
             let result = b.use_item_on(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),
-                horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                face,
-                horizon_core::geometry::Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+                horizon_core::geometry::BlockHit {
+                    block: horizon_core::position::BlockPos::new(
+                        hit.pos[0], hit.pos[1], hit.pos[2],
+                    ),
+                    direction: face,
+                    location: horizon_core::geometry::Vec3::new(
+                        hit.point[0],
+                        hit.point[1],
+                        hit.point[2],
+                    ),
+                    inside: hit.inside,
+                },
                 player,
                 held.map(|s| &*s.item),
             );
@@ -11547,6 +11560,8 @@ mod tests {
             names: &names,
             trade: None,
             maps: None,
+            limited_crafting: false,
+            known_recipes: None,
         };
         let mut menu = Menu::new(Kind::Inventory);
         let cobblestone = ItemStack {
