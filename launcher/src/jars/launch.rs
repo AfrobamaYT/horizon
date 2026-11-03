@@ -52,7 +52,7 @@ pub fn prepare_launch(
         program: command.get_program().into(),
         source,
     };
-    let args = LaunchArguments::for_command(command).map_err(&command_error)?;
+    let args = LaunchArguments::for_command(command).map_err(command_error)?;
     if args.is_information_request() {
         return Ok(());
     }
@@ -61,7 +61,7 @@ pub fn prepare_launch(
             .get_current_dir()
             .unwrap_or(std::path::Path::new(".")),
     )
-    .map_err(&command_error)?;
+    .map_err(command_error)?;
     let executable =
         std::fs::canonicalize(cwd.join(command.get_program())).map_err(command_error)?;
     let native = packages::adjacent_manifests(&executable).map_err(LaunchError::Packages)?;
