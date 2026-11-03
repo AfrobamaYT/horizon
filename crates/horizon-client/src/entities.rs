@@ -1392,6 +1392,8 @@ pub struct ArmorStand {
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
     pub enchantment_equipment: horizon_items::equipment::Equipment,
+    /// `Entity.firstTick`: true until its first tick has run.
+    pub first_tick: bool,
     /// `Entity.mainSupportingBlockPos` after the last move.
     pub support: horizon_world::ground_support::GroundState,
 }
@@ -1564,6 +1566,7 @@ impl ArmorStand {
             enchantment_block: None,
             enchantment_fall_distance: 0.0,
             enchantment_equipment: Default::default(),
+            first_tick: true,
             support: Default::default(),
         }
     }

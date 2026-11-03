@@ -200,26 +200,8 @@ impl Game<'_> {
             return false;
         };
         let stack = equipment_stack(stack);
+        let equippable = stack.as_ref().and_then(|s| self.equippable_slot_sound(s));
         if let Target::Mob(id) = t {
-            let equippable = stack.as_ref().and_then(|s| {
-                let name = horizon_client::item_sync::equippable_slot(s, self.items())?;
-                let equip_slot = super::dispenser::Slot::from_name(&name)?;
-                let patched = s.data().and_then(|d| d.other("minecraft:equippable"));
-                let sound = if let Some(component) = patched {
-                    match component.get("equip_sound") {
-                        Some(horizon_world::nbt::Tag::String(sound)) => {
-                            Some(sound.to_string_lossy())
-                        }
-                        _ => None,
-                    }
-                } else {
-                    self.items()
-                        .get(&s.item)
-                        .and_then(|i| i.equip_sound.clone())
-                }
-                .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into());
-                Some((equip_slot, sound))
-            });
             let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
                 return false;
             };
@@ -245,29 +227,106 @@ impl Game<'_> {
                         })
                         .flatten()
                 });
-                if let Some(sound) = sound {
-                    self.audio.play(&sound, Some([at.x, at.y, at.z]), 1.0, 1.0);
-                }
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
-                self.post_game_event(
-                    if equippable.is_some() {
-                        "minecraft:equip"
-                    } else {
-                        "minecraft:unequip"
-                    },
-                    [at.x, at.y, at.z],
-                    ctx,
-                );
+                self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
             }
             return true;
         }
-        match self
+        // `LivingEntity.onEquipItem` for the entities that keep no equip state
+        // of their own: the stand and the dragon (not silent, never spectators).
+        let (old, at, first_tick) = match t {
+            Target::Stand(id) => self.armor_stands.iter().find(|a| a.id == id).map(|a| {
+                (
+                    a.equipment.get(slot as usize).cloned(),
+                    a.position,
+                    a.first_tick,
+                )
+            }),
+            Target::Dragon(id) => self.dragon.as_ref().filter(|d| d.id == id).map(|d| {
+                (
+                    d.equipment.get(slot as usize).cloned(),
+                    d.position,
+                    d.first_tick(),
+                )
+            }),
+            _ => None,
+        }
+        .map_or((None, None, true), |(old, at, first)| {
+            (old, Some(at), first)
+        });
+        let written = match self
             .slots_named(&Owner::Entity(t), slot_name(slot))
             .as_slice()
         {
-            [s] => self.slot_set(s, stack),
+            [s] => self.slot_set(s, stack.clone()),
             _ => false,
+        };
+        if let (true, Some(at), false) = (written, at, first_tick) {
+            let same = match (&old, &stack) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_item_same_components(b),
+                _ => false,
+            };
+            if !same {
+                let sound = equippable.as_ref().and_then(|(equip_slot, sound)| {
+                    (*equip_slot as usize == slot as usize).then(|| sound.clone())
+                });
+                let (Target::Stand(id) | Target::Dragon(id)) = t else {
+                    unreachable!("only a stand or the dragon gets here")
+                };
+                let ctx_who = Some(horizon_client::mobs::Who::Mob(id));
+                let ctx = self.who_context(ctx_who, None);
+                self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
+            }
         }
+        written
+    }
+
+    /// The slot and sound `stack`'s `equippable` component names
+    /// (`Equippable.slot`, `equipSound`).
+    pub(super) fn equippable_slot_sound(
+        &self,
+        stack: &ItemStack,
+    ) -> Option<(super::dispenser::Slot, String)> {
+        let name = horizon_client::item_sync::equippable_slot(stack, self.items())?;
+        let equip_slot = super::dispenser::Slot::from_name(&name)?;
+        let sound = match stack.data().and_then(|d| d.other("minecraft:equippable")) {
+            Some(component) => match component.get("equip_sound") {
+                Some(horizon_world::nbt::Tag::String(sound)) => Some(sound.to_string_lossy()),
+                _ => None,
+            },
+            None => self
+                .items()
+                .get(&stack.item)
+                .and_then(|i| i.equip_sound.clone()),
+        }
+        .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into());
+        Some((equip_slot, sound))
+    }
+
+    /// The effects of `LivingEntity.onEquipItem` once the guards passed (server
+    /// side, not a spectator, not the first tick, another item): the equip
+    /// sound when there is one, and the `equip` (the stack is equippable) or
+    /// `unequip` game event.
+    fn equip_item_effects(
+        &mut self,
+        at: [f64; 3],
+        sound: Option<String>,
+        equips: bool,
+        ctx: horizon_client::sculk::Context,
+    ) {
+        if let Some(sound) = sound {
+            self.audio.play(&sound, Some(at), 1.0, 1.0);
+        }
+        self.post_game_event(
+            if equips {
+                "minecraft:equip"
+            } else {
+                "minecraft:unequip"
+            },
+            at,
+            ctx,
+        );
     }
 }
 
@@ -338,6 +397,67 @@ mod tests {
                     .count(),
                 1
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn stand_and_dragon_equipment_writes_run_on_equip_item() {
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let mut stand = horizon_client::entities::ArmorStand::new(16, Vec3::ZERO, 0.0);
+            stand.id = 16;
+            game.armor_stands.push(stand);
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 17;
+            game.dragon = Some(dragon);
+            let stand = game.native_living(game.native_entity(16).unwrap()).unwrap();
+            let dragon = game.native_living(game.native_entity(17).unwrap()).unwrap();
+            game.audio.capture = Some(Vec::new());
+            super::super::dispense_fixture::start_recording();
+            let helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            // Before its first tick an entity makes no sound and no event.
+            assert!(game.native_living_set_equipment(
+                stand,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert!(game.native_living_set_equipment(stand, EquipmentSlot::Head, None));
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            game.tick_armor_stands().unwrap();
+            game.dragon.as_mut().unwrap().ticks = 1;
+            // An equippable item in its own slot: sound and `equip`; the same
+            // item again changes nothing.
+            for _ in 0..2 {
+                assert!(game.native_living_set_equipment(
+                    stand,
+                    EquipmentSlot::Head,
+                    Some(helmet.clone())
+                ));
+            }
+            // A stored body armor: sound and `equip`, body is storage only.
+            let body = ItemStack::new("minecraft:diamond_horse_armor", 1);
+            assert!(game.native_living_set_equipment(stand, EquipmentSlot::Body, Some(body)));
+            // Not equippable: `unequip` and no sound.
+            let stone = ItemStack::new("minecraft:stone", 1);
+            assert!(game.native_living_set_equipment(
+                stand,
+                EquipmentSlot::Saddle,
+                Some(stone.clone())
+            ));
+            // The dragon the same.
+            let chest = ItemStack::new("minecraft:iron_chestplate", 1);
+            assert!(game.native_living_set_equipment(dragon, EquipmentSlot::Chest, Some(chest)));
+            assert!(game.native_living_set_equipment(dragon, EquipmentSlot::Saddle, Some(stone)));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 3);
+            let events = super::super::dispense_fixture::stop_recording();
+            let count = |name: &str| events.iter().filter(|e| e.ends_with(name)).count();
+            assert_eq!(count("minecraft:equip"), 3);
+            assert_eq!(count("minecraft:unequip"), 2);
         });
     }
 

@@ -393,7 +393,7 @@ pub(super) struct Dragon {
     growl: i32,
     /// `Mob.ambientSoundTime`.
     ambient_time: i32,
-    ticks: i32,
+    pub(super) ticks: i32,
     /// DragonFlightHistory: (y, yRot) samples, newest at `head`.
     history: [(f64, f32); 64],
     head: usize,
@@ -3263,6 +3263,10 @@ impl Game<'_> {
 }
 /// Saving and loading the dragon and the crystals as chunk entities.
 impl Dragon {
+    /// `Entity.firstTick`: no tick has run yet.
+    pub(super) fn first_tick(&self) -> bool {
+        self.ticks == 0
+    }
     pub(super) fn to_nbt(&self, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
         let mut tag = horizon_client::entity_nbt::vehicle_to_nbt(
             "minecraft:ender_dragon",
@@ -4313,17 +4317,6 @@ fn push_seen_with_hurt(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
-        (
-            Aabb::new(
-                Vec3::new(feet[0] - 0.3, feet[1], feet[2] - 0.3),
-                Vec3::new(feet[0] + 0.3, feet[1] + 1.8, feet[2] + 0.3),
-            ),
-            Vec3::new(feet[0], feet[1], feet[2]),
-        )
-    }
-
     #[test]
     fn breath_lifetime_excludes_the_wait() {
         assert!(!breath_expired(219, 200));

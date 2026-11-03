@@ -811,6 +811,7 @@ impl Game<'_> {
                 continue;
             }
             self.armor_stand_location_effects(i, false);
+            self.armor_stands[i].first_tick = false;
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
