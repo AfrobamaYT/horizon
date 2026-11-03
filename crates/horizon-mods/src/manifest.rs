@@ -51,6 +51,9 @@ pub struct Manifest {
     /// Other native mods whose hooks must be available before this one.
     #[serde(default)]
     pub dependencies: std::collections::BTreeMap<String, Dependency>,
+    /// Original Java jars, layered in list order below this mod's own files.
+    #[serde(default)]
+    pub jar: Vec<JarRef>,
     /// Exact build pins and optional raw injections for a code mod.
     pub native: Option<Native>,
 }
