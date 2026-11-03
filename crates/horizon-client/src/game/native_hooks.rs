@@ -3830,16 +3830,7 @@ impl Game<'_> {
         entries: &mut Vec<horizon_client::mod_api::NativeArmorHurt>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_armor_hurt(
-            self,
-            mod_api::mods(),
-            player,
-            entity,
-            kind,
-            source,
-            entries,
-            cancel,
-        );
+        mod_api::dispatch_armor_hurt(self, player, entity, kind, source, entries, cancel);
     }
     /// A mob is about to destroy a block (NeoForge's `LivingDestroyBlockEvent`):
     /// a wither breaking blocks around it, a ravager breaking leaves, the ender
@@ -3857,15 +3848,7 @@ impl Game<'_> {
         state: BlockStateId,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_living_destroy_block(
-            self,
-            mod_api::mods(),
-            entity,
-            kind,
-            pos,
-            state,
-            cancel,
-        );
+        mod_api::dispatch_living_destroy_block(self, entity, kind, pos, state, cancel);
     }
     /// A server entity is about to be placed by `/spreadplayers` (NeoForge's
     /// `EntityTeleportEvent.SpreadPlayersCommand`, vanilla's
@@ -4404,7 +4387,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_permissions_changed(
             self,
-            mod_api::mods(),
             player,
             player_entity_id,
             name,
@@ -4428,7 +4410,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_flyable_fall(
             self,
-            mod_api::mods(),
             player,
             player_entity_id,
             name,
