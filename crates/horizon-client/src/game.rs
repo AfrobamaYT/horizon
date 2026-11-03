@@ -213,6 +213,8 @@ mod native_claimed_items;
 mod native_components;
 mod native_configs;
 mod native_criteria;
+#[cfg(test)]
+mod native_damage_tests;
 mod native_data_maps;
 mod native_display_refs;
 mod native_dragon_refs;

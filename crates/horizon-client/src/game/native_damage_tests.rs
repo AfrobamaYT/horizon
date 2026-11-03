@@ -1,9 +1,9 @@
 //! `living_damage_pre` and `living_damage_post` heard by a trait mod, through the game's own
 //! hooks: the damage container each hit fills, the hit's level host, and the mob and dragon
 //! hits that fire them.
-use super::super::dragon::{Dragon, SPECIAL};
-use super::super::entity::damage_level_of;
-use super::super::native_entity_refs::tests::with_game;
+use super::dragon::{Dragon, SPECIAL};
+use super::entity::damage_level_of;
+use super::native_entity_refs::tests::with_game;
 use crate::mod_api::{
     self, Hooks, LevelRandomHost, LivingDamagePostEvent, LivingDamagePreEvent,
     LivingIncomingDamageEvent, Reduction,
@@ -67,9 +67,9 @@ impl Hooks for Probe {
 
 /// Runs `test` in a game with the probe installed, and returns what it heard.
 fn heard(test: impl FnOnce(&mut super::Game<'_>)) -> Heard {
-    let _ = health::HURT_SERVER.set(super::hurt_server);
-    let _ = health::DAMAGE_PRE.set(super::damage_pre);
-    let _ = health::DAMAGE_POST.set(super::damage_post);
+    let _ = health::HURT_SERVER.set(super::native_hooks::hurt_server);
+    let _ = health::DAMAGE_PRE.set(super::native_hooks::damage_pre);
+    let _ = health::DAMAGE_POST.set(super::native_hooks::damage_post);
     let log = Arc::new(Mutex::new(Heard::default()));
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
         "probe",

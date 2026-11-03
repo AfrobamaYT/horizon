@@ -9,10 +9,6 @@
 //! sites may change; rebuild native mods after game updates.
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
-#[cfg(test)]
-#[path = "native_damage_tests.rs"]
-mod damage_tests;
-
 use super::native_data_maps::NativeDataMapType;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
@@ -10282,22 +10278,26 @@ mod tests {
             .split("/// Server-level helpers for native mods.")
             .next()
             .unwrap();
-        let level_section = source
-            .split("impl GameLevel<'_> {")
-            .nth(1)
-            .unwrap()
-            .split("\n}")
-            .next()
-            .unwrap();
-        let level_hooks: BTreeSet<_> = level_section
-            .lines()
-            .filter_map(|line| {
-                line.trim()
-                    .strip_prefix("pub(super) fn native_")?
-                    .split('(')
-                    .next()
-            })
-            .collect();
+        // The hook points of one `impl` block of this file.
+        let impl_hooks = |head: &str| -> BTreeSet<&'static str> {
+            source
+                .split(head)
+                .nth(1)
+                .unwrap()
+                .split("\n}")
+                .next()
+                .unwrap()
+                .lines()
+                .filter_map(|line| {
+                    line.trim()
+                        .strip_prefix("pub(super) fn native_")?
+                        .split('(')
+                        .next()
+                })
+                .collect()
+        };
+        let level_hooks = impl_hooks("impl GameLevel<'_> {");
+        let hit_hooks = impl_hooks("impl HitLevel<'_> {");
         // Hook points that are free functions in other crates.
         let free_hooks = |source: &'static str| -> BTreeSet<&'static str> {
             source
@@ -10326,13 +10326,14 @@ mod tests {
         let ender_hooks = free_hooks(include_str!("../mobs/enderman.rs"));
         let declared: BTreeSet<_> = section
             .lines()
-            .chain(level_section.lines())
             .filter_map(|line| {
                 line.trim()
                     .strip_prefix("pub(super) fn native_")?
                     .split('(')
                     .next()
             })
+            .chain(level_hooks.iter().copied())
+            .chain(hit_hooks.iter().copied())
             .chain(render_hooks.iter().copied())
             .chain(item_hooks.iter().copied())
             .chain(loot_hooks.iter().copied())
@@ -10384,6 +10385,8 @@ mod tests {
                 format!("horizon_client_lib::breathing::native_{name}")
             } else if level_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
+            } else if hit_hooks.contains(name) {
+                format!("horizon_client::game::native_hooks::HitLevel<'_>::native_{name}")
             } else {
                 format!("horizon_client::game::native_hooks::Game<'_>::native_{name}")
             };
