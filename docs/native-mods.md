@@ -572,7 +572,7 @@ client assets is separate work; do not read resource files on each tick.
 
 **What a native bundle holds.** The one manifest, optional icon, root `Cargo.toml` and `build.rs`,
 `.rs` and `.toml` files under `src/`, `assets/` and `data/`, and root text files (`README*`, `LICENSE*`,
-`LICENCE*`, `COPYING*`, `NOTICE*`, `.gitignore`). Source and resource size limits are checked separately;
+`LICENCE*`, `COPYING*`, `NOTICE*`). Source and resource size limits are checked separately;
 anything else refuses the archive ([api/mod-files.md](api/mod-files.md)).
 
 **One `.hmod` for content and code.** Without root `Cargo.toml`, nothing compiles. With it and `[native]`,
