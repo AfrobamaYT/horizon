@@ -81,6 +81,26 @@ pub struct NativeCamera {
     pub dimension: String,
 }
 
+/// Context and adjustable pose for a first-person hand render.
+///
+/// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
+/// The renderer applies the transform before the ordinary hand and item poses.
+pub struct NativeHandRender<'a> {
+    pub player: u128,
+    pub player_entity_id: i32,
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub interpolated_pitch: f32,
+    pub swing: f32,
+    pub equip: f32,
+    /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
+    pub packed_light: u32,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 3],
+    pub scale: f32,
+}
+
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
@@ -1463,6 +1483,61 @@ mod tests {
         }
     }
 
+    #[test]
+    fn render_hand_chains_pose_until_cancelled() {
+        struct HandMod {
+            offset: f32,
+            cancel: bool,
+        }
+        impl Hooks for HandMod {
+            fn render_hand(&self, _host: &dyn Host, event: &mut RenderHandEvent<'_, '_>) -> Flow {
+                assert_eq!((event.render.player, event.render.player_entity_id), (7, 9));
+                event.render.translation[0] += self.offset;
+                if self.cancel {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(HandMod {
+                offset: 1.0,
+                cancel: false,
+            }),
+            Box::new(HandMod {
+                offset: 2.0,
+                cancel: true,
+            }),
+            Box::new(HandMod {
+                offset: 4.0,
+                cancel: false,
+            }),
+        ];
+        let host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut render = NativeHandRender {
+            player: 7,
+            player_entity_id: 9,
+            hand: Hand::Main,
+            stack: None,
+            partial: 0.5,
+            interpolated_pitch: 0.0,
+            swing: 0.0,
+            equip: 0.0,
+            packed_light: 0,
+            translation: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: 1.0,
+        };
+        let mut canceled = false;
+        dispatch_render_hand(&host, &mods, &mut render, &mut canceled);
+        assert!(canceled);
+        assert_eq!(render.translation, [3.0, 0.0, 0.0]);
+    }
+
     /// Claims a use on stone, after telling the player what the block is.
     struct Probe;
 
@@ -1476,6 +1551,35 @@ mod tests {
             } else {
                 Flow::Continue
             }
+        }
+    }
+
+    #[test]
+    fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
+        struct XpHook(bool);
+        impl Hooks for XpHook {
+            fn player_xp_change(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerXpChangeEvent<'_>,
+            ) -> Flow {
+                assert_eq!(
+                    (event.player, event.player_entity_id, event.name),
+                    (7, 42, "Probe")
+                );
+                event.amount = -5;
+                if self.0 { Flow::Cancel } else { Flow::Continue }
+            }
+        }
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for cancelled in [false, true] {
+            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let (mut amount, mut cancel) = (10, false);
+            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            assert_eq!((amount, cancel), (-5, cancelled));
         }
     }
 

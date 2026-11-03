@@ -195,7 +195,10 @@ impl Game<'_> {
             return Some(amount);
         };
         let (mut amount, mut cancel) = (amount, false);
-        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        let player_entity_id = self
+            .lan_acting_entity
+            .map_or_else(|| self.own_entity_id(), |id| id as i32);
+        self.native_player_xp_change(player, player_entity_id, &name, &mut amount, &mut cancel);
         (!cancel).then_some(amount)
     }
 
@@ -3044,7 +3047,7 @@ impl Game<'_> {
                 self.give_levels(amount);
                 return true;
             } else {
-                self.give_experience_points(amount, true);
+                self.give_experience_points(amount);
             }
             return true;
         }

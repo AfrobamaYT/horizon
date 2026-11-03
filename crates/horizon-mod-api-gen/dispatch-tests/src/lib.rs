@@ -44,6 +44,7 @@ mod tests {
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
         pub(super) struct NativeNoteBlockChange;
+        pub(super) struct NativeHandRender<'a>(pub &'a ());
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());

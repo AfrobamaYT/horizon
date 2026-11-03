@@ -5132,14 +5132,7 @@ impl Game<'_> {
         self.as_guest(host, conn, |game| {
             let rest = game.mending(value);
             if rest > 0 {
-                let (Some(player), Some(name)) =
-                    (game.lan_acting_uuid, game.lan_acting_name.clone())
-                else {
-                    return;
-                };
-                let mut amount = rest.min(i32::MAX as u32) as i32;
-                game.native_player_exp_change(player, &name, &mut amount);
-                game.give_experience_points(amount.max(0), false);
+                game.give_experience_points(rest.min(i32::MAX as u32) as i32);
             }
         });
     }
