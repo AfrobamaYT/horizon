@@ -361,6 +361,69 @@ impl PlayerRead<'_> {
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
+    /// Create or retrieve a connectionless player for the level currently in place.
+    pub(super) fn native_fake_player(
+        &mut self,
+        level: crate::mod_api::LevelRef,
+        uuid: u128,
+        name: &str,
+    ) -> Option<PlayerRef> {
+        if !self.native_level_in_place(level)
+            || !self.lan_guest_swaps.is_empty()
+            || !horizon_client::lan::conn::valid_name(name)
+        {
+            return None;
+        }
+        let epoch = self.native_lifecycle.epoch()?;
+        if self
+            .level
+            .player_uuid
+            .map(horizon_client::lan::playerdata::ints_uuid)
+            == Some(uuid)
+        {
+            return None;
+        }
+        let host = self.lan.as_ref()?;
+        if host
+            .hub
+            .guests
+            .iter()
+            .any(|g| g.uuid == uuid && g.participates_online())
+        {
+            return None;
+        }
+        if let Some(g) = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == uuid && g.dimension == level.dimension())
+        {
+            return (g.name == name).then_some(PlayerRef {
+                entity: crate::mod_api::EntityRef::new(epoch, g.entity_id as u32),
+                uuid,
+            });
+        }
+        let id = self.next_entity.checked_add(1)?;
+        let entity_id = i32::try_from(id).ok()?;
+        let motion = PlayerMotion::new(
+            self.motion,
+            horizon_core::geometry::Vec3::new(0.0, 0.0, 0.0),
+        )
+        .ok()?;
+        let host = self.lan.as_mut()?;
+        let conn = host.hub.lan.shared.next_id()?;
+        let mut guest = Guest::connectionless(conn, uuid, name.into(), entity_id, [0.0; 3], motion);
+        guest.dimension = level.dimension().to_owned();
+        host.hub.guests.push(guest);
+        host.play
+            .insert(conn, super::lan_actions::GuestPlay::default());
+        self.next_entity = id;
+        Some(PlayerRef {
+            entity: crate::mod_api::EntityRef::new(epoch, id),
+            uuid,
+        })
+    }
+
     /// Resolve an online UUID on this server. During a nested player swap,
     /// outer players whose records are displaced return None. API @API:player_read@.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
