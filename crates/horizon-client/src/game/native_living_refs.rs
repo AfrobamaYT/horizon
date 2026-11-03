@@ -25,7 +25,7 @@ fn player_slot(
     selected: usize,
     armor: &[Option<ItemStack>; 4],
     offhand: &Option<ItemStack>,
-    equipment: &horizon_client::equipment::Equipment,
+    equipment: &horizon_items::equipment::Equipment,
     slot: EquipmentSlot,
 ) -> Option<ItemStack> {
     match slot {
@@ -519,8 +519,8 @@ mod tests {
             stack("minecraft:iron_boots"),
         ];
         let offhand = stack("minecraft:shield");
-        let mut equipment = horizon_client::equipment::Equipment::default();
-        equipment.set(horizon_client::equipment::SADDLE, stack("minecraft:saddle"));
+        let mut equipment = horizon_items::equipment::Equipment::default();
+        equipment.set(horizon_items::equipment::SADDLE, stack("minecraft:saddle"));
         let at =
             |slot| player_slot(&inventory, 1, &armor, &offhand, &equipment, slot).map(|s| s.item);
         assert_eq!(

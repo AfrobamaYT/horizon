@@ -1,6 +1,8 @@
 //! `EntityEquipment`: the stack in each `EquipmentSlot` of a living entity,
-//! and its `equipment` compound (`EntityEquipment.CODEC`). Mobs, armor stands,
-//! the dragon and player holders all use it.
+//! and its `equipment` compound (`EntityEquipment.CODEC`). The host player and
+//! LAN guests hold one (body and saddle) and save through it; a mob's
+//! equipment is still kept in `Extra` fields and read out as one
+//! (`Mob::equipment_stacks`).
 use crate::item_nbt::{item_from_nbt, item_to_nbt};
 use crate::items::ItemStack;
 use horizon_world::nbt::{Compound, Tag};
@@ -9,7 +11,13 @@ use horizon_world::nbt::{Compound, Tag};
 pub const SLOT_NAMES: [&str; 8] = [
     "mainhand", "offhand", "feet", "legs", "chest", "head", "body", "saddle",
 ];
-/// The ordinals of `EquipmentSlot.BODY` and `SADDLE`.
+/// The ordinals of `EquipmentSlot`.
+pub const MAINHAND: usize = 0;
+pub const OFFHAND: usize = 1;
+pub const FEET: usize = 2;
+pub const LEGS: usize = 3;
+pub const CHEST: usize = 4;
+pub const HEAD: usize = 5;
 pub const BODY: usize = 6;
 pub const SADDLE: usize = 7;
 

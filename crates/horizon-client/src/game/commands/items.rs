@@ -141,8 +141,8 @@ impl Game<'_> {
                     add(Slot::Offhand);
                 }
                 for (i, n) in [
-                    (crate::equipment::BODY, "armor.body"),
-                    (crate::equipment::SADDLE, "saddle"),
+                    (horizon_items::equipment::BODY, "armor.body"),
+                    (horizon_items::equipment::SADDLE, "saddle"),
                 ] {
                     if matches_name(name, n) {
                         add(Slot::Equipment(i));
@@ -287,7 +287,7 @@ impl Game<'_> {
                 let old = self.equipment[*i].clone();
                 self.equipment.set(*i, stack.clone());
                 self.player_on_equip(
-                    crate::equipment::SLOT_NAMES[*i],
+                    horizon_items::equipment::SLOT_NAMES[*i],
                     old.as_ref(),
                     stack.as_ref(),
                 );

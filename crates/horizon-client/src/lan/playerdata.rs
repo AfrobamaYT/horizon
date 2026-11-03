@@ -504,7 +504,10 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     put(101, &guest.armor[2]);
     put(100, &guest.armor[3]);
     put(150, &guest.offhand);
-    for slot in [crate::equipment::BODY, crate::equipment::SADDLE] {
+    for slot in [
+        horizon_items::equipment::BODY,
+        horizon_items::equipment::SADDLE,
+    ] {
         if let Some(saved) = crate::save::saved_slot(slot) {
             put(saved, &guest.equipment[slot]);
         }
@@ -564,10 +567,11 @@ mod tests {
         let mut saddle = ItemStack::new("minecraft:saddle", 1);
         saddle.damage = 3;
         g.equipment.set(
-            crate::equipment::BODY,
+            horizon_items::equipment::BODY,
             Some(ItemStack::new("minecraft:leather_horse_armor", 1)),
         );
-        g.equipment.set(crate::equipment::SADDLE, Some(saddle));
+        g.equipment
+            .set(horizon_items::equipment::SADDLE, Some(saddle));
         g.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
         save(&g, &dir);
         let tag = read_dat(&path(&dir, 7)).unwrap();
@@ -592,9 +596,9 @@ mod tests {
         )]));
         let mut vanilla = guest();
         apply(&mut vanilla, &level);
-        assert_eq!(vanilla.equipment[crate::equipment::BODY], None);
+        assert_eq!(vanilla.equipment[horizon_items::equipment::BODY], None);
         assert_eq!(
-            vanilla.equipment[crate::equipment::SADDLE]
+            vanilla.equipment[horizon_items::equipment::SADDLE]
                 .as_ref()
                 .map(|s| &*s.item),
             Some("minecraft:saddle")

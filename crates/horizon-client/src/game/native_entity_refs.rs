@@ -733,7 +733,7 @@ pub(super) mod tests {
             assert_eq!(
                 game.lan.as_ref().unwrap().hub.guests[0]
                     .equipment
-                    .get(horizon_client::equipment::BODY)
+                    .get(horizon_items::equipment::BODY)
                     .map(|s| &*s.item),
                 Some("minecraft:iron_horse_armor")
             );

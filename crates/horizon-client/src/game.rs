@@ -2806,7 +2806,7 @@ struct Game<'a> {
     /// slots 41 and 42, saved as 151 and 152). The hands and armor stay in
     /// the fields above. Nothing in the game reads these yet; they are kept
     /// for mods and saves.
-    equipment: horizon_client::equipment::Equipment,
+    equipment: horizon_items::equipment::Equipment,
     /// `ItemStack.popTime` of the nine hotbar stacks, then the off hand: set to 5
     /// when a slot gains items, counted down each tick.
     hotbar_pop: [u8; 10],

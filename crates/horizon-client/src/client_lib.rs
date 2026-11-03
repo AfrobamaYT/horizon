@@ -162,7 +162,6 @@ pub use horizon_items::blocks;
 pub use horizon_items::bundle;
 pub use horizon_items::cooldowns;
 pub use horizon_items::enchant;
-pub use horizon_items::equipment;
 pub use horizon_items::flowers;
 pub use horizon_items::item_data;
 pub use horizon_items::items;

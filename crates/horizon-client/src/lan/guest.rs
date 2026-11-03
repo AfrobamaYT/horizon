@@ -286,7 +286,7 @@ pub struct Guest {
     pub armor: [Option<ItemStack>; 4],
     pub offhand: Option<ItemStack>,
     /// `EquipmentSlot.BODY` and `SADDLE`, kept and saved like `Game::equipment`.
-    pub equipment: crate::equipment::Equipment,
+    pub equipment: horizon_items::equipment::Equipment,
     pub selected: usize,
     pub carried: Option<ItemStack>,
     /// The inventory menu's crafting grid (2x2) and its result

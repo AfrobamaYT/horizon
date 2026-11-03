@@ -66,7 +66,7 @@ struct KeptPlayer {
     inventory: Vec<Option<ItemStack>>,
     armor: [Option<ItemStack>; 4],
     offhand: Option<ItemStack>,
-    equipment: crate::equipment::Equipment,
+    equipment: horizon_items::equipment::Equipment,
     carried: Option<ItemStack>,
 }
 

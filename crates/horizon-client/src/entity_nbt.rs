@@ -1281,13 +1281,17 @@ pub fn mob_to_nbt(
             stack.extra = m.extra.body_extra.clone();
             stack
         });
-        crate::equipment::put(&mut equipment, crate::equipment::BODY, body.as_ref());
-        crate::equipment::put(
+        horizon_items::equipment::put(
             &mut equipment,
-            crate::equipment::SADDLE,
+            horizon_items::equipment::BODY,
+            body.as_ref(),
+        );
+        horizon_items::equipment::put(
+            &mut equipment,
+            horizon_items::equipment::SADDLE,
             m.saddle_item().as_ref(),
         );
-        crate::equipment::store(map, equipment);
+        horizon_items::equipment::store(map, equipment);
     }
     tag
 }
