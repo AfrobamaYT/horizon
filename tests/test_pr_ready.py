@@ -276,24 +276,11 @@ class PrReadyTests(unittest.TestCase):
         self.assertEqual(libraries, {"core"})
         self.assertEqual(pr_ready.dependent_crates(["core"], dependencies), ["build", "core", "dev", "optional"])
 
-    def test_scope_warns_on_size_and_mixed_areas(self):
-        self.assertEqual(pr_ready.scope_warnings({"crates/horizon-client/src/game.rs", "tools/test_food_parity.py",
-                                                  "mods/horizon/src/test/java/dev/horizonlab/parity/X.java",
-                                                  "docs/native-client.md"}, 120), [])
-        self.assertEqual(pr_ready.scope_warnings({"crates/horizon-theme/src/lib.rs", "launcher/src/theme.rs"}, 10), [])
-        warnings = pr_ready.scope_warnings({"crates/horizon-client/src/game.rs", "launcher/src/main.rs",
-                                            ".github/workflows/ci.yml"}, 900)
-        self.assertEqual(len(warnings), 2)
-        self.assertIn("900 lines of code: over 500", warnings[0])
-        self.assertEqual(warnings[1], "mixes CI, game, launcher")
-
-    def test_documentation_and_tests_are_not_counted_in_the_size(self):
-        self.assertTrue(pr_ready.reviewed("tools/pr_ready.py"))
-        self.assertTrue(pr_ready.reviewed("crates/horizon-client/src/game.rs"))
-        self.assertFalse(pr_ready.reviewed("CONTRIBUTING.md"))
-        self.assertFalse(pr_ready.reviewed("tests/test_pr_ready.py"))
-        self.assertFalse(pr_ready.reviewed("tools/test_food_parity.py"))
-        self.assertFalse(pr_ready.reviewed("crates/horizon-core/tests/jmath.rs"))
+    def test_scope_warns_on_mixed_areas(self):
+        self.assertEqual(pr_ready.scope_warnings({"crates/horizon-theme/src/lib.rs", "launcher/src/theme.rs"}), [])
+        self.assertEqual(pr_ready.scope_warnings({"crates/horizon-client/src/game.rs", "launcher/src/main.rs",
+                                                  ".github/workflows/ci.yml"}),
+                         ["mixes CI, game, launcher"])
 
     def test_cargo_lock_changes_only_with_a_manifest(self):
         self.assertIsNone(pr_ready.lock_problem({"crates/horizon-core/src/lib.rs"}))

@@ -51,11 +51,14 @@ impl Game<'_> {
     }
     /// `Entity.startRiding` for two mobs: false when a mod canceled it.
     pub(super) fn try_mount_mob(&mut self, rider: u32, vehicle: u32) -> bool {
-        if !self.native_mob_may_ride(rider, vehicle, true) {
-            return false;
-        }
-        riders::link(&mut self.mobs, rider, vehicle);
-        true
+        let vehicle = if self.boats.iter().any(|b| b.id == vehicle) {
+            super::commands::Target::Boat(vehicle)
+        } else if self.carts.iter().any(|c| c.id == vehicle) {
+            super::commands::Target::Cart(vehicle)
+        } else {
+            super::commands::Target::Mob(vehicle)
+        };
+        self.start_riding_target(super::commands::Target::Mob(rider), vehicle, true)
     }
     /// Riders sit on their vehicles (`Entity.positionRider`), mobs or boats,
     /// and let go when the vehicle dies or is gone.
