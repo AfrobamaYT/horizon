@@ -593,10 +593,11 @@ impl Game<'_> {
             (true, true) => {
                 m.extra.set_body_stack(None);
             }
-            (false, false) => m.extra.armor[0] = Some(stack),
+            (false, false) => m
+                .extra
+                .set_slot_stack(horizon_items::equipment::HEAD, Some(stack)),
             (false, true) => {
-                m.extra.head = None;
-                m.extra.armor[0] = None;
+                m.extra.set_slot_stack(horizon_items::equipment::HEAD, None);
             }
         }
         if broke {
@@ -867,7 +868,7 @@ impl Game<'_> {
                     "baby": m.is_baby(),
                     "target": m.ai.target.map(|t| format!("{t:?}")),
                     "goals": m.ai.goals.running_names(),
-                    "held": m.extra.main_hand.as_deref(),
+                    "held": m.extra.main_hand_id(),
                     "mount": m.extra.mount,
                     "rider": m.extra.rider,
                     // A player's input this tick, and whether it steers.
@@ -891,7 +892,7 @@ impl Game<'_> {
                     "sitting": m.extra.sitting,
                     "temper": m.extra.variant3,
                     "chested": m.extra.chested,
-                    "head": m.extra.head.as_deref(),
+                    "head": m.extra.head_id(),
                     "body": m.extra.body_id(),
                     "warden": horizon_client::mobs::warden::describe(m),
                 });
@@ -3589,7 +3590,7 @@ impl Game<'_> {
             // Fox.getBreedOffspring runs no finalizeSpawn: nothing in the
             // baby fox's mouth.
             if p.species() == Species::Fox {
-                child.extra.main_hand = None;
+                child.extra.set_main_hand(None);
             }
             // Fox.FoxBreedGoal.breed: the baby trusts the players who fed its
             // parents into love.
@@ -7220,7 +7221,7 @@ impl Game<'_> {
                 // PlayerRenderer's CapeLayer, WingsLayer, ParrotOnShoulderLayer
                 // and SpinAttackEffectLayer. Only the cape hides with the body;
                 // the others have no `isInvisible` check.
-                let chest = mob.extra.chest.as_deref();
+                let chest = mob.extra.slot_id(horizon_items::equipment::CHEST);
                 if !layers_only {
                     self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
                 }

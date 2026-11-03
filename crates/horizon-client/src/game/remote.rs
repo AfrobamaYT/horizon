@@ -4041,7 +4041,12 @@ impl Game<'_> {
                 if p.event == 55
                     && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
-                    std::mem::swap(&mut m.extra.main_hand, &mut m.extra.off_hand);
+                    let (main, off) = (
+                        m.extra.take_slot_id(horizon_items::equipment::MAINHAND),
+                        m.extra.take_slot_id(horizon_items::equipment::OFFHAND),
+                    );
+                    m.extra.set_main_hand(off);
+                    m.extra.set_slot_id(horizon_items::equipment::OFFHAND, main);
                 }
                 // LivingEntity.handleEntityEvent 47 to 52, 65 and 68: an
                 // equipped item broke (onEquippedItemBroken).
@@ -6565,22 +6570,21 @@ impl Game<'_> {
                 // AvatarRenderer.getArmPose: the used item's BLOCK animation
                 // (an item with `blocks_attacks`) raises the arm.
                 let used = if m.extra.using_off_hand {
-                    &m.extra.off_hand
+                    m.extra.off_hand_id()
                 } else {
-                    &m.extra.main_hand
+                    m.extra.main_hand_id()
                 };
                 m.extra.blocking = m.extra.using_item > 0
                     && used
-                        .as_ref()
                         .and_then(|i| world_items!(self).get(i))
                         .is_some_and(|i| i.blocks_attacks.is_some());
             }
             if m.extra.using_item > 0 {
                 if player {
                     let item = if m.extra.using_off_hand {
-                        m.extra.off_hand.clone()
+                        m.extra.off_hand_id().map(Arc::<str>::from)
                     } else {
-                        m.extra.main_hand.clone()
+                        m.extra.main_hand_id().map(Arc::<str>::from)
                     };
                     if let Some(item) = item {
                         let eye = m.eye_height();
@@ -9905,14 +9909,14 @@ impl Game<'_> {
                 .filter(|m| r.level_players.contains_key(&(m.id as i32)))
                 .map(|m| {
                     let e = &m.extra;
-                    let armor = [&e.head, &e.chest, &e.legs, &e.feet].map(|s| s.as_deref());
+                    let armor = horizon_items::equipment::ARMOR.map(|slot| e.slot_id(slot));
                     serde_json::json!({
                         "id": m.id,
                         "swinging": m.ai.swinging,
                         "using": m.extra.using_item,
                         "armor": armor,
-                        "main_hand": e.main_hand.as_deref(),
-                        "off_hand": e.off_hand.as_deref(),
+                        "main_hand": e.main_hand_id(),
+                        "off_hand": e.off_hand_id(),
                     })
                 })
                 .collect::<Vec<_>>(),

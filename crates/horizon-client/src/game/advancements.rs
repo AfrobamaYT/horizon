@@ -529,16 +529,14 @@ impl Game<'_> {
     }
     pub(super) fn mob_entity(&self, m: &horizon_client::mobs::Mob) -> EntityView {
         // mainhand, offhand, head, chest, legs, feet.
-        let slot = |i: &Option<std::sync::Arc<str>>| {
-            i.as_ref().map(|id| item_view(&ItemStack::new(id, 1)))
-        };
+        let slot = |i: Option<&str>| i.map(|id| item_view(&ItemStack::new(id, 1)));
         let mut equipment: [Option<ItemView>; 7] = Default::default();
-        equipment[0] = slot(&m.extra.main_hand);
-        equipment[1] = slot(&m.extra.off_hand);
-        equipment[2] = slot(&m.extra.head);
-        equipment[3] = slot(&m.extra.chest);
-        equipment[4] = slot(&m.extra.legs);
-        equipment[5] = slot(&m.extra.feet);
+        equipment[0] = slot(m.extra.main_hand_id());
+        equipment[1] = slot(m.extra.off_hand_id());
+        equipment[2] = slot(m.extra.head_id());
+        equipment[3] = slot(m.extra.slot_id(horizon_items::equipment::CHEST));
+        equipment[4] = slot(m.extra.slot_id(horizon_items::equipment::LEGS));
+        equipment[5] = slot(m.extra.slot_id(horizon_items::equipment::FEET));
         equipment[6] = m.extra.body_stack().map(item_view);
         EntityView {
             kind: m.kind.id.clone(),

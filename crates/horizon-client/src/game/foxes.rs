@@ -35,8 +35,7 @@ impl Game<'_> {
                     let item_food = self.fox_food(&e.stack.item);
                     let held_food = self.mobs[i]
                         .extra
-                        .main_hand
-                        .as_deref()
+                        .main_hand_id()
                         .is_some_and(|held| self.fox_food(held));
                     if !fox::can_hold_item(&self.mobs[i], item_food, held_food) {
                         j += 1;
@@ -87,7 +86,7 @@ impl Game<'_> {
                     if e.pickup_delay > 0
                         || e.stack.count == 0
                         || !reach.intersects(e.bounds())
-                        || self.mobs[i].extra.main_hand.is_some()
+                        || self.mobs[i].extra.main_hand_id().is_some()
                     {
                         j += 1;
                         continue;

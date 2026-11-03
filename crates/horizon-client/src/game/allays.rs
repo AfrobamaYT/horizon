@@ -275,7 +275,7 @@ impl Game<'_> {
             return true;
         }
         let acting = self.acting_uuid();
-        let holds = m.extra.main_hand.is_some();
+        let holds = m.extra.main_hand_id().is_some();
         if !holds && let Some(mut given) = item.cloned() {
             let m = &mut self.mobs[index];
             // `Allay.mobInteract` hands over one item, its components and all.
