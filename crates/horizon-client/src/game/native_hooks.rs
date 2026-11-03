@@ -4807,7 +4807,7 @@ impl Game<'_> {
     /// falling `distance` blocks at damage multiplier `multiplier` while allowed to fly (a
     /// creative or spectator player walking), so `Player.causeFallDamage` returned early
     /// and nothing was hurt. Listen only. Once for each landing, after the fall's
-    /// block reaction. The player's state is swapped in. Server-side. It fires once per landing, not per tick.
+    /// block reaction. The player's state is swapped in. Server-side.
     pub(super) fn native_player_flyable_fall(
         &mut self,
         player: u128,
