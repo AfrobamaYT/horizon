@@ -34,7 +34,56 @@ pub struct Census {
 
 const NOT_MODS: [&str; 5] = ["minecraft", "neoforge", "forge", "fabricloader", "java"];
 
+/// The loader whose metadata identifies a jar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JarLoader {
+    NeoForge,
+    Fabric,
+}
+
+/// Identity read from the jar itself, never inferred from its filename.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JarIdentity {
+    pub loader: JarLoader,
+    pub id: String,
+    pub version: String,
+}
+
+/// Read a NeoForge or Fabric jar's own identity, refusing missing or invalid metadata.
+pub fn read_identity(path: &Path) -> Result<JarIdentity, String> {
+    let (info, loader) = read_inner(path, true)?;
+    let loader = loader.expect("strict metadata always has a loader");
+    let bytes = info.mod_id.as_bytes();
+    let valid_id = (2..=64).contains(&bytes.len())
+        && match loader {
+            JarLoader::Fabric => {
+                bytes[0].is_ascii_alphabetic()
+                    && bytes
+                        .iter()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(b))
+            }
+            JarLoader::NeoForge => bytes
+                .iter()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_'),
+        };
+    if !valid_id || info.version.is_empty() || info.version.contains("${") {
+        return Err(format!(
+            "{}: invalid jar identity or version",
+            path.display()
+        ));
+    }
+    Ok(JarIdentity {
+        loader,
+        id: info.mod_id,
+        version: info.version,
+    })
+}
+
 pub fn read(path: &Path) -> Result<JarInfo, String> {
+    read_inner(path, false).map(|(info, _)| info)
+}
+
+fn read_inner(path: &Path, strict: bool) -> Result<(JarInfo, Option<JarLoader>), String> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", path.display()))?;
     let text = |zip: &mut zip::ZipArchive<fs::File>, name: &str| -> Option<String> {
@@ -42,24 +91,40 @@ pub fn read(path: &Path) -> Result<JarInfo, String> {
         zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
         Some(s)
     };
-    let tomls: Vec<String> = ["META-INF/neoforge.mods.toml", "META-INF/mods.toml"]
-        .iter()
-        .filter_map(|n| text(&mut zip, n))
-        .collect();
-    let mut info = if !tomls.is_empty() {
-        metadata(&tomls)?
-    } else if let Some(t) = text(&mut zip, "fabric.mod.json") {
-        fabric(&t)?
-    } else if let Some(t) = text(&mut zip, "mcmod.info") {
-        mcmod_info(&t)?
+    let neo = text(&mut zip, "META-INF/neoforge.mods.toml");
+    let forge = text(&mut zip, "META-INF/mods.toml");
+    let (mut info, loader) = if strict {
+        if let Some(t) = neo {
+            (mods_toml(&t)?, Some(JarLoader::NeoForge))
+        } else if let Some(t) = text(&mut zip, "fabric.mod.json") {
+            (fabric(&t)?, Some(JarLoader::Fabric))
+        } else {
+            return Err(format!(
+                "{}: no NeoForge or Fabric metadata",
+                path.display()
+            ));
+        }
     } else {
-        JarInfo::default()
+        let tomls: Vec<String> = neo.into_iter().chain(forge).collect();
+        let info = if !tomls.is_empty() {
+            metadata(&tomls)?
+        } else if let Some(t) = text(&mut zip, "fabric.mod.json") {
+            fabric(&t)?
+        } else if let Some(t) = text(&mut zip, "mcmod.info") {
+            mcmod_info(&t)?
+        } else {
+            JarInfo::default()
+        };
+        (info, None)
     };
     // `version = "${file.jarVersion}"` is filled in from the manifest at load.
     if info.version.starts_with("${") {
         info.version = text(&mut zip, "META-INF/MANIFEST.MF")
             .and_then(|m| manifest_value(&m, "Implementation-Version"))
             .unwrap_or_default();
+    }
+    if strict {
+        return Ok((info, loader));
     }
     let names: Vec<String> = zip
         .file_names()
@@ -73,7 +138,7 @@ pub fn read(path: &Path) -> Result<JarInfo, String> {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
     }
-    Ok(info)
+    Ok((info, loader))
 }
 
 /// A main-section attribute of `META-INF/MANIFEST.MF`.
@@ -325,6 +390,60 @@ mod tests {
         }
         archive.finish().unwrap();
         SyntheticJar(path, dir)
+    }
+
+    #[test]
+    fn strict_identity_uses_loader_metadata_and_never_filename() {
+        let fabric = synthetic_jar(
+            "different-filename",
+            &[("fabric.mod.json", r#"{"id":"fabric-api","version":"1.2"}"#)],
+        );
+        assert_eq!(
+            read_identity(&fabric.0).unwrap(),
+            JarIdentity {
+                loader: JarLoader::Fabric,
+                id: "fabric-api".into(),
+                version: "1.2".into()
+            }
+        );
+        let neo = synthetic_jar(
+            "neo",
+            &[
+                (
+                    "META-INF/neoforge.mods.toml",
+                    "[[mods]]\nmodId = 'example_mod'\nversion = '${file.jarVersion}'\n",
+                ),
+                (
+                    "META-INF/MANIFEST.MF",
+                    "Manifest-Version: 1.0\nImplementation-Version: 3.2\n\n",
+                ),
+            ],
+        );
+        let identity = read_identity(&neo.0).unwrap();
+        assert_eq!(
+            (
+                identity.loader,
+                identity.id.as_str(),
+                identity.version.as_str()
+            ),
+            (JarLoader::NeoForge, "example_mod", "3.2")
+        );
+        for (stem, entries) in [
+            ("missing", vec![]),
+            ("no-id", vec![("fabric.mod.json", r#"{"version":"1"}"#)]),
+            (
+                "bad-id",
+                vec![("fabric.mod.json", r#"{"id":"-bad","version":"1"}"#)],
+            ),
+            ("no-version", vec![("fabric.mod.json", r#"{"id":"good"}"#)]),
+            (
+                "legacy",
+                vec![("mcmod.info", r#"[{"modid":"legacy","version":"1"}]"#)],
+            ),
+        ] {
+            let jar = synthetic_jar(stem, &entries);
+            assert!(read_identity(&jar.0).is_err(), "{stem}");
+        }
     }
 
     #[test]
