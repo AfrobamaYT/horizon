@@ -4,7 +4,7 @@
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread.
 use super::{
     BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, EntityCapabilityKey,
-    EntityRef, Hooks, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, PlaceProvider,
+    EntityRef, Host, ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, ModEntry, PlaceProvider,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -20,6 +20,8 @@ use std::{
 
 /// A part, with the mod that attached it.
 pub struct Attached<P: ?Sized> {
+    /// The mod's bundle id, retained for diagnostics after registration.
+    pub(super) mod_id: &'static str,
     /// The mod's place in dispatch order.
     pub(super) mod_index: usize,
     /// Its place in its mod's registrations: a mod's parts on one thing keep this order, key or
@@ -34,6 +36,7 @@ pub struct Attached<P: ?Sized> {
 impl<P: ?Sized> Clone for Attached<P> {
     fn clone(&self) -> Self {
         Self {
+            mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.order,
             kind: self.kind,
@@ -64,7 +67,7 @@ pub struct Parts {
     /// order.
     entity_capabilities: Capabilities,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
-    place_providers: HashMap<&'static str, (usize, Arc<dyn PlaceProvider>)>,
+    place_providers: HashMap<&'static str, (&'static str, Arc<dyn PlaceProvider>)>,
 }
 
 type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
@@ -73,7 +76,7 @@ type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>
 /// [`EntityProvider`] of the capability's handler trait.
 #[derive(Clone)]
 pub(crate) struct CapabilityPart {
-    mod_index: usize,
+    mod_id: &'static str,
     /// The handler type it gives, for refusing a capability name answered with two.
     type_name: &'static str,
     /// Asked ahead of the game's own provider.
@@ -106,7 +109,7 @@ struct TagParts {
     items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
 }
 
-/// What every mod's [`Hooks::register`] attached.
+/// What every mod's [`Hooks::register`](super::Hooks::register) attached.
 #[derive(Default)]
 struct Installed {
     keys: Parts,
@@ -223,8 +226,7 @@ fn unknown_keys<'a, P: ?Sized>(
             list.iter().map(move |part| {
                 format!(
                     "{} attached {} to {scope} {id}, which this game does not have",
-                    super::mod_name(part.mod_index),
-                    part.type_name
+                    part.mod_id, part.type_name
                 )
             })
         })
@@ -242,7 +244,7 @@ fn add_tagged<P: ?Sized>(
         let Some(members) = tags.get(&**tag) else {
             log::warn!(
                 "{} attached {} to {scope} tag #{tag}, which does not exist",
-                super::mod_name(part.mod_index),
+                part.mod_id,
                 part.type_name
             );
             continue;
@@ -254,9 +256,13 @@ fn add_tagged<P: ?Sized>(
                     log::warn!(
                         "{} is attached to {member} twice, by {} and {} (#{tag}); {}'s is kept",
                         part.type_name,
-                        super::mod_name(other.mod_index),
-                        super::mod_name(part.mod_index),
-                        super::mod_name(other.mod_index.min(part.mod_index)),
+                        other.mod_id,
+                        part.mod_id,
+                        if other.mod_index < part.mod_index {
+                            other.mod_id
+                        } else {
+                            part.mod_id
+                        },
                     );
                     if part.mod_index < other.mod_index {
                         *other = part.clone();
@@ -365,7 +371,7 @@ pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
                 let provider = part.provider.downcast_ref::<Arc<P>>()?;
                 Some(Capability {
                     handler: call(provider, host)?,
-                    owner: Some(part.mod_index),
+                    owner: Some(part.mod_id),
                 })
             })
     };
@@ -423,7 +429,7 @@ impl<T: ?Sized + 'static> BlockEntityProviders<T> {
 }
 
 /// The mod's provider of the item places named `provider`, with the mod's index.
-pub(crate) fn place_provider(provider: &str) -> Option<(usize, Arc<dyn PlaceProvider>)> {
+pub(crate) fn place_provider(provider: &str) -> Option<(&'static str, Arc<dyn PlaceProvider>)> {
     let (owner, provider) = INSTALLED.get()?.keys.place_providers.get(provider)?;
     Some((*owner, provider.clone()))
 }
@@ -438,10 +444,10 @@ fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
-/// What a mod's [`Hooks::register`] attaches its parts with. A thing takes one part of each
+/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with. A thing takes one part of each
 /// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-#[derive(Default)]
 pub struct Registrar {
+    mod_id: &'static str,
     mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
     registered: usize,
@@ -451,6 +457,17 @@ pub struct Registrar {
 }
 
 impl Registrar {
+    fn new(mod_id: &'static str) -> Self {
+        Self {
+            mod_id,
+            mod_index: 0,
+            registered: 0,
+            parts: Parts::default(),
+            tags: TagParts::default(),
+            refused: Vec::new(),
+        }
+    }
+
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
     pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
         self.attach::<P, dyn BlockPart>(|p| &mut p.blocks, block, Arc::new(part));
@@ -589,21 +606,20 @@ impl Registrar {
         if !namespaced(name) {
             self.refused.push(format!(
                 "{} provides item places {name:?}, which is not a namespaced name",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return;
         }
         if let Some((other, _)) = self.parts.place_providers.get(name) {
             self.refused.push(format!(
                 "item places {name} are provided twice, by {} and {}",
-                super::mod_name(*other),
-                super::mod_name(self.mod_index)
+                *other, self.mod_id
             ));
             return;
         }
         self.parts
             .place_providers
-            .insert(name, (self.mod_index, provider));
+            .insert(name, (self.mod_id, provider));
     }
 
     /// Adds `provider` for capability `name` and `id` to `table`. Refused for a capability name
@@ -619,7 +635,7 @@ impl Registrar {
         before_game: bool,
         provider: Arc<P>,
     ) {
-        let me = super::mod_name(self.mod_index);
+        let me = self.mod_id;
         if !namespaced(name) {
             self.refused.push(format!(
                 "{me} answered capability {name:?}, which is not a namespaced name"
@@ -639,7 +655,7 @@ impl Registrar {
             self.refused.push(format!(
                 "capability {name} is answered with two handler types, {} by {} and {} by {me}",
                 other.type_name,
-                super::mod_name(other.mod_index),
+                other.mod_id,
                 type_name::<T>(),
             ));
             return;
@@ -648,7 +664,7 @@ impl Registrar {
             .entry(id.into())
             .or_default()
             .push(CapabilityPart {
-                mod_index: self.mod_index,
+                mod_id: self.mod_id,
                 type_name: type_name::<T>(),
                 before_game,
                 provider: Arc::new(provider),
@@ -669,7 +685,7 @@ impl Registrar {
         if tag.starts_with('#') || !namespaced(tag) {
             self.refused.push(format!(
                 "{} attached {name} to tag {tag:?}, which is not a namespaced tag name (write it without #)",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return None;
         }
@@ -677,6 +693,7 @@ impl Registrar {
         Some((
             tag.into(),
             Attached {
+                mod_id: self.mod_id,
                 mod_index: self.mod_index,
                 order: self.registered,
                 kind: TypeId::of::<K>(),
@@ -697,7 +714,7 @@ impl Registrar {
         if !namespaced(id) {
             self.refused.push(format!(
                 "{} attached {name} to {id:?}, which is not a namespaced id",
-                super::mod_name(self.mod_index)
+                self.mod_id
             ));
             return false;
         }
@@ -705,13 +722,13 @@ impl Registrar {
         if let Some(other) = list.iter().find(|a| a.kind == TypeId::of::<K>()) {
             self.refused.push(format!(
                 "{name} is attached to {id} twice, by {} and {}",
-                super::mod_name(other.mod_index),
-                super::mod_name(self.mod_index)
+                other.mod_id, self.mod_id
             ));
             return false;
         }
         self.registered += 1;
         list.push(Attached {
+            mod_id: self.mod_id,
             mod_index: self.mod_index,
             order: self.registered,
             kind: TypeId::of::<K>(),
@@ -727,20 +744,25 @@ fn namespaced(id: &str) -> bool {
         .is_some_and(|(namespace, path)| !namespace.is_empty() && !path.is_empty())
 }
 
-/// Builds the parts from every mod's [`Hooks::register`], in dispatch order. Once, at startup;
+/// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
-pub(crate) fn install_parts(mods: &[Box<dyn Hooks>]) -> Result<(), Vec<String>> {
-    let mut registrar = Registrar::default();
-    for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
-        registrar.mod_index = index;
-        hooks.register(&mut registrar);
-    }
-    if !registrar.refused.is_empty() {
-        return Err(registrar.refused);
-    }
-    let installed = Installed {
-        keys: registrar.parts,
-        tags: registrar.tags,
+pub(crate) fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
+    let installed = if let Some(first) = mods.first() {
+        let mut registrar = Registrar::new(first.id);
+        for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
+            registrar.mod_id = mods[index].id;
+            registrar.mod_index = index;
+            hooks.register(&mut registrar);
+        }
+        if !registrar.refused.is_empty() {
+            return Err(registrar.refused);
+        }
+        Installed {
+            keys: registrar.parts,
+            tags: registrar.tags,
+        }
+    } else {
+        Installed::default()
     };
     if INSTALLED.set(installed).is_err() {
         log::warn!("Mod parts already installed; keeping the first table");
@@ -824,6 +846,9 @@ pub(crate) mod tests {
             r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, place| {
                 Some(Box::new(Pouch(place.clone())))
             });
+            r.item_capability(&ITEM_ENERGY, "test:cell", |_, place| {
+                Some(Box::new(Cell(place.clone())))
+            });
             r.item_capability_before_game(&ITEM_ITEMS, "test:bag", |_, place| {
                 Some(Box::new(Bag(place.clone())))
             });
@@ -865,6 +890,14 @@ pub(crate) mod tests {
             ] {
                 r.block_entity_capability_before_game(&FLUIDS, id, move |_, at| {
                     Some(Box::new(ModTank { at, lie }))
+                });
+            }
+            for (id, lie) in [
+                ("test:battery_gives_more", Lie::GivesMore),
+                ("test:battery_takes_more", Lie::TakesMore),
+            ] {
+                r.block_entity_capability_before_game(&ENERGY, id, move |_, at| {
+                    Some(Box::new(ModBattery { at, lie }))
                 });
             }
             r.block_entity_capability(&CHEMICALS, "test:chem_tank", |_, at| {
@@ -1502,7 +1535,7 @@ pub(crate) mod tests {
         // is asked nothing.
         assert!(entity(2).capability(host, &ENTITY_ITEMS).is_none());
         let robot = entity(3).capability(host, &ENTITY_ITEMS).unwrap();
-        assert_eq!((robot.owner(), robot.size(host)), (mod_name(0), 3));
+        assert_eq!((robot.owner(), robot.size(host)), ("doubler".to_owned(), 3));
         assert!(entity(4).capability(host, &ENTITY_ITEMS).is_none());
     }
 
@@ -1816,8 +1849,11 @@ pub(crate) mod tests {
 
     /// The test mods, their parts installed, on a thread that runs a game.
     pub(crate) fn game_thread() -> super::super::Mods {
-        let mods: super::super::Mods =
-            vec![Box::new(Doubler) as Box<dyn Hooks>, Box::new(Chemist)].into();
+        let mods: super::super::Mods = vec![
+            ModEntry::new("doubler", Box::new(Doubler)),
+            ModEntry::new("chemist", Box::new(Chemist)),
+        ]
+        .into();
         super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
@@ -1905,12 +1941,14 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].starts_with("doubler attached "));
         assert!(refused[0].contains("Gauge to block test:gauge, which this game does not have"));
     }
 
     #[test]
     fn a_tag_giving_a_part_twice_keeps_the_earlier_mod() {
         let part = |mod_index| Attached::<dyn BlockPart> {
+            mod_id: ["earlier", "later"][mod_index],
             mod_index,
             order: 0,
             kind: TypeId::of::<Gauge>(),
@@ -2036,6 +2074,75 @@ pub(crate) mod tests {
         player.main_hand = Some(stack("minecraft:stone", 1, 0));
         let host: &mut dyn Host = &mut player;
         assert!(HAND.capability(host, &ITEM_ITEMS).is_none());
+    }
+
+    /// A mod's energy cell at `.0`: up to 1000, kept in the cell's own stack (its damage, for the
+    /// test), so the handler holds nothing.
+    struct Cell(ItemPlace);
+    impl Cell {
+        /// The cell here rewritten as holding `energy`: `moved` when that goes through, else 0.
+        fn rewrite(&self, host: &mut dyn Host, tx: &Transaction, energy: u32, moved: u32) -> u32 {
+            let charged = ItemResource::of(&stack("test:cell", 1, energy));
+            match self.0.exchange(host, tx, &charged, 1) {
+                1 => moved,
+                _ => 0,
+            }
+        }
+    }
+    impl EnergyHandler for Cell {
+        fn amount(&self, host: &mut dyn Host) -> u32 {
+            self.0.stack(host).map_or(0, |cell| cell.damage)
+        }
+        fn capacity(&self, _: &mut dyn Host) -> u32 {
+            1000
+        }
+        fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            match amount.min(1000 - held) {
+                0 => 0,
+                went => self.rewrite(host, tx, held + went, went),
+            }
+        }
+        fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let held = self.amount(host);
+            match amount.min(held) {
+                0 => 0,
+                came => self.rewrite(host, tx, held - came, came),
+            }
+        }
+    }
+
+    #[test]
+    fn an_items_energy_moves_through_its_place_and_a_charged_one_splits_off_its_stack() {
+        game_thread();
+        let slot = ItemPlace::PlayerSlot { player: 1, slot: 9 };
+        let mut player = Player {
+            main_hand: Some(stack("test:cell", 2, 600)),
+            ..Player::default()
+        };
+        player.slots.insert(9, stack("test:cell", 1, 900));
+        let host: &mut dyn Host = &mut player;
+        let hand = HAND.capability(host, &ITEM_ENERGY).unwrap();
+        let other = slot.capability(host, &ITEM_ENERGY).unwrap();
+        // The other cell has room for 100: one of the two in the hand gives that and splits off.
+        let moved = host.transaction(|host, tx| move_energy(host, &hand, &other, 400, tx));
+        assert_eq!(moved, Ok(100));
+        assert_eq!(player.slots[&9], stack("test:cell", 1, 1000));
+        assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
+        assert_eq!(player.given, [stack("test:cell", 1, 500)]);
+        // Aborted, a move leaves both as they were.
+        let host: &mut dyn Host = &mut player;
+        let aborted = host.transaction(|host, tx| {
+            let moved = move_energy(host, &other, &hand, 400, tx);
+            Err::<(), _>(moved)
+        });
+        assert_eq!(aborted, Err(Ok(400)));
+        assert_eq!(player.slots[&9], stack("test:cell", 1, 1000));
+        assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
+        // An item no mod answers for has no energy.
+        player.main_hand = Some(stick());
+        let host: &mut dyn Host = &mut player;
+        assert!(HAND.capability(host, &ITEM_ENERGY).is_none());
     }
 
     #[test]
@@ -2285,14 +2392,14 @@ pub(crate) mod tests {
         let from = here().capability(host, &ITEMS, FROM, None).unwrap();
         let liar: Capability<dyn ResourceHandler<ItemResource>> = Capability {
             handler: Box::new(TakesMore),
-            owner: Some(0),
+            owner: Some("doubler"),
         };
         let moved =
             host.transaction(|host, tx| move_resources(host, &from, &liar, |_| true, 64, tx));
-        let owner = mod_name(0);
+        let owner = "doubler".to_owned();
         assert_eq!(moved, Err(Overanswered { owner }));
         assert_eq!(world.from[0], Some(stack("minecraft:stick", 5, 0)));
-        assert!(super::super::item_place::warned_about(&mod_name(0)));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -2529,9 +2636,7 @@ pub(crate) mod tests {
         // Offered 2 apples, it keeps none and answers 7 taken: undone, and the slot stays empty.
         assert_eq!(insert(&mut shelf_, &shelf_slot(1), apples(2)), 0);
         assert_eq!(shelf_.slots, [Some(apples(10)), None, None]);
-        assert!(super::super::item_place::warned_about(
-            &super::super::mod_name(0)
-        ));
+        assert!(super::super::item_place::warned_about("doubler"));
     }
 
     #[test]
@@ -2797,22 +2902,24 @@ pub(crate) mod tests {
             })
             .unwrap();
             assert!(p.given.is_empty());
-            assert!(super::super::super::item_place::warned_about(
-                &super::super::super::mod_name(0)
-            ));
+            assert!(super::super::super::item_place::warned_about("doubler"));
         }
     }
 
     #[test]
     fn a_place_provider_given_twice_is_refused() {
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("first");
         r.place_provider("test:charms", Arc::new(Charms));
+        r.mod_id = "second";
         r.mod_index = 1;
         r.place_provider("test:charms", Arc::new(Charms));
         r.place_provider("charms", Arc::new(Charms));
         r.block_entity_capability(&ITEMS, "pipe", |_, at| Some(Box::new(Pipe(at))));
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("item places test:charms are provided twice"));
+        assert!(
+            r.refused[0]
+                .contains("item places test:charms are provided twice, by first and second")
+        );
         assert!(r.refused[1].contains("not a namespaced name"));
         assert!(r.refused[2].contains("not a namespaced id"));
     }
@@ -2826,10 +2933,11 @@ pub(crate) mod tests {
             CapabilityKey::new("test:chemical");
         const UNNAMESPACED: CapabilityKey<dyn ResourceHandler<Chemical>> =
             CapabilityKey::new("chemical");
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("first");
         r.block_entity_capability(&CHEMICALS, "test:chem_tank", |_, at| {
             Some(Box::new(ChemTank(at)))
         });
+        r.mod_id = "second";
         r.mod_index = 1;
         r.block_entity_capability(&NOT_CHEMICALS, "test:chem_vat", |_, at| {
             Some(Box::new(ModTank { at, lie: None }))
@@ -2841,7 +2949,6 @@ pub(crate) mod tests {
             Some(Box::new(ChemTank(at)))
         });
         assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
-        let (zero, one) = (mod_name(0), mod_name(1));
         let two_types = &r.refused[0];
         assert!(
             two_types.starts_with("capability test:chemical is answered with two handler types")
@@ -2849,11 +2956,11 @@ pub(crate) mod tests {
         let chemicals = type_name::<dyn ResourceHandler<Chemical>>();
         let fluids = type_name::<dyn ResourceHandler<FluidResource>>();
         assert!(
-            two_types.contains(&format!("{chemicals} by {zero}")),
+            two_types.contains(&format!("{chemicals} by first")),
             "{two_types}"
         );
         assert!(
-            two_types.contains(&format!("{fluids} by {one}")),
+            two_types.contains(&format!("{fluids} by second")),
             "{two_types}"
         );
         assert!(r.refused[1].contains("capability \"chemical\", which is not a namespaced name"));
@@ -3344,16 +3451,162 @@ pub(crate) mod tests {
                 let second = move_resources(host, &source, &tank, |_| true, 300, tx)?;
                 Ok(first + second)
             });
-            let owner = mod_name(0);
+            let owner = "doubler".to_owned();
             assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
             let held = [SOURCE, OTHER, TANK].map(|pos| world.held(pos));
             assert_eq!(held, [water(1000), water(1000), None], "{liar}");
         }
     }
 
+    /// A mod's battery: the game's at its position, misanswering by 100 as `lie` says.
+    struct ModBattery {
+        at: BlockSide,
+        lie: Lie,
+    }
+    impl EnergyHandler for ModBattery {
+        fn amount(&self, host: &mut dyn Host) -> u32 {
+            host.energy_amount(self.at).unwrap_or(0)
+        }
+        fn capacity(&self, host: &mut dyn Host) -> u32 {
+            host.energy_capacity(self.at)
+        }
+        fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let went = host.energy_insert(self.at, amount, tx);
+            match self.lie {
+                Lie::TakesMore => went + 100,
+                Lie::GivesMore => went,
+            }
+        }
+        fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let more = match self.lie {
+                Lie::GivesMore => 100,
+                Lie::TakesMore => 0,
+            };
+            host.energy_extract(self.at, amount + more, tx)
+        }
+    }
+
+    /// Batteries as the game answers them, by position: what each holds, and the most one
+    /// insert moves, of a capacity of 1000; and the mod block entity types standing at some.
+    #[derive(Clone, Default)]
+    struct EnergyWorld {
+        batteries: HashMap<[i32; 3], (u32, u32)>,
+        types: HashMap<[i32; 3], &'static str>,
+        kept: Vec<Self>,
+    }
+    impl EnergyWorld {
+        fn amounts(&self, at: &[[i32; 3]]) -> Vec<u32> {
+            at.iter().map(|pos| self.batteries[pos].0).collect()
+        }
+    }
+    impl Journal for EnergyWorld {
+        fn kept(&mut self) -> &mut Vec<Self> {
+            &mut self.kept
+        }
+    }
+    impl Host for EnergyWorld {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
+        }
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
+        }
+        fn block_entity_kind(
+            &self,
+            BlockEntityRef { position: pos, .. }: BlockEntityRef,
+        ) -> Option<&str> {
+            self.types.get(&pos).copied()
+        }
+        fn energy_amount(&self, BlockSide { pos, .. }: BlockSide) -> Option<u32> {
+            Some(self.batteries.get(&pos)?.0)
+        }
+        fn energy_capacity(&self, _: BlockSide) -> u32 {
+            1000
+        }
+        fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
+            let Some((held, limit)) = self.batteries.get_mut(&at.pos) else {
+                return 0;
+            };
+            let went = amount.min(*limit).min(1000 - *held);
+            *held += went;
+            went
+        }
+        fn energy_extract(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
+            let Some((held, _)) = self.batteries.get_mut(&at.pos) else {
+                return 0;
+            };
+            let came = amount.min(*held);
+            *held -= came;
+            came
+        }
+    }
+
+    #[test]
+    fn an_energy_move_takes_what_the_targets_room_and_limit_let_in_and_loses_none() {
+        game_thread();
+        let mut world = EnergyWorld::default();
+        world.batteries.insert(SOURCE, (900, 1000));
+        world.batteries.insert(TANK, (700, 1000));
+        world.batteries.insert(OTHER, (0, 250));
+        let mut moved = |from, to, max| {
+            let host: &mut dyn Host = &mut world;
+            let source = here().capability(host, &ENERGY, from, None).unwrap();
+            let target = here().capability(host, &ENERGY, to, None).unwrap();
+            host.transaction(|host, tx| move_energy(host, &source, &target, max, tx))
+        };
+        // The target's room, then its limit per insert, each by a move tried again with what
+        // it took; and no more than the source holds.
+        assert_eq!(moved(SOURCE, TANK, 1000), Ok(300));
+        assert_eq!(moved(SOURCE, OTHER, 1000), Ok(250));
+        assert_eq!(moved(OTHER, SOURCE, 1000), Ok(250));
+        assert_eq!(world.amounts(&[SOURCE, TANK, OTHER]), [600, 1000, 0]);
+    }
+
+    #[test]
+    fn a_battery_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_energy() {
+        game_thread();
+        for (liar, at) in [
+            ("test:battery_gives_more", SOURCE),
+            ("test:battery_takes_more", TANK),
+        ] {
+            let mut world = EnergyWorld::default();
+            world.batteries.insert(SOURCE, (500, 1000));
+            world.batteries.insert(OTHER, (500, 1000));
+            world.batteries.insert(TANK, (0, 1000));
+            world.types.insert(at, liar);
+            let host: &mut dyn Host = &mut world;
+            let ends = |host: &mut dyn Host, pos| here().capability(host, &ENERGY, pos, None);
+            let (source, other, tank) = (
+                ends(host, SOURCE).unwrap(),
+                ends(host, OTHER).unwrap(),
+                ends(host, TANK).unwrap(),
+            );
+            // Two moves into the battery at `TANK` in one transaction, the second from the
+            // source: a move through the liar fails, and its error aborts the transaction.
+            let moved = host.transaction(|host, tx| {
+                let first = move_energy(host, &other, &tank, 200, tx)?;
+                let second = move_energy(host, &source, &tank, 200, tx)?;
+                Ok(first + second)
+            });
+            let owner = "doubler".to_owned();
+            assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
+            assert_eq!(
+                world.amounts(&[SOURCE, OTHER, TANK]),
+                [500, 500, 0],
+                "{liar}"
+            );
+        }
+    }
+
     #[test]
     fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("registrar-test");
         r.block_part_tag("test:gauged", TagGauge);
         r.block_part("test:gauge", Gauge);
         let tags = HashMap::from([(
@@ -3406,8 +3659,9 @@ pub(crate) mod tests {
     fn the_same_part_twice_on_one_block_is_refused() {
         struct Other;
         impl BlockPart for Other {}
-        let mut r = Registrar::default();
+        let mut r = Registrar::new("first");
         r.block_part("test:gauge", Gauge);
+        r.mod_id = "second";
         r.mod_index = 1;
         r.block_part("test:gauge", Other);
         r.block_part("test:gauge", Gauge);
@@ -3415,7 +3669,9 @@ pub(crate) mod tests {
         r.block_part_tag("#test:gauged", Other);
         assert_eq!(r.parts.block(|| Some("test:gauge")).len(), 2);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("Gauge is attached to test:gauge twice"));
+        assert!(
+            r.refused[0].contains("Gauge is attached to test:gauge twice, by first and second")
+        );
         assert!(r.refused[1].contains("not a namespaced id"));
         assert!(r.refused[2].contains("write it without #"));
     }
