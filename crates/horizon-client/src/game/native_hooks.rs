@@ -8159,8 +8159,7 @@ impl Game<'_> {
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        let path = self.native_data_dir(mod_id).join(key);
-        fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
+        horizon_world::native_load_context::read_setting(&self.native_data_dir(mod_id), key)
     }
     /// Keeps a mod's setting `key`.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {

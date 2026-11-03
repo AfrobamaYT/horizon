@@ -398,11 +398,12 @@ mod tests {
     use super::*;
     #[test]
     fn standalone_models_register_only_on_the_client() {
-        use crate::mod_api::{Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
+        use crate::mod_api::{self, Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
         };
+        #[derive(Default)]
         struct Models(Arc<AtomicUsize>);
         #[crate::mod_api::horizon_mod]
         impl Hooks for Models {
