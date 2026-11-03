@@ -509,7 +509,13 @@ impl Game<'_> {
                 let ran = self
                     .as_guest(conn, |g| g.rocket_hurt_mobs(&hits, owner, at))
                     .is_some();
-                if ran && let Some(host) = self.lan.as_mut() {
+                if ran
+                    && let Some(host) = self.lan.as_mut()
+                    && host
+                        .hub
+                        .guest(conn)
+                        .is_some_and(|guest| guest.participates_online())
+                {
                     for (id, _) in &hits {
                         if self.mobs.iter().any(|m| m.id == *id) {
                             host.mob_players.insert(*id, conn);

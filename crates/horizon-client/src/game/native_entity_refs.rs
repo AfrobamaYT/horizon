@@ -18,9 +18,27 @@ use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
+    /// Keep a held-out entity inaccessible until its copy has been stored back.
+    pub(super) fn with_entity_held_out<R>(
+        &mut self,
+        id: u32,
+        action: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        if horizon_client::mod_api::mods().is_empty() {
+            return action(self);
+        }
+        self.held_out.push(id);
+        let result = action(self);
+        self.held_out.pop();
+        result
+    }
+
     /// What a handle names now, or None for a stale or foreign one.
     pub(super) fn native_entity_target(&self, entity: EntityRef) -> Option<Target> {
-        if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(entity.epoch()) {
+        if self.held_out.contains(&entity.id())
+            || !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(entity.epoch())
+        {
             return None;
         }
         let id = i32::try_from(entity.id()).ok()?;
@@ -397,7 +415,19 @@ pub(super) mod tests {
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
         game.resolve_parts().unwrap();
+        // The title's save folder is under the working directory: give each test its own, so a
+        // test that saves leaves the checkout clean and parallel tests don't share files.
+        let saves = std::env::temp_dir().join(format!(
+            "horizon-with-game-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+            saves.clone(),
+            horizon_client::save::LevelShape::OVERWORLD,
+        ));
         test(&mut game);
+        let _ = std::fs::remove_dir_all(saves);
     }
 
     #[test]
@@ -955,6 +985,7 @@ pub(super) mod tests {
                 guest::Guest,
                 hub::{Hub, HubConfig},
             },
+            mod_api::HostTransaction,
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
@@ -1062,6 +1093,201 @@ pub(super) mod tests {
                     .iter()
                     .any(|(chunk, _)| *chunk == (100, 0))
             );
+            game.next_entity = 100;
+            game.lan.as_ref().unwrap().hub.lan.shared.next_id();
+            game.lan.as_ref().unwrap().hub.lan.shared.next_id();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let role = game.options.execution_role;
+            game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+            assert!(game.native_fake_player(level, 1234, "machine").is_none());
+            game.options.execution_role = role;
+            let made = game.native_fake_player(level, 1234, "machine").unwrap();
+            assert_eq!(game.native_fake_player(level, 1234, "machine"), Some(made));
+            assert!(game.native_fake_player(level, 1234, "other").is_none());
+            assert!(game.native_fake_player(level, 1, "real").is_none());
+            assert_eq!(game.native_player_is_fake(made), Some(true));
+            assert!(game.native_player_ref(1234).is_none());
+            let mut abilities = game.native_player_abilities(made).unwrap();
+            abilities.may_fly = true;
+            assert!(game.native_player_set_abilities(made, abilities));
+            assert!(game.native_player_abilities(made).unwrap().may_fly);
+            assert!(game.native_player_set_food_level(made, 10));
+            assert!(game.native_player_feed(made, 3, 0.0));
+            assert_eq!(game.native_player_food(made).unwrap().level, 13);
+            assert!(game.native_player_set_experience_levels(made, 7));
+            assert_eq!(game.native_player_experience(made).unwrap().level, 7);
+            assert!(game.native_player_set_item_cooldown(made, "minecraft:stone", 20));
+            assert_eq!(
+                game.native_player_has_item_cooldown(made, "minecraft:stone"),
+                Some(true)
+            );
+            assert!(game.native_player_remove_fake(made));
+            assert!(!game.native_player_remove_fake(made));
+            assert_eq!(game.native_player_is_fake(made), None);
+            let replacement = game.native_fake_player(level, 1234, "machine").unwrap();
+            assert_ne!(made, replacement);
+            let saved_root = game.world_root.clone();
+            let scratch = std::env::current_dir()
+                .unwrap()
+                .join("target/fake-player-save-test");
+            let _ = std::fs::remove_dir_all(&scratch);
+            game.world_root = scratch.clone();
+            let host = game.lan.as_mut().unwrap();
+            let i = host.hub.guests.iter().position(|g| g.uuid == 1234).unwrap();
+            let mut actor = host.hub.guests.remove(i);
+            game.save_guest(&mut actor);
+            game.lan.as_mut().unwrap().hub.guests.insert(i, actor);
+            assert!(!scratch.exists());
+            game.world_root = saved_root;
+            let conn = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.uuid == 1234)
+                .unwrap()
+                .conn;
+            game.as_guest(conn, |game| {
+                assert_eq!(game.native_player_permission_level(replacement), Some(0));
+                assert!(!game.native_player_remove_fake(replacement));
+                assert!(game.native_fake_player(level, 4321, "other").is_none());
+            })
+            .unwrap();
+            assert!(game.native_player_remove_fake(replacement));
+            let overworld_actor = game.native_fake_player(level, 2345, "parked").unwrap();
+            let attachment = horizon_world::attachments::AttachmentType {
+                namespace: "test",
+                name: "identity",
+                default: || 0i32,
+                codec: None,
+                copy_on_death: false,
+                sync: false,
+            };
+            let holder = horizon_world::attachments::Holder::Player(2345);
+            game.options.dedicated = Some(Vec::new());
+            let real_holder = horizon_world::attachments::Holder::Player(1);
+            game.attachment_map_quiet(real_holder)
+                .unwrap()
+                .set(&attachment, 17)
+                .unwrap();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 3)
+                .unwrap();
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            assert!(game.native_fake_player(level, 3456, "other").is_none());
+            let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 8)
+                .unwrap();
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
+            assert_ne!(overworld_actor, nether_actor);
+            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let aborted: Result<(), ()> = host.transaction(|host, _| {
+                attachment.set(host, holder, 99).unwrap();
+                Err(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
+            let place = crate::mod_api::ItemPlace::PlayerSlot {
+                player: 2345,
+                slot: 0,
+            };
+            let sticks = crate::mod_api::ItemResource::of(&horizon_client::items::ItemStack::new(
+                "minecraft:stick",
+                1,
+            ));
+            let host: &mut dyn crate::mod_api::ServerHost = game;
+            let rolled_back: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(place.insert(host, tx, &sticks, 1), 1);
+                Err(())
+            });
+            assert!(rolled_back.is_err());
+            assert!(place.stack(game).is_none());
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|g| g.entity_id as u32 == overworld_actor.entity().id())
+                    .unwrap()
+                    .inventory[0],
+                None
+            );
+            let host: &mut dyn crate::mod_api::ServerHost = game;
+            assert_eq!(
+                host.transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &sticks, 1))),
+                Ok(1)
+            );
+            assert_eq!(place.stack(game).unwrap().count, 1);
+            assert_eq!(
+                game.native_fake_player(nether, 2345, "parked"),
+                Some(nether_actor)
+            );
+            assert!(game.native_player_set_experience_levels(nether_actor, 8));
+            assert!(game.native_player_set_experience_levels(overworld_actor, 3));
+            assert_eq!(
+                game.native_player_experience(nether_actor).unwrap().level,
+                8
+            );
+            assert_eq!(
+                game.native_player_experience(overworld_actor)
+                    .unwrap()
+                    .level,
+                3
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                3
+            );
+            assert!(game.native_player_remove_fake(overworld_actor));
+            assert_eq!(
+                game.attachment_map_quiet(real_holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                17
+            );
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
+            assert!(game.native_player_remove_fake(nether_actor));
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            game.options.dedicated = None;
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
@@ -1281,6 +1507,111 @@ pub(super) mod tests {
                 assert_eq!(cooldown.group, expected);
                 assert!(receiver.try_recv().is_err());
             }
+            let fake = game.native_fake_player(level, 5678, "joiner").unwrap();
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            let nether = game.native_level("minecraft:the_nether").unwrap();
+            let other_fake = game.native_fake_player(nether, 5678, "joiner").unwrap();
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            let saved_root = game.world_root.clone();
+            let scratch = std::env::current_dir()
+                .unwrap()
+                .join("target/fake-login-save-test");
+            let _ = std::fs::remove_dir_all(&scratch);
+            game.world_root = scratch.clone();
+            let shared = &game.lan.as_ref().unwrap().hub.lan.shared;
+            let conn = shared.next_id().unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            shared
+                .events
+                .send(horizon_client::lan::NetEvent::Joined(Box::new(Joined {
+                    conn,
+                    uuid: 5678,
+                    name: "joiner".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::default(),
+                    address: ([127, 0, 0, 1], 1).into(),
+                })))
+                .unwrap();
+            struct Logout(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+            impl crate::mod_api::Hooks for Logout {
+                fn player_logged_out(
+                    &self,
+                    _: &mut dyn crate::mod_api::ServerHost,
+                    _: &mut crate::mod_api::PlayerLoggedOutEvent<'_>,
+                ) {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            let logouts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+                "logout-test",
+                Box::new(Logout(logouts.clone())),
+            )]
+            .into();
+            crate::mod_api::testing::with_mods(mods, || {
+                game.native_player_logged_out(0, "control");
+                assert_eq!(logouts.swap(0, std::sync::atomic::Ordering::Relaxed), 1);
+                game.tick_lan_packets();
+                assert_eq!(logouts.load(std::sync::atomic::Ordering::Relaxed), 0);
+            });
+            assert_eq!(game.native_player_is_fake(fake), None);
+            assert_eq!(game.native_player_is_fake(other_fake), None);
+            assert!(
+                !horizon_client::lan::playerdata::path(&scratch, 5678).exists(),
+                "fake login replacement saved player data"
+            );
+            game.world_root = saved_root;
+            let matching: Vec<_> = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.uuid == 5678)
+                .collect();
+            assert_eq!(matching.len(), 1);
+            assert!(matching[0].participates_online());
+            let mods: crate::mod_api::Mods = vec![crate::mod_api::ModEntry::new(
+                "logout-shutdown-test",
+                Box::new(Logout(logouts.clone())),
+            )]
+            .into();
+            let real_count = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.placed && g.participates_online())
+                .count();
+            crate::mod_api::testing::with_mods(mods, || game.native_players_leaving());
+            assert_eq!(logouts.load(Ordering::Relaxed), real_count);
+            game.lan.as_mut().unwrap().play.entry(fake_id).or_default();
+            game.award_leave_game_to_all();
+            let host = game.lan.as_mut().unwrap();
+            assert!(!host.play.get(&fake_id).unwrap().left_game);
+            assert!(host.play.get(&real_id).unwrap().left_game);
+            host.hub.ticks = 2401;
+            assert_eq!(game.ban_ip_target("fake"), None);
+            assert_eq!(game.ban_ip_target("real").as_deref(), Some("127.0.0.1"));
+            game.kick_idle(1);
+            let host = game.lan.as_ref().unwrap();
+            assert!(host.hub.guest(fake_id).unwrap().left_reason.is_empty());
+            assert!(!host.hub.guest(real_id).unwrap().left_reason.is_empty());
+            let old = game.native_fake_player(level, 6789, "reopen").unwrap();
+            game.native_lifecycle_world_closed();
+            game.native_lifecycle_open_started();
+            let reopened = game.native_level(game.dim.id()).unwrap();
+            assert_ne!(level.epoch(), reopened.epoch());
+            assert_eq!(game.native_player_is_fake(old), None);
+            let fresh = game.native_fake_player(reopened, 6789, "reopen").unwrap();
+            assert_ne!(fresh, old);
         });
     }
 

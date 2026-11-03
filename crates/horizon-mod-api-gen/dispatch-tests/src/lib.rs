@@ -154,6 +154,7 @@ mod tests {
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
+        pub(super) struct ServerReloadListeners;
     }
     use serde_json::{Map, Value};
     use stubs::*;
@@ -229,6 +230,9 @@ mod tests {
                 pub struct AnvilUpdate;
                 pub struct GrindstonePlace;
                 pub struct GrindstoneTake;
+            }
+            pub mod mod_chunk_tickets {
+                pub struct TicketValidation;
             }
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
