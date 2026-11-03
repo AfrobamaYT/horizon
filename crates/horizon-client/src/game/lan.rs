@@ -1872,8 +1872,11 @@ impl Game<'_> {
                 }
                 HostEvent::Joined(conn) => {
                     // The mods may refuse the login before the player is placed.
-                    if let Some((uuid, name)) =
-                        host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+                    if let Some((uuid, name)) = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.hub.guest(conn))
+                        .map(|g| (g.uuid, g.name.clone()))
                     {
                         let mut cancel = false;
                         let mut reason = None;
@@ -1888,11 +1891,17 @@ impl Game<'_> {
                                     &[],
                                 ),
                             };
+                            let Some(host) = self.lan.as_mut() else {
+                                return;
+                            };
                             host.hub.kick(conn, reason);
                             continue;
                         }
                     }
-                    self.lan_guest_joined(&mut host, conn, entities, spawn);
+                    self.lan_guest_joined(conn, entities, spawn);
+                    let Some(host) = self.lan.as_ref() else {
+                        return;
+                    };
                     if self.options.dedicated.is_some()
                         && let Some(g) = host.hub.guest(conn)
                     {
