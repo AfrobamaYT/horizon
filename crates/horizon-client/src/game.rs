@@ -6261,9 +6261,20 @@ impl Game<'_> {
         // canceled click does nothing (a guest's block is sent back).
         if let Some(hit) = block_hit {
             let mut canceled = false;
-            let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
+            let player = self.native_acting_id();
+            let player_entity_id = self
+                .lan_acting_entity
+                .map_or_else(|| self.own_entity_id(), |id| id as i32);
             let (hand, at) = (self.hand, hit.native());
-            self.native_right_click_block(hit.pos, hit.face, hand, at, player, &mut canceled);
+            self.native_right_click_block(
+                hit.pos,
+                hit.face,
+                hand,
+                at,
+                player,
+                player_entity_id,
+                &mut canceled,
+            );
             if canceled {
                 // Nothing was used, so nothing consumed the action.
                 self.use_failed = true;
@@ -6476,9 +6487,21 @@ impl Game<'_> {
         let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut claimed = false;
         if let Some(hit) = block_hit {
-            let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
+            let player = self.native_acting_id();
+            let player_entity_id = self
+                .lan_acting_entity
+                .map_or_else(|| self.own_entity_id(), |id| id as i32);
             let (hand, at) = (self.hand, hit.native());
-            self.native_use_item_on(&stack, hit.pos, hit.face, hand, at, player, &mut claimed);
+            self.native_use_item_on(
+                &stack,
+                hit.pos,
+                hit.face,
+                hand,
+                at,
+                player,
+                player_entity_id,
+                &mut claimed,
+            );
         }
         if !claimed && !on_block {
             self.native_use_item(&stack, &mut claimed);

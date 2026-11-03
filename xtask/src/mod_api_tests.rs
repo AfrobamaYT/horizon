@@ -50,6 +50,8 @@ mod tests {
         pub(super) struct UseAnimation;
         #[derive(Clone, Copy)]
         pub(super) struct Hand;
+        #[derive(Clone, Copy)]
+        pub(super) struct BlockHit;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
@@ -638,6 +640,10 @@ mod tests {
             &ItemStack::default(),
             [0; 3],
             [0; 3],
+            Hand,
+            BlockHit,
+            0,
+            0,
             &mut claimed,
         );
         assert!(claimed);
@@ -649,6 +655,10 @@ mod tests {
             &ItemStack::default(),
             [0; 3],
             [0; 3],
+            Hand,
+            BlockHit,
+            0,
+            0,
             &mut claimed,
         );
         assert!(calls.lock().unwrap().is_empty());

@@ -6282,7 +6282,8 @@ impl Game<'_> {
     /// Server-side, for every player of the world (the helpers read the
     /// acting one); an item on cooldown is never used. API 13. `hand`, `hit`
     /// (`UseOnContext.getClickLocation`, `getClickedFace`, `isInside`) and
-    /// `player`, the acting player's UUID, since API @API:block_use_context@.
+    /// `player` (the acting player's UUID) and `player_entity_id` (the server's
+    /// entity id), since API @API:block_use_context@.
     pub(super) fn native_use_item_on(
         &mut self,
         stack: &ItemStack,
@@ -6291,6 +6292,7 @@ impl Game<'_> {
         hand: Hand,
         hit: BlockHit,
         player: u128,
+        player_entity_id: i32,
         claimed: &mut bool,
     ) {
         mod_api::dispatch_use_item_on(
@@ -6302,6 +6304,7 @@ impl Game<'_> {
             hand,
             hit,
             player,
+            player_entity_id,
             claimed,
         );
     }
@@ -6629,8 +6632,9 @@ impl Game<'_> {
     /// block nor the item acts, the hand doesn't swing, and a guest sees the
     /// block as it is. Server-side, for every player of the world
     /// (`native_acting_player` says who), once per hand. API 21. `hand`,
-    /// `hit` (the packet's `BlockHitResult`) and `player`, the acting
-    /// player's UUID, since API @API:block_use_context@.
+    /// `hit` (the packet's `BlockHitResult`), `player` (the acting player's
+    /// UUID) and `player_entity_id` (the server's entity id), since API
+    /// @API:block_use_context@.
     pub(super) fn native_right_click_block(
         &mut self,
         pos: [i32; 3],
@@ -6638,6 +6642,7 @@ impl Game<'_> {
         hand: Hand,
         hit: BlockHit,
         player: u128,
+        player_entity_id: i32,
         canceled: &mut bool,
     ) {
         mod_api::dispatch_right_click_block(
@@ -6648,6 +6653,7 @@ impl Game<'_> {
             hand,
             hit,
             player,
+            player_entity_id,
             canceled,
         );
     }

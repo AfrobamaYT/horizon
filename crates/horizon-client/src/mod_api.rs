@@ -1125,6 +1125,7 @@ mod tests {
             Hand::Main,
             top_hit(),
             7,
+            41,
             &mut claimed,
         );
     }
@@ -1138,9 +1139,20 @@ mod tests {
     struct OffHandTop;
 
     impl Hooks for OffHandTop {
+        fn use_item_on(&self, _: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+            assert_eq!((event.player, event.player_entity_id), (7, 41));
+            assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
+            Flow::Continue
+        }
+
         fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
             let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
-            if event.hand == Hand::Off && top_half && event.player == 7 && !event.hit.inside {
+            if event.hand == Hand::Off
+                && top_half
+                && event.player == 7
+                && event.player_entity_id == 41
+                && !event.hit.inside
+            {
                 Flow::Cancel
             } else {
                 Flow::Continue
@@ -1155,6 +1167,20 @@ mod tests {
             block: "minecraft:stone",
             lines: Vec::new(),
         };
+        let mut claimed = false;
+        dispatch_use_item_on(
+            &mut host,
+            &mods,
+            &stick(),
+            [0; 3],
+            [0, 1, 0],
+            Hand::Off,
+            top_hit(),
+            7,
+            41,
+            &mut claimed,
+        );
+        assert!(!claimed);
         let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
         for (hand, hit, expected) in [
             (Hand::Off, top_hit(), true),
@@ -1170,6 +1196,7 @@ mod tests {
                 hand,
                 hit,
                 7,
+                41,
                 &mut canceled,
             );
             assert_eq!(canceled, expected, "{hand:?} {hit:?}");
