@@ -227,6 +227,8 @@ mod native_explosions;
 mod native_falling;
 #[cfg(test)]
 mod native_guest_turn_tests;
+#[cfg(test)]
+mod native_held_out_tests;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;
@@ -3085,6 +3087,8 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    /// Entities whose copies are held out of storage; their handles refuse until stored back.
+    held_out: Vec<u32>,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
@@ -19514,6 +19518,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_input: Default::default(),
             native_lifecycle: Default::default(),
+            held_out: Vec::with_capacity(4),
             native_net: Default::default(),
             native_mod_screen: None,
             sky_darken_memo: Default::default(),
