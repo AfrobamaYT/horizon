@@ -559,10 +559,7 @@ impl Game<'_> {
             self.console_broadcast = Some(true);
             self.sprint_report(&report);
             self.console_broadcast = None;
-            if let Some(mut host) = self.lan.take() {
-                self.send_admin_feedback(&mut host, None);
-                self.lan = Some(host);
-            }
+            self.send_admin_feedback(None);
             self.admin_feedback.clear();
         }
         let now = Instant::now();

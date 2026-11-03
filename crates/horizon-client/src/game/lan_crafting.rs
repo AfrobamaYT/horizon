@@ -237,13 +237,18 @@ impl Game<'_> {
         let (conn, name) = (g.conn, g.name.clone());
         let mut result = self.recipes().find(&g.craft_grid, 2).map(|(_, stack)| stack);
         self.native_prepare_item_craft(uuid, &name, None, &mut result);
-        let env = self.menu_env();
-        if let Some(host) = self.lan.as_mut()
-            && let Some(g) = host.hub.guest_mut(conn)
-        {
-            g.craft_result.clone_from(&result);
-            if let Some(menu) = host.play.get_mut(&conn).and_then(|p| p.crafting.inventory.as_mut()) {
-                menu.set_slot(&env, 0, result);
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let Some(g) = host.hub.guest_mut(conn) else {
+            return;
+        };
+        g.craft_result.clone_from(&result);
+        let menu = host.play.get_mut(&conn).and_then(|p| p.crafting.inventory.take());
+        if let Some(mut menu) = menu {
+            menu.set_slot(&self.menu_env(), 0, result);
+            if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
+                play.crafting.inventory = Some(menu);
             }
         }
     }
