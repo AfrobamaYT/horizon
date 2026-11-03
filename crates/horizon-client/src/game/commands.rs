@@ -83,6 +83,19 @@ pub(super) fn entity_pitch(pitch: f32) -> f32 {
     (pitch % 360.0).clamp(-90.0, 90.0)
 }
 
+/// `PositionMoveRotation.calculateAbsolute` and `TeleportCommand.performTeleport`.
+fn teleport_velocity(velocity: Vec3, relative: [bool; 3], fall_flying: bool) -> Vec3 {
+    Vec3::new(
+        if relative[0] { velocity.x } else { 0.0 },
+        if relative[1] && fall_flying {
+            velocity.y
+        } else {
+            0.0
+        },
+        if relative[2] { velocity.z } else { 0.0 },
+    )
+}
+
 /// An entity of a type Horizon does not simulate: its compound lives in the
 /// entity memory (`persist.raw`), its position and rotation here.
 #[derive(Clone, Debug)]
@@ -1577,17 +1590,8 @@ impl Game<'_> {
                 self.dismount_mob(id);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                     m.ai.nav.stop();
-                    if !relative[0] {
-                        m.velocity.x = 0.0;
-                    }
-                    if !relative[1] {
-                        m.velocity.y = 0.0;
-                    }
-                    if !relative[2] {
-                        m.velocity.z = 0.0;
-                    }
+                    m.velocity = teleport_velocity(m.velocity, relative, m.extra.fall_flying);
                     if !m.extra.fall_flying {
-                        m.velocity.y = 0.0;
                         m.on_ground = true;
                     }
                     m.position = v;
