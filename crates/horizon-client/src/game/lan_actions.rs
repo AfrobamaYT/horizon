@@ -1906,7 +1906,8 @@ impl Game<'_> {
         };
         let spectator = host.hub.guests[gi].spectator();
         let permission = host.hub.guests[gi].permission;
-        let won_game = host.play.get(&conn).is_some_and(|p| p.won_game);
+        let won_game = matches!(packet, S::ClientCommand(ref c) if c.action == 0)
+            && host.play.get(&conn).is_some_and(|p| p.won_game);
         match packet {
             S::PlayerAction(a) => match a.action {
                 0 => {
