@@ -614,10 +614,7 @@ impl std::ops::Deref for CatalogHook {
     }
 }
 
-fn catalog_hooks(
-    root: &Path,
-    catalog: &serde_json::Value,
-) -> Result<Vec<CatalogHook>, String> {
+fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
     let mut hooks = catalog["hooks"]
         .as_array()
         .ok_or("catalog hooks must be an array")?
@@ -1852,8 +1849,10 @@ mod tests {
             entry.as_object_mut().unwrap().remove("side").unwrap();
             std::fs::write(&catalog_path, missing.to_string()).unwrap();
             let kind = if group == "hooks" { "hook" } else { "helper" };
-            assert_eq!(super::sources(&root, super::FillMode::Require).unwrap_err(),
-                format!("{kind} {name}: side missing"));
+            assert_eq!(
+                super::sources(&root, super::FillMode::Require).unwrap_err(),
+                format!("{kind} {name}: side missing")
+            );
         }
         std::fs::write(&catalog_path, &original_catalog).unwrap();
         let without_counterparts = super::sources(&root, super::FillMode::Require)
