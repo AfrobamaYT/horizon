@@ -192,10 +192,65 @@ impl Game<'_> {
         };
         let stack = equipment_stack(stack);
         if let Target::Mob(id) = t {
+            let equippable = stack.as_ref().and_then(|s| {
+                let name = horizon_client::item_sync::equippable_slot(s, self.items())?;
+                let equip_slot = super::dispenser::Slot::from_name(&name)?;
+                let patched = s.data().and_then(|d| d.other("minecraft:equippable"));
+                let sound = if let Some(component) = patched {
+                    match component.get("equip_sound") {
+                        Some(horizon_world::nbt::Tag::String(sound)) => {
+                            Some(sound.to_string_lossy())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    self.items()
+                        .get(&s.item)
+                        .and_then(|i| i.equip_sound.clone())
+                }
+                .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into());
+                Some((equip_slot, sound))
+            });
             let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
                 return false;
             };
-            return mob.set_equipment_stack(slot as usize, stack);
+            let old = if (slot as usize) <= 5 {
+                horizon_client::mobs::finalize::item_stack(mob, slot as usize)
+            } else {
+                mob.equipment_stacks()[slot as usize].clone()
+            };
+            let changed = match (&old, &stack) {
+                (None, None) => false,
+                (Some(a), Some(b)) => !a.same_item_same_components(b),
+                _ => true,
+            };
+            if !mob.set_equipment_stack(slot as usize, stack) {
+                return false;
+            }
+            if changed && !mob.first_tick {
+                let at = mob.position;
+                let sound = equippable.as_ref().and_then(|(equip_slot, sound)| {
+                    (!mob.silent && *equip_slot as usize == slot as usize)
+                        .then(|| {
+                            super::dispenser::equip_sound(mob, *equip_slot, Some(sound.clone()))
+                        })
+                        .flatten()
+                });
+                if let Some(sound) = sound {
+                    self.audio.play(&sound, Some([at.x, at.y, at.z]), 1.0, 1.0);
+                }
+                let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
+                self.post_game_event(
+                    if equippable.is_some() {
+                        "minecraft:equip"
+                    } else {
+                        "minecraft:unequip"
+                    },
+                    [at.x, at.y, at.z],
+                    ctx,
+                );
+            }
+            return true;
         }
         match self
             .slots_named(&Owner::Entity(t), slot_name(slot))
@@ -210,6 +265,72 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_equipment_writes_emit_vanilla_equip_events() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            game.audio.capture = Some(Vec::new());
+            super::super::dispense_fixture::start_recording();
+            let helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Head, None));
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            game.mobs[0].first_tick = false;
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Head,
+                Some(helmet.clone())
+            ));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Head, Some(helmet)));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            game.mobs[0].silent = true;
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Head,
+                Some(ItemStack::new("minecraft:diamond_helmet", 1))
+            ));
+            assert!(game.native_living_set_equipment(living, EquipmentSlot::Head, None));
+            game.mobs[0].silent = false;
+            // Equippable, but its head slot does not match chest: event, no sound.
+            assert!(game.native_living_set_equipment(
+                living,
+                EquipmentSlot::Chest,
+                Some(ItemStack::new("minecraft:iron_helmet", 1))
+            ));
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            let events = super::super::dispense_fixture::stop_recording();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| e.ends_with("minecraft:equip"))
+                    .count(),
+                3
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| e.ends_with("minecraft:unequip"))
+                    .count(),
+                1
+            );
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

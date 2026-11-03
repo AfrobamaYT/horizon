@@ -5640,12 +5640,24 @@ mod held_item_name_tests {
         let mut helmet = crate::items::ItemStack::new("minecraft:iron_helmet", 1);
         helmet.damage = 40;
         helmet.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Hat".into()));
-        crate::mobs::finalize::set_item_stack(&mut mob, crate::mobs::finalize::HEAD, helmet);
+        helmet.data_mut().trim = Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")));
+        assert!(mob.set_equipment_stack(5, Some(helmet.clone())));
+        assert!(mob.set_equipment_stack(0, Some(helmet)));
         let raw = mob_to_nbt(&mob, [1, 2, 3, 4], None, None);
         let loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
         let worn = crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::HEAD).unwrap();
         assert_eq!(worn.damage, 40);
         assert_eq!(worn.custom_name().as_deref(), Some("Hat"));
+        let held =
+            crate::mobs::finalize::item_stack(&loaded, crate::mobs::finalize::MAINHAND).unwrap();
+        assert_eq!(
+            held.data().unwrap().trim,
+            Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")))
+        );
+        assert_eq!(
+            worn.data().unwrap().trim,
+            Some((Arc::from("minecraft:gold"), Arc::from("minecraft:coast")))
+        );
         // Replacing the item forgets the old stack.
         let mut loaded = loaded;
         crate::mobs::finalize::set_item(
