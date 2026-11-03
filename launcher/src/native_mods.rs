@@ -919,8 +919,6 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     })
 }
 
-
-
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
 pub fn revision_of(version: &str) -> Result<String, String> {
     let reference = match version.strip_prefix("nightly-") {
@@ -1609,6 +1607,12 @@ fn pipeline(
     progress: &impl Fn(Step),
 ) -> Result<Built, String> {
     let started = std::time::Instant::now();
+    let built_on = about(base);
+    if is_native(base) && built_on.is_none() {
+        return Err(format!(
+            "Native build {base} has a missing or invalid native-mods.json record."
+        ));
+    }
     backend::need_prepared(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
     // The mods are copied first: the build and its key use the copy, whatever happens to the
@@ -1622,7 +1626,6 @@ fn pipeline(
         log_warning(&warning);
     }
     // A native build starts from the release or Nightly it was made from, on its own revision.
-    let built_on = about(base);
     let origin = built_on.as_ref().map_or(base, |a| a.base.as_str());
     let mut ids = std::collections::HashSet::new();
     for b in &found {
