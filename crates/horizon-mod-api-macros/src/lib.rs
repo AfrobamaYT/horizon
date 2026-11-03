@@ -109,17 +109,6 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     quote!(#implementation #export).into()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn verbatim_items_are_uninspectable() {
-        let item = ImplItem::Verbatim(quote!(future syntax));
-        assert!(uninspectable(&item));
-    }
-}
-
 /// Mark a trait mod or its renderer and derive its hook subscriptions.
 #[proc_macro_attribute]
 pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
@@ -148,4 +137,15 @@ pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 #[proc_macro_attribute]
 pub fn __subscriptions(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_items_are_uninspectable() {
+        let item = ImplItem::Verbatim(quote!(future syntax));
+        assert!(uninspectable(&item));
+    }
 }
