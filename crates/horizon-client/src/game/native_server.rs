@@ -1103,9 +1103,8 @@ impl Game<'_> {
         };
         let conn = host
             .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && g.participates_online() && !g.dead && g.uuid == uuid)
+            .holder_guest(uuid, self.dim.id())
+            .filter(|g| !g.dead)
             .map(|g| g.conn);
         let ran = conn
             .and_then(|conn| self.as_guest(&mut host, conn, f))

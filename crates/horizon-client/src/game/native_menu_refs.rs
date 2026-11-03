@@ -25,6 +25,7 @@ impl Game<'_> {
             return None;
         };
         let host = self.lan.as_ref()?;
+        (host.hub.holder_guest(guest.uuid, self.dim.id())?.conn == guest.conn).then_some(())?;
         (guest.menu_generation == menu.generation).then_some(())?;
         if let Some(open) = &guest.menu {
             (open.window == menu.window && open.hidden.is_empty()).then_some(guest)
@@ -241,7 +242,11 @@ impl Game<'_> {
             .lan
             .iter_mut()
             .flat_map(|host| host.hub.guests.iter_mut());
-        let g = guests.find(|g| g.placed && g.uuid == menu.player.uuid())?;
+        let g = guests.find(|g| {
+            g.placed
+                && g.uuid == menu.player.uuid()
+                && g.entity_id as u32 == menu.player.entity().id()
+        })?;
         match backing {
             MenuSlotBacking::Ender(n) => g.ender_items.get_mut(n),
             MenuSlotBacking::CraftGrid(n) => g.craft_grid.get_mut(n),

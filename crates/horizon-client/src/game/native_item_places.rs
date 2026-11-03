@@ -170,7 +170,7 @@ impl Game<'_> {
             if self.native_menu_storage(*menu, *slot).is_none() {
                 return 0;
             }
-            self.journal_menus(menu.player.uuid());
+            self.journal_menus(menu.player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 fill(held, &mut rest);
             }
@@ -266,7 +266,7 @@ impl Game<'_> {
             if took == 0 {
                 return 0;
             }
-            self.journal_menus(menu.player.uuid());
+            self.journal_menus(menu.player);
             if let Some(held) = self.native_menu_storage(*menu, *slot) {
                 *held = held.as_ref().map(|h| left(h, took)).filter(|h| h.count > 0);
             }

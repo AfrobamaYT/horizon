@@ -1144,6 +1144,39 @@ pub(super) mod tests {
                 8
             );
             assert_ne!(overworld_actor, nether_actor);
+            let place = crate::mod_api::ItemPlace::PlayerSlot {
+                player: 2345,
+                slot: 0,
+            };
+            let sticks = crate::mod_api::ItemResource::of(&horizon_client::items::ItemStack::new(
+                "minecraft:stick",
+                1,
+            ));
+            let host: &mut dyn crate::mod_api::Host = game;
+            let rolled_back: Result<(), ()> = host.transaction(|host, tx| {
+                assert_eq!(place.insert(host, tx, &sticks, 1), 1);
+                Err(())
+            });
+            assert!(rolled_back.is_err());
+            assert!(place.stack(game).is_none());
+            assert_eq!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|g| g.entity_id as u32 == overworld_actor.entity().id())
+                    .unwrap()
+                    .inventory[0],
+                None
+            );
+            let host: &mut dyn crate::mod_api::Host = game;
+            assert_eq!(
+                host.transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &sticks, 1))),
+                Ok(1)
+            );
+            assert_eq!(place.stack(game).unwrap().count, 1);
             assert_eq!(
                 game.native_fake_player(nether, 2345, "parked"),
                 Some(nether_actor)
