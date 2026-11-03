@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "living_experience_drop",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_experience_drop",
+      "neoforge": "LivingExperienceDropEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

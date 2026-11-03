@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "explosion_start",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_explosion_start",
+      "neoforge": "ExplosionEvent.Start",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

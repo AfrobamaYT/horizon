@@ -302,10 +302,24 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         *self.random() = random;
         placed
     }
-    fn feature_exists(&self, name: &str) -> bool {
+    pub(crate) fn feature_exists(&self, name: &str) -> bool {
         self.b
             .live_features()
             .is_some_and(|f| f.configured(name).is_some())
+    }
+    /// `BlockGrowFeatureEvent`: the feature `pos` grows into once mods may
+    /// cancel or replace `feature`, if it is installed. `feature` is vanilla's,
+    /// `None` when it has none (no key drawn, or the key isn't installed): a mod
+    /// may still supply one (the event's feature is nullable).
+    pub(crate) fn grow_feature_event<'a>(
+        &mut self,
+        pos: BlockPos,
+        feature: Option<&'a str>,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        let feature = feature.filter(|name| self.feature_exists(name));
+        self.level
+            .block_grow_feature(pos, feature)
+            .filter(|name| self.feature_exists(name))
     }
 
     /// `TreeGrower.hasFlowers`: a flower within 2 blocks horizontally, 1 vertically.
@@ -362,10 +376,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && self.feature_exists(mega)
             && let Some((dx, dz, around)) = self.two_by_two(state, pos)
         {
+            let Some(feature) = self.grow_feature_event(pos, Some(mega)) else {
+                return false;
+            };
             for &(_, p) in &around {
                 self.remove_sapling(p);
             }
-            if self.place_configured_feature(mega, pos.offset(dx, 0, dz)) {
+            if self.place_configured_feature(&feature, pos.offset(dx, 0, dz)) {
                 return true;
             }
             for &(s, p) in &around {
@@ -379,14 +396,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         } else {
             grower.trees
         };
-        let Some(feature) = weighted(list, self.random()) else {
+        let feature = weighted(list, self.random());
+        let Some(feature) = self.grow_feature_event(pos, feature) else {
             return false;
         };
-        if !self.feature_exists(feature) {
-            return false;
-        }
         self.remove_sapling(pos);
-        if self.place_configured_feature(feature, pos) {
+        if self.place_configured_feature(&feature, pos) {
             return true;
         }
         self.set_block(pos, state, flags::UPDATE_NONE);
@@ -446,12 +461,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `MushroomBlock.growMushroom`.
     pub(crate) fn grow_mushroom(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
-        let Some(feature) = self.b.data(state).feature.clone() else {
+        let feature = self.b.data(state).feature.clone();
+        let Some(feature) = self.grow_feature_event(pos, feature.as_deref()) else {
             return false;
         };
-        if !self.feature_exists(&feature) {
-            return false;
-        }
         self.remove_block(pos, false);
         if self.place_configured_feature(&feature, pos) {
             return true;

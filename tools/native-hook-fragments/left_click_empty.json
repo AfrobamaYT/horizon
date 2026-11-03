@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "left_click_empty",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_left_click_empty",
+      "side": "client",
+      "cancellable": false,
+      "neoforge": "PlayerInteractEvent.LeftClickEmpty",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

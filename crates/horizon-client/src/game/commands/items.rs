@@ -20,6 +20,8 @@ pub(in crate::game) enum Slot {
     /// `armor[0..4]` (head, chest, legs, feet).
     Armor(usize),
     Offhand,
+    /// The player's body or saddle (`EquipmentSlot` ordinal, `Game::equipment`).
+    Equipment(usize),
     Ender(usize),
     /// A mob's equipment by name (`mainhand`, `offhand`, `head`, ...).
     Mob(u32, &'static str),
@@ -37,6 +39,20 @@ pub(in crate::game) enum Slot {
 pub(in crate::game) enum Owner {
     Entity(Target),
     Block([i32; 3]),
+}
+
+fn mob_slot(name: &str) -> Option<usize> {
+    Some(match name {
+        "mainhand" => 0,
+        "offhand" => 1,
+        "feet" => 2,
+        "legs" => 3,
+        "chest" => 4,
+        "head" => 5,
+        "body" => 6,
+        "saddle" => 7,
+        _ => return None,
+    })
 }
 
 /// The player's slot names and the inventory index each addresses.
@@ -124,6 +140,14 @@ impl Game<'_> {
                 if matches_name(name, "weapon.offhand") {
                     add(Slot::Offhand);
                 }
+                for (i, n) in [
+                    (horizon_items::equipment::BODY, "armor.body"),
+                    (horizon_items::equipment::SADDLE, "saddle"),
+                ] {
+                    if matches_name(name, n) {
+                        add(Slot::Equipment(i));
+                    }
+                }
                 for i in 0..27 {
                     if matches_name(name, &format!("enderchest.{i}")) {
                         add(Slot::Ender(i));
@@ -196,25 +220,11 @@ impl Game<'_> {
             Slot::MainHand => self.inventory.get(self.selected).cloned().flatten(),
             Slot::Armor(i) => self.armor.get(*i).cloned().flatten(),
             Slot::Offhand => self.offhand.clone(),
+            Slot::Equipment(i) => self.equipment.get(*i).cloned(),
             Slot::Ender(i) => self.ender_items.get(*i).cloned().flatten(),
             Slot::Mob(id, key) => {
                 let m = self.mobs.iter().find(|m| m.id == *id)?;
-                let item = match *key {
-                    "mainhand" => &m.extra.main_hand,
-                    "offhand" => &m.extra.off_hand,
-                    "head" => &m.extra.head,
-                    "body" => &m.extra.body,
-                    "chest" => &m.extra.chest,
-                    "legs" => &m.extra.legs,
-                    "feet" => &m.extra.feet,
-                    _ => return None,
-                };
-                item.as_ref().map(|i| ItemStack {
-                    item: i.clone(),
-                    count: 1,
-                    damage: 0,
-                    extra: None,
-                })
+                m.equipment_stacks()[mob_slot(key)?].clone()
             }
             Slot::Stand(id, i) => self
                 .armor_stands
@@ -271,6 +281,18 @@ impl Game<'_> {
                 self.player_on_equip("offhand", old.as_ref(), stack.as_ref());
                 true
             }
+            // setItemSlot, so onEquipItem: the equip sound, but no game event
+            // for body and saddle.
+            Slot::Equipment(i) => {
+                let old = self.equipment[*i].clone();
+                self.equipment.set(*i, stack.clone());
+                self.player_on_equip(
+                    horizon_items::equipment::SLOT_NAMES[*i],
+                    old.as_ref(),
+                    stack.as_ref(),
+                );
+                true
+            }
             Slot::Ender(i) => match self.ender_items.get_mut(*i) {
                 Some(slot) => {
                     *slot = stack;
@@ -282,30 +304,7 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == *id) else {
                     return false;
                 };
-                let item = stack.as_ref().map(|s| s.item.clone());
-                // The worn armour stack goes with the id: a kept stack of the
-                // previous piece would otherwise still be what the mob wears.
-                let worn = match *key {
-                    "head" => Some(0),
-                    "chest" => Some(1),
-                    "legs" => Some(2),
-                    "feet" => Some(3),
-                    _ => None,
-                };
-                if let Some(i) = worn {
-                    m.extra.armor[i] = stack.clone();
-                }
-                match *key {
-                    "mainhand" => m.extra.set_main_hand_stack(stack),
-                    "offhand" => m.extra.off_hand = item,
-                    "head" => m.extra.head = item,
-                    "body" => m.extra.body = item,
-                    "chest" => m.extra.chest = item,
-                    "legs" => m.extra.legs = item,
-                    "feet" => m.extra.feet = item,
-                    _ => return false,
-                }
-                true
+                mob_slot(key).is_some_and(|slot| m.set_equipment_stack(slot, stack))
             }
             Slot::Stand(id, i) => match self
                 .armor_stands
@@ -702,7 +701,6 @@ impl Game<'_> {
     }
     /// `/item modify (entity|block) <target> <slot> <modifier>`.
     pub(super) fn cmd_item_modify(&mut self, ctx: &Context) -> R<i32> {
-        self.ensure_datapacks();
         let targets = self.owner_of(ctx, "target", true)?;
         let Some(Arg::Str(slot_name)) = ctx.get("slot").cloned() else {
             return Ok(0);

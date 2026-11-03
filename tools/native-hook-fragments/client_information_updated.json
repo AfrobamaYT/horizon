@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "client_information_updated",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_information_updated",
+      "neoforge": "ClientInformationUpdatedEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

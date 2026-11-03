@@ -1,0 +1,10 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "container_size", "backend": true, "target": "horizon_client::game::machines::native_items::Game<'_>::native_container_size", "mod_api": {}, "side": "server"},
+    {"name": "container_stack", "backend": true, "target": "horizon_client::game::machines::native_items::Game<'_>::native_container_stack", "mod_api": {}, "side": "server"},
+    {"name": "container_insert", "backend": true, "target": "horizon_client::game::machines::native_items::Game<'_>::native_container_insert", "mod_api": {}, "side": "server"},
+    {"name": "container_extract", "backend": true, "target": "horizon_client::game::machines::native_items::Game<'_>::native_container_extract", "mod_api": {}, "side": "server"},
+    {"name": "container_capacity", "backend": true, "target": "horizon_client::game::machines::native_items::Game<'_>::native_container_capacity", "mod_api": {}, "side": "server"}
+  ]
+}

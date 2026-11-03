@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "client_player_clone",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_player_clone",
+      "neoforge": "ClientPlayerNetworkEvent.Clone",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

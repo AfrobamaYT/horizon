@@ -46,7 +46,7 @@ const ARMOR: [usize; 4] = [39, 38, 37, 36];
 const OFFHAND: usize = 40;
 
 /// The guest's inventory, armor, off hand, selection and carried stack into `menu`.
-fn load_player(menu: &mut Menu, g: &Guest) {
+pub(super) fn load_player(menu: &mut Menu, g: &Guest) {
     for i in 0..36 {
         menu.set_player_item(i, g.inventory[i].clone());
     }
@@ -58,6 +58,34 @@ fn load_player(menu: &mut Menu, g: &Guest) {
     menu.creative = g.creative();
     menu.levels = g.xp_level;
     menu.carried = g.carried.clone();
+}
+
+/// The vanilla menu engine's kind for a guest's menu over block entity `entity`, with the
+/// container's slots: a furnace's, a brewing stand's, a crafter's, or a content mod's menu type
+/// with its slots' rules. None for the others, whose clicks the hub runs.
+pub(super) fn machine_menu(
+    entity: &BlockEntity,
+    mod_type: Option<&'static horizon_client::containers::ModMenuType>,
+) -> Option<(Kind, Vec<Option<ItemStack>>)> {
+    Some(match entity {
+        BlockEntity::Furnace(f) => {
+            let recipe = match f.kind.recipe_type() {
+                "minecraft:blasting" => "blasting",
+                "minecraft:smoking" => "smoking",
+                _ => "smelting",
+            };
+            (Kind::Furnace(recipe), f.items.to_vec())
+        }
+        BlockEntity::Brewing(b) => (Kind::Brewing, b.items.to_vec()),
+        BlockEntity::Crafter(c) => (Kind::CrafterBlock, c.items.to_vec()),
+        BlockEntity::Mod(m) => {
+            let t = mod_type?;
+            let mut items = m.items.clone();
+            items.resize(t.slots, None);
+            (Kind::Mod(t), items)
+        }
+        _ => return None,
+    })
 }
 
 /// `load_player` back.
@@ -87,6 +115,16 @@ fn place_back(menu: &mut Menu, env: &Env, stacks: Vec<ItemStack>) {
 impl Game<'_> {
     pub(super) fn menu_env(&self) -> Env<'_> {
         Env {
+            player: self
+                .lan_acting_uuid
+                .or_else(|| self.remote.as_ref().map(|r| r.profile())),
+            player_entity_id: Some(self.own_entity_id()),
+            // The server thread's and a dedicated server's menus are the server's.
+            side: if self.native_authoritative() {
+                horizon_client::menu::LogicalSide::Server
+            } else {
+                horizon_client::menu::LogicalSide::Client
+            },
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -118,10 +156,15 @@ impl Game<'_> {
             self.level_maps(&held)
         });
         let env = Env {
+            player: Some(host.hub.guests[gi].uuid),
+            player_entity_id: Some(host.hub.guests[gi].entity_id),
+            side: horizon_client::menu::LogicalSide::Server,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
+        menu.brewed_potion_hook = !horizon_client::mod_api::mods().is_empty();
+        menu.item_smelted_hook = menu.brewed_potion_hook;
         let result = op(menu, &env);
         if let Some(maps) = maps {
             self.register_made_maps(maps);
@@ -135,13 +178,20 @@ impl Game<'_> {
         };
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
+        let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let crafted = std::mem::take(&mut menu.crafted);
         let item_crafted = std::mem::take(&mut menu.item_crafted);
         menu.drops.clear();
         store_player(menu, &mut host.hub.guests[gi]);
-        if !brewed.is_empty() {
-            let conn = host.hub.guests[gi].conn;
+        if !brewed.is_empty() || !brewed_potion_takes.is_empty() {
+            let (conn, uuid, entity_id) = {
+                let guest = &host.hub.guests[gi];
+                (guest.conn, guest.uuid, guest.entity_id)
+            };
             self.as_guest(host, conn, |g| {
+                for stack in &brewed_potion_takes {
+                    g.native_player_brewed_potion(uuid, entity_id, stack);
+                }
                 for stack in &brewed {
                     g.trigger_brewed_potion(stack);
                 }
@@ -174,6 +224,34 @@ impl Game<'_> {
         }
         self.drop_guest_items(host, gi, dropped);
         result
+    }
+
+    /// `InventoryMenu.slotsChanged` for guest `uuid`'s crafting grid written outside a click
+    /// (a mod's menu slot write, at the root commit): the result made again from the grid, with
+    /// `native_prepare_item_craft` as a click has it, kept by the guest and their menu. The
+    /// client hears it with the tick's inventory sync.
+    pub(super) fn guest_craft_result(&mut self, uuid: u128) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        if let Some(g) = host
+            .hub
+            .guests
+            .iter_mut()
+            .find(|g| g.placed && g.uuid == uuid)
+        {
+            let mut result = self
+                .recipes()
+                .find(&g.craft_grid, 2)
+                .map(|(_, stack)| stack);
+            self.native_prepare_item_craft(uuid, &g.name, None, &mut result);
+            g.craft_result.clone_from(&result);
+            let play = host.play.get_mut(&g.conn);
+            if let Some(menu) = play.and_then(|p| p.crafting.inventory.as_mut()) {
+                menu.set_slot(&self.menu_env(), 0, result);
+            }
+        }
+        self.lan = Some(host);
     }
 
     /// A click on the guest's inventory menu (window 0): `InventoryMenu`,
@@ -253,27 +331,13 @@ impl Game<'_> {
         else {
             return false;
         };
-        let (kind, items) = match self.world.block_entities.get(&pos) {
-            Some(BlockEntity::Furnace(f)) => {
-                let recipe = match f.kind.recipe_type() {
-                    "minecraft:blasting" => "blasting",
-                    "minecraft:smoking" => "smoking",
-                    _ => "smelting",
-                };
-                (Kind::Furnace(recipe), f.items.to_vec())
-            }
-            Some(BlockEntity::Brewing(b)) => (Kind::Brewing, b.items.to_vec()),
-            Some(BlockEntity::Crafter(c)) => (Kind::CrafterBlock, c.items.to_vec()),
-            // A content mod's menu type, with its slots' rules.
-            Some(BlockEntity::Mod(m)) => match mod_type {
-                Some(t) => {
-                    let mut items = m.items.clone();
-                    items.resize(t.slots, None);
-                    (Kind::Mod(t), items)
-                }
-                None => return false,
-            },
-            _ => return false,
+        let Some((kind, items)) = self
+            .world
+            .block_entities
+            .get(&pos)
+            .and_then(|entity| machine_menu(entity, mod_type))
+        else {
+            return false;
         };
         let furnace = matches!(kind, Kind::Furnace(_));
         // CrafterBlockEntity.containerData: the disabled slots, then triggered.
@@ -351,19 +415,25 @@ impl Game<'_> {
             }
             _ => {}
         }
-        // FurnaceResultSlot.checkTakeAchievements: the guest took from the output.
+        // FurnaceResultSlot.checkTakeAchievements, each as the click made it.
+        let guest = &host.hub.guests[gi];
+        for (stack, removed) in std::mem::take(&mut menu.item_smelted) {
+            self.native_item_smelted(guest.uuid, guest.entity_id, stack.as_ref(), removed);
+        }
+        // The guest took from the output.
         let count = |s: Option<&ItemStack>| s.map_or(0, |s| s.count);
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let at = host.hub.guests[gi].position;
             let guest = &host.hub.guests[gi];
             let output = items[2].as_ref();
             if let Some(output) = output {
+                let taken = output.count - count(menu.slot(2));
                 self.native_furnace_extract(
                     guest.uuid,
                     &guest.name,
                     [pos.0, pos.1, pos.2],
                     &output.item,
-                    output.count - count(menu.slot(2)),
+                    taken,
                 );
             }
             self.award_furnace_recipes(pos, at);

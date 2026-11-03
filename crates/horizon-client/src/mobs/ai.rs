@@ -103,6 +103,13 @@ impl Mob {
         self.ai.swing_duration = duration.max(1);
         true
     }
+    /// Whether the current swing is the off hand's (`swing_hand`'s arm
+    /// inverted); a swing that named no hand is the main hand's.
+    pub fn swing_is_off_hand(&self) -> bool {
+        self.extra
+            .swing_right_arm
+            .is_some_and(|right| right == self.main_arm_left())
+    }
     /// LivingEntity.swing
     pub fn swing(&mut self) {
         if self.start_swing(6) {
@@ -120,12 +127,13 @@ impl Mob {
     }
     /// `swing_hand` for a swing of `animation`, lengthened or shortened by
     /// this mob's haste, conduit power or mining fatigue
-    /// (`LivingEntity.getModifiedSwingDuration`).
+    /// (`LivingEntity.getModifiedSwingDuration`). Whether the swing started
+    /// (`SwingState.startIfAble`).
     pub fn swing_hand_modified(
         &mut self,
         off_hand: bool,
         animation: crate::first_person::SwingAnimation,
-    ) {
+    ) -> bool {
         let amplifier = |id: &str| self.extra.effects.iter().find(|e| e.0 == id).map(|e| e.2);
         let dig_speed = amplifier("minecraft:haste").max(amplifier("minecraft:conduit_power"));
         let fatigue = amplifier("minecraft:mining_fatigue");
@@ -133,7 +141,9 @@ impl Mob {
         if self.start_swing(duration) {
             self.extra.swing_right_arm = Some(!off_hand != self.main_arm_left());
             self.extra.swing_stab = animation.kind == 2;
+            return true;
         }
+        false
     }
 }
 /// The module implementing a species' behaviour.
@@ -628,12 +638,17 @@ pub fn tick(
     if m.alive() {
         super::spear_use::update_using_item(m, w, known_speed, events);
     }
-    // LivingEntity.tick: a sleeper whose bed is gone stands up before
-    // aiStep, with or without AI.
+    let sleep_answer = m
+        .extra
+        .villager
+        .as_deref_mut()
+        .and_then(|e| e.may_continue_sleeping.take());
+    // LivingEntity.tick checks the bed even for mobs without AI.
     if super::villager::sleeping(m)
-        && super::villager::sleeping_pos(m)
-            .filter(|p| w.block_name(p[0], p[1], p[2]).ends_with("_bed"))
-            .is_none()
+        && !sleep_answer.unwrap_or_else(|| {
+            super::villager::sleeping_pos(m)
+                .is_some_and(|p| w.block_name(p[0], p[1], p[2]).ends_with("_bed"))
+        })
     {
         super::villager::stop_sleeping(m, w, events);
         super::villager_brain::woken(m, w.game_time);
@@ -1159,13 +1174,12 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    // A wolf's armor (its body slot) is `#freeze_immune_wearables`.
     ![
-        &m.extra.body,
         &m.extra.head,
         &m.extra.chest,
         &m.extra.legs,
         &m.extra.feet,
+        &m.extra.body,
     ]
     .into_iter()
     .flatten()
@@ -1589,14 +1603,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// or without AI (`NoAI` only skips `serverAiStep`).
 fn burn_undead(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.kind.flags.burns_in_day && m.alive() && sun_burn_tick(m, w) {
-        // The head is the sun-protection slot, or the body for the species
-        // whose body item is their armour (a zombie horse's, a nautilus's).
-        let protected = if super::drops::body_slot_species(m.species()) {
-            m.extra.body.is_some()
-        } else {
-            m.extra.head.is_some()
-        };
-        if protected {
+        if m.item_by_slot(m.sun_protection_slot()).is_some() {
             events.push(MobEvent::SunProtectionWear { mob: m.id });
         } else {
             m.ignite_for_ticks(160);
@@ -2712,7 +2719,7 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
                     continue;
                 }
                 if let Some(mods) = mods
-                    && !mods.tick_mod_effect(id, m.id, count, amp)
+                    && !mods.tick_mod_effect(id, m, count, amp)
                 {
                     // Removed before it counts down.
                     expired = true;
@@ -3283,6 +3290,57 @@ mod same_vehicle_push_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
 
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn zombie_horse_sunburn_checks_body_not_head() {
+        assert!(with_test_world(&[], |world, types| {
+            let mut world = world.clone();
+            world.monsters_burn = true;
+            let mut horse = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:zombie_horse"].clone()),
+                Vec3::ZERO,
+                0.0,
+            );
+            horse.extra.head = Some("minecraft:iron_helmet".into());
+            let mut events = Vec::new();
+            for _ in 0..1000 {
+                burn_undead(&mut horse, &world, &mut events);
+            }
+            assert!(horse.fire_ticks > 0);
+            assert!(events.is_empty());
+            horse.fire_ticks = 0;
+            horse.extra.body = Some("minecraft:leather_horse_armor".into());
+            for _ in 0..1000 {
+                burn_undead(&mut horse, &world, &mut events);
+            }
+            assert_eq!(horse.fire_ticks, 0);
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, MobEvent::SunProtectionWear { .. }))
+            );
+        }));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn leather_body_armor_prevents_freezing() {
+        assert!(with_test_world(&[], |w, types| {
+            let mut horse = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:horse"].clone()),
+                Vec3::ZERO,
+                0.0,
+            );
+            assert!(can_freeze(&horse, w));
+            horse.extra.body = Some("minecraft:leather_horse_armor".into());
+            assert!(!can_freeze(&horse, w));
+            horse.extra.body = Some("minecraft:iron_horse_armor".into());
+            assert!(can_freeze(&horse, w));
+        }));
+    }
+
     /// What a mob holds and wears, by `EquipmentSlot`: the hand's item, the
     /// worn armour's stack (a dyed piece keeps its colour), a horse's
     /// armour in the body slot and its saddle, and nothing else.
@@ -3846,6 +3904,34 @@ mod fox_screech_tests {
 mod age_up_tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn sleep_answer_is_applied_with_or_without_ai() {
+        let ran = crate::mobs::world::with_test_world(&[], |w, types| {
+            for no_ai in [false, true] {
+                for may_continue in [false, true] {
+                    let kind = Arc::new(types.types["minecraft:villager"].clone());
+                    let mut m = Mob::new(1, kind, Vec3::new(4.0, 220.0, 4.0), 0.0);
+                    m.no_ai = no_ai;
+                    m.no_gravity = true;
+                    m.persistent = true;
+                    m.extra.ints[1] = 1;
+                    let ext = super::super::villager::ext_mut(&mut m);
+                    ext.sleeping_pos = Some([4, 220, 4]);
+                    ext.may_continue_sleeping = Some(may_continue);
+                    tick(&mut m, w, &mut LegacyRandom::new(0), &mut Vec::new());
+                    assert_eq!(
+                        super::super::villager::sleeping(&m),
+                        may_continue,
+                        "NoAI={no_ai}"
+                    );
+                }
+            }
+        });
+        if !ran {
+            eprintln!("sleep regression needs prepared vanilla resources");
+        }
+    }
 
     /// Official Java 26.3: NoAI leaves both age clocks running. AgeLocked
     /// holds a baby's age, but a positive breeding cooldown still expires.

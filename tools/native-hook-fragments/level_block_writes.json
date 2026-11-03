@@ -1,0 +1,15 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "level_set_block", "side": "server",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_set_block",
+      "receiver": "level"
+    },
+    {
+      "name": "level_destroy_block", "side": "server",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level_destroy_block",
+      "receiver": "level"
+    }
+  ]
+}

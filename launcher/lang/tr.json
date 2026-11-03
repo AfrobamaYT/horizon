@@ -188,9 +188,6 @@
   "Delete…": "Sil…",
   "Keep": "Sakla",
   "Move to Trash": "Çöp Kutusuna Taşı",
-  "These mods were made for different Horizon versions": "Bu modlar farklı Horizon sürümleri için yapılmış",
-  "They often still work together. If the build fails, install versions made for the same Nightly.": "Genellikle yine de birlikte çalışırlar. Derleme başarısız olursa, aynı Nightly sürümü için yapılmış sürümleri yükleyin.",
-  "Build anyway": "Yine de derle",
   "Folder": "Klasör",
   "Version": "Sürüm",
   "Vanilla": "Saf (Vanilla)",
@@ -308,7 +305,6 @@
   "Downloading {source}…": "{source} indiriliyor…",
   "Installing…": "Yükleniyor…",
   "The release file {file} ({source}).": "Sürüm dosyası {file} ({source}).",
-  "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "{source} kaynağı. Sürümü {file} (bir içerik modu) barındırıyor: Bunları GitHub'dan yüklemek henüz desteklenmiyor.",
   "The source at commit {commit}.": "{commit} commitindeki kaynak.",
   "Not reviewed by the Horizon registry": "Horizon kayıt defteri tarafından incelenmedi",
   "Native mods run with full access to this computer. Read the source before you install it.": "Yerel modlar bu bilgisayara tam erişimle çalışır. Yüklemeden önce kaynağını okuyun.",
@@ -789,7 +785,6 @@
   "vanilla like": "Vanilla benzeri",
   "worldgen": "Dünya üretimi",
   "No version is installed yet.": "Henüz bir sürüm yüklenmemiş.",
-  "{error} They often still build: pass --allow-version-mismatch to try.": "{error} Bazen yine de derlenebilir: denemek için --allow-version-mismatch geçirin.",
   "Built the server engine: {path}": "Sunucu motoru derlendi: {path}",
   "Point the server at it: set engine.path to this file in the server's server.toml (docs/hosting.md); the launcher writes nothing itself.": "Sunucuyu buna işaret edin: sunucunun server.toml dosyasında (docs/hosting.md) engine.path'i bu dosya olarak ayarlayın; launcher kendisi hiçbir şey yazmaz.",
   "{path} already exists. Move it away, or build into another folder.": "{path} zaten var. Taşıyın veya başka bir klasöre derleyin.",
@@ -959,5 +954,7 @@
   "Hide other players' cosmetics": "Diğer oyuncuların kozmetiklerini gizle",
   "Others look like plain players to you. Also in the game's Horizon settings.": "Diğerleri sana sıradan oyuncular gibi görünür. Oyunun Horizon ayarlarında da var.",
   "Show other players' auras and trails": "Diğer oyuncuların aura ve izlerini göster",
-  "Off by default. Also in the game's Horizon settings.": "Varsayılan olarak kapalı. Oyunun Horizon ayarlarında da var."
+  "Off by default. Also in the game's Horizon settings.": "Varsayılan olarak kapalı. Oyunun Horizon ayarlarında da var.",
+  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "Bu oyun kaynağında okunabilir bir yerel giriş şablonu yok. Horizon'ı güncelleyin ve modları bu oyun için yeniden derleyin.",
+  "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "{version} yerel derlemesinin native-mods.json kaydı eksik veya geçersiz. Yüklü bir Horizon sürümünden yeniden derleyin."
 }

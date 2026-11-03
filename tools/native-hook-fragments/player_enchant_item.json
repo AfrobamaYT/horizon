@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "player_enchant_item",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_enchant_item",
+      "neoforge": "PlayerEnchantItemEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

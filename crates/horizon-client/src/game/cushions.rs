@@ -183,6 +183,7 @@ impl Game<'_> {
             pos: hit.pos,
             face: hit.face,
             point: hit.point,
+            inside: hit.inside,
         };
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
         if self.items().block_in_tag(
@@ -272,6 +273,7 @@ impl Game<'_> {
             position.z.floor() as i32,
         ];
         self.cushions.push(Cushion {
+            join: Default::default(),
             id,
             position,
             pos: attached,

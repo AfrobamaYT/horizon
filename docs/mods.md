@@ -5,7 +5,7 @@ Two kinds of mod run in Horizon:
 | Kind | File | What it is | Where it runs |
 |---|---|---|---|
 | **Content mod** | `.hmod` | Data and assets: blocks, items, recipes, loot, tags, models, textures, structures. No code. | Read when the game starts |
-| **Native mod** | `.hnmod` | A [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) bundle: Rust that changes the game's own source before it is compiled. | In a game the launcher builds for the player ([native-mods.md](native-mods.md)) |
+| **Native mod** | `.hmod` | A [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) bundle: Rust that changes the game's own source before it is compiled. | In a game the launcher builds for the player ([native-mods.md](native-mods.md)) |
 
 Fabric and NeoForge jars do **not** run as they are: their code calls and patches Minecraft's Java classes, and
 Horizon has none. What carries over is the data and assets inside a jar ([modpacks.md](modpacks.md)).
@@ -45,13 +45,13 @@ cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks
   one hook, built with `horizon-launcher native-build <path> --trust-native-code`
   ([native-mods.md](native-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs `horizon-mod.toml`, `assets/` and `data/` into `target/horizon-mod/<id>.hmod`, with the same checks
-  the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code is native now) and a
+  the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code requires a native mod) and a
   manifest without capability `registries`.
 - `run` builds, then starts `horizon-client` (on `PATH`, or `--game PATH`, or `HORIZON_CLIENT`) with
   `--dev-mod target/horizon-mod/<id>.hmod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
-  with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hnmod`, `.hpack`, resource pack `.zip`
+  with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hpack`, resource pack `.zip`
   and `.hshader` files.
 - `registry build|review|check|list|release|page` is the registry repository's CI ([api/mod-index.md](api/mod-index.md)).
 
@@ -69,7 +69,10 @@ capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
 ```
 
-Unknown keys are refused, so a typo is an error, not a silently ignored permission.
+Unknown keys are refused, so a typo is an error, not a silently ignored permission. Content manifests
+use only `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
+Executable `mod.wasm` files are unsupported: a folder or archive containing one is refused, including when
+installed through a modpack. Code is never silently skipped.
 
 ### Content mods (API 0.2)
 
@@ -84,8 +87,8 @@ A server that has content mods on also checks them one by one (`horizon_protocol
 `horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
 `side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
 not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
-HUD, a minimap) never blocks a join and is never told to a server, and a `server` mod stays private to it. A manifest
-with no `side` line is `client`, so a content mod meant for both halves must say `side = "both"`, or this check
+local resource pack) never blocks a join and is never told to a server. A manifest with no `side` line is `client`,
+so a content mod meant for both halves must say `side = "both"`, or this check
 ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
 list yet: their manifest has no side.
 
@@ -96,6 +99,8 @@ A block names its template and what differs from it:
   "properties": { "hardness": 4.0, "light": 3, "sounds": "minecraft:amethyst_block" },
   "item": true }
 ```
+
+`push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
 
 `random_ticks` makes a block tick randomly whatever its template does, as vanilla's
 `isRandomlyTicking(state)` does for its own blocks, so a crop, sapling or soil on a template that never
@@ -134,6 +139,8 @@ A declared name may not be one the template already has, and `default_state`
 takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
+
+A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
 
 A block whose template is one of vanilla's signs is a sign, whatever its name: it has vanilla's sign block
 entity, so the text, the editor, dye, glow ink, wax and saving all work as they do on an oak sign, and the
@@ -185,8 +192,7 @@ Coordinates must be finite and each minimum must not exceed its maximum. `[]` is
 `properties` names an ordered tuple of template and/or declared state properties; each `values` key
 lists their values in that order, separated by commas without spaces. A nonmatching tuple uses
 `default`. Without `default`, every tuple must be covered. A default-only table gives every state the
-same shape. The existing `{"property":"axis","values":{"x":[...],"y":[...],"z":[...]}}`
-format still works; use either `property` or `properties`, not both. Unknown properties, unreachable
+same shape. A single-property table uses `"properties":["axis"]`. Unknown properties, unreachable
 value tuples, malformed boxes and duplicate property names reject the mod with a load error rather
 than silently ignoring a typo. Omitted `shapes` preserves the template outline (or the connecting
 block's `thickness` outline). Omitted `collision_shapes` preserves the existing behavior: a declared
@@ -208,6 +214,16 @@ gets its own damage and durability, or a tool its mining speed:
       "operation": "add_value", "slot": "mainhand" }],
     "!minecraft:repairable": {} } }
 ```
+
+An item can place a block by naming it with `block`, whether it is a vanilla block or a declared mod block:
+
+```json
+{ "template": "minecraft:wheat_seeds", "block": "ruby:crop" }
+```
+
+This uses the block's placement state and survival rules and consumes the item outside creative mode. Add seeds to
+`minecraft:villager_plantable_seeds` for farmers to plant them. The mapping does not change what the block drops or
+what Pick Block gives.
 
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
@@ -383,17 +399,32 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
-A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) and mob spawn
-changes reach biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in
-`data/<ns>/neoforge/biome_modifier/` (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types).
-`add_features` appends its `features` to one generation `step` of every biome in `biomes`; `remove_features` takes them
-out of its `steps` (every step when it lists none); `add_spawns` appends its `spawners` (one `{ "type", "weight",
-"minCount", "maxCount" }` object or a list of them) to each entity type's category in
-`minecraft:gameplay/natural_mob_spawns`, turning `minCount` and `maxCount` into 26.3's `count`; `remove_spawns` takes its
-`entity_types` out of every category; `add_spawn_costs` sets `spawn_costs` (`{ "energy_budget", "charge" }`) for its
-`entity_types`, and `remove_spawn_costs` removes them; `none` does nothing. `biomes`, `features` and `entity_types` are
-an id, a `#tag`, a list of ids, or NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal,
-each in mod and file order, and a feature already in the step is not added twice.
+A mod's own configured and placed features (`data/<ns>/worldgen/feature/`, `placed_feature/`) generate in
+biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
+(older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one
+generation `step` of every biome in `biomes`; `remove_features` takes them out of its `steps` (every step when it lists
+none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
+NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
+feature already in the step is not added twice. Configured features use 26.3's `worldgen/feature/` directory
+(registry `minecraft:worldgen/feature`).
+
+Spawn modifiers also apply to those biomes: `add_spawns` appends `spawners` (one object or a list with `type`,
+`weight`, `minCount` and `maxCount`) to each entity type's category, converting the count range to 26.3's `count`;
+`remove_spawns` removes `entity_types` from every category. `add_spawn_costs` sets `spawn_costs` from `spawn_cost`
+(`energy_budget` and `charge`) for its `entity_types`, and `remove_spawn_costs` removes them. Entity type selectors
+accept an id, `#tag`, list of ids, or NeoForge's `any`, `or`, `and` or `not`.
+
+A biome holder set can also use Horizon's own `horizon:climate` type, alone or nested in those boolean sets; it is not
+a NeoForge format. It filters each biome's base `temperature` and `downfall` (the names in
+[Fabric's public biome weather API](https://maven.fabricmc.net/docs/yarn-1.21-rc1+build.1/net/minecraft/world/biome/Biome.Weather.html)),
+not its positional temperature. Each range takes `min`, `max`, or both, inclusive; an omitted bound is unbounded. At
+least one field and one bound per range are required. Unknown keys, non-numbers and inverted bounds stop the content
+load. Climate sets apply only to `biomes`, not `features`.
+
+```json
+{ "type": "neoforge:and", "values": ["#minecraft:is_overworld",
+  { "type": "horizon:climate", "temperature": { "min": 0.8 }, "downfall": { "max": 0.5 } }] }
+```
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
@@ -404,9 +435,9 @@ The modifiers rewrite the biomes when the content root builds, and the generator
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
 naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
-`#c:` convention tag), or of a type not read yet (`add_carvers`, climate, a mod's own serializer), is skipped with a
-warning naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a
-type that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
+`#c:` convention tag), or of a type not read yet (`add_carvers`, a mod's own serializer), is skipped with a warning
+naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a type
+that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
 content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
 doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
 it too.
@@ -435,11 +466,15 @@ Behaviour that needs code (a new key, a HUD, a tool that changes how mining work
 a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game. Start from
 [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template). How the launcher builds
 one, what it pins and why it is not sandboxed: [native-mods.md](native-mods.md).
+The typed hook API is generated automatically at build time, in debug and release builds alike; its generated
+Rust files are build output, not files to regenerate or commit. Engine contributors adding a hook only run
+`cargo run -p xtask -- mod-api` to fill its hand-written placeholder body
+([Adding a hook](native-mods.md#adding-a-hook)).
 
 A native mod's config files go in the game's shared `config/` folder, beside `options.txt` (on a dedicated server,
 beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its own file names, such as
-`config/<mod id>.json`. It asks for the folder with `Game::native_config_dir()` (hook points API 26), which needs no
-game, so it works from any hook, and makes the folder when missing. Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
+`config/<mod id>.json`. It asks for the folder with `Game::native_config_dir()`, which needs no
+game, so it works from any hook, and makes the folder when missing. Settings kept with `native_set_setting` are in `horizon-mods/.horizon-mod-data/<id>/`.
 
 ## Publish your mod
 
@@ -449,9 +484,9 @@ once, when it is listed; its later releases are checked by machine, not read by 
 which checks every file before it installs it.
 
 1. Run `cargo horizon-mod check` on the file (above): the registry runs the same checks.
-2. Put the source in a public GitHub repository, under a licence that lets players run it. A native mod's `.hnmod` is
+2. Put the source in a public GitHub repository, under a licence that lets players run it. A native mod's `.hmod` is
    its source.
-3. Publish a **GitHub release** in it with the file as an asset (`.hmod`, `.hnmod`, `.hpack`, `.hshader`, or a resource
+3. Publish a **GitHub release** in it with the file as an asset (`.hmod`, `.hpack`, `.hshader`, or a resource
    pack's `.zip`), and its `.minisig` beside it if you sign. The release notes are the changelog.
 4. List the project once: open [playhorizon.dev/mods/submit](https://playhorizon.dev/mods/submit), sign in with GitHub
    and give the repository and the page (name, summary, licence, optionally a minisign public key). It opens a pull
@@ -472,8 +507,8 @@ who rated.
 
 Your page can live in your repository too: a `horizon-registry.toml` at its root (on the newest release's tag) with
 `name`, `summary`, `description`, `authors` and `license` fills what the registry's entry leaves out; the entry's own
-words win. Its owners, key, kind and icon are the registry's, changed by a pull request. Projects listed before this
-(`versions` in their entry) keep their hosted versions. The formats: [api/mod-index.md](api/mod-index.md).
+words win. Its owners, key and icon are the registry's, changed by a pull request; its kind never changes. Hosted releases in an entry's
+`versions` remain listed. The formats: [api/mod-index.md](api/mod-index.md).
 
 ### Integrity and signing
 

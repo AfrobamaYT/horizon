@@ -64,6 +64,22 @@ fn main() -> ExitCode {
     }
 }
 
+/// The checkout xtask acts on: the nearest folder at or above the current directory that holds
+/// `xtask/Cargo.toml`. It is read when xtask runs, not when it is built, so a binary that
+/// worktrees share through one `CARGO_TARGET_DIR` writes to the checkout it is run from.
+fn repo_root() -> Result<PathBuf, String> {
+    let here = std::env::current_dir().map_err(|e| format!("current directory: {e}"))?;
+    checkout_above(&here)
+        .ok_or_else(|| format!("{}: not inside a Horizon checkout", here.display()))
+}
+
+fn checkout_above(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|dir| dir.join("xtask/Cargo.toml").is_file())
+        .map(Path::to_path_buf)
+}
+
 fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -82,7 +98,7 @@ fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
 }
 
 fn tokens() -> Result<(), String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/horizon-theme/tokens.css");
+    let path = repo_root()?.join("crates/horizon-theme/tokens.css");
     fs::write(&path, horizon_theme::css()).map_err(|e| format!("{}: {e}", path.display()))?;
     println!("wrote crates/horizon-theme/tokens.css");
     Ok(())
@@ -167,7 +183,7 @@ fn icns(entries: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
 }
 
 fn icons() -> Result<(), String> {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let repo = repo_root()?;
     let brand = repo.join("docs/media/brand");
     let square = brand.join("icon.svg");
     let packaging = repo.join("packaging/icons");
@@ -261,11 +277,7 @@ fn copy_exporter_tree(from: &Path, to: &Path) -> Result<(), String> {
 
 /// `OUT`, emptied, with the sources the release folders take (`ARCHIVED`); the repository's path.
 fn new_folder(out: &Path) -> Result<PathBuf, String> {
-    let top = git(
-        Path::new(env!("CARGO_MANIFEST_DIR")),
-        &["rev-parse", "--show-toplevel"],
-    )?;
-    let repo = PathBuf::from(String::from_utf8_lossy(&top).trim());
+    let repo = repo_root()?;
     match fs::remove_dir_all(out) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
             return Err(format!("{}: {e}", out.display()));
@@ -474,6 +486,25 @@ mod tests {
         tar.extend(header(name, mode, data.len(), kind));
         tar.extend(data);
         tar.resize(tar.len().div_ceil(512) * 512, 0);
+    }
+
+    #[test]
+    fn each_worktree_finds_its_own_checkout() {
+        let base = std::env::temp_dir().join(format!("xtask-root-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let [one, two] = ["one", "two"].map(|name| base.join(name));
+        for checkout in [&one, &two] {
+            fs::create_dir_all(checkout.join("xtask")).unwrap();
+            fs::write(checkout.join("xtask/Cargo.toml"), "").unwrap();
+            fs::create_dir_all(checkout.join("crates/horizon-client/src")).unwrap();
+        }
+        assert_eq!(checkout_above(&one), Some(one.clone()));
+        assert_eq!(
+            checkout_above(&two.join("crates/horizon-client/src")),
+            Some(two.clone())
+        );
+        assert_eq!(checkout_above(&base), None);
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

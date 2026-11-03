@@ -228,6 +228,12 @@ fn equine(s: Species) -> bool {
             | Species::TraderLlama
     )
 }
+/// Mobs with species-specific body equipment.
+pub(super) fn body_equipment_species(s: Species) -> bool {
+    equine(s)
+        || matches!(s, Species::Wolf | Species::HappyGhast | Species::SulfurCube)
+        || horizon_client::mobs::nautilus::is_nautilus(s)
+}
 /// What a mob holds in a slot.
 pub(super) fn mob_slot_item(m: &Mob, slot: Slot) -> Option<Arc<str>> {
     let x = &m.extra;
@@ -280,7 +286,7 @@ fn mob_can_dispenser_equip(m: &Mob, slot: Slot) -> bool {
     }
 }
 /// `getEquipSound`: the saddle overrides of pigs, striders, horses, camels and nautili.
-fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
+pub(super) fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
     if slot != Slot::Saddle {
         return default;
     }
@@ -302,18 +308,7 @@ fn equip_sound(m: &Mob, slot: Slot, default: Option<String>) -> Option<String> {
     })
 }
 pub(super) fn mob_set_slot(m: &mut Mob, slot: Slot, stack: ItemStack) {
-    let item: Arc<str> = stack.item.clone();
-    let x = &mut m.extra;
-    match slot {
-        Slot::MainHand => x.set_main_hand(Some(item)),
-        Slot::OffHand => x.off_hand = Some(item),
-        Slot::Feet => x.feet = Some(item),
-        Slot::Legs => x.legs = Some(item),
-        Slot::Chest => x.chest = Some(item),
-        Slot::Head => x.head = Some(item),
-        Slot::Body => x.body = Some(item),
-        Slot::Saddle => m.set_saddle(Some(stack)),
-    }
+    m.set_equipment_stack(slot as usize, Some(stack));
 }
 
 impl Game<'_> {
@@ -508,7 +503,7 @@ impl Game<'_> {
     /// Drop one item as DefaultDispenseItemBehavior does. For a dispenser hook:
     /// return this remainder in its answer with `CLICK`; the caller plays the
     /// answer's event and smoke once. A client, another dimension or an unloaded
-    /// chunk keeps the input stack unchanged. API 67.
+    /// chunk keeps the input stack unchanged.
     #[allow(dead_code)]
     pub(super) fn native_dispense_default(
         &mut self,
@@ -1815,61 +1810,61 @@ impl Game<'_> {
         self.spawn_item(stack, [at.x, at.y + y_offset, at.z], v, 10);
         v
     }
-    /// `Mob.convertTo(type, ConversionParams.single(this, false, false))`: a
-    /// new mob of `kind` in the same place (no spawn finalization, so no
-    /// random draws) keeps the name, flags, persistence and age; the old one
-    /// is discarded.
-    pub(super) fn convert_mob(&mut self, index: usize, kind: &str) -> Option<u32> {
-        let t = self.res.mob_types().get(kind).cloned()?;
-        let (old_id, old_kind) = (
-            self.mobs[index].id,
-            super::native_hooks::mob_kind(&self.mobs[index]),
+    /// `MushroomCow.shear`: `player` is who sheared it, none for a dispenser.
+    pub(super) fn shear_mooshroom(&mut self, index: usize, player: Option<u128>, tool: &ItemStack) {
+        let old = self.mobs[index].clone();
+        let at = old.position;
+        let height = f64::from(old.height());
+        let table = if old.extra.variant == 1 {
+            "minecraft:shearing/mooshroom/brown"
+        } else {
+            "minecraft:shearing/mooshroom/red"
+        };
+        self.audio.play(
+            "minecraft:entity.mooshroom.shear",
+            Some([at.x, at.y, at.z]),
+            1.0,
+            1.0,
         );
-        // LivingConversionEvent.Pre: a canceled conversion leaves the mob.
-        let mut cancel = false;
-        self.native_living_conversion_pre(old_id, &old_kind, kind, &mut cancel);
-        if cancel {
-            return None;
-        }
-        let old = &self.mobs[index];
-        self.next_entity += 1;
-        let mut mob = Mob::new(self.next_entity, t, old.position, old.yaw);
-        mob.previous = old.previous;
-        mob.head_yaw = old.head_yaw;
-        mob.body_yaw = old.body_yaw;
-        mob.head_pitch = old.head_pitch;
-        mob.persistent = old.persistent;
-        mob.custom_name = old.custom_name.clone();
-        mob.custom_name_text = old.custom_name_text.clone();
-        mob.name_visible = old.name_visible;
-        mob.invisible = old.invisible;
-        mob.no_ai = old.no_ai;
-        mob.silent = old.silent;
-        mob.no_gravity = old.no_gravity;
-        mob.invulnerable_flag = old.invulnerable_flag;
-        mob.extra.age = if old.is_baby() { old.extra.age } else { 0 };
-        for slot in [
-            &mut mob.extra.main_hand,
-            &mut mob.extra.off_hand,
-            &mut mob.extra.head,
-            &mut mob.extra.body,
-            &mut mob.extra.chest,
-            &mut mob.extra.legs,
-            &mut mob.extra.feet,
-        ] {
-            *slot = None;
-        }
-        let id = mob.id;
-        self.mobs[index].removed = true;
-        self.mobs.push(mob);
-        self.native_mobs_joined(self.mobs.len() - 1, false);
-        self.native_entity_transform(old_id, &old_kind, id, kind);
-        self.native_living_conversion_post(old_id, &old_kind, id, kind);
-        Some(id)
+        self.convert_to(
+            &old,
+            "minecraft:cow",
+            horizon_client::mobs::conversion::Params {
+                keep_equipment: false,
+                preserve_can_pick_up_loot: false,
+            },
+            |game, _| {
+                game.mooshroom_shear_puff([at.x, at.y, at.z], height);
+                let mut drops =
+                    game.sequence_loot("minecraft:shearing/mooshroom", table, Some(tool));
+                game.native_use_drops(
+                    table,
+                    [at.x, at.y, at.z],
+                    None,
+                    Some((old.id, "minecraft:mooshroom")),
+                    player,
+                    Some(tool),
+                    &mut drops,
+                );
+                for stack in drops {
+                    for _ in 0..stack.count {
+                        game.spawn_item(
+                            ItemStack {
+                                count: 1,
+                                ..stack.clone()
+                            },
+                            [at.x, at.y + height, at.z],
+                            new_item_motion(),
+                            0,
+                        );
+                    }
+                }
+            },
+        );
     }
     /// `ShearsDispenseItemBehavior.tryShearEntity`: the first live, ready
     /// `Shearable` in the block is sheared.
-    fn shear_entity(&mut self, target: Pos) -> Result<bool> {
+    pub(super) fn shear_entity(&mut self, target: Pos) -> Result<bool> {
         let shears = ItemStack::new("minecraft:shears", 1);
         for t in self.targets_at(target) {
             // Entity.shearOffAllLeashConnections comes first, for any entity.
@@ -1891,8 +1886,8 @@ impl Game<'_> {
                     // passenger attachment, and nothing is swallowed for 5 s.
                     let height = f64::from(m.height());
                     let id = m.id;
-                    if let Some(body) = self.mobs[i].extra.body.take() {
-                        self.spawn_at_location(at, height, ItemStack::new(&body, 1));
+                    if let Some(body) = self.mobs[i].take_body_equipment() {
+                        self.spawn_at_location(at, height, body);
                     }
                     // setItemSlot(BODY, EMPTY): an unequip.
                     let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
@@ -1979,29 +1974,7 @@ impl Game<'_> {
                     }
                 }
                 Species::Mooshroom if !m.is_baby() => {
-                    let variant = if m.extra.variant == 1 { "brown" } else { "red" };
-                    let height = f64::from(m.height());
-                    self.audio
-                        .play("minecraft:entity.mooshroom.shear", sound_at, 1.0, 1.0);
-                    // convertTo(COW): the cow takes its place, then the mushrooms drop.
-                    // A canceled conversion (LivingConversionEvent.Pre) drops nothing.
-                    if self.convert_mob(i, "minecraft:cow").is_some() {
-                        self.mooshroom_shear_puff([at.x, at.y, at.z], height);
-                        let drops = self.sequence_loot(
-                            "minecraft:shearing/mooshroom",
-                            &format!("minecraft:shearing/mooshroom/{variant}"),
-                            Some(&shears),
-                        );
-                        for stack in drops {
-                            for _ in 0..stack.count {
-                                let one = ItemStack {
-                                    count: 1,
-                                    ..stack.clone()
-                                };
-                                self.spawn_at_location(at, height, one);
-                            }
-                        }
-                    }
+                    self.shear_mooshroom(i, None, &shears);
                 }
                 _ => continue,
             }
@@ -2141,11 +2114,14 @@ impl Game<'_> {
             }
             let (at, height) = (m.position, f64::from(m.height()));
             // The swallowed block comes out on top (the passenger attachment).
-            if let Some(old) = self.mobs[i].extra.body.take() {
-                self.spawn_at_location(at, height, ItemStack::new(&old, 1));
+            if let Some(old) = self.mobs[i].take_body_equipment() {
+                self.spawn_at_location(at, height, old);
             }
             let m = &mut self.mobs[i];
-            m.extra.body = Some(stack.item.clone());
+            m.extra.set_body_stack(Some(ItemStack {
+                count: 1,
+                ..stack.clone()
+            }));
             m.persistent = true;
             let (at, id) = (m.position, m.id);
             // setItemSlot: a body item without `equippable` posts UNEQUIP.
@@ -2270,6 +2246,37 @@ pub(super) fn tipped_effect(stack: &ItemStack) -> Option<(&'static str, i32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sulfur_cube_dispenser_replacement_drops_the_full_old_stack() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:sulfur_cube")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(
+                12,
+                kind,
+                horizon_core::geometry::Vec3::new(0.5, 0.0, 0.5),
+                0.0,
+            );
+            let mut old = ItemStack::new("minecraft:stone", 3);
+            old.damage = 7;
+            old.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            mob.extra.set_body_stack(Some(old.clone()));
+            game.mobs.push(mob);
+            let incoming = ItemStack::new("minecraft:dirt", 5);
+            assert!(game.sulfur_cube_swallow((0, 0, 0), &incoming));
+            assert!(game.dropped.iter().any(|drop| drop.stack == old));
+            assert_eq!(
+                game.mobs[0].equipment_stacks()[6],
+                Some(ItemStack::new("minecraft:dirt", 1))
+            );
+        });
+    }
 
     #[test]
     fn mod_dispenser_answers_preserve_fallback_and_own_consumption() {

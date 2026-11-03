@@ -73,12 +73,13 @@ impl Game<'_> {
     /// while any entity has some. Only those entities are looked at, and
     /// nothing else of the entities' memory changes.
     pub(super) fn prune_entity_attachments(&mut self) {
+        let alive = self.live_entity_ids();
         let gone: Vec<[i32; 4]> = self
             .persist
             .uuids
             .iter()
             .filter(|(id, uuid)| {
-                self.entity_attachments.contains_key(*uuid) && !self.attachment_entity_exists(**id)
+                self.entity_attachments.contains_key(*uuid) && !alive.contains(*id)
             })
             .map(|(_, uuid)| *uuid)
             .collect();
@@ -109,16 +110,28 @@ impl Game<'_> {
         }
     }
 
-    /// `attachment_map` without recording the holder for the sync.
+    /// `attachment_map` without recording the holder for the sync. Inside a transaction, the
+    /// map is kept as it was on its first access, so an abort puts it back.
     pub(super) fn attachment_map_quiet(
         &mut self,
         holder: horizon_client::mod_api::Holder,
     ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
     {
-        use horizon_client::mod_api::AttachmentError;
         if !self.native_authoritative() {
-            return Err(AttachmentError::MissingHolder);
+            return Err(horizon_client::mod_api::AttachmentError::MissingHolder);
         }
+        self.journal_attachments(holder);
+        self.attachment_slot(holder)
+    }
+
+    /// Where `holder`'s attachment map lives now: an entity's by its UUID, a player's where
+    /// their state is (swapped in for a guest's turn, or kept beside), the world's others.
+    pub(super) fn attachment_slot(
+        &mut self,
+        holder: horizon_client::mod_api::Holder,
+    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
+    {
+        use horizon_client::mod_api::AttachmentError;
         if let horizon_client::mod_api::Holder::Entity(id) = holder {
             if !self.attachment_entity_exists(id) {
                 return Err(AttachmentError::MissingHolder);
@@ -155,6 +168,9 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     }
     fn is_client_side(&self) -> bool {
         horizon_world::level::LevelAccess::is_client_side(self)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.native_state_block(state)
     }
     fn state_with_property(
         &self,
@@ -196,6 +212,9 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     }
     fn is_client_side(&self) -> bool {
         horizon_client::mod_api::LevelHost::is_client_side(&*self.level)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.level.registry.state(state).map(|s| &*s.name)
     }
     fn state_with_property(
         &self,

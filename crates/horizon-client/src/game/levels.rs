@@ -48,17 +48,17 @@ pub(super) struct Parked {
     /// Entity portal processes and cooldowns belong to this level's entities.
     portal_states: HashMap<u32, horizon_client::nether_portal::PortalState>,
     falling: horizon_client::join_seq::JoinList<FallingBlock>,
-    paintings: Vec<horizon_client::entities::Painting>,
-    item_frames: Vec<horizon_client::entities::ItemFrame>,
+    paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
+    item_frames: horizon_client::join_seq::JoinList<horizon_client::entities::ItemFrame>,
     armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
-    cushions: Vec<horizon_client::entities::Cushion>,
+    cushions: horizon_client::join_seq::JoinList<horizon_client::entities::Cushion>,
     others: Vec<commands::OtherEntity>,
     fangs: super::fangs::FangState,
     pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat>,
     pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
-    crystals: Vec<dragon::Crystal>,
+    crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
     dragon: Option<dragon::Dragon>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
     breath_clouds: Vec<dragon::Breath>,
@@ -132,6 +132,35 @@ impl Levels {
         self.parked.get(&dim).map(|level| &level.world)
     }
 
+    /// The world of the level not in place whose dimension is `dimension`
+    /// (`minecraft:the_nether`), found without collecting the parked levels.
+    pub(super) fn parked_world_of(&self, dimension: &str) -> Option<&World> {
+        self.parked
+            .iter()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &level.world)
+    }
+
+    /// The streaming of the level not in place whose dimension is `dimension`.
+    pub(super) fn parked_streaming_of(&self, dimension: &str) -> Option<&Streaming> {
+        self.parked
+            .iter()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &level.streaming)
+    }
+
+    /// The streaming of the level not in place whose dimension is `dimension`, to change.
+    pub(super) fn parked_streaming_of_mut(&mut self, dimension: &str) -> Option<&mut Streaming> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &mut level.streaming)
+    }
+
+    pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
+        self.parked.get(&dim).map(|level| &level.anims)
+    }
+
     /// The worlds of the levels not in place.
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
@@ -156,7 +185,7 @@ impl Levels {
     /// The forced chunks of every level not in place, released.
     pub(super) fn release_parked_forced_chunks(&mut self) {
         for level in self.parked.values_mut() {
-            level.streaming.forced.clear();
+            level.streaming.clear_forced();
         }
     }
 
@@ -178,6 +207,7 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
+            self.server_loot.clone(),
         )?;
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
@@ -195,17 +225,17 @@ impl Game<'_> {
             level_events: Vec::new(),
             portal_states: HashMap::new(),
             falling: Default::default(),
-            paintings: Vec::new(),
-            item_frames: Vec::new(),
+            paintings: Default::default(),
+            item_frames: Default::default(),
             armor_stands: Default::default(),
-            cushions: Vec::new(),
+            cushions: Default::default(),
             others: Vec::new(),
             fangs: Default::default(),
             boats: Default::default(),
             carts: Default::default(),
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
-            crystals: Vec::new(),
+            crystals: Default::default(),
             dragon: None,
             dragon_fireballs: Vec::new(),
             breath_clouds: Vec::new(),
@@ -345,6 +375,8 @@ impl Game<'_> {
             if opened {
                 // The new streaming's radius and meshing options.
                 self.apply_settings();
+                // ServerLevel's constructor reads the level's raids.
+                self.read_raids();
                 self.native_level_opened(target);
             }
         }
@@ -604,7 +636,7 @@ impl Game<'_> {
                         .get(d)
                         .is_some_and(|p| !p.streaming.forced.is_empty())
                 };
-                guests.iter().any(|g| g.dimension == d.id())
+                guests.iter().any(|g| g.dimension == d.id() && g.participates_in_player_simulation())
                     // A viewer count not yet told to 0 (`tick_mod_container_viewers`).
                     || self.mod_container_viewers.keys().any(|(k, _)| *k == d.id())
                     || self.player_bed_levels().any(|b| b == *d)
@@ -667,10 +699,11 @@ impl Game<'_> {
         let back = self.dim;
         for dim in closing {
             self.enter_level(None, dim)?;
-            // Its chunks leave with it: the mods hear before its last save.
-            let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
-            self.native_chunks_changed(&chunks);
+            // Vanilla saves the level's chunks before their unload hooks.
+            self.native_chunks_loaded();
             self.save_level(true)?;
+            let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
+            self.native_chunks_unloaded(&chunks);
             // Its entities' attachments are saved with them; they leave memory too.
             for uuid in self.persist.uuids.values() {
                 self.entity_attachments.remove(uuid);

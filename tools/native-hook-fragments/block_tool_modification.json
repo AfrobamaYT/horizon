@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "block_tool_modification",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_tool_modification",
+      "neoforge": "BlockEvent.BlockToolModificationEvent",
+      "side": "both",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

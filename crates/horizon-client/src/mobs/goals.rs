@@ -2235,17 +2235,18 @@ impl Goal for Breed {
         );
         self.love_time += 1;
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
-            // Llama.getBreedOffspring and finalizeSpawnChildFromBreeding's
-            // experience, from the parent's random.
-            let llama = super::llama::is_llama(m.species()).then(|| {
-                let o = super::llama::breed_offspring(m, &p);
-                let xp = 1 + m.random.next_int_bound(7).unwrap_or(0);
-                cx.events.push(MobEvent::Experience {
-                    at: [m.position.x, m.position.y, m.position.z],
-                    amount: xp as u32,
-                });
-                Box::new(o)
-            });
+            let llama = super::llama::is_llama(m.species())
+                .then(|| Box::new(super::llama::breed_offspring(m, &p)));
+            let parent_variant =
+                super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
+            let experience = if (llama.is_some() || parent_variant.is_some())
+                && !cx.w.asks_baby_spawn
+                && !super::orb_after_child(m.species())
+            {
+                super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
+            } else {
+                super::BreedExperience::Deferred
+            };
             m.extra.in_love = 0;
             m.extra.age = 6000;
             // TurtleBreedGoal.breed: the mother carries an egg, not a baby.
@@ -2260,6 +2261,8 @@ impl Goal for Breed {
                 parent: m.id,
                 partner: p.id,
                 llama,
+                parent_variant,
+                experience,
             });
         }
     }
@@ -2604,6 +2607,7 @@ impl Goal for EatBlock {
                 if cx.w.mob_griefing {
                     cx.events.push(MobEvent::BreakBlock {
                         pos: [x, y, z],
+                        by: None,
                         drop: false,
                     });
                 }
@@ -2834,6 +2838,163 @@ impl MoveToBlock {
             self.reached = true;
             self.try_ticks -= 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod breeding_variant_tests {
+    use super::*;
+    use crate::mobs::{BreedExperience, world::with_test_world};
+    use horizon_core::{
+        geometry::Vec3,
+        random::{LegacyRandom, RandomSource},
+    };
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn chicken_breeding_coin_precedes_same_tick_egg_with_or_without_listener() {
+        #[derive(Debug, Clone)]
+        struct SeedAtBreed(Breed);
+        impl Goal for SeedAtBreed {
+            goal_clone!();
+            fn flags(&self) -> u8 {
+                MOVE | LOOK
+            }
+            fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn can_continue(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+                m.random = LegacyRandom::new(1);
+                self.0.tick(m, cx);
+            }
+        }
+        assert!(with_test_world(&[], |world, types| {
+            let kind = Arc::new(types.types["minecraft:chicken"].clone());
+            let mut mate = Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0);
+            mate.extra.in_love = 600;
+            let partner = [mate.seen(None)];
+            for asks_baby_spawn in [false, true] {
+                let w = MobWorld {
+                    asks_baby_spawn,
+                    mob_drops: false,
+                    others: &partner,
+                    ..world.clone()
+                };
+                let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                parent.persistent = true;
+                parent.extra.in_love = 600;
+                parent.extra.egg_time = 1;
+                parent.ai.targets.clear();
+                parent.ai.goals = GoalSelector {
+                    goals: vec![Wrapped {
+                        priority: 2,
+                        running: true,
+                        goal: Box::new(SeedAtBreed(Breed {
+                            speed: 1.0,
+                            partner: Some(2),
+                            love_time: reduced(60) - 1,
+                        })),
+                    }],
+                    locked: [Some(0), Some(0), None, None],
+                    disabled: 0,
+                };
+                let mut events = Vec::new();
+                parent.tick(&w, &mut LegacyRandom::new(1), &mut events);
+                assert!(events.iter().any(|event| matches!(
+                    event,
+                    MobEvent::Breed {
+                        parent_variant: Some(true),
+                        ..
+                    }
+                )));
+                assert_eq!(parent.extra.egg_time, 8313);
+                assert_eq!(parent.extra.age, 5999);
+            }
+        }));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn variant_and_experience_are_drawn_in_order_before_later_goal_work() {
+        assert!(with_test_world(&[], |world, types| {
+            for id in [
+                "minecraft:pig",
+                "minecraft:cow",
+                "minecraft:chicken",
+                "minecraft:fox",
+                "minecraft:cat",
+            ] {
+                let kind = Arc::new(types.types[id].clone());
+                let partner =
+                    [Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0).seen(None)];
+                for (ask_mods, mob_drops) in
+                    [(false, true), (false, false), (true, true), (true, false)]
+                {
+                    let world = MobWorld {
+                        asks_baby_spawn: ask_mods,
+                        mob_drops,
+                        others: &partner,
+                        ..world.clone()
+                    };
+                    let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                    parent.random = LegacyRandom::new(0);
+                    let mut goal = Breed {
+                        speed: 1.0,
+                        partner: Some(2),
+                        love_time: reduced(60) - 1,
+                    };
+                    let mut events = Vec::new();
+                    let mut level_random = LegacyRandom::new(1);
+                    let mut cx = Cx {
+                        w: &world,
+                        lr: &mut level_random,
+                        events: &mut events,
+                    };
+                    goal.tick(&mut parent, &mut cx);
+                    let (choice, experience) = events
+                        .iter()
+                        .find_map(|event| match event {
+                            MobEvent::Breed {
+                                parent_variant,
+                                experience,
+                                ..
+                            } => Some((*parent_variant, *experience)),
+                            _ => None,
+                        })
+                        .expect("the animals breed");
+                    assert_eq!(choice, Some(true), "{id}");
+                    assert_eq!(
+                        experience,
+                        if ask_mods || id == "minecraft:fox" {
+                            BreedExperience::Deferred
+                        } else {
+                            BreedExperience::Drawn(mob_drops.then_some(3))
+                        },
+                        "{id}"
+                    );
+                    assert_eq!(
+                        parent.random.state(),
+                        if !ask_mods && mob_drops && id != "minecraft:fox" {
+                            234_029_835_660_143
+                        } else {
+                            205_749_139_540_596
+                        },
+                        "{id}"
+                    );
+                    if !ask_mods && mob_drops && id != "minecraft:fox" {
+                        assert_eq!(
+                            parent.random.next_int(),
+                            1_033_096_058,
+                            "{id}: same-tick later draw"
+                        );
+                    }
+                }
+            }
+        }));
     }
 }
 

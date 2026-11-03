@@ -16,7 +16,8 @@ from tools import release_train  # noqa: E402
 # The root workspace's manifest and toolchain files: the launcher's path crates inherit from them.
 ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", "clippy.toml"}
 # The check itself: a change to it runs it.
-LAUNCHER_CHECK = {".github/workflows/ci.yml", "tools/ci/rust_changes.py", "tools/release_train.py"}
+LAUNCHER_CHECK = {".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml",
+                  "tools/ci/rust_changes.py", "tools/release_train.py"}
 
 
 def needs_rust(paths):

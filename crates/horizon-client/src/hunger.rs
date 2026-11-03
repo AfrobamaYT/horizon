@@ -14,7 +14,7 @@ use horizon_world::{
 };
 
 /// A living entity is about to heal. Mods may change the amount or cancel.
-/// `entity` identifies the affected entity. 358.
+/// `entity` identifies the affected entity.
 #[inline(never)]
 pub fn native_living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
     crate::native_client_hooks::living_heal(entity, amount, cancel);
@@ -183,10 +183,12 @@ impl FoodWorld for TickWorld<'_> {
             status: Default::default(),
             blocking: None,
             blocked: 0.0,
+            shield_damage: 0,
             fully_blocked: false,
             block_sound: false,
             knocked: false,
             totem: false,
+            totem_off_hand: false,
             totem_fired: false,
             canceled: false,
         };

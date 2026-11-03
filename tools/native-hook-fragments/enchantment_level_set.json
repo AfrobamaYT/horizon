@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "enchantment_level_set",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchantment_level_set",
+      "neoforge": "EnchantmentLevelSetEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

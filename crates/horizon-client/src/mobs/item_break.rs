@@ -39,33 +39,22 @@ pub fn equipment_break_event(slot: EquipmentSlot) -> i8 {
 }
 
 impl Mob {
+    /// `Mob.sunProtectionSlot`, overridden by zombie horses and zombie nautiluses.
+    pub fn sun_protection_slot(&self) -> EquipmentSlot {
+        if matches!(
+            self.species(),
+            super::Species::ZombieHorse | super::Species::ZombieNautilus
+        ) {
+            EquipmentSlot::Body
+        } else {
+            EquipmentSlot::Head
+        }
+    }
     /// `LivingEntity.getItemBySlot` for a mob or another player a server
     /// sends: the stack it wears or holds in `slot`, with the components
     /// `ClientboundSetEquipmentPacket` gave it where they are kept.
     pub fn item_by_slot(&self, slot: EquipmentSlot) -> Option<ItemStack> {
-        let e = &self.extra;
-        let plain = |id: &Option<std::sync::Arc<str>>| id.as_deref().map(|i| ItemStack::new(i, 1));
-        let worn = |index: usize, id: &Option<std::sync::Arc<str>>| {
-            e.armor[index]
-                .clone()
-                .filter(|s| id.as_ref() == Some(&s.item))
-                .or_else(|| plain(id))
-        };
-        match slot {
-            EquipmentSlot::MainHand => e.main_hand_stack().cloned().or_else(|| plain(&e.main_hand)),
-            EquipmentSlot::OffHand => plain(&e.off_hand),
-            EquipmentSlot::Head => worn(0, &e.head),
-            EquipmentSlot::Chest => worn(1, &e.chest),
-            EquipmentSlot::Legs => worn(2, &e.legs),
-            EquipmentSlot::Feet => worn(3, &e.feet),
-            // The body armour (a wolf's, a horse's, a llama's carpet) is
-            // kept in `body`, with the durability it has lost.
-            EquipmentSlot::Body => plain(&e.body).map(|s| ItemStack {
-                damage: e.body_damage.max(0) as u32,
-                ..s
-            }),
-            EquipmentSlot::Saddle => self.saddle_item(),
-        }
+        self.equipment_stacks()[slot as usize].clone()
     }
 }
 
@@ -151,7 +140,32 @@ mod tests {
         assert_eq!(item(EquipmentSlot::Saddle), None);
     }
 
-    /// A wolf's armour is its body slot (kept in `body`), and a horse's
+    #[test]
+    fn undead_sun_protection_reads_the_species_slot() {
+        for (name, species) in [
+            ("minecraft:zombie_horse", Species::ZombieHorse),
+            ("minecraft:zombie_nautilus", Species::ZombieNautilus),
+        ] {
+            let mut m = mob(name, species);
+            m.extra.head = Some("minecraft:iron_helmet".into());
+            assert!(m.item_by_slot(m.sun_protection_slot()).is_none());
+            m.extra.body = Some("minecraft:leather_horse_armor".into());
+            assert_eq!(
+                m.item_by_slot(m.sun_protection_slot())
+                    .unwrap()
+                    .item
+                    .as_ref(),
+                "minecraft:leather_horse_armor"
+            );
+        }
+        let mut zombie = mob("minecraft:zombie", Species::Zombie);
+        zombie.extra.body = Some("minecraft:leather_horse_armor".into());
+        assert!(zombie.item_by_slot(zombie.sun_protection_slot()).is_none());
+        zombie.extra.head = Some("minecraft:iron_helmet".into());
+        assert!(zombie.item_by_slot(zombie.sun_protection_slot()).is_some());
+    }
+
+    /// A wolf's armour is its body slot, and a horse's
     /// saddle its saddle slot.
     #[test]
     fn body_armour_and_saddles_break_from_their_slots() {

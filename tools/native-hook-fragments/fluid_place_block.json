@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "fluid_place_block",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_place_block",
+      "neoforge": "BlockEvent.FluidPlaceBlockEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

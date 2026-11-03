@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "item_fished",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_fished",
+      "neoforge": "ItemFishedEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

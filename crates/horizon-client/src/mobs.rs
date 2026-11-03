@@ -330,6 +330,17 @@ pub enum Brain {
 pub use anim::Anim;
 pub use species::Species;
 
+pub fn draws_parent_variant(species: Species) -> bool {
+    matches!(
+        species,
+        Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
+    )
+}
+
+pub fn orb_after_child(species: Species) -> bool {
+    species == Species::Fox
+}
+
 /// Per-type behaviour switches derived from vanilla classes and tags.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Flags {
@@ -932,7 +943,9 @@ pub struct Extra {
     /// `Mob.canPickUpLoot` (also lets dispensers equip it).
     pub pick_up_loot: bool,
     pub saddled: bool,
-    /// The durability a wolf's body armor (`extra.body`) has lost.
+    /// Count of the body stack (zero means an ordinary single item).
+    pub body_count: u32,
+    /// The durability a wolf's body armor has lost.
     pub body_damage: i32,
     /// The components (dye, name...) of that armor stack.
     pub body_extra: Option<Box<crate::item_data::StackData>>,
@@ -978,8 +991,7 @@ pub struct Extra {
     pub off_hand: Option<Arc<str>>,
     /// The head item (`getItemBySlot(HEAD)`), on every mob.
     pub head: Option<Arc<str>>,
-    /// The body item (`getItemBySlot(BODY)`): a horse's armour, a llama's
-    /// carpet, a wolf's armour, a harness, a sulfur cube's swallowed block.
+    /// Equipment in the separate body slot (horse armour, wolf armour, harnesses).
     pub body: Option<Arc<str>>,
     /// Worn armour below the head (humanoid mobs).
     pub chest: Option<Arc<str>>,
@@ -1155,9 +1167,16 @@ pub struct Extra {
     /// What the native mods last heard it hold and wear
     /// (`LivingEntity.lastEquipmentItems`, empty at first), by
     /// `EquipmentSlot` ordinal: see `Mob::equipment_stacks`.
-    pub equipment_heard: Option<Box<[Option<crate::items::ItemStack>; 8]>>,
+    pub equipment_heard: Option<Box<horizon_items::equipment::Equipment>>,
 }
 impl Extra {
+    pub fn set_body_stack(&mut self, stack: Option<crate::items::ItemStack>) {
+        self.body = stack.as_ref().map(|s| s.item.clone());
+        self.body_count = stack.as_ref().map_or(0, |s| s.count);
+        self.body_damage = stack.as_ref().map_or(0, |s| s.damage as i32);
+        self.body_extra = stack.and_then(|s| s.extra);
+    }
+
     pub fn set_main_hand(&mut self, item: Option<Arc<str>>) {
         self.main_hand = item;
         self.main_hand_stack = None;
@@ -1335,6 +1354,27 @@ impl MannequinDescription {
         }
     }
 }
+/// Whether breeding experience was drawn in the parent's tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreedExperience {
+    Deferred,
+    Drawn(Option<u32>),
+}
+
+/// Makes the events pushed since `start` (the effects of a break a mod may stop)
+/// conditional on the game having broken one of `mob`'s blocks. Without a mod they
+/// stay plain events: nothing is allocated.
+pub fn after_break(events: &mut Vec<MobEvent>, mob: u32, start: usize) {
+    if crate::native_client_hooks::has_mods() {
+        let effects = events.split_off(start);
+        events.push(MobEvent::IfBroke {
+            mob,
+            effects,
+            otherwise: Vec::new(),
+        });
+    }
+}
+
 /// Events a mob tick asks the game to act on.
 #[derive(Clone, Debug)]
 pub enum MobEvent {
@@ -1816,6 +1856,30 @@ pub enum MobEvent {
     BreakBlock {
         pos: [i32; 3],
         drop: bool,
+        /// The mob whose breaking this is, when it is one `LivingDestroyBlockEvent`
+        /// hears (a wither's, a ravager's, a silverfish's, a zombie's).
+        by: Option<u32>,
+    },
+    /// `EndermanTakeBlockGoal`: the enderman `mob` picks up the block `state` at
+    /// `pos` (it already holds it); the block turns to air unless a mod stops it
+    /// or it is no longer that block.
+    TakeBlock {
+        mob: u32,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+    },
+    /// What follows a `BreakBlock { by: Some(mob) }` of this batch: `effects` when
+    /// the game broke at least one of the mob's blocks, `otherwise` when a mod kept
+    /// them all (vanilla plays the break's sound and particles only on a destruction).
+    /// Only made while a mod is loaded; without one the effects are plain events.
+    IfBroke {
+        mob: u32,
+        effects: Vec<MobEvent>,
+        otherwise: Vec<MobEvent>,
+    },
+    /// The mob `mob` jumps (`jumpFromGround`'s flag, set after a ravager broke no leaves).
+    Jump {
+        mob: u32,
     },
     Particles {
         kind: &'static str,
@@ -1877,6 +1941,10 @@ pub enum MobEvent {
         /// A llama's baby, drawn from the parent's random as
         /// `Llama.getBreedOffspring` does.
         llama: Option<Box<super::mobs::llama::Offspring>>,
+        /// Whether the parent supplies the variant, if already drawn.
+        parent_variant: Option<bool>,
+        /// The parent-RNG experience decision, if already made.
+        experience: BreedExperience,
     },
     /// Replace a block by name (sheep turning grass to dirt), optionally with
     /// the destroy effect.
@@ -2184,19 +2252,24 @@ impl Mob {
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
-    pub fn equipment_stacks(&self) -> [Option<crate::items::ItemStack>; 8] {
+    pub fn equipment_stacks(&self) -> horizon_items::equipment::Equipment {
         use crate::items::ItemStack;
         let e = &self.extra;
-        let wolf = self.species() == Species::Wolf;
+        let offhand = finalize::stored_stack(self, finalize::OFFHAND);
+        let armor = [
+            finalize::HEAD,
+            finalize::CHEST,
+            finalize::LEGS,
+            finalize::FEET,
+        ]
+        .map(|slot| finalize::stored_stack(self, slot));
         let slots = [
             (0usize, &e.main_hand, e.main_hand_stack()),
-            (1, &e.off_hand, None),
-            (2, &e.feet, e.armor[3].as_ref()),
-            (3, &e.legs, e.armor[2].as_ref()),
-            (4, &e.chest, e.armor[1].as_ref()),
-            // The body slot's item is no worn armour: a horse's armour, a
-            // llama's carpet, a harness go out on their own (6).
-            (5usize, &e.head, e.armor[0].as_ref()),
+            (1, &e.off_hand, offhand.as_ref()),
+            (2, &e.feet, armor[3].as_ref()),
+            (3, &e.legs, armor[2].as_ref()),
+            (4, &e.chest, armor[1].as_ref()),
+            (5, &e.head, armor[0].as_ref()),
             (6, &e.body, None),
         ];
         let mut out: [Option<ItemStack>; 8] = Default::default();
@@ -2208,14 +2281,14 @@ impl Mob {
             // its colour.
             out[slot] = Some(worn.cloned().unwrap_or_else(|| ItemStack {
                 item: item.clone(),
-                count: 1,
-                // A wolf's armor shows its cracks.
-                damage: if slot == 6 && wolf {
+                count: if slot == 6 { e.body_count.max(1) } else { 1 },
+                // Body equipment retains its damage and components.
+                damage: if slot == 6 {
                     e.body_damage.max(0) as u32
                 } else {
                     0
                 },
-                extra: if slot == 6 && wolf {
+                extra: if slot == 6 {
                     e.body_extra.clone()
                 } else {
                     None
@@ -2230,8 +2303,61 @@ impl Mob {
                 extra: None,
             }));
         }
-        out
+        out.into()
     }
+    /// Remove and return the complete body stack.
+    pub fn take_body_equipment(&mut self) -> Option<crate::items::ItemStack> {
+        let stack = self.equipment_stacks()[6].clone();
+        self.extra.set_body_stack(None);
+        stack
+    }
+
+    /// Set the complete equipment stack by the protocol slot ordinal.
+    pub fn set_equipment_stack(
+        &mut self,
+        slot: usize,
+        stack: Option<crate::items::ItemStack>,
+    ) -> bool {
+        if slot == 6 {
+            self.extra.set_body_stack(stack);
+            return true;
+        }
+        if slot == 7 {
+            self.set_saddle(stack);
+            return true;
+        }
+        let (gear_slot, armor_index) = match slot {
+            0 => (gear::MAIN, None),
+            1 => (gear::OFF, None),
+            2 => (gear::FEET, Some(3)),
+            3 => (gear::LEGS, Some(2)),
+            4 => (gear::CHEST, Some(1)),
+            5 => (gear::HEAD, Some(0)),
+            _ => return false,
+        };
+        if let Some(stack) = stack {
+            finalize::set_item_stack(self, slot, stack.clone());
+            if let Some(index) = armor_index {
+                self.extra.armor[index] = Some(stack);
+            }
+        } else {
+            match slot {
+                0 => self.extra.set_main_hand(None),
+                1 => self.extra.off_hand = None,
+                2 => self.extra.feet = None,
+                3 => self.extra.legs = None,
+                4 => self.extra.chest = None,
+                5 => self.extra.head = None,
+                _ => unreachable!(),
+            }
+            gear::set(self, gear_slot, Vec::new());
+            if let Some(index) = armor_index {
+                self.extra.armor[index] = None;
+            }
+        }
+        true
+    }
+
     pub fn burning_time(&self) -> f64 {
         let base = finalize::value(self, finalize::Attr::BurningTime);
         let protection: u32 = gear::ARMOR
@@ -2600,6 +2726,11 @@ impl PlayerView {
         self.effects.contains(&effect)
     }
 }
+/// `Animal.finalizeSpawnChildFromBreeding`: draw only when mob drops are enabled.
+pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
+    mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
+}
+
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     pub world: &'a World,
@@ -2662,6 +2793,12 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
+    /// Whether a listener can cancel animal taming.
+    pub asks_animal_tame: bool,
+    /// Whether a listener can cancel a mob's block destruction.
+    pub asks_living_destroy_block: bool,
+    /// Whether a server listener can cancel baby spawning.
+    pub asks_baby_spawn: bool,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
@@ -2670,7 +2807,8 @@ pub struct MobWorld<'a> {
 /// `shouldApplyEffectTickThisTick` and `applyEffectTick`, which the game's
 /// native mods answer. False removes the effect.
 pub trait ModEffectTicks {
-    fn tick_mod_effect(&self, effect: &str, mob: u32, tick_count: i32, amplifier: i32) -> bool;
+    fn tick_mod_effect(&self, effect: &str, mob: &mut Mob, tick_count: i32, amplifier: i32)
+    -> bool;
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
 #[derive(Clone, Debug, Default)]
@@ -2870,15 +3008,14 @@ impl Mob {
     /// the last-hurt-by bookkeeping goals read.
     /// The `armor` and `armor_toughness` modifiers of worn humanoid armour.
     pub fn worn_armor(&self) -> (f32, f32) {
-        // An equine keeps its horse armor in `extra.body`: the item's `armor`
-        // and `armor_toughness` modifiers of the body slot.
-        if equine::is_equine(self.species()) {
-            return self
-                .extra
+        let body = if equine::is_equine(self.species()) {
+            self.extra
                 .body
                 .as_deref()
-                .map_or((0.0, 0.0), spawning::horse_armor_stats);
-        }
+                .map_or((0.0, 0.0), spawning::horse_armor_stats)
+        } else {
+            (0.0, 0.0)
+        };
         [
             &self.extra.head,
             &self.extra.chest,
@@ -2888,7 +3025,7 @@ impl Mob {
         .into_iter()
         .flatten()
         .map(|i| spawning::armor_stats(i))
-        .fold((0.0, 0.0), |(a, t), (x, y)| (a + x, t + y))
+        .fold(body, |(a, t), (x, y)| (a + x, t + y))
     }
     /// `damage` of a blow whose causing entity is `aim` (`SulfurCube.knockback` reads it).
     pub fn damage_aimed(&mut self, amount: f32, source: Damage, aim: Option<Aim>) -> bool {
@@ -2979,12 +3116,24 @@ impl Mob {
         if amount < 0.0 {
             amount = 0.0;
         }
+        // LivingEntity.applyItemBlocking: no mob raises a blocking item, but a native
+        // mod may block for it.
+        let blocked = if amount > 0.0 {
+            crate::health::shield_block(
+                crate::health::Hurting::Mob(self, &source),
+                amount,
+                crate::health::no_block(amount),
+            )
+            .map_or(0.0, |b| b.blocked_damage)
+        } else {
+            0.0
+        };
+        amount -= blocked;
         // #damages_helmet: falling anvils, blocks and stalactites.
         if matches!(
             source.kind,
             DamageKind::FallingBlock | DamageKind::FallingAnvil | DamageKind::FallingStalactite
-        ) && !species::body_slot(self.species())
-            && self.extra.head.is_some()
+        ) && self.extra.head.is_some()
         {
             amount *= 0.75;
         }
@@ -3108,7 +3257,12 @@ impl Mob {
         if drops::is_animal(self.species()) {
             self.extra.in_love = 0;
         }
-        self.last_damage = Some((source, i64::from(self.age)));
+        // A hit blocked whole is not a success: vanilla records the source and runs the
+        // effects' `onMobHurt` only for a success.
+        let success = blocked <= 0.0 || amount > 0.0;
+        if success {
+            self.last_damage = Some((source, i64::from(self.age)));
+        }
         if let Some(who) = source.attacker {
             self.ai.last_hurt_by = Some(who);
             self.ai.last_hurt_by_time = self.age as i32;
@@ -3116,9 +3270,10 @@ impl Mob {
                 self.ai.last_hurt_by_player = 100;
             }
         }
-        // dealDefaultKnockback, unless the damage type is tagged no_knockback;
-        // a source without a position knocks in a random direction.
-        if knock && !source.no_knockback() {
+        // dealDefaultKnockback, unless the damage type is tagged no_knockback or
+        // the hit was blocked whole; a source without a position knocks in a
+        // random direction.
+        if knock && !source.no_knockback() && !(blocked > 0.0 && amount <= 0.0) {
             // dealDefaultKnockback: a projectile knocks the way it travelled
             // (`calculateHorizontalHurtKnockbackDirection`), else from the source's position.
             let (dx, dz) = match self.projectile_motion {
@@ -3167,7 +3322,7 @@ impl Mob {
             self.outbox
                 .push(MobEvent::Sound("entity.iron_golem.damage", at, 1.0, 1.0));
         }
-        if self.has_effect("minecraft:infested") {
+        if success && self.has_effect("minecraft:infested") {
             self.outbox.push(MobEvent::Infested { mob: self.id });
         }
         // Squid.hurtServer: a squid hurt after a living entity hit it squirts ink.
@@ -3183,7 +3338,7 @@ impl Mob {
         if self.species() == Species::GlowSquid {
             aquatic::hurt_server(self);
         }
-        true
+        success
     }
     /// A splash or cloud's harming effect on this mob: the potion's
     /// `indirect_magic` is in `#witch_resistant_to`, so a witch takes 15%.
@@ -3227,9 +3382,7 @@ impl Mob {
         let after = before + damage.ceil() as i32;
         let at = [self.position.x, self.position.y, self.position.z];
         if after >= WOLF_ARMOR_DURABILITY {
-            self.extra.body = None;
-            self.extra.body_damage = 0;
-            self.extra.body_extra = None;
+            self.extra.set_body_stack(None);
             self.outbox
                 .push(MobEvent::Sound("item.wolf_armor.break", at, 1.0, 1.0));
         } else {
@@ -3452,6 +3605,13 @@ impl Mob {
         let main = self.extra.main_hand.as_deref() == Some(TOTEM);
         let off = !main && self.extra.off_hand.as_deref() == Some(TOTEM);
         if !main && !off {
+            return false;
+        }
+        // `LivingUseTotemEvent`: a native mod may cancel, and the mob dies.
+        if crate::health::USE_TOTEM
+            .get()
+            .is_some_and(|hook| hook(crate::health::Hurting::Mob(self, source), off))
+        {
             return false;
         }
         if main {
@@ -3704,9 +3864,9 @@ impl Mob {
         self.extra.saddled = saddle.is_some();
         // A plain saddle is implied by `saddled`; anything else (a copper
         // golem's antenna flower) is kept as it is.
-        self.extra.saddle_stack = saddle
-            .map(|s| crate::items::ItemStack { count: 1, ..s })
-            .filter(|s| s.damage != 0 || s.extra.is_some() || &*s.item != "minecraft:saddle");
+        self.extra.saddle_stack = saddle.filter(|s| {
+            s.count != 1 || s.damage != 0 || s.extra.is_some() || &*s.item != "minecraft:saddle"
+        });
     }
 }
 
@@ -4661,6 +4821,46 @@ mod armor_hurt_tests {
         Mob::new(1, kind, Vec3::ZERO, 0.0)
     }
 
+    #[test]
+    fn equipment_stacks_reads_full_offhand() {
+        let mut horse = horse();
+        let mut stack = crate::items::ItemStack::new("minecraft:shield", 3);
+        stack.damage = 17;
+        finalize::set_item_stack(&mut horse, finalize::OFFHAND, stack.clone());
+        assert_eq!(horse.equipment_stacks()[1], Some(stack));
+    }
+
+    #[test]
+    fn removing_body_equipment_keeps_the_whole_stack() {
+        let mut horse = horse();
+        let mut stack = crate::items::ItemStack::new("minecraft:red_carpet", 3);
+        stack.damage = 7;
+        stack.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+        horse.extra.set_body_stack(Some(stack.clone()));
+        assert_eq!(horse.take_body_equipment(), Some(stack));
+        assert_eq!(horse.take_body_equipment(), None);
+    }
+
+    #[test]
+    fn replacing_armor_with_same_item_forgets_old_stack() {
+        let mut horse = horse();
+        let mut old = crate::items::ItemStack::new("minecraft:iron_helmet", 1);
+        old.damage = 8;
+        horse.set_equipment_stack(5, Some(old));
+        let mut replacement = crate::items::ItemStack::new("minecraft:iron_helmet", 2);
+        replacement.damage = 3;
+        finalize::set_item_stack(&mut horse, finalize::HEAD, replacement.clone());
+        assert_eq!(horse.equipment_stacks()[5], Some(replacement));
+    }
+
+    #[test]
+    fn saddle_stack_keeps_count() {
+        let mut horse = horse();
+        let stack = crate::items::ItemStack::new("minecraft:saddle", 3);
+        horse.set_saddle(Some(stack.clone()));
+        assert_eq!(horse.saddle_item(), Some(stack));
+    }
+
     /// `LivingEntity.hurtArmor` (`doHurtEquipment`): a hit that lands on a mob
     /// wearing body armour leaves the piece owing a wear, which the host
     /// applies with the item's own maximum and fire rules.
@@ -4696,8 +4896,7 @@ mod armor_hurt_tests {
     /// `Horse` is the only mob that overrides `LivingEntity.hurtArmor` (the
     /// base one is empty, `LivingEntity.java:1887`), so a donkey wearing a body
     /// item — `/item replace entity @e[type=minecraft:donkey,limit=1]
-    /// armor.body with minecraft:wolf_armor` — wears nothing, even though
-    /// vanilla only gives a horse's body piece the wear.
+    /// armor.body with minecraft:wolf_armor` — wears nothing.
     #[test]
     fn a_donkey_wearing_a_body_item_wears_nothing() {
         let mut donkey = mob("minecraft:donkey", Species::Donkey);

@@ -678,9 +678,11 @@ impl Game<'_> {
             return false;
         }
         let (_, _, crit, magic) = self.melee_damage("minecraft:armor_stand", true);
+        let sweep = self.sweep_before_hit("minecraft:armor_stand", crit);
         let hurt = self.hit_armor_stand(i, |g, area, id| {
             g.attack_effects(
                 area,
+                sweep,
                 Some(id as i32),
                 crit,
                 super::mace::Spared::Stand(id),
@@ -785,6 +787,7 @@ impl Game<'_> {
             extra: None,
         };
         self.spawn_item(stand, center, [0.0; 3], 10);
+        self.armor_stand_death_drops(a.id, "minecraft:player_attack", self.own_entity_id() as u32);
         for stack in a.equipment.into_iter().flatten() {
             let r = &mut self.world.random;
             let v = [
@@ -865,12 +868,14 @@ impl Game<'_> {
             }
             self.armor_stand_turtle_eggs(i, landed)?;
             let a = &mut self.armor_stands[i];
-            if !a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry) {
-                dead.push(i);
+            if let Some(damage_type) =
+                a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry)
+            {
+                dead.push((i, damage_type));
             }
         }
-        for i in dead.into_iter().rev() {
-            self.break_armor_stand_by_anything(i);
+        for (i, damage_type) in dead.into_iter().rev() {
+            self.break_armor_stand_by_anything(i, damage_type, 0);
         }
         Ok(())
     }
@@ -912,12 +917,36 @@ impl Game<'_> {
         }
         Ok(())
     }
+    /// `ArmorStand.brokenByAnything`'s `dropAllDeathLoot`: the stand has no
+    /// loot of its own, so the list is empty and a mod may add to it or hear
+    /// that the stand broke (`native_living_drops`). The stand item and the
+    /// equipment pop outside the list, as in vanilla.
+    fn armor_stand_death_drops(&mut self, id: u32, damage_type: &str, causing: u32) {
+        let source = (!horizon_client::mod_api::mods().is_empty())
+            .then(|| super::creatures::death_hurt_source(damage_type, causing));
+        let dying = super::creatures::DyingDrops {
+            entity: id,
+            kind: "minecraft:armor_stand",
+            player: None,
+            source,
+            recently_hit: false,
+        };
+        self.drop_death_items(&dying, Vec::new(), 10, |_| {
+            super::dispenser::new_item_motion()
+        });
+    }
     /// `ArmorStand.brokenByAnything`, then `kill`, as burning out or a blast
     /// breaks a stand: its equipment pops above its block, the stand item does
     /// not drop.
-    pub(super) fn break_armor_stand_by_anything(&mut self, i: usize) {
+    pub(super) fn break_armor_stand_by_anything(
+        &mut self,
+        i: usize,
+        damage_type: &str,
+        causing: u32,
+    ) {
         let a = self.armor_stands.remove(i);
         let at = [a.position.x, a.position.y, a.position.z];
+        self.armor_stand_death_drops(a.id, damage_type, causing);
         let (pos, drops) = broken_armor_stand_equipment(a);
         for stack in drops {
             self.pop_resource(pos, stack);
@@ -1365,7 +1394,7 @@ impl Game<'_> {
         let current = self.armor[index].clone();
         // PREVENT_ARMOR_CHANGE (Curse of Binding) outside creative, or the same item.
         if current.as_ref().is_some_and(|c| {
-            (c.enchantment_level("minecraft:binding_curse") > 0 && !self.creative)
+            (world_stations!(self).enchantments.prevents_armor_change(c) && !self.creative)
                 || c.same_item_same_components(stack)
         }) {
             return true;

@@ -6,11 +6,17 @@ use std::sync::OnceLock;
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
+    pub item_stacked_on_other: fn(&mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
+    pub farmland_trample: fn(u32, [i32; 3], u32, f64, &mut bool),
+    pub has_mods: fn() -> bool,
+    pub player_name_format: fn(&crate::text::Text, &mut crate::text::Text),
+    pub player_tab_list_name_format: fn(u128, &str, &mut Option<crate::text::Text>),
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
+    pub ender_entity_teleport: fn(u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
     pub ingredient_test: fn(&str, &Map<String, Value>, &ItemStack, &mut bool),
 }
@@ -34,6 +40,15 @@ pub(crate) fn menu_slot_rules(
     }
 }
 
+pub(crate) fn item_stacked_on_other(
+    event: &mut crate::menu::StackedOnOther<'_>,
+    canceled: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.item_stacked_on_other)(event, canceled);
+    }
+}
+
 pub(crate) fn living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_heal)(entity, amount, cancel);
@@ -49,6 +64,41 @@ pub(crate) fn living_breathe(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_breathe)(entity, kind, can_breathe, consume, refill);
+    }
+}
+
+pub(crate) fn farmland_trample(
+    entity: u32,
+    pos: [i32; 3],
+    state: u32,
+    distance: f64,
+    cancel: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.farmland_trample)(entity, pos, state, distance, cancel);
+    }
+}
+
+pub(crate) fn has_mods() -> bool {
+    HOOKS.get().is_some_and(|hooks| (hooks.has_mods)())
+}
+
+pub(crate) fn player_name_format(
+    username: &crate::text::Text,
+    displayname: &mut crate::text::Text,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.player_name_format)(username, displayname);
+    }
+}
+
+pub(crate) fn player_tab_list_name_format(
+    player: u128,
+    name: &str,
+    display_name: &mut Option<crate::text::Text>,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.player_tab_list_name_format)(player, name, display_name);
     }
 }
 
@@ -87,6 +137,18 @@ pub(crate) fn living_fall(
 pub(crate) fn living_jump(entity: u32, kind: &str) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_jump)(entity, kind);
+    }
+}
+
+pub(crate) fn ender_entity_teleport(
+    entity: u32,
+    kind: &str,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    cancel: &mut bool,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.ender_entity_teleport)(entity, kind, from, target, cancel);
     }
 }
 

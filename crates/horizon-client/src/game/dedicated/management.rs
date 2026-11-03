@@ -112,7 +112,7 @@ impl Game<'_> {
                     "Game rule '{}' updated from '{current}' to '{value}'",
                     rule.name
                 ));
-                self.set_game_rule(rule, value);
+                self.set_game_rule(rule, value, None);
                 return json!({ "value": typed_rule(rule, value) });
             }
             "serversettings/autosave" => {
@@ -464,8 +464,16 @@ impl Game<'_> {
                 }
             }
             "operators/remove" => {
-                for user in entries.iter().filter_map(|e| self.management_user(e)) {
+                let users: Vec<_> = entries
+                    .iter()
+                    .filter_map(|e| self.management_user(e))
+                    .collect();
+                for user in users {
                     rpc(format!("Deop '{}'", shown(&user)));
+                    let known = lists.lock().unwrap().ops.contains(&user);
+                    if known && self.permission_change(&lists, &user, 0) {
+                        continue;
+                    }
                     lists.lock().unwrap().ops.remove(&user);
                 }
                 self.sync_ops(&lists);
@@ -489,6 +497,9 @@ impl Game<'_> {
                     .collect();
                 for op in current.iter().filter(|o| !wanted.contains(o)) {
                     rpc(format!("Deop '{}'", shown(&op.user)));
+                    if self.permission_change(&lists, &op.user, 0) {
+                        continue;
+                    }
                     lists.lock().unwrap().ops.remove(&op.user);
                 }
                 for op in wanted.into_iter().filter(|o| !current.contains(o)) {
@@ -542,6 +553,12 @@ impl Game<'_> {
     /// the player had. The commands an online player may run follow (`sync_ops`, after the edit).
     fn management_add_op(&mut self, rpc: &impl Fn(String), state: &ServerState, op: Op) {
         rpc(format!("Op '{}'", shown(&op.user)));
+        let level = op
+            .level
+            .unwrap_or_else(|| state.lists.lock().unwrap().op_level);
+        if self.permission_change(&state.lists, &op.user, level) {
+            return;
+        }
         let mut lists = state.lists.lock().unwrap();
         let had = lists
             .ops

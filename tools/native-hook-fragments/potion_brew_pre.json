@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "potion_brew_pre",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_potion_brew_pre",
+      "neoforge": "PotionBrewEvent.Pre",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

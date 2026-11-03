@@ -1,0 +1,65 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "player_needs_food", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_needs_food",
+      "receiver": "player"
+    },
+    {
+      "name": "player_has_enough_food", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_has_enough_food",
+      "receiver": "player"
+    },
+    {
+      "name": "player_can_eat", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_can_eat",
+      "receiver": "player"
+    },
+    {
+      "name": "player_feed", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_feed",
+      "receiver": "player"
+    },
+    {
+      "name": "player_add_exhaustion", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_add_exhaustion",
+      "receiver": "player"
+    },
+    {
+      "name": "player_set_food_level", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_set_food_level",
+      "receiver": "player"
+    },
+    {
+      "name": "player_set_saturation", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_set_saturation",
+      "receiver": "player"
+    },
+    {
+      "name": "player_set_exhaustion", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_set_exhaustion",
+      "receiver": "player"
+    },
+    {
+      "name": "player_experience", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_experience",
+      "receiver": "player"
+    },
+    {
+      "name": "player_xp_needed_for_next_level", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_xp_needed_for_next_level",
+      "receiver": "player"
+    },
+    {
+      "name": "player_set_experience_points", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_set_experience_points",
+      "receiver": "player"
+    },
+    {
+      "name": "player_set_experience_levels", "side": "server",
+      "target": "horizon_client::game::native_player_food::Game<'_>::native_player_set_experience_levels",
+      "receiver": "player"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "client_player_change_game_type",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_player_change_game_type",
+      "neoforge": "ClientPlayerChangeGameTypeEvent",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

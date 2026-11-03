@@ -7,6 +7,7 @@ use super::guest::Guest;
 use crate::{
     bundle::{Contents, can_be_in_bundle, toggle_selected},
     containers::BlockEntity,
+    enchant::Enchantments,
     items::{ItemStack, Items},
     world::World,
 };
@@ -14,6 +15,8 @@ use crate::{
 /// What the menus need to know about items and the slots' rules.
 pub trait Rules {
     fn items(&self) -> &Items;
+    /// The enchantment definitions: what keeps worn armour on (`PREVENT_ARMOR_CHANGE`).
+    fn enchantments(&self) -> &Enchantments;
     fn max_stack(&self, item: &str) -> u32;
     /// The armor slot (0 head .. 3 feet) an item can be worn in.
     fn armor_index(&self, item: &str) -> Option<usize>;
@@ -99,7 +102,35 @@ pub enum Slots {
     Native,
 }
 
+/// The concrete storage a container slot uses, in the container's order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotBacking {
+    Block((i32, i32, i32), usize),
+    Ender(usize),
+    Native(usize),
+}
+
 impl Slots {
+    /// Locate a container slot, including the correct half of a double chest.
+    pub fn backing(self, world: &World, n: usize) -> Option<SlotBacking> {
+        match self {
+            Slots::Block(pos) => {
+                (n < shown(world, pos)?.len()).then_some(SlotBacking::Block(pos, n))
+            }
+            Slots::Double(a, b) => {
+                let first = shown(world, a)?.len();
+                if n < first {
+                    Some(SlotBacking::Block(a, n))
+                } else {
+                    let n = n - first;
+                    (n < shown(world, b)?.len()).then_some(SlotBacking::Block(b, n))
+                }
+            }
+            Slots::Ender => Some(SlotBacking::Ender(n)),
+            Slots::Native => Some(SlotBacking::Native(n)),
+        }
+    }
+
     fn halves(self) -> Vec<(i32, i32, i32)> {
         match self {
             Slots::Block(k) => vec![k],
@@ -113,6 +144,19 @@ impl Slots {
         self.halves()
             .iter()
             .all(|k| world.block_entities.contains_key(k))
+    }
+    /// How many slots the block entities behind a block menu show now, a missing one none;
+    /// none for the ender chest's and a mod's chest menu, which no block holds.
+    pub fn block_slots(self, world: &World) -> Option<usize> {
+        match self {
+            Slots::Ender | Slots::Native => None,
+            _ => Some(
+                self.halves()
+                    .into_iter()
+                    .map(|k| shown(world, k).map_or(0, <[_]>::len))
+                    .sum(),
+            ),
+        }
     }
     /// `Container.stillValid` for the guest: the block entities are there
     /// and the guest is within reach of each (`stillValidBlockEntity`). The
@@ -275,7 +319,7 @@ impl View<'_> {
             && !self.guest.creative()
             && stack
                 .as_ref()
-                .is_some_and(|s| s.enchantment_level("minecraft:binding_curse") > 0)
+                .is_some_and(|s| rules.enchantments().prevents_armor_change(s))
         {
             return false;
         }
@@ -287,6 +331,88 @@ impl View<'_> {
             Some(c) => (c.len()..c.len() + 27, c.len() + 27..c.len() + 36),
             None => (9..36, 36..45),
         }
+    }
+}
+
+struct HostedSlotView<'a, 'v> {
+    view: &'a mut View<'v>,
+    slot: usize,
+    rules: &'a dyn Rules,
+}
+
+impl crate::menu::SlotView for HostedSlotView<'_, '_> {
+    fn item(&self) -> Option<ItemStack> {
+        self.view.get(self.slot)
+    }
+    fn may_place(&self, stack: &ItemStack) -> bool {
+        self.view.may_place(self.slot, stack, self.rules)
+    }
+    fn may_pickup(&self) -> bool {
+        self.view.container.is_some()
+            || !(5..=8).contains(&self.slot)
+            || self.view.guest.creative()
+            || self
+                .view
+                .get(self.slot)
+                .is_none_or(|s| !self.rules.enchantments().prevents_armor_change(&s))
+    }
+    fn allow_modification(&self) -> bool {
+        let item = self
+            .item()
+            .unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+        self.may_pickup() && self.may_place(&item)
+    }
+    fn safe_insert(&mut self, mut stack: Option<ItemStack>, count: u32) -> Option<ItemStack> {
+        let Some(input) = stack.as_mut() else {
+            return stack;
+        };
+        if !self.may_place(input) {
+            return stack;
+        }
+        let current = self.item();
+        let have = current.as_ref().map_or(0, |s| s.count);
+        let moved = count.min(input.count).min(
+            self.view
+                .slot_max(self.slot, input, self.rules)
+                .saturating_sub(have),
+        );
+        if moved == 0 {
+            return stack;
+        }
+        match current {
+            None => {
+                let mut part = input.clone();
+                part.count = moved;
+                input.count -= moved;
+                self.view.set(self.slot, Some(part));
+            }
+            Some(mut current) if current.same_item_same_components(input) => {
+                current.count += moved;
+                input.count -= moved;
+                self.view.set(self.slot, Some(current));
+            }
+            Some(_) => {}
+        }
+        if input.count == 0 { None } else { stack }
+    }
+    fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack> {
+        if !self.may_pickup() {
+            return None;
+        }
+        let mut current = self.item()?;
+        if !self.allow_modification() && max < current.count {
+            return None;
+        }
+        let moved = count.min(max).min(current.count);
+        if moved == 0 {
+            return None;
+        }
+        let mut taken = current.clone();
+        taken.count = moved;
+        current.count -= moved;
+        self.view
+            .set(self.slot, (current.count > 0).then_some(current));
+        Some(taken)
     }
 }
 
@@ -445,9 +571,7 @@ pub fn click(
     } else {
         *drag = None;
         match mode {
-            // isContainerClickButton: PICKUP and QUICK_MOVE take buttons 0
-            // and 1; any other button is no click at all, so neither the
-            // slot nor the cursor moves (a modified client sends those).
+            // Invalid container click buttons must not move the slot or cursor.
             input::PICKUP | input::QUICK_MOVE if !is_container_click_button(button) => {}
             input::PICKUP | input::QUICK_MOVE if slot == -999 => {
                 if mode == input::PICKUP
@@ -533,7 +657,53 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
         return;
     }
     let right = button == 1;
-    if bundle_click(view, i, right, rules) {
+    let mut canceled = false;
+    let mut handled = false;
+    if crate::native_client_hooks::has_mods() {
+        let (container, container_slot) = match &view.container {
+            Some(c) if i < c.len() => (crate::menu::MAIN, i),
+            Some(c) => (crate::menu::PLAYER, player_slot(i - c.len())),
+            None => (
+                crate::menu::PLAYER,
+                match i {
+                    5..=8 => 44 - i,
+                    9..=35 => i,
+                    36..=44 => i - 36,
+                    45 => 40,
+                    _ => i,
+                },
+            ),
+        };
+        let player = view.guest.uuid;
+        let player_entity_id = view.guest.entity_id;
+        let mut carried = view.guest.carried.take();
+        let mut slot_view = HostedSlotView {
+            view,
+            slot: i,
+            rules,
+        };
+        let mut event = crate::menu::StackedOnOther {
+            player: Some(player),
+            player_entity_id: Some(player_entity_id),
+            slot: i,
+            container,
+            container_slot,
+            primary: !right,
+            side: crate::menu::LogicalSide::Server,
+            carried: crate::menu::CarriedAccess(&mut carried),
+            clicked: &mut slot_view,
+            cancellation_result: false,
+        };
+        crate::menu::native_item_stacked_on_other(&mut event, &mut canceled);
+        handled = event.cancellation_result;
+        view.guest.carried = carried;
+    }
+    let handled = if canceled {
+        handled
+    } else {
+        bundle_click(view, i, right, rules)
+    };
+    if handled {
         return;
     }
     let (slot_item, carried) = (view.get(i), view.guest.carried.clone());
@@ -824,8 +994,9 @@ fn quick_craft(
             }
             if slots.len() == 1 {
                 // A single slot behaves like a plain click.
-                let button = if kind == 1 { 1 } else { 0 };
-                pickup(view, slots[0] as i32, button, rules);
+                if kind <= 1 {
+                    pickup(view, slots[0] as i32, i32::from(kind), rules);
+                }
                 return;
             }
             let each = match kind {
@@ -863,6 +1034,14 @@ fn quick_craft(
 mod tests {
     use super::*;
     use crate::lan::{Joined, PlayerSender};
+
+    /// The test enchantments: Curse of Binding, and a data pack's `test:clinging` with its
+    /// `prevent_armor_change` effect.
+    fn enchantments() -> &'static Enchantments {
+        static ENCHANTMENTS: std::sync::LazyLock<Enchantments> =
+            std::sync::LazyLock::new(crate::enchant::tests::sample);
+        &ENCHANTMENTS
+    }
     use horizon_protocol::packets::configuration::ClientInformation;
     use horizon_world::loot::PackOverlay;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
@@ -871,6 +1050,9 @@ mod tests {
     impl Rules for ItemRules {
         fn items(&self) -> &Items {
             &self.0
+        }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
         }
         fn max_stack(&self, item: &str) -> u32 {
             self.0.get(item).map_or(64, |i| i.max_stack)
@@ -928,6 +1110,65 @@ mod tests {
                 .map(|s| (s.item.to_string(), s.count))
                 .collect()
         })
+    }
+
+    #[test]
+    fn hosted_slot_view_respects_limits_and_transfers() {
+        use crate::menu::SlotView;
+        let Some(rules) = rules() else { return };
+        let mut guest = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 60))];
+        let mut view = View {
+            guest: &mut guest,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        let mut slot = HostedSlotView {
+            view: &mut view,
+            slot: 0,
+            rules: &rules,
+        };
+        let rest = slot
+            .safe_insert(Some(ItemStack::new("minecraft:stone", 10)), 10)
+            .unwrap();
+        assert_eq!(rest.count, 6);
+        assert_eq!(slot.item().unwrap().count, 64);
+        assert_eq!(slot.safe_take(8, 3).unwrap().count, 3);
+        assert_eq!(slot.item().unwrap().count, 61);
+    }
+
+    #[test]
+    fn invalid_pickup_button_leaves_chest_and_carried_unchanged() {
+        let Some(rules) = rules() else { return };
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 10))];
+        g.carried = Some(ItemStack::new("minecraft:bundle", 1));
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        let mut drag = None;
+        let (drops, changed) = click(&mut view, &mut drag, 0, 2, input::PICKUP, &rules);
+        assert!(drops.is_empty() && changed.is_empty());
+        assert_eq!(view.get(0).unwrap().count, 10);
+        assert_eq!(
+            view.guest.carried.as_ref().unwrap().item.as_ref(),
+            "minecraft:bundle"
+        );
+        let mut creative_drag = Some((2, vec![0]));
+        let (drops, changed) = click(
+            &mut view,
+            &mut creative_drag,
+            0,
+            10,
+            input::QUICK_CRAFT,
+            &rules,
+        );
+        assert!(drops.is_empty() && changed.is_empty());
+        assert_eq!(view.get(0).unwrap().count, 10);
     }
 
     /// A double-click's collect walks the slots in the direction the button
@@ -1213,6 +1454,9 @@ mod tests {
         fn items(&self) -> &Items {
             unreachable!("swap does not read the item catalog");
         }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
+        }
         fn max_stack(&self, _: &str) -> u32 {
             64
         }
@@ -1305,6 +1549,9 @@ mod tests {
         fn items(&self) -> &Items {
             unreachable!("a quick move reads no item catalog");
         }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
+        }
         fn max_stack(&self, _: &str) -> u32 {
             64
         }
@@ -1377,6 +1624,9 @@ mod tests {
     impl Rules for StrictRules {
         fn items(&self) -> &Items {
             &self.items
+        }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
         }
         fn max_stack(&self, _: &str) -> u32 {
             64
@@ -1495,19 +1745,27 @@ mod tests {
         assert_eq!(view.get(0).map(|s| s.count), Some(4));
     }
 
-    /// `ArmorSlot.mayPickup`: a survival guest cannot take cursed armour off;
-    /// a creative one can, by a click and by a shift-click.
+    /// `ArmorSlot.mayPickup`: a survival guest cannot take armour with `prevent_armor_change` off,
+    /// Curse of Binding's or a data pack enchantment's under another id; a creative one can, by a
+    /// click and by a shift-click. Armour with another enchantment comes off.
     #[test]
     fn guest_survival_cannot_remove_cursed_armour() {
         let rules = StrictRules::new(&[]);
-        for (game_mode, taken) in [
-            (crate::lan::guest::SURVIVAL, false),
-            (crate::lan::guest::CREATIVE, true),
+        for (enchantment, game_mode, taken) in [
+            (
+                "minecraft:binding_curse",
+                crate::lan::guest::SURVIVAL,
+                false,
+            ),
+            ("test:clinging", crate::lan::guest::SURVIVAL, false),
+            ("minecraft:unbreaking", crate::lan::guest::SURVIVAL, true),
+            ("minecraft:binding_curse", crate::lan::guest::CREATIVE, true),
+            ("test:clinging", crate::lan::guest::CREATIVE, true),
         ] {
             for mode in [input::PICKUP, input::QUICK_MOVE] {
                 let mut g = guest();
                 let mut cursed = ItemStack::new("minecraft:diamond_chestplate", 1);
-                cursed.set_crafting_enchantments(vec![("minecraft:binding_curse".into(), 1)]);
+                cursed.set_crafting_enchantments(vec![(enchantment.into(), 1)]);
                 g.armor[1] = Some(cursed);
                 g.game_mode = game_mode;
                 let mut drag = None;
@@ -1519,8 +1777,9 @@ mod tests {
                 };
                 // Menu slot 6 is the chest slot.
                 click(&mut view, &mut drag, 6, 0, mode, &rules);
-                assert_eq!(view.get(6).is_some(), !taken);
-                assert_eq!(view.guest.carried.is_some() || view.get(9).is_some(), taken);
+                assert_eq!(view.get(6).is_some(), !taken, "{enchantment}");
+                let moved = view.guest.carried.is_some() || view.get(9).is_some();
+                assert_eq!(moved, taken, "{enchantment}");
             }
         }
     }
@@ -1529,6 +1788,9 @@ mod tests {
     impl Rules for ArmorRules {
         fn items(&self) -> &Items {
             unreachable!("a quick move reads no item catalog");
+        }
+        fn enchantments(&self) -> &Enchantments {
+            enchantments()
         }
         fn max_stack(&self, _: &str) -> u32 {
             64
@@ -1594,6 +1856,9 @@ mod tests {
         impl Rules for SmallRules {
             fn items(&self) -> &Items {
                 unreachable!("a quick move reads no item catalog");
+            }
+            fn enchantments(&self) -> &Enchantments {
+                enchantments()
             }
             fn max_stack(&self, item: &str) -> u32 {
                 if item == "minecraft:snowball" { 16 } else { 64 }

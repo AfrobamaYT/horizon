@@ -89,7 +89,7 @@ impl Game<'_> {
         }
         let at = m.center();
         if item == "minecraft:saddle" && !m.extra.saddled {
-            m.set_saddle(held);
+            m.set_saddle(held.map(|s| ItemStack { count: 1, ..s }));
             let sound = if m.species() == Species::Strider {
                 "minecraft:entity.strider.saddle"
             } else {
@@ -233,7 +233,7 @@ impl Game<'_> {
         let at = m.center();
         let tamed = m.extra.tame;
         let sound = if item == "minecraft:saddle" && tamed && !m.extra.saddled {
-            m.set_saddle(held);
+            m.set_saddle(held.map(|s| ItemStack { count: 1, ..s }));
             // Camel.getSaddleSound (the equip sound of a camel's saddle).
             Some(match species {
                 Species::Camel => "minecraft:entity.camel.saddle",
@@ -245,7 +245,8 @@ impl Game<'_> {
             && tamed
             && m.extra.body.is_none()
         {
-            m.extra.body = Some(item.into());
+            m.extra
+                .set_body_stack(held.map(|s| ItemStack { count: 1, ..s }));
             Some("minecraft:entity.horse.armor")
         } else if item == "minecraft:chest"
             && matches!(species, Species::Donkey | Species::Mule)
@@ -592,7 +593,26 @@ impl Game<'_> {
     pub(super) fn mount_event(&mut self, e: &MobEvent) {
         match *e {
             MobEvent::Tamed { mob } => {
-                let owner = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+                // RunAroundLikeCrazyGoal.tick: tameWithName by the player on
+                // its back, unless AnimalTameEvent is cancelled, which fails
+                // the roll instead.
+                let tamer = self.mount_tamer(mob);
+                if let Some(index) = self.mobs.iter().position(|m| m.id == mob)
+                    && let Some((uuid, entity_id)) = tamer
+                    && self.animal_tame_cancelled(index, uuid, entity_id)
+                {
+                    let m = &mut self.mobs[index];
+                    let mut events = Vec::new();
+                    horizon_client::mobs::equine::refuse_rider(m, &mut events);
+                    if let Err(e) = self.handle_mob_events(events) {
+                        log::warn!("failed horse taming: {e}");
+                    }
+                    return;
+                }
+                let owner = tamer
+                    .map(|(uuid, _)| horizon_client::lan::playerdata::uuid_ints(uuid))
+                    .or(self.level.player_uuid)
+                    .or(Some([0, 0, 0, 1]));
                 if let Some(view) = self
                     .mobs
                     .iter()
@@ -602,6 +622,7 @@ impl Game<'_> {
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
                 }
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                    m.extra.tame = true;
                     m.extra.owner = owner;
                     m.persistent = true;
                     // AbstractHorse.tameWithName: entity event 7, spawnTamingParticles(true).
@@ -613,10 +634,7 @@ impl Game<'_> {
                     .find(|m| m.id == mob)
                     .map(|m| m.kind.id.clone())
                 {
-                    let owner = self
-                        .level
-                        .player_uuid
-                        .map(horizon_client::lan::playerdata::ints_uuid);
+                    let owner = owner.map(horizon_client::lan::playerdata::ints_uuid);
                     self.native_entity_tame(mob, &kind, owner);
                 }
             }
@@ -650,6 +668,19 @@ impl Game<'_> {
             },
             _ => {}
         }
+    }
+    /// The player on the mob `mob`'s back, as its UUID and entity id: a
+    /// server's player, or this game's own.
+    fn mount_tamer(&self, mob: u32) -> Option<(u128, i32)> {
+        let guest = self.lan.as_ref().and_then(|h| {
+            h.hub
+                .guests
+                .iter()
+                .find(|g| g.vehicle == Some(mob))
+                .map(|g| (g.uuid, g.entity_id))
+        });
+        guest
+            .or_else(|| (self.riding == Some(mob)).then(|| (self.own_uuid(), self.own_entity_id())))
     }
     /// `Entity.propagateFallToPassengers`: whoever rides the mob `mob` takes
     /// `causeFallDamage` of its fall, as the mount's own damage does. The local

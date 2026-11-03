@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_xp_level_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_xp_level_change",
+      "neoforge": "PlayerXpEvent.LevelChange",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

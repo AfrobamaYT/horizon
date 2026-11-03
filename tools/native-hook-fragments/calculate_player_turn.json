@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "calculate_player_turn",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_calculate_player_turn",
+      "neoforge": "CalculatePlayerTurnEvent",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

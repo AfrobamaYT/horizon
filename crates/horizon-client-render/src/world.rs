@@ -295,6 +295,20 @@ impl World {
     pub fn top_y(&self) -> i32 {
         self.layout().max_y()
     }
+    /// Writes the stored state at a resident position and nothing else: no remesh, relight,
+    /// block log, path or watched write, and no block entity change. A transaction's tentative
+    /// write, which `set` makes real at the root commit or which this takes back on an abort,
+    /// so nothing outside sees it. False outside the resident chunks or the world's height.
+    pub fn set_stored(&mut self, x: i32, y: i32, z: i32, state: BlockStateId) -> bool {
+        let Some(chunk) = self.chunks.get_mut(&(x >> 4, z >> 4)) else {
+            return false;
+        };
+        if chunk.section_index(y).is_none() {
+            return false;
+        }
+        Arc::make_mut(chunk).set(x & 15, y, z & 15, state.0);
+        true
+    }
     /// Resident storage write; marks the touched sections (and neighbours on
     /// section borders) for remeshing and the surrounding chunks for relighting.
     /// Neighbour updates, drops and block entities belong to the gameplay layer.
@@ -498,6 +512,34 @@ impl World {
             }
         });
     }
+    /// The fields Horizon keeps beside a block entity's model, for a journal: the tag it was
+    /// loaded or set with (its `lock`) and its loot table roll.
+    pub fn block_entity_extras(&self, key: (i32, i32, i32)) -> BlockEntityExtras {
+        let saved = self
+            .chunks
+            .get(&(key.0 >> 4, key.2 >> 4))
+            .and_then(|chunk| chunk.saved.as_ref());
+        BlockEntityExtras {
+            source: saved.and_then(|s| {
+                s.block_entity_sources
+                    .iter()
+                    .find(|(p, _)| *p == key)
+                    .map(|(_, tag)| tag.clone())
+            }),
+            rolled_loot: saved.and_then(|s| s.rolled_loot.iter().find(|r| r.pos == key).cloned()),
+        }
+    }
+    /// Puts back what [`World::block_entity_extras`] kept.
+    pub fn set_block_entity_extras(&mut self, key: (i32, i32, i32), kept: BlockEntityExtras) {
+        self.with_chunk_extras(key, |extras| {
+            extras.block_entity_sources.retain(|(p, _)| *p != key);
+            extras
+                .block_entity_sources
+                .extend(kept.source.map(|tag| (key, tag)));
+            extras.rolled_loot.retain(|r| r.pos != key);
+            extras.rolled_loot.extend(kept.rolled_loot);
+        });
+    }
     /// `LevelChunk.removeBlockEntity`: the tag a block entity was loaded or set
     /// with goes with it, so a container placed there later starts unlocked.
     pub fn forget_block_entity_source(&mut self, key: (i32, i32, i32)) {
@@ -630,4 +672,11 @@ mod tests {
         assert!(!world.may_hold([0, 400, 0], [0, 401, 0], nine));
         assert!(world.may_hold([0, 400, 0], [0, 401, 0], |s| s.0 == 0));
     }
+}
+
+/// A block entity's fields kept beside its model ([`World::block_entity_extras`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockEntityExtras {
+    source: Option<horizon_world::nbt::Tag>,
+    rolled_loot: Option<crate::chunk::RolledLoot>,
 }

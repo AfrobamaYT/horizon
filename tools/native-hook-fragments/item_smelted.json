@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "item_smelted",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_smelted",
+      "neoforge": "PlayerEvent.ItemSmeltedEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

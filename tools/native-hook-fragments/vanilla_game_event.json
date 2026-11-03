@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "vanilla_game_event",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vanilla_game_event",
+      "neoforge": "VanillaGameEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

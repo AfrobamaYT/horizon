@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "game_rule_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_game_rule_changed",
+      "neoforge": "GameRuleChangedEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

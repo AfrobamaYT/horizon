@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "player_brewed_potion",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_brewed_potion",
+      "side": "server",
+      "neoforge": "PlayerBrewedPotionEvent",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

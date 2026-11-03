@@ -182,10 +182,8 @@ pub fn sleep_pose(m: &Mob) -> Option<(f32, [f32; 2])> {
         _ => return None,
     })
 }
-/// `Villager.tick`: the unhappy counter and the gossip decay; a hurt
-/// sleeper wakes up (`LivingEntity.hurtServer`; the `checkBedExists` wake
-/// runs earlier in `LivingEntity.tick`, for AI-less mobs too), and lies the
-/// way its bed faces (`getBedOrientation`). The brain does the rest.
+/// `Villager.tick`: the unhappy counter and gossip decay; hurt sleepers wake.
+/// The bed check runs earlier in `LivingEntity.tick`, including without AI.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.extra.ints[0] > 0 {
         m.extra.ints[0] -= 1;
@@ -277,6 +275,9 @@ pub struct Ext {
     pub hurt_seen: i32,
     /// A zombie villager's cure under way.
     pub cure: Option<super::zombie_villager::Cure>,
+    /// `CanContinueSleepingEvent.mayContinueSleeping`, set by the game before the tick
+    /// when a native mod may overwrite the bed check; empty means vanilla's.
+    pub may_continue_sleeping: Option<bool>,
     /// The villager's brain, built at its first tick.
     pub brain: Option<Box<super::villager_brain::Brain>>,
 }

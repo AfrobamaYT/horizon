@@ -188,9 +188,6 @@
   "Delete…": "削除…",
   "Keep": "保持",
   "Move to Trash": "ゴミ箱へ移動",
-  "These mods were made for different Horizon versions": "これらのModは異なるHorizonバージョン向けに作成されました",
-  "They often still work together. If the build fails, install versions made for the same Nightly.": "多くの場合、一緒に動作します。ビルドが失敗する場合は、同じNightly向けに作成されたバージョンをインストールしてください。",
-  "Build anyway": "それでもビルドする",
   "Folder": "フォルダ",
   "Version": "バージョン",
   "Vanilla": "バニラ",
@@ -308,7 +305,6 @@
   "Downloading {source}…": "{source} をダウンロード中…",
   "Installing…": "インストール中…",
   "The release file {file} ({source}).": "リリースファイル {file} ({source})。",
-  "The source of {source}. Its release ships {file}, a content mod: installing those from GitHub is not supported yet.": "{source} のソースコードです。このリリースにはコンテンツModである {file} が含まれていますが、GitHubからの此类Modのインストールは現在サポートされていません。",
   "The source at commit {commit}.": "コミット {commit} のソースコード。",
   "Not reviewed by the Horizon registry": "Horizonレジストリで未審査",
   "Native mods run with full access to this computer. Read the source before you install it.": "ネイティブModはこのコンピューターへのフルアクセス権限を持って実行されます。インストール前にソースコードを確認してください。",
@@ -789,7 +785,6 @@
   "vanilla like": "バニラ風",
   "worldgen": "地形生成",
   "No version is installed yet.": "まだバージョンがインストールされていません。",
-  "{error} They often still build: pass --allow-version-mismatch to try.": "{error} 多くの場合、それでもビルドできます：--allow-version-mismatch を渡して試してください。",
   "Built the server engine: {path}": "サーバーエンジンがビルドされました: {path}",
   "Point the server at it: set engine.path to this file in the server's server.toml (docs/hosting.md); the launcher writes nothing itself.": "サーバーを指定してください: サーバーの server.toml (docs/hosting.md) で engine.path をこのファイルに設定してください; ランチャー自身は何も書き込みません。",
   "{path} already exists. Move it away, or build into another folder.": "{path} は既に存在しています。移動するか、別のフォルダーにビルドしてください。",
@@ -959,5 +954,7 @@
   "Hide other players' cosmetics": "他のプレイヤーのコスメを隠す",
   "Others look like plain players to you. Also in the game's Horizon settings.": "他のプレイヤーは通常の姿で表示されます。ゲームの Horizon 設定にもあります。",
   "Show other players' auras and trails": "他のプレイヤーのオーラと軌跡を表示",
-  "Off by default. Also in the game's Horizon settings.": "既定ではオフ。ゲームの Horizon 設定にもあります。"
+  "Off by default. Also in the game's Horizon settings.": "既定ではオフ。ゲームの Horizon 設定にもあります。",
+  "This game source has no readable native entry template. Update Horizon and rebuild the mods against this game.": "このゲームのソースには、読み取り可能なネイティブエントリテンプレートがありません。Horizonを更新し、このゲーム向けにModを再ビルドしてください。",
+  "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.": "ネイティブビルド {version} の native-mods.json レコードが見つからないか無効です。インストール済みのHorizonから再ビルドしてください。"
 }

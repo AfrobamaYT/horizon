@@ -29,6 +29,12 @@ const SNAPSHOTS_PER_FRAME: usize = 16;
 const SNAPSHOT_BUDGET: Duration = Duration::from_millis(2);
 
 impl Game<'_> {
+    /// Save the level's chunk tickets: `/forceload`'s in vanilla's `chunk_tickets.dat`, the
+    /// mods' in Horizon's own `mod_chunk_tickets.dat`.
+    pub(super) fn save_chunk_tickets(&self) -> Result<()> {
+        self.save.save_forced_chunks(self.streaming.commanded())?;
+        self.save.save_mod_tickets(self.streaming.mod_tickets())
+    }
     pub(super) fn begin_closing_save(&mut self, quit: bool) -> Result<()> {
         if let Some(save) = &mut self.pending_save {
             save.quit |= quit;
@@ -45,6 +51,10 @@ impl Game<'_> {
             });
             return Ok(());
         }
+        if self.integrated.is_some() {
+            // Minecraft.disconnect: the client logs out before its server halts.
+            self.client_logging_out();
+        }
         if let Some(integrated) = &self.integrated {
             integrated.request_stop();
             self.pending_save = Some(ClosingSave {
@@ -58,6 +68,7 @@ impl Game<'_> {
             if !quit {
                 return self.leave_server(None);
             }
+            self.client_logging_out();
             if let Some(mut remote) = self.remote.take() {
                 remote.session.disconnect();
             }
@@ -146,8 +157,24 @@ impl Game<'_> {
                     if save.started.elapsed() > Duration::from_secs(30) {
                         return Err("chunk generation did not finish before saving".into());
                     }
-                    if self.streaming.poll_save(&mut self.world) {
-                        save.stage = Stage::Chunks(self.world.modified.iter().copied().collect());
+                    let deadline = Instant::now() + Duration::from_millis(2);
+                    loop {
+                        match self.streaming.prepare_poll_save(&mut self.world, deadline) {
+                            horizon_client::streaming::SaveStep::Pending => break,
+                            horizon_client::streaming::SaveStep::Full(chunk) => {
+                                self.native_late_full_chunk_snapshot(&chunk);
+                                self.streaming.save_finished(chunk);
+                            }
+                            horizon_client::streaming::SaveStep::Protos(protos) => {
+                                self.native_proto_snapshots(&protos);
+                                if self.streaming.submit_protos(protos) {
+                                    save.stage = Stage::Chunks(
+                                        self.world.modified.iter().copied().collect(),
+                                    );
+                                }
+                                break;
+                            }
+                        }
                     }
                     Ok(false)
                 }
@@ -156,6 +183,7 @@ impl Game<'_> {
                     for _ in 0..SNAPSHOTS_PER_FRAME {
                         let Some(&key) = keys.front() else { break };
                         let chunks = self.with_entities(self.world.chunks.get(&key));
+                        self.native_full_chunk_snapshots(&chunks);
                         self.save.save_later(
                             &chunks,
                             self.pack.assets.registry,
@@ -188,7 +216,7 @@ impl Game<'_> {
                         self.prune_entity_memory();
                         self.save_raids();
                         self.save.save_attachments(&self.world.attachments)?;
-                        self.save.save_forced_chunks(&self.streaming.forced)?;
+                        self.save_chunk_tickets()?;
                         self.save_game_metadata()?;
                         save.stage = Stage::Writes;
                     }

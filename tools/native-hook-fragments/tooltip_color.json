@@ -9,7 +9,5 @@
         "contract": "listen"
       }
     }
-  ],
-  "rust_summary": "tooltip box colours (`native_tooltip_color`).",
-  "doc_summary": "tooltip box colours (`native_tooltip_color`): the background and the two border colours, the colour half of what NeoForge 26.3 `RenderTooltipEvent.Texture` decides. Its sprite textures are not offered: Horizon draws these boxes as solid fills. Bundles need \"hooks\": @API:tooltip_color@."
+  ]
 }

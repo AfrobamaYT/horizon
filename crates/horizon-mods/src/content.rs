@@ -3,13 +3,13 @@
 //! effects, entity types and menu types it declares in
 //! `data/<id>/horizon/{block,item,mob_effect,entity_type,menu}/`.
 //!
-//! Content is data, not code: nothing here runs in the sandbox. What a mod
+//! Content is data, not code: nothing here executes. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
 //! manifest lists), plus additions to vanilla tags and to the convention
 //! tags (`c`, which NeoForge and Fabric mods share). Paths are plain, files
 //! and totals are capped, vanilla ids cannot be redefined, and no two mods
 //! share a namespace ([`clash`]).
-use crate::manifest::{Capability, MANIFEST, Manifest};
+use crate::manifest::Manifest;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -90,6 +90,40 @@ pub struct BlockProperties {
     pub random_ticks: Option<RandomTicks>,
     /// How the block is drawn, whatever the template does (`BlockBehaviour.getRenderShape`).
     pub render_shape: Option<RenderShape>,
+    /// Vanilla's piston push reaction, or the template's when unset.
+    #[serde(default, deserialize_with = "deserialize_push_reaction")]
+    pub push_reaction: Option<PushReaction>,
+}
+
+/// Vanilla's `PushReaction`, by its constant's name.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PushReaction {
+    PushPull,
+    Push,
+    Popped,
+    Immoveable,
+    IgnoreEntity,
+}
+
+impl PushReaction {
+    /// The constant's name, as the block tables write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::PushPull => "PUSH_PULL",
+            Self::Push => "PUSH",
+            Self::Popped => "POPPED",
+            Self::Immoveable => "IMMOVEABLE",
+            Self::IgnoreEntity => "IGNORE_ENTITY",
+        }
+    }
+}
+
+fn deserialize_push_reaction<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<PushReaction>, D::Error> {
+    Option::<PushReaction>::deserialize(deserializer)
+        .map_err(|e| serde::de::Error::custom(format!("push_reaction: {e}")))
 }
 
 /// Vanilla's `RenderShape`, by its constant's name: `MODEL` puts the block model in the chunk
@@ -141,12 +175,10 @@ impl RandomTicks {
     }
 }
 
-/// Boxes selected by one property (legacy) or an ordered tuple of properties.
+/// Boxes selected by an ordered tuple of properties.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BlockShapes {
-    #[serde(default)]
-    pub property: String,
     #[serde(default)]
     pub properties: Vec<String>,
     #[serde(default)]
@@ -155,18 +187,9 @@ pub struct BlockShapes {
 }
 
 impl BlockShapes {
-    pub fn property_names(&self) -> Vec<&str> {
-        if self.property.is_empty() {
-            self.properties.iter().map(String::as_str).collect()
-        } else {
-            vec![self.property.as_str()]
-        }
-    }
-
     fn check(&self) -> Result<(), String> {
-        let names = self.property_names();
-        if (!self.property.is_empty() && !self.properties.is_empty())
-            || names.iter().any(|name| !state_name(name))
+        let names = &self.properties;
+        if names.iter().any(|name| !state_name(name))
             || names.iter().collect::<BTreeSet<_>>().len() != names.len()
             || (names.is_empty() && !self.values.is_empty())
             || (self.values.is_empty() && self.default.is_none())
@@ -244,6 +267,8 @@ struct BlockFile {
     wood_type: Option<String>,
     #[serde(default)]
     wall_block: Option<String>,
+    #[serde(default)]
+    base_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
@@ -290,6 +315,8 @@ pub struct Block {
     /// template is the matching wall sign and which has no item. The
     /// template's when unset.
     pub wall_block: Option<String>,
+    /// The block farmland turns into; the template's base when unset.
+    pub base_block: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,6 +357,7 @@ struct ItemFile {
     #[serde(default)]
     components: BTreeMap<String, serde_json::Value>,
     crafting_remainder: Option<String>,
+    block: Option<String>,
 }
 
 /// An item the mod adds: a vanilla template item's components under a new
@@ -347,6 +375,8 @@ pub struct Item {
     /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
     /// a vanilla item or one of the mod's own.
     pub crafting_remainder: Option<String>,
+    /// The block placed by this item, if any.
+    pub block: Option<String>,
 }
 
 /// `MobEffectCategory`.
@@ -493,11 +523,7 @@ impl Content {
         declared: &[String],
     ) -> Result<Content, String> {
         let (source, sized) = if path.is_dir() {
-            let mut out = Vec::new();
-            for top in ["assets", "data"] {
-                walk(path, &path.join(top), &mut out)?;
-            }
-            (Source::Dir(path.to_owned()), out)
+            (Source::Dir(path.to_owned()), folder_files(path)?)
         } else {
             let mut zip = open_zip(path)?;
             let mut out = Vec::new();
@@ -660,11 +686,6 @@ impl Content {
     /// Where content may go, and the declarations.
     fn check(&mut self, manifest: &Manifest, declared: &[String]) -> Result<(), String> {
         let id = manifest.id.as_str();
-        if !self.files.is_empty() && !manifest.capabilities.contains(&Capability::Registries) {
-            return Err(format!(
-                "has assets/ or data/ but not capability registries in {MANIFEST}"
-            ));
-        }
         let mut blocks = Vec::new();
         let mut items = Vec::new();
         let mut effects = Vec::new();
@@ -755,6 +776,7 @@ impl Content {
                 thickness: file.thickness,
                 wood_type: file.wood_type,
                 wall_block: file.wall_block,
+                base_block: file.base_block,
             };
             check_block(&block).map_err(|e| format!("{name}: {e}"))?;
             if block.item {
@@ -775,6 +797,7 @@ impl Content {
                 rarity: file.rarity,
                 components: file.components,
                 crafting_remainder: file.crafting_remainder,
+                block: file.block,
             };
             check_item(&item).map_err(|e| format!("{name}: {e}"))?;
             if !ids.insert(item.id.clone()) {
@@ -913,6 +936,9 @@ fn check_item(item: &Item) -> Result<(), String> {
             item.template
         ));
     }
+    if item.block.as_ref().is_some_and(|id| !namespaced_id(id)) {
+        return Err("block must be a namespaced block id".into());
+    }
     if item.max_stack_size.is_some_and(|n| !(1..=99).contains(&n)) {
         return Err("max_stack_size is 1 to 99".into());
     }
@@ -1038,6 +1064,14 @@ fn check_block(file: &Block) -> Result<(), String> {
         }
         _ => {}
     }
+    if let Some(base) = &file.base_block {
+        if file.template != "minecraft:farmland" {
+            return Err("base_block needs template minecraft:farmland".into());
+        }
+        if !namespaced_id(base) {
+            return Err("base_block is a block id, namespace:path".into());
+        }
+    }
     // Every vanilla `SignBlock`'s id ends in `_sign`, and no other block's does.
     let sign = file.template.ends_with("_sign");
     if let Some(wood) = &file.wood_type {
@@ -1111,12 +1145,29 @@ fn open_zip(path: &Path) -> Result<zip::ZipArchive<std::fs::File>, String> {
 
 /// Files under `dir`, relative to `root` with `/` separators. Symbolic links
 /// are not followed: a mod folder holds its own files.
+pub(crate) fn folder_files(root: &Path) -> Result<Vec<(String, u64)>, String> {
+    let mut out = Vec::new();
+    for top in ["assets", "data"] {
+        walk(root, &root.join(top), &mut out)?;
+    }
+    Ok(out)
+}
+
 fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), String> {
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return Ok(());
-    };
-    for entry in read.flatten() {
-        let path = entry.path();
+    match std::fs::symlink_metadata(dir) {
+        Ok(m) if !m.is_dir() => {
+            return Err(format!(
+                "{}: unsupported file type in a content mod",
+                dir.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    }
+    let read = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for entry in read {
+        let path = entry.map_err(|e| e.to_string())?.path();
         let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
         if meta.is_dir() {
             walk(root, &path, out)?;
@@ -1125,6 +1176,11 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), Str
             let parts: Option<Vec<&str>> = rel.iter().map(|p| p.to_str()).collect();
             let name = parts.ok_or_else(|| format!("{} is not UTF-8", rel.display()))?;
             out.push((name.join("/"), meta.len()));
+        } else {
+            return Err(format!(
+                "{}: unsupported file type in a content mod",
+                path.display()
+            ));
         }
         if out.len() > MAX_FILES {
             return Err(format!("more than {MAX_FILES} content files"));
@@ -1165,15 +1221,17 @@ capabilities = ["registries"]
         )]).unwrap();
         let block = &content.blocks[0];
         assert_eq!(
-            block.shapes.as_ref().unwrap().property_names(),
+            block.shapes.as_ref().unwrap().properties,
             ["facing", "count"]
         );
         assert_eq!(
             block.collision_shapes.as_ref().unwrap().default,
             Some(vec![])
         );
+        assert!(
+            serde_json::from_str::<BlockShapes>(r#"{"property":"axis","default":[]}"#).is_err()
+        );
         for value in [
-            r#"{"property":"axis","properties":["count"],"default":[]}"#,
             r#"{"properties":["axis","axis"],"default":[]}"#,
             r#"{"properties":["Axis"],"default":[]}"#,
             r#"{"properties":["axis","count"],"values":{"x":[]}}"#,
@@ -1196,7 +1254,6 @@ capabilities = ["registries"]
             );
         }
         let oversized = BlockShapes {
-            property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
@@ -1210,7 +1267,7 @@ capabilities = ["registries"]
     fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
         let dir = scratch(name);
         let path = dir.join("m.hmod");
-        std::fs::write(&path, Package::write_files(manifest, None, files)?).unwrap();
+        std::fs::write(&path, Package::write_files(manifest, files)?).unwrap();
         let package = Package::read(&path);
         let content = package.and_then(|p| Content::read(&path, &p.manifest));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1328,12 +1385,41 @@ capabilities = ["registries"]
                 thickness: None,
                 wood_type: None,
                 wall_block: None,
+                base_block: None,
             }]
         );
         assert_eq!(content.items[0].id, "ruby:ruby");
         assert_eq!(content.items[0].rarity, Some(Rarity::Uncommon));
         assert!(content.items[0].components.is_empty());
         assert_eq!(content.items[0].crafting_remainder, None);
+    }
+
+    #[test]
+    fn items_name_the_block_they_place() {
+        let file = "data/ruby/horizon/item/seeds.json";
+        let content = hmod(
+            "seeds",
+            MANIFEST_TEXT,
+            &[(
+                file,
+                br#"{"template":"minecraft:wheat_seeds","block":"ruby:crop"}"#,
+            )],
+        )
+        .unwrap();
+        assert_eq!(content.items[0].block.as_deref(), Some("ruby:crop"));
+        let error = hmod(
+            "bad-block",
+            MANIFEST_TEXT,
+            &[(
+                file,
+                br#"{"template":"minecraft:wheat_seeds","block":"crop"}"#,
+            )],
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("block must be a namespaced block id"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1368,11 +1454,7 @@ capabilities = ["registries"]
         let read = |declared: &[String]| {
             let dir = scratch("declared-remainder");
             let path = dir.join("m.hmod");
-            std::fs::write(
-                &path,
-                Package::write_files(MANIFEST_TEXT, None, files).unwrap(),
-            )
-            .unwrap();
+            std::fs::write(&path, Package::write_files(MANIFEST_TEXT, files).unwrap()).unwrap();
             let package = Package::read(&path).unwrap();
             let content = Content::read_declaring(&path, &package.manifest, declared);
             std::fs::remove_dir_all(&dir).unwrap();
@@ -1603,6 +1685,21 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn blocks_choose_vanilla_push_reactions() {
+        for name in ["PUSH_PULL", "PUSH", "POPPED", "IMMOVEABLE", "IGNORE_ENTITY"] {
+            let text = format!(
+                r#"{{"template":"minecraft:stone","properties":{{"push_reaction":"{name}"}}}}"#
+            );
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/block/gear.json", text.as_bytes())];
+            let content = hmod("push-reaction", MANIFEST_TEXT, files).unwrap();
+            assert_eq!(
+                content.blocks[0].properties.push_reaction.unwrap().name(),
+                name
+            );
+        }
+    }
+
+    #[test]
     fn blocks_pick_the_states_that_tick_randomly() {
         let own = r#""state_properties": {"grown": {"type": "boolean"}}"#;
         let block = |ticks: &str| {
@@ -1655,12 +1752,11 @@ capabilities = ["registries"]
     #[test]
     fn folder_mod_reads_the_same() {
         let dir = scratch("folder");
-        std::fs::write(dir.join(MANIFEST), MANIFEST_TEXT).unwrap();
+        std::fs::write(dir.join(crate::manifest::MANIFEST), MANIFEST_TEXT).unwrap();
         let block = dir.join("data/ruby/horizon/block");
         std::fs::create_dir_all(&block).unwrap();
         std::fs::write(block.join("ruby_block.json"), BLOCK).unwrap();
         let package = Package::read(&dir).unwrap();
-        assert!(package.wasm.is_none());
         let content = Content::read(&dir, &package.manifest).unwrap();
         assert_eq!(content.files, ["data/ruby/horizon/block/ruby_block.json"]);
         assert_eq!(content.file(&content.files[0]).unwrap(), BLOCK);
@@ -1699,6 +1795,26 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn farmland_base_requires_farmland_and_a_block_id() {
+        let block = |json: &str| {
+            hmod(
+                "farmland",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/farm.json", json.as_bytes())],
+            )
+        };
+        let parsed =
+            block(r#"{"template":"minecraft:farmland","base_block":"ruby:soil"}"#).unwrap();
+        assert_eq!(parsed.blocks[0].base_block.as_deref(), Some("ruby:soil"));
+        for bad in [
+            r#"{"template":"minecraft:stone","base_block":"ruby:soil"}"#,
+            r#"{"template":"minecraft:farmland","base_block":"soil"}"#,
+        ] {
+            assert!(block(bad).unwrap_err().contains("base_block"));
         }
     }
 
@@ -1885,13 +2001,21 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:stone", "glow": true}"#,
             )],
         );
-        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
-        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[0,0,0,1,1]]}}}"#)]);
+        let e = refused(
+            "push-reaction",
+            &[(
+                "data/ruby/horizon/block/a.json",
+                br#"{"template":"minecraft:stone","properties":{"push_reaction":"NORMAL"}}"#,
+            )],
+        );
+        assert!(e.contains("push_reaction"), "{e}");
+        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
+        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{"x":[[0,0,0,1,1]]}}}"#)]);
         refused(
             "shape-no-values",
             &[(
                 "data/ruby/horizon/block/a.json",
-                br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{}}}"#,
+                br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{}}}"#,
             )],
         );
         let e = refused(
@@ -2049,32 +2173,6 @@ capabilities = ["registries"]
             Some("mods t_and_t and kaisyn both use the namespace kaisyn; turn one of them off")
         );
         assert_eq!(clash(("t_and_t", &t_and_t), ("ruby", &ruby)), None);
-    }
-
-    #[test]
-    fn content_needs_the_registries_capability() {
-        let code_only = MANIFEST_TEXT
-            .replace("api = \"0.2\"", "api = \"0.1\"")
-            .replace("capabilities = [\"registries\"]", "capabilities = []");
-        // No code and no registries: nothing to load.
-        let e = hmod("empty", &code_only, &[]).unwrap_err();
-        assert!(e.contains("mod.wasm: missing"), "{e}");
-        // Registries on API 0.1.
-        let old = MANIFEST_TEXT.replace("api = \"0.2\"", "api = \"0.1\"");
-        assert!(Manifest::parse(&old).unwrap_err().contains("needs api"));
-        // Content without the capability, in a mod with code.
-        let dir = scratch("no-cap");
-        let path = dir.join("m.hmod");
-        let files: &[(&str, &[u8])] = &[("assets/ruby/lang/en_us.json", b"{}")];
-        std::fs::write(
-            &path,
-            Package::write_files(&code_only, Some(b"\0asm"), files).unwrap(),
-        )
-        .unwrap();
-        let package = Package::read(&path).unwrap();
-        let e = Content::read(&path, &package.manifest).err().unwrap();
-        assert!(e.contains("not capability registries"), "{e}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

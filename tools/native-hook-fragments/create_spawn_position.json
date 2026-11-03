@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "create_spawn_position",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_create_spawn_position",
+      "neoforge": "LevelEvent.CreateSpawnPosition",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

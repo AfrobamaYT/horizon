@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "can_continue_sleeping",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_can_continue_sleeping",
+      "side": "server",
+      "neoforge": "CanContinueSleepingEvent",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "replace",
+        "out": "may_continue"
+      }
+    }
+  ]
+}

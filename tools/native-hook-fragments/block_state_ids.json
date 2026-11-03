@@ -1,0 +1,9 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "block_state_id", "side": "both", "target": "horizon_client::game::native_block_states::Game<'_>::native_block_state_id"},
+    {"name": "block_state_string", "side": "both", "target": "horizon_client::game::native_block_states::Game<'_>::native_block_state_string"},
+    {"name": "block_state_default", "side": "both", "target": "horizon_client::game::native_block_states::Game<'_>::native_block_state_default"},
+    {"name": "item_stack_in_tag", "side": "server", "target": "horizon_client::game::native_block_states::Game<'_>::native_item_stack_in_tag"}
+  ]
+}

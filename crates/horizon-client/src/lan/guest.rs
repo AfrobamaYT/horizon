@@ -18,8 +18,33 @@ use horizon_protocol::{
 };
 use std::{
     collections::VecDeque,
-    sync::{Arc, atomic::AtomicI32},
+    sync::{
+        Arc,
+        atomic::{AtomicI32, AtomicU64, Ordering},
+    },
 };
+
+/// Unique across reconnects and server instances in this process, even when
+/// the protocol's container id wraps back to the same number.
+static NEXT_MENU_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn menu_generation() -> u64 {
+    let mut generation = NEXT_MENU_GENERATION.load(Ordering::Relaxed);
+    loop {
+        let next = generation
+            .checked_add(1)
+            .expect("menu generation exhausted");
+        match NEXT_MENU_GENERATION.compare_exchange_weak(
+            generation,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return generation,
+            Err(current) => generation = current,
+        }
+    }
+}
 
 /// GameType ids.
 pub const SURVIVAL: i32 = 0;
@@ -64,7 +89,26 @@ pub struct SentEffect {
 /// ServerGamePacketListenerImpl.CLIENT_LOADED_TIMEOUT_TIME.
 pub const CLIENT_LOADED_TIMEOUT: u8 = 60;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuestKind {
+    Network,
+    Fake,
+}
+
+struct GuestInit {
+    conn: u32,
+    uuid: u128,
+    name: String,
+    properties: Vec<horizon_protocol::packets::login::Property>,
+    info: ClientInformation,
+    brand: String,
+    sender: PlayerSender,
+    latency: Arc<AtomicI32>,
+    address: std::net::SocketAddr,
+}
+
 pub struct Guest {
+    pub kind: GuestKind,
     pub conn: u32,
     /// The client's address (IP bans, `list`).
     pub address: std::net::SocketAddr,
@@ -121,7 +165,6 @@ pub struct Guest {
     pub vehicle_good: Option<[f64; 3]>,
     pub sprinting: bool,
     pub fall_flying: bool,
-    pub flying: bool,
     pub sleeping: bool,
     /// `LivingEntity.DATA_LIVING_ENTITY_FLAGS`: 1 while using an item, 2 if
     /// it is in the off hand.
@@ -242,6 +285,8 @@ pub struct Guest {
     pub inventory: Vec<Option<ItemStack>>,
     pub armor: [Option<ItemStack>; 4],
     pub offhand: Option<ItemStack>,
+    /// `EquipmentSlot.BODY` and `SADDLE`, kept and saved like `Game::equipment`.
+    pub equipment: horizon_items::equipment::Equipment,
     pub selected: usize,
     pub carried: Option<ItemStack>,
     /// The inventory menu's crafting grid (2x2) and its result
@@ -285,6 +330,9 @@ pub struct Guest {
     /// The shoulder parrots (Player.DATA_SHOULDER_PARROT_LEFT and _RIGHT) the
     /// player's client was last sent about itself.
     pub sent_shoulders: [Option<i32>; 2],
+    /// The arrows and stingers (`DATA_ARROW_COUNT_ID`, `DATA_STINGER_COUNT_ID`)
+    /// the player's client was last sent about itself.
+    pub sent_stuck: (i32, i32),
     /// Where the player last died (Player.lastDeathLocation), sent with the respawn.
     pub last_death: Option<(String, [i32; 3])>,
     /// The last action sequence to acknowledge at the next tick (-1: none).
@@ -306,20 +354,24 @@ pub struct Guest {
     pub dead: bool,
     /// `LivingEntity.deathTime`: ticks since the guest died.
     pub death_time: u32,
-    /// The join packets were sent (PlayerList.placeNewPlayer ran).
+    /// The player record is materialized for gameplay and handle lookup.
+    /// Network guests reach this state after placeNewPlayer; fake actors do not
+    /// log in. Online iterators must also check `participates_online`.
     pub placed: bool,
     /// Root command names the mods took out of this player's command tree
     /// (`native_player_commands_sent`); their tree is sent without them.
     pub hidden_commands: Vec<String>,
-    /// `Abilities.flyingSpeed`: vanilla's 0.05, unless a server mod set
-    /// another (`native_set_flying_speed`). Saved with the player.
-    pub flying_speed: f32,
+    /// `Player.getAbilities`: set from the game mode when it changes, and
+    /// written by server mods. Saved with the player.
+    pub abilities: super::abilities::PlayerAbilities,
     /// The level the player is in (`ServerPlayer.level().dimension()`): the
     /// hub's level passes only reach the players in theirs.
     pub dimension: String,
     /// The open block container, if any.
     pub menu: Option<super::menu::Menu>,
     pub next_window: i32,
+    /// Identity of the current menu, distinct even when a window id is reused.
+    pub menu_generation: u64,
     /// An unfinished drag in the inventory menu.
     pub drag: Option<(u8, Vec<usize>)>,
     /// The compound this player was loaded from, for fields Horizon does not model.
@@ -349,8 +401,91 @@ pub struct Guest {
 }
 
 impl Guest {
+    /// Allocate the next protocol window and a non-reusable menu identity.
+    pub fn next_menu_window(&mut self) -> i32 {
+        self.next_window = self.next_window % 100 + 1;
+        self.menu_generation = menu_generation();
+        self.next_window
+    }
+
     pub fn new(j: Joined, entity_id: i32, position: [f64; 3], view_distance: i32) -> Self {
+        let Joined {
+            conn,
+            uuid,
+            name,
+            properties,
+            info,
+            brand,
+            sender,
+            latency,
+            address,
+        } = j;
+        Self::with_defaults(
+            GuestKind::Network,
+            GuestInit {
+                conn,
+                uuid,
+                name,
+                properties,
+                info,
+                brand,
+                sender,
+                latency,
+                address,
+            },
+            entity_id,
+            position,
+            view_distance,
+        )
+    }
+
+    pub fn connectionless(
+        conn: u32,
+        uuid: u128,
+        name: String,
+        entity_id: i32,
+        position: [f64; 3],
+        motion: PlayerMotion,
+    ) -> Self {
+        let init = GuestInit {
+            conn,
+            uuid,
+            name,
+            properties: Vec::new(),
+            info: ClientInformation::new(2),
+            brand: String::new(),
+            sender: PlayerSender::disabled(),
+            latency: Arc::default(),
+            address: ([0, 0, 0, 0], 0).into(),
+        };
+        let mut guest = Self::with_defaults(GuestKind::Fake, init, entity_id, position, 2);
+        guest.placed = true;
+        // No connection ever reports the world loaded: the record is
+        // material, and the body's damage policy treats it as loaded from
+        // the start instead of invulnerable forever.
+        guest.loaded = true;
+        guest.loading = false;
+        guest.load_timeout = 0;
+        guest.motion = Some(Box::new(motion));
+        guest
+    }
+
+    pub fn participates_online(&self) -> bool {
+        self.kind == GuestKind::Network
+    }
+    pub fn participates_in_player_simulation(&self) -> bool {
+        self.kind == GuestKind::Network
+    }
+
+    fn with_defaults(
+        kind: GuestKind,
+        j: GuestInit,
+        entity_id: i32,
+        position: [f64; 3],
+        view_distance: i32,
+    ) -> Self {
         Self {
+            kind,
             conn: j.conn,
             address: j.address,
             last_action_tick: 0,
@@ -385,7 +520,6 @@ impl Guest {
             vehicle_good: None,
             sprinting: false,
             fall_flying: false,
-            flying: false,
             sleeping: false,
             living_flags: 0,
             stuck: (0, 0),
@@ -438,6 +572,7 @@ impl Guest {
             inventory: vec![None; 36],
             armor: [None, None, None, None],
             offhand: None,
+            equipment: Default::default(),
             selected: 0,
             carried: None,
             craft_grid: Default::default(),
@@ -461,6 +596,7 @@ impl Guest {
             sent_air: (300, 0.0),
             sent_shared: 0,
             sent_shoulders: [None; 2],
+            sent_stuck: (0, 0),
             last_death: None,
             ack_up_to: std::cell::Cell::new(-1),
             sent_selected: 0,
@@ -475,10 +611,11 @@ impl Guest {
             death_time: 0,
             placed: false,
             hidden_commands: Vec::new(),
-            flying_speed: 0.05,
+            abilities: Default::default(),
             dimension: "minecraft:overworld".into(),
             menu: None,
             next_window: 0,
+            menu_generation: menu_generation(),
             drag: None,
             saved: None,
             attachments: Default::default(),
@@ -494,15 +631,14 @@ impl Guest {
             recipes_unlocked: Vec::new(),
         }
     }
-    /// `ServerPlayer.onUpdateAbilities`: the guest's abilities, flying speed included.
-    pub fn abilities(&self) -> play::Clientbound {
-        play::Clientbound::PlayerAbilities(play::PlayerAbilities {
-            flags: self.ability_flags(),
-            flying_speed: self.flying_speed,
-            walking_speed: 0.1,
-        })
+    /// `ServerPlayer.onUpdateAbilities`: the guest's abilities, speeds included.
+    pub fn abilities_packet(&self) -> play::Clientbound {
+        play::Clientbound::PlayerAbilities(self.abilities.packet())
     }
     pub fn send(&self, packet: &play::Clientbound) {
+        if !self.participates_online() {
+            return;
+        }
         if self.anticheat.record.is_some() {
             self.note_change(packet);
         }
@@ -612,23 +748,6 @@ impl Guest {
     pub fn spectator(&self) -> bool {
         self.game_mode == SPECTATOR
     }
-    /// PlayerAbilities flags (invulnerable, flying, may fly, instabuild).
-    pub fn ability_flags(&self) -> i8 {
-        let mut f = 0;
-        if self.creative() || self.spectator() {
-            f |= 1;
-        }
-        if self.flying || self.spectator() {
-            f |= 2;
-        }
-        if self.creative() || self.spectator() {
-            f |= 4;
-        }
-        if self.creative() {
-            f |= 8;
-        }
-        f
-    }
     /// `Player.getDesiredPose`: sleeping, gliding, then the body's own pose
     /// (swimming, crawling, crouching) once its server tick has run.
     pub fn pose(&self) -> Pose {
@@ -638,7 +757,7 @@ impl Guest {
             Pose::FallFlying
         } else if let Some(m) = &self.motion {
             m.pose
-        } else if self.sneaking && !self.flying {
+        } else if self.sneaking && !self.abilities.flying {
             Pose::Crouching
         } else {
             Pose::Standing

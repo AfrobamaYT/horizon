@@ -1,0 +1,70 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity_is_shift_key_down", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_shift_key_down",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_is_crouching", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_crouching",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_is_sprinting", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_sprinting",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_is_in_water", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_in_water",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_is_in_lava", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_in_lava",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_fire_immune", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_fire_immune",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_fire_ticks", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_fire_ticks",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_air_supply", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_air_supply",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_max_air_supply", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_max_air_supply",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_is_silent", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_silent",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_set_silent", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_set_silent",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_is_invisible", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_is_invisible",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_pose", "side": "server",
+      "target": "horizon_client::game::native_entity_state::Game<'_>::native_entity_pose",
+      "receiver": "entity"
+    }
+  ]
+}

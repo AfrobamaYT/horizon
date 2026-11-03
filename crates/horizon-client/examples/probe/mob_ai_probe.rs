@@ -1202,6 +1202,9 @@ pub fn main() -> horizon_client::Result<()> {
                     items: Some(&items),
                     lid_openers: &lid_openers,
                     mod_effects: None,
+                    asks_animal_tame: false,
+                    asks_living_destroy_block: false,
+                    asks_baby_spawn: false,
                     border: None,
                 }
             };

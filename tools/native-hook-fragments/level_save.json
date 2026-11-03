@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "level_save",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_level_save",
+      "neoforge": "LevelEvent.Save",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

@@ -161,28 +161,16 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
 pub(super) const INPUT: &str = ".horizon-mod-api-injections.json";
 pub(super) const ENV: &str = "HORIZON_MOD_API_INJECTIONS";
 
-/// New sources consume declarations in their build script; released sources still commit the
-/// generated trait. Both paths use the same generation and collision checks, without rustfmt.
+/// Supply declarations to the generator, which checks conflicts against the catalog at build time.
+/// This file travels with cached mixin output; generated Rust lives only in Cargo's OUT_DIR.
 pub(super) fn stage(stage: &Path, injections: &[Injection]) -> Result<(), String> {
-    let client = api::read(&stage.join("crates/horizon-client/Cargo.toml"))?;
-    let build_time = client
-        .get("build-dependencies")
-        .and_then(toml::Value::as_table)
-        .is_some_and(|deps| deps.contains_key("horizon-mod-api-gen"));
     let declarations = injections.iter().map(Injection::input).collect::<Vec<_>>();
-    let input = serde_json::to_string(&declarations).map_err(|e| e.to_string())?;
-    if build_time {
-        // This file travels with cached mixin output; generated Rust lives in Cargo's OUT_DIR.
-        let path = stage.join(INPUT);
-        fs::write(&path, input).map_err(|e| format!("{}: {e}", path.display()))
-    } else if injections.is_empty() {
-        Ok(())
-    } else {
-        let path = stage.join("crates/horizon-client/src/mod_api/generated.rs");
-        let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let output = horizon_mod_api_gen::inject(&source, &input)?;
-        fs::write(&path, output).map_err(|e| format!("{}: {e}", path.display()))
-    }
+    let path = stage.join(INPUT);
+    fs::write(
+        &path,
+        serde_json::to_vec(&declarations).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -193,56 +181,20 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("horizon-inject-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("engine/src")).unwrap();
+        fs::create_dir_all(root.join("rust/src")).unwrap();
         fs::write(
-            root.join("engine/Cargo.toml"),
+            root.join("rust/Cargo.toml"),
             "[package]\nname = 'mod-example'\nversion = '1.0.0'\n",
         )
         .unwrap();
-        fs::write(root.join("engine/src/lib.rs"), "").unwrap();
+        fs::write(root.join("rust/src/lib.rs"), "").unwrap();
         fs::write(
             root.join(MANIFEST),
-            format!("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'engine'\n{injection}"),
+            format!("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n{injection}"),
         )
         .unwrap();
         let bundle = super::super::bundle(&root, None).unwrap();
         (root, bundle)
-    }
-
-    /// Emulate a released source tree or the current build script, including its inject() call.
-    fn staged_hooks(
-        stage_dir: &Path,
-        injections: &[Injection],
-        build_time: bool,
-        existing: &str,
-    ) -> Result<String, String> {
-        let client = stage_dir.join("crates/horizon-client");
-        fs::create_dir_all(client.join("src/mod_api")).unwrap();
-        let dependencies = if build_time {
-            "[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n"
-        } else {
-            ""
-        };
-        fs::write(
-            client.join("Cargo.toml"),
-            format!("[package]\nname = 'horizon-client'\nversion = '0.1.0'\n{dependencies}"),
-        )
-        .unwrap();
-        let generated = client.join("src/mod_api/generated.rs");
-        if !build_time {
-            fs::write(&generated, existing).unwrap();
-        }
-        stage(stage_dir, injections)?;
-        if build_time {
-            assert!(!generated.exists());
-            horizon_mod_api_gen::inject(
-                existing,
-                &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
-            )
-        } else {
-            assert!(!stage_dir.join(INPUT).exists());
-            Ok(fs::read_to_string(generated).unwrap())
-        }
     }
 
     fn compile_and_run(root: &Path, program: &str) {
@@ -276,18 +228,18 @@ mod tests {
         let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
         assert!(!manifest.contains("trait_method"));
         assert!(!manifest.contains("[api]"));
-        for build_time in [false, true] {
-            let stage_dir = root.join(if build_time { "build-time" } else { "legacy" });
-            let output = staged_hooks(
-                &stage_dir,
-                &injections,
-                build_time,
-                "pub trait Hooks: Send + Sync {\n}\n",
-            )
-            .unwrap();
-            assert!(syn::parse_file(&output).is_ok());
-            let program = format!(
-                r#"
+        let stage_dir = root.join("stage");
+        fs::create_dir_all(&stage_dir).unwrap();
+        stage(&stage_dir, &injections).unwrap();
+        assert!(!stage_dir.join("crates").exists());
+        let output = horizon_mod_api_gen::inject(
+            "pub trait Hooks: Send + Sync {\n}\n",
+            &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
+        )
+        .unwrap();
+        assert!(syn::parse_file(&output).is_ok());
+        let program = format!(
+            r#"
             mod mod_api {{
                 use std::sync::OnceLock;
                 #[derive(PartialEq)] pub enum Flow {{ Continue, Cancel }}
@@ -303,9 +255,10 @@ mod tests {
                 impl Hooks for Other {{
                     fn inject_example_tick(&self, _: &mut InjectExampleTickEvent) -> Flow {{ panic!("wrong owner") }}
                 }}
-                pub fn mods() -> &'static [Box<dyn Hooks>] {{
-                    static MODS: OnceLock<Vec<Box<dyn Hooks>>> = OnceLock::new();
-                    MODS.get_or_init(|| vec![Box::new(Owner), Box::new(Other)])
+                pub struct ModEntry {{ pub id: &'static str, pub hooks: Box<dyn Hooks> }}
+                pub fn mods() -> &'static [ModEntry] {{
+                    static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
+                    MODS.get_or_init(|| vec![ModEntry {{ id: "owner", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
             }}
             {helper}
@@ -315,9 +268,8 @@ mod tests {
                 assert_eq!(value, 42);
             }}
         "#
-            );
-            compile_and_run(&root, &program);
-        }
+        );
+        compile_and_run(&root, &program);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -326,17 +278,16 @@ mod tests {
         let (root, bundle) = fixture("value", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'RETURN'\ntrait_method = 'total'\nbindings = [{ name = 'total', ty = 'i32', value = '$value' }, { name = 'calls', ty = '&mut u32', value = '&mut *calls' }]\n");
         let injections = prepare(&[bundle], &root).unwrap();
         let helper = fs::read_to_string(root.join("horizon-trait-injection-0.rs")).unwrap();
-        for build_time in [false, true] {
-            let stage_dir = root.join(if build_time { "build-time" } else { "legacy" });
-            let output = staged_hooks(
-                &stage_dir,
-                &injections,
-                build_time,
-                "pub trait Hooks: Send + Sync {\n}\n",
-            )
-            .unwrap();
-            let program = format!(
-                r#"
+        let stage_dir = root.join("stage");
+        fs::create_dir_all(&stage_dir).unwrap();
+        stage(&stage_dir, &injections).unwrap();
+        let output = horizon_mod_api_gen::inject(
+            "pub trait Hooks: Send + Sync {\n}\n",
+            &fs::read_to_string(stage_dir.join(INPUT)).unwrap(),
+        )
+        .unwrap();
+        let program = format!(
+            r#"
             mod mod_api {{
                 use std::sync::atomic::{{AtomicBool, Ordering}};
                 use std::sync::OnceLock;
@@ -353,12 +304,13 @@ mod tests {
                     fn inject_example_total(&self, _: &mut InjectExampleTotalEvent) {{ panic!("wrong owner") }}
                 }}
                 pub static INSTALLED: AtomicBool = AtomicBool::new(false);
-                pub fn mods() -> &'static [Box<dyn Hooks>] {{
-                    static MODS: OnceLock<Vec<Box<dyn Hooks>>> = OnceLock::new();
+                pub struct ModEntry {{ pub id: &'static str, pub hooks: Box<dyn Hooks> }}
+                pub fn mods() -> &'static [ModEntry] {{
+                    static MODS: OnceLock<Vec<ModEntry>> = OnceLock::new();
                     if !INSTALLED.load(Ordering::SeqCst) {{
                         return &[];
                     }}
-                    MODS.get_or_init(|| vec![Box::new(Owner), Box::new(Other)])
+                    MODS.get_or_init(|| vec![ModEntry {{ id: "owner", hooks: Box::new(Owner) }}, ModEntry {{ id: "other", hooks: Box::new(Other) }}])
                 }}
             }}
             {helper}
@@ -371,9 +323,8 @@ mod tests {
                 assert_eq!(calls, 1);
             }}
         "#
-            );
-            compile_and_run(&root, &program);
-        }
+        );
+        compile_and_run(&root, &program);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -381,34 +332,23 @@ mod tests {
     fn staged_input_checks_conflicts_and_clears_removed_injections() {
         let (root, bundle) = fixture("conflicts", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\n");
         let injections = prepare(&[bundle], &root).unwrap();
-        for build_time in [false, true] {
-            let stage_dir = root.join(if build_time { "build-time" } else { "legacy" });
-            for (existing, expected) in [
-                (
-                    "pub trait Hooks: Send + Sync { fn inject_example_tick(&self) {} }",
-                    "duplicate generated trait method",
-                ),
-                (
-                    "pub trait Hooks: Send + Sync {} pub struct InjectExampleTickEvent;",
-                    "duplicate generated event",
-                ),
-            ] {
-                let error =
-                    staged_hooks(&stage_dir, &injections, build_time, existing).unwrap_err();
-                assert!(error.contains(expected), "{error}");
-            }
-            let output = staged_hooks(
-                &stage_dir,
-                &[],
-                build_time,
-                "pub trait Hooks: Send + Sync {}",
-            )
-            .unwrap();
-            assert!(!output.contains("inject_example_tick"));
-            if build_time {
-                assert_eq!(fs::read_to_string(stage_dir.join(INPUT)).unwrap(), "[]");
-            }
+        stage(&root, &injections).unwrap();
+        let input = fs::read_to_string(root.join(INPUT)).unwrap();
+        for existing in [
+            "pub trait Hooks: Send + Sync { fn inject_example_tick(&self) {} }",
+            "pub trait Hooks: Send + Sync {} pub struct InjectExampleTickEvent;",
+        ] {
+            assert!(horizon_mod_api_gen::inject(existing, &input).is_err());
         }
+        stage(&root, &[]).unwrap();
+        let input = fs::read_to_string(root.join(INPUT)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&input).unwrap(),
+            serde_json::json!([])
+        );
+        let output =
+            horizon_mod_api_gen::inject("pub trait Hooks: Send + Sync {}", &input).unwrap();
+        assert!(!output.contains("inject_example_tick"));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -425,7 +365,7 @@ mod tests {
             .unwrap()
         };
         let before = key();
-        fs::write(root.join("engine/src/lib.rs"), "// one line edit").unwrap();
+        fs::write(root.join("rust/src/lib.rs"), "// one line edit").unwrap();
         assert_eq!(before, key());
         fs::write(root.join("other.rs"), "// mixin input").unwrap();
         assert_ne!(before, key());
@@ -434,7 +374,7 @@ mod tests {
 
     #[test]
     fn mixin_inputs_inside_api_are_not_excluded_from_cache() {
-        let (root, bundle) = fixture("api-helper", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'engine/src/lib.rs'\n");
+        let (root, bundle) = fixture("api-helper", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'rust/src/lib.rs'\n");
         let key = || {
             super::super::inject_cache::key(
                 "revision",
@@ -445,26 +385,19 @@ mod tests {
             .unwrap()
         };
         let before = key();
-        fs::write(root.join("engine/src/lib.rs"), "fn changed() {}\n").unwrap();
+        fs::write(root.join("rust/src/lib.rs"), "fn changed() {}\n").unwrap();
         assert_ne!(before, key());
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn mixin_crate_containing_api_is_not_excluded_from_cache() {
-        let (root, bundle) = fixture("api-parent", "[[crate]]\nid = 'whole_bundle'\npath = '.'\n");
-        let key = || {
-            super::super::inject_cache::key(
-                "revision",
-                "mixins",
-                super::super::Profile::Performance,
-                std::slice::from_ref(&bundle),
-            )
-            .unwrap()
-        };
-        let before = key();
-        fs::write(root.join("engine/src/lib.rs"), "// changed\n").unwrap();
-        assert_ne!(before, key());
+    fn rejects_two_routes_for_the_same_source_folder() {
+        let (root, _) = fixture("dual-route", "");
+        let path = root.join(MANIFEST);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(path, text + "[[crate]]\nid = 'code'\npath = 'rust'\n").unwrap();
+        let error = super::super::bundle(&root, None).unwrap_err();
+        assert!(error.contains("both [api] and [[crate]]"), "{error}");
         fs::remove_dir_all(root).unwrap();
     }
 

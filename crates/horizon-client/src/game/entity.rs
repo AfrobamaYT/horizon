@@ -59,6 +59,9 @@ pub(super) trait Entity: EntityRules {
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
+    /// Where it stood when the last tick began (`Entity.lastKnownPosition`'s
+    /// reading): `position - previous_position` is `computeSpeed`.
+    fn previous_position(&self) -> Vec3;
     /// `Entity.getDeltaMovement`.
     fn velocity(&self) -> Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
@@ -282,6 +285,9 @@ macro_rules! stored_motion {
         }
         fn position_mut(&mut self) -> &mut Vec3 {
             &mut self.position
+        }
+        fn previous_position(&self) -> Vec3 {
+            self.previous
         }
         fn velocity(&self) -> Vec3 {
             self.velocity
@@ -659,6 +665,16 @@ impl Game<'_> {
             .chain(self.crystals.iter().map(|e| e.id))
             .chain(self.dragon.iter().map(|e| e.id))
             .chain(self.ominous_spawners.iter().map(|e| e.id))
+    }
+    /// The ids of every entity in the level that is not removed: one walk.
+    pub(super) fn live_entity_ids(&self) -> HashSet<u32> {
+        let mut alive: HashSet<u32> = self.entity_ids_off_walk().collect();
+        for_each_entity!(entity_lists_of!(self), entity => {
+            if !entity.is_removed() {
+                alive.insert(entity.id());
+            }
+        });
+        alive
     }
     /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
     pub(super) fn save_every_entity(

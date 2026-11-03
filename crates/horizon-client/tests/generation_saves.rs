@@ -167,8 +167,26 @@ impl Session {
     }
     fn save(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(120);
-        while !self.streaming.poll_save(&mut self.world) {
+        'save: loop {
             assert!(Instant::now() < deadline, "incremental save never finished");
+            let tick_deadline = Instant::now() + Duration::from_millis(2);
+            loop {
+                match self
+                    .streaming
+                    .prepare_poll_save(&mut self.world, tick_deadline)
+                {
+                    horizon_client::streaming::SaveStep::Pending => break,
+                    horizon_client::streaming::SaveStep::Full(chunk) => {
+                        self.streaming.save_finished(chunk)
+                    }
+                    horizon_client::streaming::SaveStep::Protos(protos) => {
+                        if self.streaming.submit_protos(protos) {
+                            break 'save;
+                        }
+                        break;
+                    }
+                }
+            }
             thread::sleep(Duration::from_millis(1));
         }
         for key in std::mem::take(&mut self.world.modified) {
@@ -355,15 +373,61 @@ fn saved_proto_chunks_restore_exactly() {
     generator.decorate(&mut worker, &mut region);
     assert!(generator.is_decorated(&region[4]));
     generator.save_protos(&region.iter().collect::<Vec<_>>());
+    let mut seeded = generator.inner.saved_proto(&region[4]).unwrap();
+    let extras = seeded.column.saved.get_or_insert_with(Default::default);
+    let extras = Arc::make_mut(extras);
+    extras
+        .root
+        .insert("example:unknown".into(), horizon_world::nbt::Tag::Int(42));
+    let attachment = horizon_world::nbt::Compound::from_iter([(
+        "example:data".into(),
+        horizon_world::nbt::Tag::Int(9),
+    )]);
+    extras.attachments = horizon_world::attachments::Attachments::from_nbt(attachment.clone());
+    save.save_protos(&[seeded], assets.registry, &generator.biomes)
+        .unwrap();
     save.flush().unwrap();
-    let restored: Vec<Proto> = keys
-        .iter()
-        .map(|&(x, z)| generator.proto(&mut worker, x, z))
-        .collect();
+    let mut restored: [Proto; 9] = std::array::from_fn(|i| {
+        let (x, z) = keys[i];
+        generator.proto(&mut worker, x, z)
+    });
+    // Decoration mutates the checked-out region after the unknown key is restored.
+    generator.decorate(&mut worker, &mut region);
+    generator.decorate(&mut worker, &mut restored);
+    generator.save_protos(&[&restored[4]]);
+    save.flush().unwrap();
+    let proto = save
+        .load_proto(keys[4].0, keys[4].1, assets.registry, &generator.biomes)
+        .unwrap();
+    assert_eq!(
+        proto
+            .column
+            .saved
+            .as_ref()
+            .unwrap()
+            .root
+            .get(&"example:unknown".into()),
+        Some(&horizon_world::nbt::Tag::Int(42))
+    );
+    assert_eq!(
+        proto.column.saved.as_ref().unwrap().attachments.to_nbt(),
+        attachment
+    );
     for (i, (original, restored)) in region.into_iter().zip(restored).enumerate() {
         assert_eq!(generator.is_decorated(&restored), i == 4);
         let (a, b) = (generator.finish(original), generator.finish(restored));
         let (x, z) = keys[i];
+        if i == 4 {
+            save.save(&[Arc::new(b.clone())], assets.registry, &generator.biomes)
+                .unwrap();
+            let loaded = save.load(x, z, assets.registry, &generator.biomes).unwrap();
+            let extras = loaded.saved.unwrap();
+            assert_eq!(
+                extras.root.get(&"example:unknown".into()),
+                Some(&horizon_world::nbt::Tag::Int(42))
+            );
+            assert_eq!(extras.attachments.to_nbt(), attachment);
+        }
         for y in horizon_client::chunk::MIN_Y..horizon_client::chunk::MIN_Y + 384 {
             for lz in 0..16 {
                 for lx in 0..16 {
@@ -388,6 +452,7 @@ fn saved_proto_chunks_restore_exactly() {
             c.saved
                 .as_ref()
                 .map(|s| (s.block_ticks.clone(), s.fluid_ticks.clone()))
+                .unwrap_or_default()
         };
         assert_eq!(ticks(&a), ticks(&b), "chunk {x} {z}");
     }
@@ -487,11 +552,11 @@ fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
         }
         fn final_block_entities(
             &self,
-            _: &Proto,
-            writes: &[([i32; 3], u32)],
+            entries: &[(&Proto, &[([i32; 3], u32)])],
         ) -> Vec<((i32, i32, i32), BlockEntity)> {
-            writes
+            entries
                 .iter()
+                .flat_map(|(_, writes)| writes.iter())
                 .map(|([x, y, z], _)| ((*x, *y, *z), BlockEntity::Chest(Vec::new())))
                 .collect()
         }
@@ -512,7 +577,8 @@ fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
         registry: assets,
         biomes,
     };
-    let made = generator.final_block_entities(&(Box::new(()) as Proto), &[([1, 64, 2], 5)]);
+    let proto = Box::new(()) as Proto;
+    let made = generator.final_block_entities(&[(&proto, &[([1, 64, 2], 5)])]);
     assert_eq!(made.len(), 1, "Persistent drops the block entities");
     assert_eq!(made[0].0, (1, 64, 2));
     let _ = std::fs::remove_dir_all(&dir);

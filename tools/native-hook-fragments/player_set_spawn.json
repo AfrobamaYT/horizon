@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_set_spawn",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_set_spawn",
+      "neoforge": "PlayerSetSpawnEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

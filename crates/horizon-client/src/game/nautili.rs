@@ -77,11 +77,14 @@ impl Game<'_> {
             if !tame && food {
                 // tryToTame: one time in three.
                 self.use_nautilus_food(item);
+                let rolled = self.mobs[index].random.next_int_bound(3).unwrap_or(1) == 0;
+                let acting = self.acting_player_uuid();
+                let (tamer, tamer_entity_id) = (self.native_acting_id(), self.own_entity_id());
+                let tamed = rolled && !self.animal_tame_cancelled(index, tamer, tamer_entity_id);
                 let m = &mut self.mobs[index];
-                let tamed = m.random.next_int_bound(3).unwrap_or(1) == 0;
                 if tamed {
                     m.extra.tame = true;
-                    m.extra.owner = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+                    m.extra.owner = Some(acting);
                     m.persistent = true;
                     m.nav_stop();
                     m.ai.target = None;
@@ -93,6 +96,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
                 return true;
             }
@@ -111,14 +115,16 @@ impl Game<'_> {
             let m = &mut self.mobs[index];
             if item == "minecraft:saddle" && tame && !m.extra.saddled {
                 let held = self.inventory[self.selected].clone();
-                m.set_saddle(held);
+                m.set_saddle(held.map(|s| ItemStack { count: 1, ..s }));
                 let sound = nautilus::saddle_sound(m);
                 self.nautilus_sound(index, sound);
                 self.consume_held();
                 return true;
             }
             if item.ends_with("_nautilus_armor") && tame && m.extra.body.is_none() {
-                m.extra.body = Some(item.into());
+                let held = self.inventory[self.selected].clone();
+                m.extra
+                    .set_body_stack(held.map(|s| ItemStack { count: 1, ..s }));
                 self.nautilus_sound(index, "item.armor.equip_nautilus");
                 self.consume_held();
                 return true;

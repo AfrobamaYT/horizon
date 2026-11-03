@@ -158,62 +158,21 @@ pub struct Brewing {
     /// Items accepted in the bottle slots (`PotionIngredient.isPotionInput`).
     pub inputs: HashSet<String>,
 }
-/// The files right in `recipe/brewing/`, parsed, by id: taken from the whole
-/// recipe folder's read when another table holds it (the start loads them
-/// together), else read alone. A file that doesn't parse is left out.
-fn brewing_sources(root: &Path) -> Vec<(String, Value)> {
-    let recipe = root.join("data/minecraft/recipe");
-    let (folder, prefix) = match crate::json_folder::held(&recipe) {
-        Some(folder) => (folder, "brewing/"),
-        None => match crate::json_folder::read(&recipe.join("brewing")) {
-            Ok(folder) => (folder, ""),
-            Err(_) => return Vec::new(),
-        },
-    };
-    folder
-        .files
-        .iter()
-        .filter_map(|f| {
-            let name = f.name.strip_prefix(prefix).filter(|n| !n.contains('/'))?;
-            let v = serde_json::from_slice::<Value>(f.bytes().ok()?).ok()?;
-            Some((format!("minecraft:brewing/{name}"), v))
-        })
-        .collect()
-}
 impl Brewing {
     pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Self {
-        // NeoForge's load conditions: a file whose don't hold is silently
-        // absent. Vanilla's brewing recipes carry none; a pack's can.
-        let mods: Vec<String> = {
-            let mut mods = horizon_items::content_namespaces::mod_ids(root);
-            if !mods.iter().any(|m| m == "minecraft") {
-                mods.push("minecraft".to_owned());
-            }
-            mods
-        };
-        let conditions_hold = |v: &Value| {
-            horizon_world::conditions::conditions_hold(v, &|id: &str| mods.iter().any(|m| m == id))
-        };
-        let mut sources: Vec<(String, Value)> = brewing_sources(root);
-        // The world's packs' brewing recipes over the game's own: the top
-        // pack's file for each id replaces it (`SimpleJsonResourceReloadListener`).
-        for (id, files) in overlay.kind("recipe") {
-            if !id.starts_with("minecraft:brewing/") {
-                continue;
-            }
-            let Ok(v) = serde_json::from_slice::<Value>(PackOverlay::top(files)) else {
-                continue;
-            };
-            match sources.iter_mut().find(|(n, _)| n == id) {
-                Some(slot) => slot.1 = v,
-                None => sources.push((id.to_owned(), v)),
-            }
+        let mut sources =
+            horizon_items::recipe_sources::sources(root, overlay).unwrap_or_else(|e| {
+                log::warn!("Horizon: brewing recipes not loaded: {e}");
+                Vec::new()
+            });
+        sources.retain(|(id, _)| {
+            let path = id.split_once(':').map_or(id.as_str(), |(_, path)| path);
+            path.strip_prefix("brewing/")
+                .is_some_and(|name| !name.contains('/'))
+        });
+        for (id, _) in &mut sources {
+            *id = horizon_items::recipe_sources::qualified(id);
         }
-        // The gate answers the merged file, as the crafting loader's does:
-        // a false-conditioned pack file leaves the lower one gone too.
-        // The data's recipe filters, over the final set.
-        let filters = horizon_items::recipe_filters::RecipeFilters::load(root, overlay);
-        sources.retain_mut(|(id, v)| conditions_hold(v) && filters.apply(id, v));
         sources.sort_by(|a, b| a.0.cmp(&b.0));
         let mut recipes = Vec::new();
         for (id, v) in sources {
@@ -297,6 +256,22 @@ impl BrewingStand {
     }
     /// `BrewingStandBlockEntity.serverTick`.
     pub fn tick(&mut self, brewing: &Brewing, items: &Items, providers: &Providers) -> BrewTick {
+        let (mut out, due) = self.tick_to_brew(brewing, items, providers);
+        if due {
+            self.brew(brewing, items, &mut out);
+        }
+        self.sync_bottles(&mut out);
+        out
+    }
+    /// `serverTick` up to its `doBrew` call: true when the brew is due now.
+    /// A caller asking mods around `doBrew` runs [`Self::brew`] itself, then
+    /// [`Self::sync_bottles`].
+    pub fn tick_to_brew(
+        &mut self,
+        brewing: &Brewing,
+        items: &Items,
+        providers: &Providers,
+    ) -> (BrewTick, bool) {
         let mut out = BrewTick::default();
         if self.fuel <= 0
             && let Some(fuel) = self.items[4].as_mut()
@@ -314,11 +289,12 @@ impl BrewingStand {
             }
         }
         let brewable = self.brewable(brewing);
+        let mut due = false;
         if self.brew_time > 0 {
             self.brew_time -= 1;
             let same = self.items[3].as_ref().map(|s| s.item.clone()) == self.ingredient;
             if self.brew_time == 0 && brewable {
-                self.brew(brewing, items, &mut out);
+                due = true;
             } else if !brewable || !same {
                 self.brew_time = 0;
             }
@@ -329,6 +305,11 @@ impl BrewingStand {
             self.total_brew_time = self.brew_time;
             self.ingredient = self.items[3].as_ref().map(|s| s.item.clone());
         }
+        (out, due)
+    }
+    /// The end of `serverTick`: the `has_bottle_*` block state when the
+    /// bottle slots filled or emptied.
+    pub fn sync_bottles(&mut self, out: &mut BrewTick) {
         let bottles = [
             self.items[0].is_some(),
             self.items[1].is_some(),
@@ -338,9 +319,26 @@ impl BrewingStand {
             self.last_bottles = Some(bottles);
             out.bottles = Some(bottles);
         }
-        out
     }
-    fn brew(&mut self, brewing: &Brewing, items: &Items, out: &mut BrewTick) {
+    /// `doBrew` once `PotionBrewEvent.Pre` asked the mods with `asked`, a
+    /// copy of the five slots, and whether they cancelled: a cancel puts the
+    /// mods' slots in and skips the brew (the caller then fires Post);
+    /// otherwise vanilla brews and the copy is dropped. Without mods (`None`)
+    /// this is `doBrew`.
+    pub fn brew_after_pre(
+        &mut self,
+        asked: Option<([Option<ItemStack>; 5], bool)>,
+        brewing: &Brewing,
+        items: &Items,
+        out: &mut BrewTick,
+    ) {
+        match asked {
+            Some((stacks, true)) => self.items = stacks,
+            _ => self.brew(brewing, items, out),
+        }
+    }
+    /// `BrewingStandBlockEntity.doBrew`.
+    pub fn brew(&mut self, brewing: &Brewing, items: &Items, out: &mut BrewTick) {
         let Some(ingredient) = self.items[3].clone() else {
             return;
         };
@@ -373,6 +371,63 @@ pub fn brewing_fuel(items: &Items, stack: &ItemStack) -> Option<(Value, Value)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn content_brewing_root(name: &str, condition: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-content-brewing-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        std::fs::create_dir_all(root.join("data/example/recipe/brewing")).unwrap();
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["example"]"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("data/example/recipe/brewing/test.json"), format!(r#"{{"type":"minecraft:brewing","input":{{"item":"minecraft:potion"}},"reagent":{{"item":"minecraft:nether_wart"}},"output":{{"id":"minecraft:diamond"}}{condition}}}"#)).unwrap();
+        root
+    }
+
+    #[test]
+    fn content_brewing_recipe_is_loaded() {
+        let root = content_brewing_root("loaded", "");
+        std::fs::create_dir_all(root.join("data/minecraft/recipe/brewing")).unwrap();
+        std::fs::write(
+            root.join("data/minecraft/recipe/brewing/test.json"),
+            br#"{"type":"minecraft:brewing","output":{"id":"minecraft:emerald"}}"#,
+        )
+        .unwrap();
+        let items = Items::for_tests(Default::default());
+        let recipes = Brewing::load(&root, &items, &PackOverlay::NONE);
+        assert_eq!(recipes.recipes[0].id, "example:brewing/test");
+        assert_eq!(&*recipes.recipes[0].output.item, "minecraft:diamond");
+        assert_eq!(recipes.recipes[1].id, "minecraft:brewing/test");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn content_brewing_recipe_condition_is_applied() {
+        let root = content_brewing_root(
+            "condition",
+            r#", "neoforge:conditions":[{"type":"neoforge:false"}]"#,
+        );
+        let items = Items::for_tests(Default::default());
+        let recipes = Brewing::load(&root, &items, &PackOverlay::NONE);
+        assert!(recipes.recipes.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn overlay_replaces_content_brewing_recipe() {
+        let root = content_brewing_root("overlay", "");
+        let files = [("recipe/example:brewing/test".to_owned(), vec![br#"{"type":"minecraft:brewing","input":{"item":"minecraft:potion"},"reagent":{"item":"minecraft:nether_wart"},"output":{"id":"minecraft:emerald"}}"#.to_vec()])];
+        let items = Items::for_tests(Default::default());
+        let recipes = Brewing::load(&root, &items, &PackOverlay { files: &files });
+        assert_eq!(recipes.recipes.len(), 1);
+        assert_eq!(&*recipes.recipes[0].output.item, "minecraft:emerald");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn potion_colours_and_names() {

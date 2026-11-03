@@ -7,7 +7,13 @@ use super::{
     entity::{Blast, Entity, EntityHandle, with_entity, with_entity_mut},
 };
 use horizon_client::{
-    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, mobs::Who, text::Text,
+    Result,
+    blocks::Fluid,
+    collisions::SceneCollisions,
+    items::ItemStack,
+    mobs::Who,
+    mod_api::{NativeBlockInteraction, NativeExplosionStart},
+    text::Text,
 };
 use horizon_core::{
     geometry::{Vec3, VoxelShape},
@@ -25,16 +31,30 @@ use std::{cmp::Ordering, io};
 
 /// `Level.clip` with `ClipContext.Block.COLLIDER`, no fluids and the
 /// collision context of the entity whose exposure is measured.
-struct ColliderRays<'a, 'r> {
-    scene: SceneCollisions<'a, 'r>,
-    context: CollisionContext<'static>,
+pub(super) struct ClipData<'a, 'r> {
+    pub facts: &'a horizon_client::blocks::BlockFacts,
+    pub behaviours: &'a horizon_world::level::Behaviours,
+    pub tables: &'a horizon_client::mesher::MeshTables,
+    pub registry: &'r horizon_world::registry::BlockRegistry,
+}
+pub(super) struct ColliderRays<'a, 'r> {
+    pub scene: SceneCollisions<'a, 'r>,
+    pub context: CollisionContext<'static>,
+    pub clip_data: Option<ClipData<'a, 'r>>,
 }
 impl RayWorld for ColliderRays<'_, '_> {
     type Error = io::Error;
     type Block = BlockStateId;
     type Fluid = ();
     fn block_state(&mut self, p: BlockPos) -> io::Result<BlockStateId> {
-        Ok(self.scene.world.block(p.x, p.y, p.z))
+        let world = self.scene.world;
+        if self.clip_data.is_some()
+            && (!(world.bottom_y()..world.top_y()).contains(&p.y)
+                || !world.chunks.contains_key(&(p.x >> 4, p.z >> 4)))
+        {
+            return Err(io::Error::other("ray entered an unloaded block"));
+        }
+        Ok(world.block(p.x, p.y, p.z))
     }
     fn fluid_state(&mut self, _: BlockPos) -> io::Result<()> {
         Ok(())
@@ -43,15 +63,35 @@ impl RayWorld for ColliderRays<'_, '_> {
         &mut self,
         state: BlockStateId,
         p: BlockPos,
-        _: RayBlockMode,
+        mode: RayBlockMode,
     ) -> io::Result<VoxelShape> {
+        if let Some(data) = &self.clip_data {
+            if data.behaviours.data(state).dynamic_shape {
+                return Err(io::Error::other("dynamic ray shape unsupported"));
+            }
+            if mode == RayBlockMode::Outline {
+                let facts = data.facts.get(state);
+                let shape = super::perspective::ray_shape_from_boxes(&facts.outline)?;
+                let offset = super::perspective::outline_offset(
+                    data.tables,
+                    state,
+                    p.x,
+                    p.z,
+                    facts.outline_offset,
+                );
+                return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
+            }
+        }
         let binding = self.scene.binding;
         binding
             .collision_shape_with_context(&mut self.scene, state, p, &self.context)
             .map_err(|e| io::Error::other(format!("{e:?}")))
     }
-    fn interaction_shape(&mut self, _: BlockStateId, _: BlockPos) -> io::Result<VoxelShape> {
-        Ok(VoxelShape::empty())
+    fn interaction_shape(&mut self, state: BlockStateId, _: BlockPos) -> io::Result<VoxelShape> {
+        match &self.clip_data {
+            Some(data) => super::perspective::ray_interaction_shape(data.registry, state),
+            None => Ok(VoxelShape::empty()),
+        }
     }
     fn fluid_is_source(&mut self, _: ()) -> io::Result<bool> {
         Ok(false)
@@ -236,6 +276,7 @@ impl Game<'_> {
         }
         // ClipContext(..., entity): the entity standing at the box's bottom.
         let mut rays = ColliderRays {
+            clip_data: None,
             scene: SceneCollisions {
                 world: &self.world,
                 binding: self.collision,
@@ -785,6 +826,13 @@ impl Game<'_> {
         if spares_stands {
             return;
         }
+        // `DamageSources.explosion`: a caused blast is `player_explosion`.
+        let cause = self.blast_attacker().map(|(id, _)| id);
+        let damage_type = super::creatures::damage_type(
+            horizon_client::mobs::DamageKind::Explosion,
+            cause.is_some(),
+        );
+        let causing = cause.unwrap_or(0);
         let mut i = 0;
         while i < self.armor_stands.len() {
             let a = &self.armor_stands[i];
@@ -792,11 +840,21 @@ impl Game<'_> {
             if !super::armor_stands::spared_by_blast(a)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
-                self.break_armor_stand_by_anything(i);
+                self.break_armor_stand_by_anything(i, damage_type, causing);
             } else {
                 i += 1;
             }
         }
+    }
+    /// `ExplosionEvent.Start` for the explosion `start`: true when a mod
+    /// cancels it, and nothing of it happens.
+    pub(super) fn explosion_start_cancelled(&mut self, start: &NativeExplosionStart<'_>) -> bool {
+        if !crate::mod_api::listened(crate::mod_api::HookId::ExplosionStart) {
+            return false;
+        }
+        let mut cancel = false;
+        self.native_explosion_start(start, &mut cancel);
+        cancel
     }
     /// Paintings and cushions in reach (`BlockAttachedEntity.hurtServer`).
     fn explosion_breaks_hanging(&mut self, center: [f64; 3], diameter: f64) {
@@ -866,6 +924,24 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
         if self.serving.is_some() || self.options.dedicated.is_some() {
+            let start = NativeExplosionStart {
+                dimension: self.dim.id(),
+                center,
+                radius,
+                fire,
+                interaction: match interaction {
+                    BlockInteraction::Keep => NativeBlockInteraction::Keep,
+                    BlockInteraction::Destroy => NativeBlockInteraction::Destroy,
+                    BlockInteraction::DestroyWithDecay => NativeBlockInteraction::DestroyWithDecay,
+                },
+                damage_type,
+                source: self.combat.explosion_source,
+                // `getIndirectSourceEntity`, as the blast's attacker is.
+                owner: self.blast_attacker().map(|(id, _)| id),
+            };
+            if self.explosion_start_cancelled(&start) {
+                return Ok(());
+            }
             self.native_explosion_prime(center, radius);
         }
         if let Some(p) = &self.player {

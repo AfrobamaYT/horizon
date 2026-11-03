@@ -1,0 +1,17 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name":"item_entity", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_ref"},
+    {"name":"item_entity_stack", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_stack", "receiver":"item_entity"},
+    {"name":"item_entity_set_stack", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_stack", "receiver":"item_entity"},
+    {"name":"item_entity_pickup_delay", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_pickup_delay", "receiver":"item_entity"},
+    {"name":"item_entity_set_pickup_delay", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_pickup_delay", "receiver":"item_entity"},
+    {"name":"item_entity_set_default_pickup_delay", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_default_pickup_delay", "receiver":"item_entity"},
+    {"name":"item_entity_set_no_pickup_delay", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_no_pickup_delay", "receiver":"item_entity"},
+    {"name":"item_entity_set_never_pickup", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_never_pickup", "receiver":"item_entity"},
+    {"name":"item_entity_age", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_age", "receiver":"item_entity"},
+    {"name":"item_entity_target", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_target", "receiver":"item_entity"},
+    {"name":"item_entity_set_target", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_set_target", "receiver":"item_entity"},
+    {"name":"item_entity_owner", "side": "server", "target":"horizon_client::game::native_item_entity_refs::Game<'_>::native_item_entity_owner", "receiver":"item_entity"}
+  ]
+}

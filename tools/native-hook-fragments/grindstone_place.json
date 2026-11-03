@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "grindstone_place",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_grindstone_place",
+      "neoforge": "GrindstoneEvent.OnPlaceItem",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

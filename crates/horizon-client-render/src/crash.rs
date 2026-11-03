@@ -27,11 +27,11 @@ thread_local! {
 /// A call into one hook of a native mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeModCall {
-    /// The mod's `[mod] id`, None in a build that didn't name its mods.
-    pub id: Option<&'static str>,
-    /// Its place in dispatch order, which names it then.
-    pub index: usize,
+    /// The mod's `[mod] id`.
+    pub id: &'static str,
     pub hook: &'static str,
+    /// The part's type (`std::any::type_name`), when the call is to one of the mod's parts.
+    pub part: Option<&'static str>,
 }
 
 /// Marks this thread as inside `call` until the guard drops, which also happens while a panic
@@ -40,6 +40,11 @@ pub fn enter_native_mod(call: NativeModCall) -> NativeModGuard {
     NativeModGuard {
         outer: IN_NATIVE_MOD.with(|c| c.replace(Some(call))),
     }
+}
+
+/// The `[mod] id` of the native mod this thread is inside a hook of, if any.
+pub fn current_native_mod() -> Option<&'static str> {
+    IN_NATIVE_MOD.with(Cell::get).map(|call| call.id)
 }
 
 /// Puts back the call that `enter_native_mod` found.
@@ -56,17 +61,17 @@ impl Drop for NativeModGuard {
 
 /// `message`, with the native mod hook this thread is inside, if any.
 fn attributed(message: String) -> String {
-    match IN_NATIVE_MOD.with(Cell::get) {
-        Some(NativeModCall {
-            id: Some(id), hook, ..
-        }) => format!("{message}\nin native mod {id}, hook {hook}"),
-        Some(NativeModCall {
-            id: None,
-            index,
-            hook,
-        }) => format!("{message}\nin native mod #{index}, hook {hook}"),
-        None => message,
-    }
+    let Some(call) = IN_NATIVE_MOD.with(Cell::get) else {
+        return message;
+    };
+    let part = call
+        .part
+        .map(|part| format!(", part {part}"))
+        .unwrap_or_default();
+    format!(
+        "{message}\nin native mod {}, hook {}{part}",
+        call.id, call.hook
+    )
 }
 
 /// Runs `f`, and returns a panic in it as an error with the panic's message instead of letting
@@ -727,20 +732,30 @@ mod tests {
     #[test]
     fn a_panic_in_a_native_mods_hook_names_it() {
         let outer = enter_native_mod(NativeModCall {
-            id: None,
-            index: 1,
+            id: "outer",
             hook: "render",
+            part: None,
         });
         let inner = enter_native_mod(NativeModCall {
-            id: Some("b"),
-            index: 0,
+            id: "b",
             hook: "tick",
+            part: None,
         });
         assert!(attributed("boom".into()).ends_with("\nin native mod b, hook tick"));
         drop(inner);
-        assert!(attributed("boom".into()).ends_with("\nin native mod #1, hook render"));
+        assert!(attributed("boom".into()).ends_with("\nin native mod outer, hook render"));
         drop(outer);
         assert_eq!(attributed("boom".into()), "boom");
+        let part = enter_native_mod(NativeModCall {
+            id: "c",
+            hook: "analog_output",
+            part: Some("c::Gauge"),
+        });
+        assert!(
+            attributed("boom".into())
+                .ends_with("\nin native mod c, hook analog_output, part c::Gauge")
+        );
+        drop(part);
     }
 
     fn report() -> Report {
@@ -866,9 +881,9 @@ mod tests {
         // The same panic inside a native mod's hook, which the hook sees before the unwind.
         let _ = std::panic::catch_unwind(|| {
             let _guard = enter_native_mod(NativeModCall {
-                id: Some("a"),
-                index: 0,
+                id: "a",
                 hook: "tick",
+                part: None,
             });
             panic!("the test crash")
         });

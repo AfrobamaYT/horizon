@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "client_player_logging_out",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_player_logging_out",
+      "neoforge": "ClientPlayerNetworkEvent.LoggingOut",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ]
+}

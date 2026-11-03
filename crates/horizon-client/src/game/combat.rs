@@ -35,8 +35,50 @@ struct Entry {
 pub(super) struct Stuck {
     pub(super) arrows: i32,
     pub(super) stingers: i32,
-    remove_arrow_time: i32,
-    remove_stinger_time: i32,
+    pub(super) remove_arrow_time: i32,
+    pub(super) remove_stinger_time: i32,
+}
+/// Who `LivingEntity.resolvePlayerResponsibleForDamage` credits: a player by
+/// entity id, or the owner of a tamed animal by UUID.
+#[derive(Clone, Copy)]
+pub(super) enum PlayerCredit {
+    Entity(u32),
+    Owner(u128),
+}
+impl PlayerCredit {
+    /// `EntityReference.getPlayer` (`getPlayerInAnyDimension`): the UUID of the
+    /// credited player while they are online, none for a player who left.
+    pub(super) fn uuid(self, host: &super::lan::LanHost) -> Option<u128> {
+        host.hub
+            .guests
+            .iter()
+            .find(|g| {
+                g.placed
+                    && match self {
+                        Self::Entity(id) => g.entity_id as u32 == id,
+                        Self::Owner(uuid) => g.uuid == uuid,
+                    }
+            })
+            .map(|g| g.uuid)
+    }
+}
+impl CombatTracker {
+    /// `LivingEntity.lastHurtByPlayer`, remembered for 100 ticks (taken, as a
+    /// dead player's memory goes with them).
+    pub(super) fn take_hurt_by_player(&mut self, now: i64) -> Option<PlayerCredit> {
+        let (credit, at) = self.last_hurt_by_player.take()?;
+        (now - at <= 100).then_some(credit)
+    }
+    /// Whether a player hurt this body within the last 100 ticks
+    /// (`lastHurtByPlayerMemoryTime > 0`), without forgetting them.
+    pub(super) fn recently_hit_by_player(&self, now: i64) -> bool {
+        self.last_hurt_by_player
+            .is_some_and(|(_, at)| now - at <= 100)
+    }
+    /// `LivingEntity.setLastHurtByPlayer(player, 100)`.
+    pub(super) fn note_hurt_by_player(&mut self, credit: PlayerCredit, now: i64) {
+        self.last_hurt_by_player = Some((credit, now));
+    }
 }
 impl Stuck {
     /// `AbstractArrow.onHitEntity`: a hit that hurt, from an arrow that
@@ -59,9 +101,9 @@ impl Stuck {
     fn decay(count: &mut i32, remove_time: &mut i32) {
         if *count > 0 {
             if *remove_time <= 0 {
-                *remove_time = 20 * (30 - *count);
+                *remove_time = 20i32.wrapping_mul(30i32.wrapping_sub(*count));
             }
-            *remove_time -= 1;
+            *remove_time = remove_time.wrapping_sub(1);
             if *remove_time <= 0 {
                 *count -= 1;
             }
@@ -85,6 +127,8 @@ pub(super) struct CombatTracker {
     noted_since: Option<(usize, usize)>,
     /// `LivingEntity.lastHurtByMob` and its timestamp (the kill credit).
     last_hurt_by: Option<((u32, Text), i64)>,
+    /// `LivingEntity.lastHurtByPlayer` and its timestamp.
+    last_hurt_by_player: Option<(PlayerCredit, i64)>,
     /// The mob the player last hurt (`getLastHurtMob`) and when.
     pub(super) last_hurt_mob: Option<(u32, i64)>,
     /// The mob whose projectile is hitting the player now.
@@ -276,11 +320,53 @@ impl Game<'_> {
             .pending_direct
             .push((damage_type.to_owned(), name));
     }
+    /// `LivingEntity.resolvePlayerResponsibleForDamage` for the player in place,
+    /// hit by entity `id`, which only a native mod reads: a player's hit names
+    /// them, a tame wolf's its owner (no one without one), and other mobs leave
+    /// it as it was.
+    fn resolve_player_responsible_for_player(&mut self, id: u32) {
+        let now = self.world.game_time;
+        match self.mobs.iter().find(|m| m.id == id) {
+            None => self
+                .combat
+                .note_hurt_by_player(PlayerCredit::Entity(id), now),
+            Some(m) if m.extra.tame && &*m.kind.id == "minecraft:wolf" => {
+                self.combat.last_hurt_by_player = m.extra.owner.map(|o| {
+                    let owner = horizon_client::lan::playerdata::ints_uuid(o);
+                    (PlayerCredit::Owner(owner), now)
+                });
+            }
+            Some(_) => {}
+        }
+    }
     /// `CombatTracker.recordDamage` for the motion events of this tick.
     pub(super) fn record_combat(&mut self, events: &[MotionEvent]) {
         self.recheck_combat();
+        // The attacker of the hit whose damage was just recorded, for its criterion.
+        let mut recorded: Option<(String, u32)> = None;
         for e in events {
             let (name, amount) = match e {
+                // LivingEntity.hurtServer reached resolvePlayerResponsibleForDamage:
+                // every hit that got past the cooldown, absorbed or blocked too.
+                MotionEvent::Health(HealthEvent::Criterion { source, .. }) => {
+                    if !horizon_client::mod_api::mods().is_empty()
+                        && let Some(d) = self.motion.health.damage.definition(*source)
+                    {
+                        let attacker = match recorded.take() {
+                            Some((t, id)) if t == d.name => Some(id),
+                            _ => self
+                                .combat
+                                .pending
+                                .iter()
+                                .find(|(t, _, _)| *t == d.name)
+                                .map(|(_, (id, _), _)| *id),
+                        };
+                        if let Some(id) = attacker {
+                            self.resolve_player_responsible_for_player(id);
+                        }
+                    }
+                    continue;
+                }
                 // LivingEntity.getDamageAfterMagicAbsorb (Resistance) and
                 // Player.actuallyHurt (absorption hearts) and
                 // LivingEntity.hurtServer (the shield, only for an accepted
@@ -325,6 +411,7 @@ impl Game<'_> {
             let now = self.world.game_time;
             if let Some(a) = &attacker {
                 self.combat.last_hurt_by = Some((a.clone(), now));
+                recorded = Some((name.clone(), a.0));
                 if !self.combat.in_combat {
                     self.combat.in_combat = true;
                 }

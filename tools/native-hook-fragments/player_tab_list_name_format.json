@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_tab_list_name_format",
+      "target": "horizon_client_lib::lan::hub::native_player_tab_list_name_format",
+      "side": "server",
+      "cancellable": false,
+      "neoforge": "PlayerEvent.TabListNameFormat",
+      "mod_api": {
+        "contract": "collect",
+        "out": "display_name"
+      }
+    }
+  ]
+}

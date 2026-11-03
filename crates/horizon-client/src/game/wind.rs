@@ -31,6 +31,16 @@ pub(super) struct Burst {
     multiplier: f32,
     breeze: bool,
     wind_charge: bool,
+    cause: BurstCause,
+}
+/// Who a burst's `ServerExplosion` names, as entity ids: the entity that
+/// bursts (`getDirectSourceEntity`: a wind charge, the bearer of Wind
+/// Charged, a mace's wielder with `attribute_to_user`) and its living
+/// `getIndirectSourceEntity` (the charge's thrower, the bearer or wielder).
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct BurstCause {
+    pub source: Option<u32>,
+    pub owner: Option<u32>,
 }
 /// Whether a wind push must wait for the entity's own tick: it joined before
 /// the charge (`id` below the charge's), so vanilla has ticked it already this
@@ -38,14 +48,18 @@ pub(super) struct Burst {
 fn push_waits_for_tick(ticks_after_projectiles: bool, id: u32, charge: Option<u32>) -> bool {
     ticks_after_projectiles && charge.is_some_and(|c| id < c)
 }
-/// `Projectile.deflect` with `ProjectileDeflection.REVERSE`.
-pub(super) fn reverse(p: &mut Projectile, jitter: f32) {
-    p.velocity = Vec3::new(
-        p.velocity.x * -0.5,
-        p.velocity.y * -0.5,
-        p.velocity.z * -0.5,
+/// `Projectile.deflect(REVERSE, entity, owner, false, 1.0)` of a breeze's
+/// deflection, through the one engine path (`Projectile::deflect`). The turn's
+/// float comes from the projectile's random. The owner stays; a hurting
+/// projectile's acceleration power halves (`onDeflection`).
+pub(super) fn reverse(p: &mut Projectile) {
+    let owner = (p.owner, p.owner_uuid, p.guest);
+    p.deflect(
+        horizon_client::projectiles::Turn::Reverse,
+        [1.0; 3],
+        owner,
+        false,
     );
-    p.yaw += 170.0 + jitter * 20.0;
 }
 /// Whether a block reacts to a wind charge's burst by being used.
 fn triggers(name: &str) -> bool {
@@ -114,8 +128,18 @@ impl Game<'_> {
             ],
             Hit::None => return Ok(()),
         };
+        // The charge owner is the indirect source of the explosion.
+        let owner = match p.owner {
+            Some(Who::Player) => Some(self.own_entity_id() as u32),
+            Some(Who::Mob(id)) => self.mobs.iter().any(|m| m.id == id).then_some(id),
+            None => None,
+        };
+        let cause = BurstCause {
+            source: Some(p.id),
+            owner,
+        };
         self.creatures.wind_source = Some(p.id());
-        let burst = self.wind_burst(center, radius, knockback, breeze, !breeze);
+        let burst = self.wind_burst(center, radius, knockback, breeze, !breeze, cause);
         self.creatures.wind_source = None;
         burst
     }
@@ -428,6 +452,7 @@ impl Game<'_> {
         multiplier: f32,
         breeze: bool,
         wind_charge: bool,
+        cause: BurstCause,
     ) -> Result<()> {
         // In a guest's turn (their charge landing, their mace's burst) the
         // host holds the other players (`as_guest`): the burst waits for the
@@ -439,8 +464,29 @@ impl Game<'_> {
                 multiplier,
                 breeze,
                 wind_charge,
+                cause,
             });
             return Ok(());
+        }
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let start = horizon_client::mod_api::NativeExplosionStart {
+                dimension: self.dim.id(),
+                center,
+                radius,
+                fire: false,
+                interaction: horizon_client::mod_api::NativeBlockInteraction::TriggerBlock,
+                // `DamageSources.explosion(source, owner)`.
+                damage_type: if cause.source.is_some() && cause.owner.is_some() {
+                    "minecraft:player_explosion"
+                } else {
+                    "minecraft:explosion"
+                },
+                source: cause.source,
+                owner: cause.owner,
+            };
+            if self.explosion_start_cancelled(&start) {
+                return Ok(());
+            }
         }
         // ServerExplosion.explode: the blast is heard first.
         let ctx = horizon_client::sculk::Context::default();
@@ -483,7 +529,14 @@ impl Game<'_> {
     pub(super) fn flush_wind_bursts(&mut self) -> Result<()> {
         self.flush_smash_pushes();
         for b in std::mem::take(&mut self.creatures.wind_bursts) {
-            self.wind_burst(b.center, b.radius, b.multiplier, b.breeze, b.wind_charge)?;
+            self.wind_burst(
+                b.center,
+                b.radius,
+                b.multiplier,
+                b.breeze,
+                b.wind_charge,
+                b.cause,
+            )?;
         }
         Ok(())
     }
@@ -659,8 +712,8 @@ mod tests {
     fn a_deflected_projectile_turns_around_at_half_speed() {
         let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::ZERO, None);
         p.velocity = Vec3::new(2.0, -1.0, 0.0);
-        reverse(&mut p, 0.5);
+        reverse(&mut p);
         assert!((p.velocity.x + 1.0).abs() < 1e-9 && (p.velocity.y - 0.5).abs() < 1e-9);
-        assert!((p.yaw - 180.0).abs() < 1e-4);
+        assert!((170.0..190.0).contains(&p.yaw));
     }
 }

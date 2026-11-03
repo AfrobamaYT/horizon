@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "permissions_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_permissions_changed",
+      "neoforge": "PermissionsChangedEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

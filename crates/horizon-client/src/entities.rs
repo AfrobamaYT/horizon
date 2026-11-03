@@ -1159,36 +1159,39 @@ impl Experience {
             *self = Self::default();
         }
     }
+    /// `Player.getXpNeededForNextLevel`, wrapping as Java's `int` does for
+    /// a level a command or a mod set out of range.
     pub fn needed(level: i32) -> i32 {
         if level >= 30 {
-            112 + (level - 30) * 9
+            (level - 30).wrapping_mul(9).wrapping_add(112)
         } else if level >= 15 {
-            37 + (level - 15) * 5
+            (level - 15).wrapping_mul(5).wrapping_add(37)
         } else {
-            7 + level * 2
+            level.wrapping_mul(2).wrapping_add(7)
         }
     }
-    /// Returns the first multiple of 5 the player reached, where each level
-    /// gained would play the level-up sound (`Player.giveExperienceLevels`).
-    pub fn give(&mut self, points: i32) -> Option<i32> {
-        let mut sound_level = None;
+    /// The first half of `Player.giveExperiencePoints`: the points go to the
+    /// bar and the total, and the levels they cross follow one at a time.
+    pub fn add_points(&mut self, points: i32) {
         self.progress += points as f32 / Self::needed(self.level) as f32;
         self.total = self.total.saturating_add(points).max(0);
-        while self.progress >= 1.0 {
-            self.progress = (self.progress - 1.0) * Self::needed(self.level) as f32;
-            self.level += 1;
-            if self.level % 5 == 0 {
-                sound_level.get_or_insert(self.level);
-            }
-            self.progress /= Self::needed(self.level) as f32;
+    }
+    /// The change `Player.giveExperienceLevels` makes: below level 0 the level,
+    /// the progress and the total are 0.
+    pub fn add_levels(&mut self, levels: i32) {
+        self.level = self.level.saturating_add(levels);
+        if self.level < 0 {
+            self.level = 0;
+            self.progress = 0.0;
+            self.total = 0;
         }
-        sound_level
     }
 }
 /// A painting (`Painting`, a `HangingEntity`): the block it hangs in, the
 /// 2D data value of the direction it faces, and its variant.
 #[derive(Clone, Debug)]
 pub struct Painting {
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
     /// Direction.get2DDataValue: south 0, west 1, north 2, east 3.
@@ -1251,6 +1254,7 @@ pub fn dye_index(name: &str) -> u8 {
 /// height, and is coloured by its `DyeColor`.
 #[derive(Clone, Debug)]
 pub struct Cushion {
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     /// `Entity.position`: the bottom centre of the cushion.
     pub position: Vec3,
@@ -1292,6 +1296,7 @@ impl Cushion {
 /// An item frame or glow item frame (`ItemFrame`).
 #[derive(Clone, Debug)]
 pub struct ItemFrame {
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
     /// Direction.get3DDataValue: down 0, up 1, north 2, south 3, west 4, east 5.
@@ -1600,8 +1605,10 @@ impl ArmorStand {
         world: &World,
         facts: &BlockFacts,
         registry: &horizon_world::registry::BlockRegistry,
-    ) -> bool {
+    ) -> Option<&'static str> {
         let (lo, hi) = (self.bounds().min_position(), self.bounds().max_position());
+        // The damage type of the last hit that lowered its health.
+        let mut hit_by = None;
         let mut water = false;
         let mut lava = false;
         for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
@@ -1626,6 +1633,7 @@ impl ArmorStand {
                 && self.health > 0.5
             {
                 self.health -= 4.0;
+                hit_by = Some("minecraft:on_fire");
             }
             self.fire_ticks -= 1;
         }
@@ -1638,11 +1646,14 @@ impl ArmorStand {
         if fire && !self.invisible && !self.marker && !self.no_gravity {
             if self.fire_ticks > 0 {
                 self.health -= 0.15;
+                hit_by = Some("minecraft:in_fire");
             } else {
                 self.fire_ticks = 100;
             }
         }
-        self.health > 0.5
+        // Dead: the damage type that ran its health out, which vanilla's
+        // `brokenByAnything` receives as the `DamageSource`.
+        (self.health <= 0.5).then(|| hit_by.unwrap_or("minecraft:generic"))
     }
     /// EntityType.ARMOR_STAND dimensions (0.5 x 1.975, half for small).
     pub fn bounds(&self) -> Aabb {
@@ -1864,15 +1875,15 @@ mod experience_tests {
 
     #[test]
     fn respawn_clears_all_xp_unless_it_is_kept() {
-        let mut xp = Experience::default();
-        xp.give(155);
-        let before = (xp.level, xp.progress, xp.total);
+        let mut xp = Experience {
+            level: 7,
+            progress: 0.5,
+            total: 155,
+        };
         xp.respawn(true);
-        assert_eq!((xp.level, xp.progress, xp.total), before);
+        assert_eq!((xp.level, xp.progress, xp.total), (7, 0.5, 155));
         xp.respawn(false);
         assert_eq!((xp.level, xp.progress, xp.total), (0, 0.0, 0));
-        xp.give(7);
-        assert_eq!((xp.level, xp.progress, xp.total), (1, 0.0, 7));
     }
 }
 
@@ -1995,9 +2006,28 @@ mod fire_environment_tests {
             )
             .unwrap();
         for _ in 0..150 {
-            assert!(stand.environment_tick(&world, &facts, assets.registry));
+            assert!(
+                stand
+                    .environment_tick(&world, &facts, assets.registry)
+                    .is_none()
+            );
         }
         assert_eq!(stand.health, 20.0, "lava does not hurt armor stands");
+        // A stand the flames run out of health names the damage that did it.
+        world
+            .set(
+                20,
+                4,
+                20,
+                assets.registry.default_state("minecraft:air").unwrap(),
+            )
+            .unwrap();
+        stand.health = 4.0;
+        stand.fire_ticks = 20;
+        assert_eq!(
+            stand.environment_tick(&world, &facts, assets.registry),
+            Some("minecraft:on_fire")
+        );
     }
 }
 #[cfg(test)]
@@ -3499,4 +3529,33 @@ mod item_destroyed_tests {
         );
     }
 }
-crate::impl_joined!(ItemEntity, ExperienceOrb, ArmorStand);
+
+#[cfg(test)]
+mod experience_cost_tests {
+    use super::Experience;
+
+    /// Java's `int` arithmetic wraps; a huge or very negative level must not
+    /// panic where overflow checks are on.
+    #[test]
+    fn needed_wraps_for_levels_out_of_range() {
+        assert_eq!(Experience::needed(0), 7);
+        assert_eq!(Experience::needed(15), 37);
+        assert_eq!(Experience::needed(30), 112);
+        assert_eq!(
+            Experience::needed(i32::MAX),
+            (i32::MAX - 30).wrapping_mul(9).wrapping_add(112)
+        );
+        assert_eq!(
+            Experience::needed(i32::MIN),
+            i32::MIN.wrapping_mul(2).wrapping_add(7)
+        );
+    }
+}
+crate::impl_joined!(
+    ItemEntity,
+    ExperienceOrb,
+    ArmorStand,
+    Painting,
+    Cushion,
+    ItemFrame
+);

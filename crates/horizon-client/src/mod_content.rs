@@ -583,7 +583,7 @@ fn resolve_shapes<'a>(
     combos: &[Vec<(String, String)>],
     properties: impl Fn(u32) -> Option<&'a J>,
 ) -> Result<Vec<VoxelShape>> {
-    let names = spec.property_names();
+    let names = &spec.properties;
     let mut used = BTreeSet::new();
     let mut shapes = Vec::with_capacity(order.len());
     for &(state, combo) in order {
@@ -630,9 +630,28 @@ fn resolve_shapes<'a>(
     Ok(shapes)
 }
 
+/// A content farmland declaration names a block absent from the loaded registry.
+#[derive(Debug)]
+pub struct UnknownBaseBlock {
+    /// The farmland declaration.
+    pub block: String,
+    /// The missing base ID.
+    pub base: String,
+}
+impl std::fmt::Display for UnknownBaseBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: base_block {} is not a block", self.block, self.base)
+    }
+}
+impl std::error::Error for UnknownBaseBlock {}
+
+/// A block ID resolved against the complete content and vanilla registry.
+struct KnownBlock<'a>(&'a str);
+
 /// A block being added: its declaration and where its states go.
 struct NewBlock<'a> {
     decl: &'a Block,
+    base_block: Option<KnownBlock<'a>>,
     rename: Rename,
     /// The template's item, if it has one.
     item: Option<String>,
@@ -666,6 +685,7 @@ struct NewItem {
     rarity: Option<Rarity>,
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
+    block: Option<String>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
 }
@@ -933,6 +953,10 @@ impl<'a> Plan<'a> {
             (names[start + len..].iter().all(|n| n != name))
                 .then_some(start as u32..(start + len) as u32)
         };
+        let declared_ids: BTreeSet<&str> = mods
+            .iter()
+            .flat_map(|m| m.content.blocks.iter().map(|b| b.id.as_str()))
+            .collect();
         let mut blocks = Vec::new();
         let mut next = names.len() as u32;
         let mut sorted: Vec<&ContentMod> = mods.iter().collect();
@@ -942,6 +966,19 @@ impl<'a> Plan<'a> {
             let mut declared: Vec<&Block> = m.content.blocks.iter().collect();
             declared.sort_by(|a, b| a.id.cmp(&b.id));
             for decl in declared {
+                let base_block = match decl.base_block.as_deref() {
+                    Some(base) if defaults.contains_key(base) || declared_ids.contains(base) => {
+                        Some(KnownBlock(base))
+                    }
+                    Some(base) => {
+                        return Err(UnknownBaseBlock {
+                            block: decl.id.clone(),
+                            base: base.to_owned(),
+                        }
+                        .into());
+                    }
+                    None => None,
+                };
                 if defaults.contains_key(&decl.id) {
                     return Err(format!("{}: {} is already a block", m.id, decl.id).into());
                 }
@@ -1087,6 +1124,7 @@ impl<'a> Plan<'a> {
                 }
                 blocks.push(NewBlock {
                     decl,
+                    base_block,
                     rename,
                     item: None,
                     shapes,
@@ -1152,18 +1190,26 @@ impl<'a> Plan<'a> {
                     rarity: None,
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
+                    block: None,
                     wall_block: b.decl.wall_block.clone(),
                 });
             }
         }
         for m in &sorted {
             for i in &m.content.items {
+                if let Some(block) = &i.block
+                    && !defaults.contains_key(block)
+                    && !blocks.iter().any(|b| b.decl.id == *block)
+                {
+                    return Err(format!("{}: block {block:?} is not a block", i.id).into());
+                }
                 items.push(NewItem {
                     rename: Rename::new(&i.template, &i.id),
                     max_stack_size: i.max_stack_size,
                     rarity: i.rarity,
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
+                    block: i.block.clone(),
                     wall_block: None,
                 });
             }
@@ -1286,6 +1332,9 @@ impl<'a> Plan<'a> {
         if let Some(shape) = p.render_shape {
             row.set("render_shape", J::Str(shape.name().into()));
         }
+        if let Some(reaction) = p.push_reaction {
+            row.set("push", J::Str(reaction.name().into()));
+        }
         if let Some(v) = p.hardness {
             row.set("hardness", J::f64(v as f64));
         }
@@ -1332,6 +1381,19 @@ impl<'a> Plan<'a> {
             BTreeSet::new()
         };
         for i in &self.items {
+            if !components && let Some(block) = &i.block {
+                map.set(
+                    &i.rename.to,
+                    J::Obj(vec![
+                        ("class".into(), J::Arr(vec![J::Str("BlockItem".into())])),
+                        (
+                            "fields".into(),
+                            J::Obj(vec![("block".into(), J::Str(block.clone()))]),
+                        ),
+                    ]),
+                );
+                continue;
+            }
             let Some(v) = map.get(&i.rename.from) else {
                 continue;
             };
@@ -1419,6 +1481,12 @@ impl<'a> Plan<'a> {
                         {
                             *name = J::Str(wood.clone());
                         }
+                        if let Some(base) = &b.base_block {
+                            let field = v
+                                .at("fields/baseBlock")
+                                .ok_or("farmland template has no base block")?;
+                            *field = J::Str(base.0.to_owned());
+                        }
                         // A connecting block: the chorus plant's PipeBlock
                         // without its rules, joining the declared tag.
                         if let Some(tag) = &b.decl.connects_to {
@@ -1486,9 +1554,18 @@ impl<'a> Plan<'a> {
                     }
                 }
             }
-            "landing-definitions.json" | "worldgen/blocks/survival-rules.json" => {
-                self.names(doc, false)
+            "landing-definitions.json" => {
+                self.names(doc, false);
+                for b in &self.blocks {
+                    if let Some(base) = &b.base_block {
+                        let entry = doc
+                            .get_mut(&b.decl.id)
+                            .ok_or("farmland template has no landing definition")?;
+                        entry.set("base", J::Str(base.0.to_owned()));
+                    }
+                }
             }
+            "worldgen/blocks/survival-rules.json" => self.names(doc, false),
             "worldgen/blocks/survival-extra-definitions.json" => {
                 if let Some(map) = doc.at("ignition_odds") {
                     self.names(map, false);
@@ -1818,7 +1895,7 @@ const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
     ("processor_list", "worldgen/processor_lists.json"),
-    ("configured_feature", "worldgen/features.json"),
+    ("feature", "worldgen/features.json"),
     ("placed_feature", "worldgen/placed_features.json"),
 ];
 
@@ -2632,6 +2709,17 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         overlay.write(
             horizon_items::items::MOD_CRAFT_REMAINDERS,
             &serde_json::to_vec(&remainders)?,
+        )?;
+    }
+    let placed_blocks: BTreeMap<&str, &str> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.block.as_deref()?)))
+        .collect();
+    if !placed_blocks.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_BLOCKS,
+            &serde_json::to_vec(&placed_blocks)?,
         )?;
     }
     // clients must agree on the block states and the items', mob effects',

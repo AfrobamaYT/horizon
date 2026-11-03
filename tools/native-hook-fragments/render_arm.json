@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "render_arm",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_render_arm",
+      "neoforge": "RenderArmEvent",
+      "side": "client",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ]
+}

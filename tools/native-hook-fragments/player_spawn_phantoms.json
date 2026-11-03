@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_spawn_phantoms",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_spawn_phantoms",
+      "side": "server",
+      "neoforge": "PlayerSpawnPhantomsEvent",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    }
+  ]
+}

@@ -25,9 +25,20 @@ use horizon_world::{
 };
 use std::{collections::BTreeMap, fs, path::Path};
 
+/// Called on the server before a landing converts farmland to its base block.
+#[inline(never)]
+pub fn native_farmland_trample(
+    entity: u32,
+    pos: [i32; 3],
+    state: u32,
+    distance: f64,
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::farmland_trample(entity, pos, state, distance, cancel);
+}
+
 /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
 /// change the distance and damage multiplier, or cancel fall handling.
-/// 357.
 #[inline(never)]
 pub fn native_living_fall(
     entity: u32,
@@ -130,6 +141,12 @@ pub enum FallEvent {
         state: BlockStateId,
     },
     Statistic(i32),
+    /// `Player.causeFallDamage` returned early for a player who may fly: the
+    /// fall's distance and damage multiplier (`PlayerFlyableFallEvent`).
+    FlyableFall {
+        distance: f64,
+        multiplier: f32,
+    },
     Damage {
         source: LandingDamage,
         amount: f32,
@@ -194,6 +211,14 @@ impl FallEvent {
             ),
             Self::HitGround { position, state } => format!("hit {} {}", v(position), state.0),
             Self::Statistic(n) => format!("stat {n}"),
+            Self::FlyableFall {
+                distance,
+                multiplier,
+            } => format!(
+                "flyable {:016x} {:08x}",
+                distance.to_bits(),
+                multiplier.to_bits()
+            ),
             Self::Damage { source, amount } => format!(
                 "damage {} {:08x}",
                 if source == LandingDamage::Fall {
@@ -290,6 +315,14 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.may_fly {
             if let Some((state, position, original_distance)) = contact {
                 self.mod_block_fall(state, position, original_distance, 0.0);
+            }
+            // Only for mods' `player_flyable_fall`: without them the landing
+            // stays as vanilla traces it.
+            if !self.player.replaying && crate::native_client_hooks::has_mods() {
+                self.fall_event(FallEvent::FlyableFall {
+                    distance,
+                    multiplier,
+                });
             }
             return Ok(false);
         }
@@ -493,6 +526,22 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
     }
     fn entity_dimensions(&self) -> (f32, f32) {
         (self.player.dimensions.width, self.player.dimensions.height)
+    }
+    fn cancel_farmland_trample(
+        &mut self,
+        position: BlockPos,
+        state: BlockStateId,
+        distance: f64,
+    ) -> bool {
+        let mut cancel = false;
+        native_farmland_trample(
+            self.player.entity_id as u32,
+            [position.x, position.y, position.z],
+            state.0,
+            distance,
+            &mut cancel,
+        );
+        cancel
     }
     fn suppressing_bounce(&mut self) -> Result<bool> {
         Ok(self.player.shift_key_down)

@@ -325,6 +325,110 @@ mod tests {
         assert!(fives > 0 && fives < 200);
     }
     #[test]
+    fn breeding_experience_uses_only_the_parent_random_when_drops_are_enabled() {
+        super::super::world::with_test_world(&[], |_, types| {
+            for kind in ["minecraft:llama", "minecraft:horse", "minecraft:cow"] {
+                let mut parent = Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                );
+                parent.random = LegacyRandom::new(0);
+                assert_eq!(super::super::breeding_experience(&mut parent, false), None);
+                assert_eq!(parent.random.state(), 25_214_903_917);
+                assert_eq!(
+                    super::super::breeding_experience(&mut parent, true),
+                    Some(6)
+                );
+                assert_eq!(parent.random.state(), 205_749_139_540_596);
+            }
+        });
+    }
+    #[test]
+    fn breeding_experience_is_drawn_in_the_goal_unless_a_mod_must_decide() {
+        let mut kind = None;
+        super::super::world::with_test_world(&[], |_, types| {
+            kind = Some(std::sync::Arc::new(types.types["minecraft:llama"].clone()));
+        });
+        let Some(kind) = kind else { return };
+        let llama = |id, x| {
+            let mut m = Mob::new(id, kind.clone(), Vec3::new(x, 64.0, 0.5), 0.0);
+            m.on_ground = true;
+            // AbstractHorse.canParent: tame and in love.
+            m.extra.tame = true;
+            m.extra.in_love = 600;
+            register(&mut m);
+            m
+        };
+        let partner = [llama(2, 2.5).seen(None)];
+        super::super::world::with_test_world(&partner, |w, _| {
+            for (ask_mods, mob_drops) in
+                [(false, true), (true, true), (false, false), (true, false)]
+            {
+                let w = MobWorld {
+                    asks_baby_spawn: ask_mods,
+                    mob_drops,
+                    ..w.clone()
+                };
+                let mut m = llama(1, 0.5);
+                m.random = LegacyRandom::new(0);
+                let mut events = Vec::new();
+                let mut goals = std::mem::take(&mut m.ai.goals);
+                let mut lr = LegacyRandom::new(0);
+                let mut cx = Cx {
+                    w: &w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                for _ in 0..80 {
+                    goals.tick(&mut m, &mut cx);
+                    if cx
+                        .events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::Breed { .. }))
+                    {
+                        break;
+                    }
+                }
+                assert!(
+                    events.iter().any(|e| matches!(
+                        e,
+                        MobEvent::Breed {
+                            parent: 1,
+                            partner: 2,
+                            llama: Some(_),
+                            ..
+                        }
+                    )),
+                    "the pair breeds a llama"
+                );
+                let experience = events.iter().find_map(|e| match e {
+                    MobEvent::Breed { experience, .. } => Some(*experience),
+                    _ => None,
+                });
+                assert_eq!(
+                    m.random.state(),
+                    if !ask_mods && mob_drops {
+                        77_392_660_919_880
+                    } else {
+                        49_533_068_356_881
+                    },
+                    "asking mods: {ask_mods}, drops: {mob_drops}"
+                );
+                assert_eq!(
+                    experience,
+                    Some(if ask_mods {
+                        super::super::BreedExperience::Deferred
+                    } else {
+                        super::super::BreedExperience::Drawn(mob_drops.then_some(2))
+                    }),
+                    "asking mods: {ask_mods}, drops: {mob_drops}"
+                );
+            }
+        });
+    }
+    #[test]
     fn a_chest_holds_strength_columns() {
         assert_eq!(DEFAULT_DESPAWN_DELAY, 47999);
         assert_eq!(MAX_TEMPER, 30);

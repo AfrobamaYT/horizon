@@ -46,6 +46,9 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
         to.extra.off_hand = from.extra.off_hand.clone();
         to.extra.head = from.extra.head.clone();
         to.extra.body = from.extra.body.clone();
+        to.extra.body_count = from.extra.body_count;
+        to.extra.body_damage = from.extra.body_damage;
+        to.extra.body_extra = from.extra.body_extra.clone();
         to.extra.chest = from.extra.chest.clone();
         to.extra.legs = from.extra.legs.clone();
         to.extra.feet = from.extra.feet.clone();
@@ -63,8 +66,26 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     to.extra.leash = from.extra.leash;
     to.extra.leash_pending = from.extra.leash_pending;
     to.extra.leash_player = from.extra.leash_player;
-    // convertCommon.
-    to.extra.effects = from.extra.effects.clone();
+    common(from, to, params.preserve_can_pick_up_loot);
+    // A zombie that turns into another zombie keeps canBreakDoors.
+    if super::doors::is_zombie(from.species()) && super::doors::is_zombie(to.species()) {
+        super::doors::set_can_break_doors(to, from.extra.can_break_doors);
+    }
+}
+
+/// State shared by single and split conversions, without spawn finalization.
+pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
+    // setAbsorptionAmount runs before the effects are copied to the fresh mob.
+    let maximum = *to
+        .kind
+        .attributes
+        .get("minecraft:max_absorption")
+        .unwrap_or(&0.0) as f32;
+    to.absorption = from.absorption.clamp(0.0, maximum);
+    // addEffect for each: Absorption's onEffectStarted raises it again.
+    for &(effect, ticks, amplifier) in &from.extra.effects {
+        to.add_effect(effect, ticks, amplifier);
+    }
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
     if from.is_baby() {
@@ -76,7 +97,7 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
         to.extra.forced_age = from.extra.forced_age;
         to.extra.forced_age_timer = from.extra.forced_age_timer;
     }
-    if params.preserve_can_pick_up_loot {
+    if preserve_can_pick_up_loot {
         to.extra.pick_up_loot = from.extra.pick_up_loot;
     }
     to.extra.left_handed = from.extra.left_handed;
@@ -90,10 +111,6 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     // COMPONENTS_TO_COPY: the custom name.
     to.custom_name = from.custom_name.clone();
     to.custom_name_text = from.custom_name_text.clone();
-    // A zombie that turns into another zombie keeps canBreakDoors.
-    if super::doors::is_zombie(from.species()) && super::doors::is_zombie(to.species()) {
-        super::doors::set_can_break_doors(to, from.extra.can_break_doors);
-    }
 }
 
 #[cfg(test)]
@@ -103,6 +120,27 @@ mod tests {
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
 
+    #[test]
+    fn absorption_is_clamped_then_restarted_by_a_copied_absorption_effect() {
+        with_test_world(&[], |_, types| {
+            let mob =
+                |id, kind: &str| Mob::new(id, Arc::new(types.types[kind].clone()), Vec3::ZERO, 0.0);
+            let mut s = mob(1, "minecraft:skeleton");
+            s.absorption = 3.5;
+            let mut plain = mob(2, "minecraft:stray");
+            single(&s, &mut plain, Params::KEEP_ALL);
+            assert_eq!(plain.absorption, 0.0);
+            // AbsorptionMobEffect.onEffectStarted: 4 per level, amplifier 1.
+            s.extra.effects.push(("minecraft:absorption", 600, 1));
+            let mut boosted = mob(3, "minecraft:stray");
+            single(&s, &mut boosted, Params::KEEP_ALL);
+            assert_eq!(boosted.absorption, 8.0);
+            assert_eq!(
+                boosted.extra.effects,
+                vec![("minecraft:absorption", 600, 1)]
+            );
+        });
+    }
     #[test]
     fn a_frozen_skeleton_becomes_a_stray_that_keeps_its_bow_and_name() {
         with_test_world(&[], |_, types| {
@@ -118,9 +156,22 @@ mod tests {
             s.yaw = 90.0;
             s.custom_name = Some("Frosty".into());
             s.no_ai = true;
+            s.absorption = 3.5;
             s.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
             s.extra.chest = Some("minecraft:chainmail_chestplate".into());
+            let mut offhand = ItemStack::new("minecraft:shield", 2);
+            offhand.damage = 5;
+            crate::mobs::finalize::set_item_stack(
+                &mut s,
+                crate::mobs::finalize::OFFHAND,
+                offhand.clone(),
+            );
+            s.extra.body = Some("minecraft:wolf_armor".into());
+            s.extra.body_damage = 7;
+            let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
+            armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            s.extra.body_extra = armor.extra;
             s.extra.leash = Some(crate::mobs::leash::Holder::Knot([3, 71, -3]));
             s.extra.mount = Some(7);
             s.extra.passenger = true;
@@ -128,6 +179,7 @@ mod tests {
             single(&s, &mut st, Params::KEEP_ALL);
             assert_eq!(st.custom_name.as_deref(), Some("Frosty"));
             assert!(st.no_ai);
+            assert_eq!(st.absorption, 0.0);
             assert_eq!(st.yaw, 90.0);
             assert_eq!(
                 st.extra.main_hand_stack().map(|s| &*s.item),
@@ -142,6 +194,10 @@ mod tests {
                 Some(crate::mobs::leash::Holder::Knot([3, 71, -3]))
             );
             assert_eq!(st.extra.mount, Some(7));
+            assert_eq!(st.extra.body.as_deref(), Some("minecraft:wolf_armor"));
+            assert_eq!(st.extra.body_damage, 7);
+            assert_eq!(st.equipment_stacks()[1], Some(offhand));
+            assert_eq!(st.extra.body_extra, s.extra.body_extra);
             // Health is the new type's own, not copied.
             assert_eq!(st.health, mob(3, "minecraft:stray").health);
             // Without keepEquipment the gear stays behind.
@@ -154,7 +210,11 @@ mod tests {
                     preserve_can_pick_up_loot: false,
                 },
             );
-            assert!(bare.extra.main_hand.is_none() && bare.extra.chest.is_none());
+            assert!(
+                bare.extra.main_hand.is_none()
+                    && bare.extra.chest.is_none()
+                    && bare.extra.body.is_none()
+            );
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));
         });
     }

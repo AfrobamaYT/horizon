@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "item_stacked_on_other",
+      "target": "horizon_client_lib::menu::native_item_stacked_on_other",
+      "neoforge": "ItemStackedOnOtherEvent",
+      "side": "both",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ]
+}

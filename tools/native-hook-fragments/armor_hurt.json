@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "armor_hurt",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_armor_hurt",
+      "neoforge": "ArmorHurtEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

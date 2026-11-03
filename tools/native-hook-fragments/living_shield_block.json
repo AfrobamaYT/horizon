@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "living_shield_block",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_shield_block",
+      "neoforge": "LivingShieldBlockEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ]
+}

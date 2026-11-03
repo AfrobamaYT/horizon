@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "ender_entity_teleport",
+      "target": "horizon_client_lib::mobs::enderman::native_ender_entity_teleport",
+      "neoforge": "EntityTeleportEvent.EnderEntity",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

@@ -6,6 +6,9 @@ license.workspace = true
 rust-version = "1.90"
 description = "The client's world data, rendering and screens: chunks, meshing, light, streaming, the renderer, the HUD, menus and settings; no gameplay"
 
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+
 [dependencies]
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 # The GUI atlas's pixels, kept compressed once uploaded (hud.rs `pack_pixels`).
@@ -74,9 +77,6 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 audio = ["dep:cpal"]
 # Helpers horizon-client's tests build their fixtures with.
 test-support = []
-
-[build-dependencies]
-horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [lints]
 workspace = true

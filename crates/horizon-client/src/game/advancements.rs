@@ -6,6 +6,7 @@ use horizon_client::{
     advancements::{self as adv, EntityView, Frame, ItemView, Progress, Tree},
     hud::{HudBatch, rgba},
     items::ItemStack,
+    mod_api::NativeProgressType,
     text::{self, Style, Text},
     toasts::Slide,
 };
@@ -322,7 +323,7 @@ impl Game<'_> {
     /// Start reading the advancement files on another thread while the world
     /// loads. The first tick's first criterion trigger used to read and parse
     /// all of them on the game thread (about 60 ms).
-    pub(super) fn prefetch_advancement_tree(&mut self) {
+    pub(super) fn prefetch_advancement_tree(&mut self, stack: &super::functions::PackStack) {
         if !self.adv.tree.list.is_empty() || self.adv.pending_tree.is_some() {
             return;
         }
@@ -333,12 +334,7 @@ impl Game<'_> {
         // asked once, not again here.
         let files = match &self.world_tables {
             Some(tables) => tables.files.clone(),
-            None => super::functions::content_overlay(
-                &self.world_root,
-                &self.options.resources,
-                self.cmds.vanilla_disabled,
-                &self.level.enabled_features,
-            ),
+            None => super::functions::content_overlay(stack),
         };
         self.adv.pending_tree = std::thread::Builder::new()
             .name("horizon-advancements".into())
@@ -538,10 +534,10 @@ impl Game<'_> {
         equipment[3] = slot(&m.extra.chest);
         equipment[4] = slot(&m.extra.legs);
         equipment[5] = slot(&m.extra.feet);
-        // The body slot (a wolf's armor, a horse's), with its durability.
         equipment[6] = m.extra.body.as_ref().map(|id| {
             let mut armor = ItemStack::new(id, 1);
             armor.damage = m.extra.body_damage.max(0) as u32;
+            armor.extra = m.extra.body_extra.clone();
             item_view(&armor)
         });
         EntityView {
@@ -568,7 +564,7 @@ impl Game<'_> {
     /// `SimpleCriterionTrigger.trigger`: test each open criterion of the
     /// trigger and award what it completes.
     pub(super) fn trigger(&mut self, name: &str, test: impl Fn(&Value, &dyn adv::World) -> bool) {
-        if self.remote.is_some() || self.no_player_here() {
+        if self.lan_acting_fake || self.remote.is_some() || self.no_player_here() {
             return;
         }
         self.load_advancements();
@@ -586,6 +582,9 @@ impl Game<'_> {
         list: &[(usize, usize)],
         test: impl Fn(&Value, &dyn adv::World) -> bool,
     ) {
+        if self.lan_acting_fake {
+            return;
+        }
         let mut hits = Vec::new();
         {
             let view = View(self);
@@ -609,12 +608,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
-                self.advancement_progress(&a.id, criterion, true);
-                if let (Some(player), Some(name)) =
-                    (self.lan_acting_uuid, self.lan_acting_name.clone())
-                {
-                    self.native_player_advancement_criterion_grant(player, &name, &a.id, criterion);
-                }
+                self.advancement_progress(&a.id, criterion, NativeProgressType::Grant);
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -623,9 +617,28 @@ impl Game<'_> {
         }
     }
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
-    fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
-            self.native_player_advancement_progress(player, &name, advancement, criterion, granted);
+    fn advancement_progress(
+        &mut self,
+        advancement: &str,
+        criterion: &str,
+        progress_type: NativeProgressType,
+    ) {
+        if !crate::mod_api::listened(crate::mod_api::HookId::PlayerAdvancementProgress) {
+            return;
+        }
+        if let (Some(uuid), Some(entity_id), Some(name)) = (
+            self.lan_acting_uuid,
+            self.lan_acting_entity,
+            self.lan_acting_name.clone(),
+        ) {
+            self.native_player_advancement_progress(
+                uuid,
+                entity_id as i32,
+                &name,
+                advancement,
+                criterion,
+                progress_type,
+            );
         }
     }
     /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
@@ -638,10 +651,11 @@ impl Game<'_> {
             for grant in batch.grants {
                 self.native_player_advancement_progress(
                     batch.player,
+                    batch.entity_id,
                     &batch.name,
                     &grant.advancement,
                     &grant.criterion,
-                    true,
+                    NativeProgressType::Grant,
                 );
             }
         }
@@ -653,10 +667,13 @@ impl Game<'_> {
         }
     }
     /// After `ServerRecipeBook.addRecipes`: the toast and the
-    /// `recipe_unlocked` trigger of each recipe now known.
-    pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) {
+    /// `recipe_unlocked` trigger of each recipe now known. Returns the
+    /// number of recipe displays taken back out because a mod refused their
+    /// discovery.
+    pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) -> usize {
         let mut allowed = Vec::with_capacity(unlocked.len());
         let mut refused = Vec::new();
+        let mut taken_back = 0;
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             for recipe in unlocked {
                 let mut cancel = false;
@@ -672,6 +689,7 @@ impl Game<'_> {
                     .level
                     .recipe_book
                     .remove_recipes(&world_stations!(self).recipe_index, &refused);
+                taken_back = removed.len();
                 if self.lan_acting.is_some() && !removed.is_empty() {
                     self.guest_packets.push(C::RecipeBookRemove(
                         horizon_protocol::packets::recipes::RecipeBookRemove { ids: removed },
@@ -688,7 +706,7 @@ impl Game<'_> {
             self.recipe_toast(&allowed);
         }
         if allowed.is_empty() || self.remote.is_some() || self.no_player_here() {
-            return;
+            return taken_back;
         }
         self.load_advancements();
         let tree = self.adv.tree.clone();
@@ -698,9 +716,20 @@ impl Game<'_> {
                 c["recipes"].as_str() == Some(r.as_str())
             });
         }
+        taken_back
     }
-    /// `KnowledgeBookItem.use`: the recipes the book names become known and it
-    /// is used up. A book naming a recipe this server does not have is
+    /// `ServerPlayer.awardRecipes`: fake players learn no recipes.
+    pub(super) fn award_recipes(&mut self, recipes: &[String]) -> usize {
+        if self.lan_acting_fake {
+            return 0;
+        }
+        let index = &world_stations!(self).recipe_index;
+        let (count, unlocked) = self.level.recipe_book.add_recipes(index, recipes);
+        count.saturating_sub(self.recipe_unlocked(&unlocked))
+    }
+
+    /// `KnowledgeBookItem.use`: the book is used up and its recipes pass through
+    /// `award_recipes`; a fake player learns nothing. A book naming a recipe this server does not have is
     /// vanilla's `Invalid recipe: {}` and knows nothing. Whether the click
     /// ends here: `InteractionResult.SUCCESS` does and swings, `FAIL` leaves
     /// the other hand its turn (`Minecraft.startUseItem`).
@@ -712,14 +741,13 @@ impl Game<'_> {
         let mut hand = self.stack_in(slot).cloned();
         let infinite = self.creative;
         let index = &world_stations!(self).recipe_index;
-        let result = self
-            .level
-            .recipe_book
-            .use_knowledge_book(index, &mut hand, infinite);
+        let result = horizon_client::recipe_book::Settings::knowledge_book_recipes(
+            index, &mut hand, infinite,
+        );
         *self.stack_in_mut(slot) = hand;
         match result {
-            Ok(unlocked) => {
-                self.recipe_unlocked(&unlocked);
+            Ok(recipes) => {
+                self.award_recipes(&recipes);
                 self.award_stat("used", &stack.item, 1);
                 self.swing_arm();
                 true
@@ -734,18 +762,16 @@ impl Game<'_> {
     }
     /// `PlayerAdvancements.award` once done: rewards, toast, announcement.
     fn award(&mut self, index: usize) {
+        if self.lan_acting_fake {
+            return;
+        }
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }
-        // AdvancementRewards.grant
-        if a.rewards.experience > 0 {
-            let old_level = self.experience.level;
-            let points = self.xp_change(a.rewards.experience).map_or(0, |p| p.max(0));
-            self.experience.give(points);
-            self.native_player_level_changed(old_level);
-        }
+        // AdvancementRewards.grant: giveExperiencePoints runs even for 0.
+        self.give_experience_points(a.rewards.experience);
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
         let rewards: Vec<String> = a
             .rewards
@@ -754,10 +780,6 @@ impl Game<'_> {
             .filter(|r| world_stations!(self).recipe_index.contains(r))
             .cloned()
             .collect();
-        let (_, unlocked) = self
-            .level
-            .recipe_book
-            .add_recipes(&world_stations!(self).recipe_index, &rewards);
         for table in &a.rewards.loot {
             let items = self
                 .res
@@ -816,7 +838,7 @@ impl Game<'_> {
                 }
             }
         }
-        self.recipe_unlocked(&unlocked);
+        self.award_recipes(&rewards);
     }
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {
@@ -1978,6 +2000,9 @@ impl Game<'_> {
     /// `AdvancementCommands.Action.GRANT` on one advancement (or one of
     /// its criteria): false when nothing changed.
     pub(super) fn grant_advancement(&mut self, index: usize, criterion: Option<&str>) -> bool {
+        if self.lan_acting_fake {
+            return false;
+        }
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         if criterion.is_none() && self.adv.progress.done(a) {
@@ -1993,7 +2018,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
-                self.advancement_progress(&a.id, c, true);
+                self.advancement_progress(&a.id, c, NativeProgressType::Grant);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -2004,6 +2029,9 @@ impl Game<'_> {
     }
     /// `AdvancementCommands.Action.REVOKE`.
     pub(super) fn revoke_advancement(&mut self, index: usize, criterion: Option<&str>) -> bool {
+        if self.lan_acting_fake {
+            return false;
+        }
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         self.progress_changed(index);
@@ -2023,7 +2051,7 @@ impl Game<'_> {
     fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
         let revoked = self.adv.progress.revoke(advancement, criterion);
         if revoked {
-            self.advancement_progress(advancement, criterion, false);
+            self.advancement_progress(advancement, criterion, NativeProgressType::Revoke);
         }
         revoked
     }

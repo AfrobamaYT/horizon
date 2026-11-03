@@ -60,7 +60,6 @@ pub enum ConsumeEffect {
     PlaySound(String),
     /// A mod's own kind, kept as the file wrote it (the loader used to drop
     /// it silently): the game hands it to `native_consume_effect`.
-    /// API 74
     Native {
         kind: String,
         data: serde_json::Value,
@@ -243,6 +242,8 @@ pub const CRAFT_REMAINDERS: [(&str, &str); 5] = [
 /// In a root built by `mod_content::build`: the content mods' items' crafting
 /// remainders, by item. Other roots have none.
 pub const MOD_CRAFT_REMAINDERS: &str = "horizon-mod-craft-remainders.json";
+/// Explicit item-to-block mappings from content mods (not block drops).
+pub const MOD_ITEM_BLOCKS: &str = "horizon-mod-item-blocks.json";
 /// A reduction of `blocks_attacks.damage_reductions`.
 #[derive(Clone, Debug)]
 pub struct BlockReduction {
@@ -372,6 +373,7 @@ thread_local! {
     /// inside itself (`LootContext.pushVisitedElement`).
     static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
+#[derive(Clone)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     pub order: Vec<Arc<str>>,
@@ -691,7 +693,27 @@ impl Items {
                     .or_insert(BlockStateId(i as u32));
             }
         }
-        Self::load_with(root, &block_for_item, overlay)
+        let mut items = Self::load_with(root, &block_for_item, overlay)?;
+        let path = root.join(MOD_ITEM_BLOCKS);
+        match fs::read(&path) {
+            Ok(bytes) => {
+                let mappings: HashMap<String, String> = serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                for (item, block) in mappings {
+                    let state = registry
+                        .default_state(&block)
+                        .ok_or_else(|| format!("{item}: block {block:?} is not a block"))?;
+                    let info = items
+                        .items
+                        .get_mut(item.as_str())
+                        .ok_or_else(|| format!("{item}: not an item"))?;
+                    info.block = Some(state);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("{}: {e}", path.display()).into()),
+        }
+        Ok(items)
     }
     /// Every item's default components and the tags, without the block <->
     /// item mapping (for headless tools that never place blocks).
@@ -942,6 +964,11 @@ impl Items {
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(root, overlay)),
         })
     }
+    /// Use the server's loaded loot-table snapshot for item and block drops.
+    pub fn set_loot_tables(&mut self, tables: Arc<horizon_world::loot::LootTables>) {
+        self.loot = tables;
+    }
+
     pub fn get(&self, id: &str) -> Option<&ItemInfo> {
         self.items.get(id)
     }
@@ -1409,7 +1436,7 @@ impl LootContext<'_> {
     /// The context a mod's own loot kind sees in this engine: the block and
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
-    /// rolls; they are None here (docs/native-mods.md, API 133).
+    /// rolls; they are None here (docs/native-mods.md).
     fn native_loot_context<R: RandomSource>(
         &self,
         random: &mut R,

@@ -36,7 +36,7 @@ impl Game<'_> {
         Ok(self.items())
     }
 
-    /// Test a block state's name in an active server tick hook. API 28.
+    /// Test a block state's name in an active server tick hook.
     #[allow(dead_code)]
     pub(super) fn native_block_in_tag(
         &self,
@@ -50,7 +50,7 @@ impl Game<'_> {
         self.native_server_block_in_tag(state, tag)
     }
 
-    /// Test an item stack in an active server tick hook. API 28.
+    /// Test an item stack in an active server tick hook.
     #[allow(dead_code)]
     pub(super) fn native_item_in_tag(
         &self,
@@ -126,7 +126,7 @@ fn read_block(
 ) -> Result<BlockState, NativeBlockReadError> {
     if !(-30_000_000..30_000_000).contains(&x)
         || !(-30_000_000..30_000_000).contains(&z)
-        || !(world.shape.min_y..world.shape.max_y()).contains(&y)
+        || !world.shape.contains_y(y)
     {
         return Err(NativeBlockReadError::OutOfBounds);
     }

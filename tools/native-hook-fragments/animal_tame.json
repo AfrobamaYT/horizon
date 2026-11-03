@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "animal_tame",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_animal_tame",
+      "neoforge": "AnimalTameEvent",
+      "paper": "EntityTameEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "farmland_trample",
+      "target": "horizon_client_lib::landing::native_farmland_trample",
+      "neoforge": "BlockEvent.FarmlandTrampleEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

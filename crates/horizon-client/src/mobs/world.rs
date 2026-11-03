@@ -492,6 +492,9 @@ pub(crate) fn with_resource_test_world(
         items: Some(&items),
         lid_openers: &lid_openers,
         mod_effects: None,
+        asks_animal_tame: false,
+        asks_living_destroy_block: false,
+        asks_baby_spawn: false,
         border: None,
     };
     f(&w, &types);

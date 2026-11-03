@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "client_chat",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_chat",
+      "neoforge": "ClientChatEvent",
+      "side": "client",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ]
+}

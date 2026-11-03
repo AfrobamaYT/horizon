@@ -323,7 +323,6 @@ impl Game<'_> {
             if ok && !s.predicates.is_empty() {
                 // EntityPredicates: the datapack predicate with the entity as
                 // `this` and the entity's position as origin.
-                self.ensure_datapacks();
                 let view = self.entity_view_of(t);
                 let origin = self.target_position(t).unwrap_or_default();
                 for (id, negated) in &s.predicates {

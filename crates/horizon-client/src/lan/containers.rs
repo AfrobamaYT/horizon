@@ -245,8 +245,7 @@ impl Hub {
         };
         self.close_container_at(i);
         let g = &mut self.guests[i];
-        g.next_window = g.next_window % 100 + 1;
-        let window = g.next_window;
+        let window = g.next_menu_window();
         g.send(&C::OpenScreen(play::OpenScreen {
             container: window,
             menu: kind,
@@ -305,8 +304,7 @@ impl Hub {
         items.resize(size, None);
         let g = &mut self.guests[i];
         g.native_menu = items.clone();
-        g.next_window = g.next_window % 100 + 1;
-        let window = g.next_window;
+        let window = g.next_menu_window();
         g.send(&C::OpenScreen(play::OpenScreen {
             container: window,
             menu: kind,
@@ -329,17 +327,6 @@ impl Hub {
         Some(window)
     }
 
-    /// Replaces what a guest's open native menu shows; the changed slots go
-    /// out with the tick's container sync.
-    pub fn set_native_menu(&mut self, conn: u32, mut items: Vec<Option<ItemStack>>) {
-        if let Some(g) = self.guest_mut(conn)
-            && let Some(m) = g.menu.as_ref().filter(|m| m.slots == Slots::Native)
-        {
-            items.resize(m.size, None);
-            g.native_menu = items;
-        }
-    }
-
     /// Open a trading window for a guest (`Merchant.openTradingScreen`):
     /// its id, or None when the menu type is unknown.
     pub fn open_merchant_window(&mut self, conn: u32, title: Tag) -> Option<i32> {
@@ -357,8 +344,7 @@ impl Hub {
         let i = self.guests.iter().position(|g| g.conn == conn)?;
         self.close_container_at(i);
         let g = &mut self.guests[i];
-        g.next_window = g.next_window % 100 + 1;
-        let window = g.next_window;
+        let window = g.next_menu_window();
         g.send(&C::OpenScreen(play::OpenScreen {
             container: window,
             menu: kind,
@@ -374,8 +360,7 @@ impl Hub {
         let i = self.guests.iter().position(|g| g.conn == conn)?;
         self.close_container_at(i);
         let g = &mut self.guests[i];
-        g.next_window = g.next_window % 100 + 1;
-        let window = g.next_window;
+        let window = g.next_menu_window();
         g.send(&C::MountScreenOpen(play::MountScreenOpen {
             container: window,
             columns,

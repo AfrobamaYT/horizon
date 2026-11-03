@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "sweep_attack",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_sweep_attack",
+      "neoforge": "SweepAttackEvent",
+      "side": "both",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ]
+}
