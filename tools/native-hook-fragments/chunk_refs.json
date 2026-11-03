@@ -2,7 +2,7 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "chunk", "side": "server",
+      "name": "chunk", "side": "both",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_chunk"
     },
     {

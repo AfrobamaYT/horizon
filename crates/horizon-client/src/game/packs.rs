@@ -63,12 +63,12 @@ pub fn startup_root(
     server: &[Pack],
     mods_enabled: &BTreeSet<String>,
     dev_mods: &[PathBuf],
-) -> std::io::Result<PathBuf> {
+) -> horizon_client::Result<PathBuf> {
     let all = packs::discover(vanilla, &packs_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
-    let base = super::mods::content_root(vanilla, mods_enabled, dev_mods);
-    packs::resource_root(&base, &enabled, &cache_dir())
+    let base = super::mods::content_root(vanilla, mods_enabled, dev_mods)?;
+    Ok(packs::resource_root(&base, &enabled, &cache_dir())?)
 }
 fn info(p: &Pack) -> PackInfo {
     let built_in = !p.id.starts_with("file/");

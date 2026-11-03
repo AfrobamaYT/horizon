@@ -144,7 +144,10 @@ pub fn main() -> horizon_client::Result<()> {
                 raider::state_mut(&mut m).patrol_leader = true;
             }
             if get("captain", "0") == "1" {
-                m.extra.head = Some(Arc::from(raider::BANNER));
+                m.extra.set_slot_id(
+                    horizon_items::equipment::HEAD,
+                    Some(Arc::from(raider::BANNER)),
+                );
             }
             let mut chances = [drops::DEFAULT_DROP_CHANCE; 8];
             for (i, slot) in drops::SLOTS.iter().enumerate() {
@@ -157,11 +160,11 @@ pub fn main() -> horizon_client::Result<()> {
                             Some(gear::MAIN)
                         }
                         "offhand" => {
-                            m.extra.off_hand = item;
+                            m.extra.set_slot_id(horizon_items::equipment::OFFHAND, item);
                             Some(gear::OFF)
                         }
                         "head" => {
-                            m.extra.head = item;
+                            m.extra.set_slot_id(horizon_items::equipment::HEAD, item);
                             Some(gear::HEAD)
                         }
                         "body" => {
@@ -173,15 +176,15 @@ pub fn main() -> horizon_client::Result<()> {
                             None
                         }
                         "chest" => {
-                            m.extra.chest = item;
+                            m.extra.set_slot_id(horizon_items::equipment::CHEST, item);
                             Some(gear::CHEST)
                         }
                         "legs" => {
-                            m.extra.legs = item;
+                            m.extra.set_slot_id(horizon_items::equipment::LEGS, item);
                             Some(gear::LEGS)
                         }
                         "feet" => {
-                            m.extra.feet = item;
+                            m.extra.set_slot_id(horizon_items::equipment::FEET, item);
                             Some(gear::FEET)
                         }
                         _ => None,

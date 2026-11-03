@@ -227,6 +227,8 @@ mod native_explosions;
 mod native_falling;
 #[cfg(test)]
 mod native_guest_turn_tests;
+#[cfg(test)]
+mod native_held_out_tests;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;
@@ -326,6 +328,7 @@ mod sculk;
 mod sculk_fixture;
 mod server_links;
 mod server_packs;
+mod server_reload;
 mod server_travel;
 mod shader_packs;
 mod shelf;
@@ -351,6 +354,7 @@ mod structure_edit;
 mod structures;
 mod subtitle_hud;
 mod sulfur_cubes;
+mod tempban;
 mod test_block_edit;
 mod test_blocks;
 mod test_entities;
@@ -1449,6 +1453,26 @@ impl LevelAccess for GameLevel<'_> {
             self.native_is_signal_source(state, &mut source);
         }
         source
+    }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        self.native_should_redstone_wire_connect_to(
+            self.dimension,
+            pos,
+            state,
+            direction,
+            &mut connected,
+        );
+        connected
     }
     fn adjust_signal(
         &self,
@@ -2832,6 +2856,7 @@ struct Game<'a> {
     cooldowns: horizon_client::cooldowns::Cooldowns,
     /// The source of a command run through /execute (the player otherwise).
     command_source: Option<commands::execute::Source>,
+    native_command_filter: bool,
     titles: titles::Titles,
     /// `Hud.toolHighlightTimer`: the selected item name.
     tool_highlight: horizon_client::hud_overlays::ToolHighlight,
@@ -3086,6 +3111,8 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    /// Entities whose copies are held out of storage; their handles refuse until stored back.
+    held_out: Vec<u32>,
     /// Native mods' messages waiting (`game/native_net.rs`).
     native_net: native_net::NativeNet,
     /// The mod whose own screen is open (`Screen::Mod`).
@@ -3254,10 +3281,10 @@ struct Game<'a> {
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
-    /// The joined guests' attachments, by UUID: here rather than in their
+    /// The joined guests' attachments, by connection: here rather than in their
     /// records, so a hook in one guest's turn still reaches the others'.
     /// The acting guest's are in `player_attachments` for the turn.
-    guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
+    guest_attachments: HashMap<u32, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -6472,9 +6499,7 @@ impl Game<'_> {
             || self.interact_cushion(target)
             || self.interact_boat(target)
             || self.interact_cart(target)
-            || self.interact_mob(target)?
-            // A guest's Interact naming a knot's id goes to `use_knot` before this.
-            || target.is_none() && self.interact_knot())
+            || self.interact_mob(target)?)
     }
     /// `ItemStack.applyAfterUseComponentSideEffects`: a used stack with a
     /// `use_cooldown` component starts its entry (`UseCooldown.apply`). A
@@ -6551,104 +6576,112 @@ impl Game<'_> {
                 }
             }
         }
-        // A fence click reaches the hook before attaching a lead.
-        if on_block
-            && (self.hand == Hand::Main && use_block.or(!(sneaking && hands_full))
-                || use_item.or(true)
-                    && self
-                        .held()
-                        .is_some_and(|stack| &*stack.item == "minecraft:lead"))
-            && self.interact_knot()
-        {
-            return Ok(true);
-        }
-        // MultiPlayerGameMode.useItemOn: blocks react first.
+        // ServerPlayerGameMode.useItemOn: after the spectator and sneak gates,
+        // BlockState.useItemOn runs before every block-specific behaviour.
         if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
-            if self.use_on_cauldron(hit.pos)? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if let Some(placed) = self.use_on_campfire(hit.pos)? {
-                if placed {
-                    self.swing_arm();
+            let mut block_answer = None;
+            if !horizon_client::mod_api::mods().is_empty() {
+                let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+                if !horizon_client::mod_api::parts("use_item_on")
+                    .block_state(state)
+                    .is_empty()
+                {
+                    let click = self.block_click(hit, self.hand, held.as_ref());
+                    self.native_use_item_on(state, &click, &mut block_answer);
                 }
-                return Ok(true);
             }
-            if self.use_lectern(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_sign_applicator(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_golem_statue(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_jukebox(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if let Some(swings) = self.use_shelf(hit) {
-                let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
-                self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
-                if swings {
-                    self.swing_arm();
+            let mut chains_sign = false;
+            if block_answer.is_none() {
+                // FenceBlock.useWithoutItem binds the player's mobs after its default
+                // useItemOn returned TRY_WITH_EMPTY_HAND.
+                if self.hand == Hand::Main && self.interact_knot() {
+                    return Ok(true);
                 }
-                return Ok(true);
-            }
-            if let Some(swings) = self.use_chiseled_bookshelf(hit, held.as_ref()) {
-                if swings {
-                    self.swing_arm();
-                }
-                return Ok(true);
-            }
-            if self.use_composter(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_vault(hit.pos, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_decorated_pot(hit.pos, held.as_ref()) {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_pumpkin(hit.pos, hit.face, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_beehive(hit.pos, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_campfire_douse(hit, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            if self.use_redstone_ore(hit.pos, held.as_ref())? {
-                self.swing_arm();
-                return Ok(true);
-            }
-            match self.use_respawn_anchor(hit.pos, held.as_ref())? {
-                respawn_anchor::AnchorUse::Charged => {
+                if self.use_on_cauldron(hit.pos)? {
                     self.swing_arm();
                     return Ok(true);
                 }
-                // The main hand passes; its item is used, then the off hand's glowstone.
-                respawn_anchor::AnchorUse::Pass => anchor_passed = true,
-                respawn_anchor::AnchorUse::Other => {}
-            }
-            // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the
-            // underside passes, so the next sign chains below instead of
-            // opening the editor, unless the side has click commands to run
-            // (`shouldTryToChainAnotherHangingSign`).
-            let chains_sign = hit.face == [0, -1, 0]
+                if let Some(placed) = self.use_on_campfire(hit.pos)? {
+                    if placed {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if self.use_lectern(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_sign_applicator(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_golem_statue(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_jukebox(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if let Some(swings) = self.use_shelf(hit) {
+                    let used = held.unwrap_or_else(|| ItemStack::new("minecraft:air", 0));
+                    self.trigger_block("minecraft:item_used_on_block", hit.pos, &used);
+                    if swings {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if let Some(swings) = self.use_chiseled_bookshelf(hit, held.as_ref()) {
+                    if swings {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+                if self.use_composter(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_vault(hit.pos, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_decorated_pot(hit.pos, held.as_ref()) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_pumpkin(hit.pos, hit.face, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_beehive(hit.pos, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_campfire_douse(hit, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if self.use_redstone_ore(hit.pos, held.as_ref())? {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                match self.use_respawn_anchor(hit.pos, held.as_ref())? {
+                    respawn_anchor::AnchorUse::Charged => {
+                        self.swing_arm();
+                        return Ok(true);
+                    }
+                    // The main hand passes; its item is used, then the off hand's glowstone.
+                    respawn_anchor::AnchorUse::Pass => anchor_passed = true,
+                    respawn_anchor::AnchorUse::Other => {}
+                }
+                // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the
+                // underside passes, so the next sign chains below instead of
+                // opening the editor, unless the side has click commands to run
+                // (`shouldTryToChainAnotherHangingSign`).
+                chains_sign = hit.face == [0, -1, 0]
                 // `instanceof HangingSignItem`, independent of the item's name.
                 && held.as_ref().is_some_and(|s| {
                     self.res.behaviours().item_binding(&s.item)
@@ -6666,9 +6699,29 @@ impl Game<'_> {
                     Some(BlockEntity::Sign(_))
                 )
                 && !self.sign_can_execute_click_commands((hit.pos[0], hit.pos[1], hit.pos[2]));
+            }
+            // These game-owned behaviours combine both methods. The item override
+            // skipped their useItemOn; TRY_WITH_EMPTY_HAND still runs their empty use.
+            if block_answer == Some(Answer::TryWithEmptyHand) && self.hand == Hand::Main {
+                if self.interact_knot() {
+                    self.trigger_default_block_use(hit.pos);
+                    return Ok(true);
+                }
+                if self.use_jukebox(hit.pos, None) || self.use_decorated_pot(hit.pos, None) {
+                    self.swing_arm();
+                    return Ok(true);
+                }
+                if let Some(swings) = self.use_chiseled_bookshelf(hit, None) {
+                    if swings {
+                        self.swing_arm();
+                    }
+                    return Ok(true);
+                }
+            }
             // TRY_WITH_EMPTY_HAND: only the main hand's turn uses the block
-            // itself (useWithoutItem).
-            if !anchor_passed && !chains_sign && self.hand == Hand::Main {
+            // itself (useWithoutItem). The block's item behaviour hears both hands.
+            if !anchor_passed && !chains_sign && (self.hand == Hand::Main || block_answer.is_some())
+            {
                 let face = match hit.face {
                     [0, 1, 0] => Direction::Up,
                     [0, -1, 0] => Direction::Down,
@@ -6685,20 +6738,43 @@ impl Game<'_> {
                     self.with_level(|b, _, _| b.cake_candle_state(cake, item.as_deref()).is_some());
                 let pots_flower = self
                     .with_level(|b, _, _| b.potted_flower_state(cake, item.as_deref()).is_some());
-                let (result, branch) = self.with_level(|b, level, ticks| {
-                    b.use_item_on_branch(
-                        level,
-                        ticks,
-                        BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-                        face,
-                        at,
-                        player,
-                        item.as_deref(),
-                    )
-                });
+                let (result, branch) = match block_answer {
+                    Some(answer) => match native_hooks::block_use_result(answer) {
+                        Some(result) => (result, horizon_world::level::UseBranch::ItemOn),
+                        None if self.hand == Hand::Main => (
+                            self.with_level(|b, level, ticks| {
+                                b.use_without_item(
+                                    level,
+                                    ticks,
+                                    BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+                                    face,
+                                    at,
+                                    player,
+                                )
+                            }),
+                            horizon_world::level::UseBranch::WithoutItem,
+                        ),
+                        None => (
+                            horizon_world::level::InteractionResult::Pass,
+                            horizon_world::level::UseBranch::ItemOn,
+                        ),
+                    },
+                    None => self.with_level(|b, level, ticks| {
+                        b.use_item_on_branch(
+                            level,
+                            ticks,
+                            BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+                            face,
+                            at,
+                            player,
+                            item.as_deref(),
+                        )
+                    }),
+                };
                 self.process_level_events()?;
                 // CakeBlock.useItemOn: the candle is used up and counted.
-                if adds_candle
+                if block_answer.is_none()
+                    && adds_candle
                     && result == horizon_world::level::InteractionResult::Success
                     && let Some(used) = held.as_ref()
                 {
@@ -6706,7 +6782,8 @@ impl Game<'_> {
                     self.consume_held();
                 }
                 // FlowerPotBlock.useItemOn: the plant is potted, used up, and counted.
-                if pots_flower
+                if block_answer.is_none()
+                    && pots_flower
                     && result == horizon_world::level::InteractionResult::Success
                     && let Some(used) = held.as_ref()
                 {
@@ -6722,7 +6799,10 @@ impl Game<'_> {
                     }
                 }
                 // NoteBlock.useWithoutItem (tuned) and BellBlock.onHit (rung).
-                if result == horizon_world::level::InteractionResult::Success {
+                if (block_answer.is_none()
+                    || branch == horizon_world::level::UseBranch::WithoutItem)
+                    && result == horizon_world::level::InteractionResult::Success
+                {
                     let name = self
                         .res
                         .facts()
@@ -6806,6 +6886,11 @@ impl Game<'_> {
         }
         if claimed {
             self.swing_arm();
+            return Ok(true);
+        }
+        // LeadItem.useOn follows the block and the item's override, including
+        // when sneaking bypassed the block's useWithoutItem.
+        if block_hit.is_some() && &*stack.item == "minecraft:lead" && self.interact_knot() {
             return Ok(true);
         }
         // ItemStack.useOn: after the block's own useItemOn/useWithoutItem
@@ -12417,8 +12502,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        self.fns = Default::default();
-        let stack = self.reload_datapacks(false, &level.enabled_features);
+        let stack = self.reload_datapacks(false, &level.enabled_features)?;
         self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
@@ -13913,7 +13997,7 @@ impl Game<'_> {
         let player = self
             .player
             .as_ref()
-            .filter(|p| !p.health.dead_or_dying() && !spectator);
+            .filter(|p| !p.health.dead_or_dying() && !spectator && !self.lan_acting_fake);
         // ExperienceOrb.followNearbyPlayer: each orb goes for the nearest
         // living player within 8 blocks, the host's own or a guest.
         let mut followed: Vec<([f64; 3], [f64; 3])> = player
@@ -13929,7 +14013,13 @@ impl Game<'_> {
                 host.hub
                     .guests
                     .iter()
-                    .filter(|g| g.placed && g.loaded && !g.dead && g.health > 0.0)
+                    .filter(|g| {
+                        g.placed
+                            && g.participates_in_player_simulation()
+                            && g.loaded
+                            && !g.dead
+                            && g.health > 0.0
+                    })
                     .filter(|g| !g.spectator())
                     .map(|g| {
                         let p = g.position;
@@ -19349,6 +19439,7 @@ impl<'a> Game<'a> {
             shield_cooldown: 0,
             cooldowns: Default::default(),
             command_source: None,
+            native_command_filter: false,
             titles: Default::default(),
             tool_highlight: Default::default(),
             saving_indicator: Default::default(),
@@ -19515,6 +19606,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_input: Default::default(),
             native_lifecycle: Default::default(),
+            held_out: Vec::with_capacity(4),
             native_net: Default::default(),
             native_mod_screen: None,
             sky_darken_memo: Default::default(),
@@ -19966,7 +20058,7 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-    fn build_world_tables(&self, stack: &functions::PackStack) -> Option<WorldTables> {
+    fn build_world_tables(&mut self, stack: &functions::PackStack) -> Option<WorldTables> {
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
@@ -21924,7 +22016,7 @@ pub fn run_with() -> Result<()> {
         &early_settings.mods.enabled,
         &options.dev_mods,
     )
-    .unwrap_or_else(|e| {
+    .or_else(|e| {
         log::warn!("Horizon: resource packs not applied: {e}");
         pack_error = Some(e.to_string());
         mods::content_root(
@@ -21932,7 +22024,7 @@ pub fn run_with() -> Result<()> {
             &early_settings.mods.enabled,
             &options.dev_mods,
         )
-    });
+    })?;
     let loaded = load_resources(
         options.resources.clone(),
         launch_world(&options),
@@ -22262,18 +22354,20 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
+    use crate::mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn reload_resolves_parts_against_reloaded_tags() {
-        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Host, Registrar};
+        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
         struct TagPart;
         impl BlockPart for TagPart {}
         struct ReloadMod;
+        #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
             }
-            fn data_pack_files(&self, _: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+            fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
                 event.files.push((
                     "tags/test:block/reload".into(),
                     br#"{"values":["minecraft:stone"]}"#.to_vec(),
@@ -22309,17 +22403,18 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn right_click_block_controls_cauldron_use() {
         use horizon_client::mod_api::{
-            self, Flow, Hooks, Host, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
+            self, Flow, Hooks, NativeBlockUpdateFlags, NativeTriState, RightClickBlockEvent,
         };
         use std::sync::{
             Arc,
             atomic::{AtomicBool, AtomicUsize, Ordering},
         };
         struct Observer(Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn right_click_block(
                 &self,
-                _: &mut dyn Host,
+                _: crate::mod_api::HostSide,
                 event: &mut RightClickBlockEvent<'_>,
             ) -> Flow {
                 self.2.fetch_add(1, Ordering::SeqCst);

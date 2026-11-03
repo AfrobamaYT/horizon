@@ -443,7 +443,7 @@ impl Game<'_> {
         };
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
@@ -986,7 +986,7 @@ impl Game<'_> {
         let g = &mut host.hub.guests[i];
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
@@ -3658,6 +3658,14 @@ impl Game<'_> {
             self.guest_mute_command(conn, &words);
             return;
         }
+        // Horizon's `/tempban` (game/tempban.rs), on dedicated servers.
+        if super::tempban::TEMPBAN_COMMANDS.contains(&words[0]) && self.server_lists.is_some() {
+            if let Some(mut host) = self.lan.take() {
+                self.guest_tempban_command(&mut host, conn, &words);
+                self.lan = Some(host);
+            }
+            return;
+        }
         // A native mod's command, for every player its level allows,
         // whether the world allows commands or not (game/native_server.rs).
         let allowed = self.options.dedicated.is_some() || self.allow_commands();
@@ -3846,7 +3854,7 @@ impl Game<'_> {
         } else {
             self.ui.registries.players.clone()
         };
-        players.extend(host.hub.guests.iter().map(|g| g.name.clone()));
+        players.extend(host.hub.online_players().map(|g| g.name.clone()));
         let (ops, banned_players, banned_ips, whitelisted) = match &self.server_lists {
             Some(lists) => {
                 let l = lists.lock().unwrap();
@@ -3943,8 +3951,7 @@ impl Game<'_> {
             return;
         }
         // PlayerList.respawn replaces the player, retaining only opted-in data.
-        let uuid = host.hub.guests[i].uuid;
-        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+        if let Some(attachments) = self.guest_attachments.get_mut(&conn)
             && let Ok(copy) = attachments.copy_on_death()
         {
             *attachments = copy;
@@ -6154,10 +6161,11 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
-    fn block_part_picks_on_the_server_and_for_a_guest() {
+    fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
         use crate::mod_api::{
-            self, BlockPart, CloneItemStackEvent, Hooks, Host, ItemStack, Registrar,
+            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemStack,
+            NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
         };
         use horizon_client::{
             chunk::Chunk,
@@ -6182,23 +6190,64 @@ mod tests {
                     .then(|| ItemStack::new("minecraft:diamond", 1))
             }
         }
-        struct Mod(Arc<Mutex<Vec<bool>>>);
+        #[derive(Clone)]
+        struct User {
+            answer: Arc<Mutex<Option<Answer>>>,
+            clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
+            item_uses: Arc<AtomicUsize>,
+        }
+        impl BlockPart for User {
+            fn use_item_on(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut UseItemOnEvent<'_>,
+            ) -> Option<Answer> {
+                self.clicks
+                    .lock()
+                    .unwrap()
+                    .push((event.click.player, event.click.hand));
+                *self.answer.lock().unwrap()
+            }
+        }
+        struct Mod {
+            picks: Arc<Mutex<Vec<bool>>>,
+            user: User,
+        }
+        #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut Registrar) {
-                r.block_part("minecraft:stone", Picker(self.0.clone()));
-                r.block_part("minecraft:beehive", Picker(self.0.clone()));
-                r.block_part("minecraft:chest", Picker(self.0.clone()));
+                r.block_part("minecraft:stone", Picker(self.picks.clone()));
+                r.block_part("minecraft:beehive", Picker(self.picks.clone()));
+                r.block_part("minecraft:chest", Picker(self.picks.clone()));
+                r.block_part("minecraft:lever", self.user.clone());
+                r.block_part("minecraft:cauldron", self.user.clone());
+                r.block_part("minecraft:jukebox", self.user.clone());
+            }
+            fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
+                self.user
+                    .item_uses
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Flow::Cancel
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
+        let user = User {
+            answer: Arc::new(Mutex::new(Some(Answer::Success))),
+            clicks: Arc::new(Mutex::new(Vec::new())),
+            item_uses: Arc::new(AtomicUsize::new(0)),
+        };
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "picker",
-            Box::new(Mod(seen.clone())),
+            Box::new(Mod {
+                picks: seen.clone(),
+                user: user.clone(),
+            }),
         )]
         .into();
         mod_api::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -6254,6 +6303,151 @@ mod tests {
                 guest.placed = true;
                 guest.game_mode = 1;
                 game.lan.as_mut().unwrap().hub.guests.push(guest);
+
+                // BlockState.useItemOn replaces the template. Only TryWithEmptyHand
+                // reaches useWithoutItem, which toggles this lever on the main hand.
+                use crate::first_person::Hand;
+                use std::sync::atomic::Ordering::SeqCst;
+                let lever = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:lever")
+                    .unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 4],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 4.5],
+                    inside: false,
+                };
+                game.world.set(0, 64, 4, lever).unwrap();
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
+                for (answer, item_uses, powered, swings) in [
+                    (Answer::Success, 0, false, 1),
+                    (Answer::SuccessServer, 0, false, 1),
+                    (Answer::Consume, 0, false, 0),
+                    (Answer::Pass, 1, false, 1),
+                    (Answer::Fail, 2, false, 1),
+                    (Answer::TryWithEmptyHand, 2, true, 1),
+                ] {
+                    *user.answer.lock().unwrap() = Some(answer);
+                    game.swing = Default::default();
+                    let before = game.swings_started;
+                    assert!(game.use_hand(Some(&hit)).unwrap());
+                    assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
+                    assert_eq!(game.swings_started - before, swings);
+                    assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                    assert_eq!(game.world.block(0, 64, 4) != lever, powered);
+                }
+                let calls = user.clicks.lock().unwrap().len();
+                game.world.set(0, 64, 4, stone).unwrap();
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(user.item_uses.load(SeqCst), 3);
+                assert_eq!(user.clicks.lock().unwrap().len(), calls);
+
+                // A block-specific useItemOn is replaced too, before its bucket exchange.
+                let cauldron = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:cauldron")
+                    .unwrap();
+                let full = game
+                    .with_props(
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:water_cauldron")
+                            .unwrap(),
+                        &[("level", "3")],
+                    )
+                    .unwrap();
+                let cauldron_hit = super::super::Hit {
+                    pos: [5, 64, 4],
+                    point: [5.5, 65.0, 4.5],
+                    ..hit
+                };
+                game.creative = false;
+                for (answer, expected, bucket, item_calls) in [
+                    (Some(Answer::Success), cauldron, "minecraft:water_bucket", 3),
+                    (None, full, "minecraft:bucket", 3),
+                    (Some(Answer::Pass), cauldron, "minecraft:water_bucket", 4),
+                ] {
+                    game.world.set(5, 64, 4, cauldron).unwrap();
+                    game.inventory[game.selected] =
+                        Some(ItemStack::new("minecraft:water_bucket", 1));
+                    *user.answer.lock().unwrap() = answer;
+                    assert!(game.use_hand(Some(&cauldron_hit)).unwrap());
+                    assert_eq!(game.world.block(5, 64, 4), expected);
+                    let held = game.inventory[game.selected].as_ref().unwrap();
+                    assert_eq!((&*held.item, held.count), (bucket, 1));
+                    assert_eq!(user.item_uses.load(SeqCst), item_calls);
+                }
+
+                // TRY_WITH_EMPTY_HAND still ejects a jukebox's disc, not just its
+                // level-only success result: the game owns that side effect.
+                let jukebox = game
+                    .with_props(
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:jukebox")
+                            .unwrap(),
+                        &[("has_record", "true")],
+                    )
+                    .unwrap();
+                game.world.set(6, 64, 4, jukebox).unwrap();
+                game.world.block_entities.insert(
+                    (6, 64, 4),
+                    horizon_client::containers::BlockEntity::Jukebox(
+                        horizon_client::containers::Jukebox {
+                            items: [Some(ItemStack::new("minecraft:music_disc_13", 1))],
+                            ticks: 0,
+                            playing: false,
+                        },
+                    ),
+                );
+                let jukebox_hit = super::super::Hit {
+                    pos: [6, 64, 4],
+                    point: [6.5, 65.0, 4.5],
+                    ..hit
+                };
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                let calls = user.clicks.lock().unwrap().len();
+                assert!(game.use_hand(Some(&jukebox_hit)).unwrap());
+                assert_eq!(user.clicks.lock().unwrap().len(), calls + 1);
+                assert!(matches!(
+                    game.world.block_entities.get(&(6, 64, 4)),
+                    Some(horizon_client::containers::BlockEntity::Jukebox(j)) if j.record().is_none()
+                ));
+                assert!(
+                    game.dropped
+                        .iter()
+                        .any(|item| &*item.stack.item == "minecraft:music_disc_13")
+                );
+                assert_eq!(user.item_uses.load(SeqCst), 4);
+
+                // The real guest packet follows the same path, with the guest's UUID.
+                game.world.set(0, 64, 4, lever).unwrap();
+                game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
+                    Some(ItemStack::new("minecraft:stick", 1));
+                *user.answer.lock().unwrap() = Some(Answer::Success);
+                game.lan_guest_packet(
+                    12,
+                    play::Serverbound::UseItemOn(play::UseItemOn {
+                        hand: 0,
+                        pos: hit.pos,
+                        face: 1,
+                        cursor: [0.5, 1.0, 0.5],
+                        inside: false,
+                        world_border: false,
+                        sequence: 1,
+                    }),
+                );
+                assert_eq!(user.clicks.lock().unwrap().last(), Some(&(12, Hand::Main)));
+                assert_eq!(user.item_uses.load(SeqCst), 4);
+                assert_eq!(game.world.block(0, 64, 4), lever);
+                game.world.set(0, 64, 4, stone).unwrap();
                 game.lan_guest_packet(
                     12,
                     play::Serverbound::PickItemFromBlock(play::PickItemFromBlock {

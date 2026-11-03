@@ -81,8 +81,36 @@ mod tests {
         pub(super) struct NativeMod;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
+        #[derive(Default)]
         pub(super) struct ModBlockEntity {
-            pub(super) id: String,
+            id: String,
+            pub(super) data: Vec<i32>,
+        }
+        impl ModBlockEntity {
+            pub(super) fn new(id: &str) -> Self {
+                Self {
+                    id: id.into(),
+                    ..Default::default()
+                }
+            }
+            pub(super) fn id(&self) -> &str {
+                &self.id
+            }
+        }
+        pub(super) struct ModBlockEntityView<'a> {
+            id: &'a str,
+            pub(super) data: &'a mut Vec<i32>,
+        }
+        impl<'a> ModBlockEntityView<'a> {
+            pub(super) fn new(entity: &'a mut ModBlockEntity) -> Self {
+                Self {
+                    id: &entity.id,
+                    data: &mut entity.data,
+                }
+            }
+            pub(super) fn id(&self) -> &str {
+                self.id
+            }
         }
         pub(super) struct ModContainer;
         pub(super) struct MerchantOffer;
@@ -127,6 +155,7 @@ mod tests {
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
         pub(super) struct WorldPhase;
+        pub(super) struct ServerReloadListeners;
     }
     use serde_json::{Map, Value};
     use stubs::*;
@@ -138,9 +167,43 @@ mod tests {
         Cancel,
     }
     trait Host {}
-    trait RenderHooks {}
+    trait ServerHost: Host {}
+    trait ClientHost: Host {}
+    enum HostSide<'a> {
+        Server(&'a mut dyn ServerHost),
+        Client(&'a mut dyn ClientHost),
+    }
+    impl HostSide<'_> {
+        fn reborrow(&mut self) -> HostSide<'_> {
+            match self {
+                Self::Server(host) => HostSide::Server(&mut **host),
+                Self::Client(host) => HostSide::Client(&mut **host),
+            }
+        }
+    }
+    enum LevelSide<'a> {
+        Server(&'a dyn LevelHost),
+        Client(&'a dyn LevelHost),
+    }
+    impl LevelSide<'_> {
+        fn reborrow(&mut self) -> LevelSide<'_> {
+            match self {
+                Self::Server(host) => LevelSide::Server(*host),
+                Self::Client(host) => LevelSide::Client(*host),
+            }
+        }
+    }
+    trait RenderHooks {
+        fn subscribed(&self) -> &'static [Option<mod_api::RenderHookId>];
+        #[allow(dead_code)]
+        fn mob_render(&self, _: &dyn Host, _: &mut NativeMobRender<'_>) {}
+        #[allow(dead_code)]
+        fn block_entity_draw(&self, _: &dyn Host, _: &mut BlockEntityDraw) {}
+    }
     struct TestHost;
     impl Host for TestHost {}
+    impl ServerHost for TestHost {}
+    impl ClientHost for TestHost {}
     mod winit {
         pub mod event {
             pub struct KeyEvent;
@@ -175,6 +238,9 @@ mod tests {
                 pub struct GrindstonePlace;
                 pub struct GrindstoneTake;
             }
+            pub mod mod_chunk_tickets {
+                pub struct TicketValidation;
+            }
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
             }
@@ -192,13 +258,25 @@ mod tests {
                 pub struct GuiDraw;
             }
         }
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum RenderHookId {
+            MobRender,
+            BlockEntityDraw,
+        }
+        #[allow(non_upper_case_globals)]
+        pub mod render_hook_ids {
+            use super::RenderHookId;
+            pub const mob_render: Option<RenderHookId> = Some(RenderHookId::MobRender);
+            pub const block_entity_draw: Option<RenderHookId> = Some(RenderHookId::BlockEntityDraw);
+        }
         include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
+        pub use horizon_mod_api_macros::__subscriptions;
     }
+    use generated as mod_api;
     use generated::*;
     struct Installed {
         mods: Arc<[ModEntry]>,
         subscribers: horizon_client_core::subscribers::Subscribers,
-        types: Box<[std::any::TypeId]>,
     }
     thread_local! {
         /// The hooks each dispatch entered, a mod at a time.
@@ -206,21 +284,21 @@ mod tests {
         static MODS: std::cell::Cell<Option<&'static Installed>> = const { std::cell::Cell::new(None) };
     }
     fn install(mods: Arc<[ModEntry]>) {
-        let types = mods
-            .iter()
-            .map(|entry| (&*entry.hooks as &dyn std::any::Any).type_id())
-            .collect();
+        let subscriptions = mods.iter().enumerate().flat_map(|(index, entry)| {
+            entry
+                .hooks
+                .subscribed()
+                .iter()
+                .flatten()
+                .map(move |hook| (index, *hook as usize))
+        });
         let subscribers = horizon_client_core::subscribers::Subscribers::new(
-            horizon_client_core::subscribers::Domain::Gameplay,
             HOOK_COUNT,
             mods.len(),
+            subscriptions,
         );
         // Test dispatch needs the same static lifetime as the real installation.
-        MODS.set(Some(Box::leak(Box::new(Installed {
-            mods,
-            subscribers,
-            types,
-        }))));
+        MODS.set(Some(Box::leak(Box::new(Installed { mods, subscribers }))));
     }
     fn listened(hook: HookId) -> bool {
         MODS.get()
@@ -228,20 +306,11 @@ mod tests {
     }
     fn entered(hook_id: HookId, hook: &'static str) -> impl Iterator<Item = &'static dyn Hooks> {
         MODS.get().into_iter().flat_map(move |installed| {
-            let mut guard = None;
             installed
                 .subscribers
                 .indices(hook_id as usize)
                 .map(move |index| {
-                    drop(guard.take());
                     let hooks = &*installed.mods[index].hooks;
-                    guard = Some(horizon_client_core::subscribers::enter(
-                        &installed.subscribers,
-                        hook_id as usize,
-                        index,
-                        (hooks as *const dyn Hooks).cast(),
-                        installed.types[index],
-                    ));
                     ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
                     hooks
                 })
@@ -298,10 +367,57 @@ mod tests {
         parts.iter().copied()
     }
     #[test]
-    fn only_overrides_remain_after_first_dispatch_across_words() {
+    fn cfg_disabled_hooks_are_not_subscribed_and_cfg_attr_stays() {
+        struct Gated;
+        #[mod_api::__subscriptions]
+        impl Hooks for Gated {
+            #[cfg(any())]
+            fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
+                unreachable!()
+            }
+            #[cfg(not(any()))]
+            fn player_logged_in(&self, _: &mut dyn ServerHost, _: &mut PlayerLoggedInEvent<'_>) {}
+            #[cfg_attr(test, inline)]
+            fn player_logged_out(&self, _: &mut dyn ServerHost, _: &mut PlayerLoggedOutEvent<'_>) {}
+        }
+        install(vec![ModEntry::new("gated", Box::new(Gated))].into());
+        assert!(
+            !listened(HookId::LootTableLoad),
+            "a cfg-disabled hook was subscribed"
+        );
+        assert!(
+            listened(HookId::PlayerLoggedIn),
+            "a cfg-enabled hook was not subscribed"
+        );
+        assert!(
+            listened(HookId::PlayerLoggedOut),
+            "cfg_attr never unsubscribes"
+        );
+    }
+
+    #[test]
+    fn cfg_disabled_render_hooks_are_not_subscribed_and_cfg_attr_stays() {
+        struct Renderer;
+        #[mod_api::__subscriptions]
+        impl RenderHooks for Renderer {
+            #[cfg(any())]
+            fn mob_render(&self, _: &dyn Host, _: &mut NativeMobRender<'_>) {}
+            #[cfg_attr(test, inline)]
+            fn block_entity_draw(&self, _: &dyn Host, _: &mut BlockEntityDraw) {}
+        }
+        assert_eq!(
+            Renderer.subscribed(),
+            &[mod_api::render_hook_ids::block_entity_draw]
+        );
+    }
+
+    #[test]
+    fn only_overrides_are_dispatched_from_the_first_call_across_words() {
         struct Quiet;
+        #[mod_api::__subscriptions]
         impl Hooks for Quiet {}
         struct Listener(Arc<std::sync::atomic::AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Listener {
             fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
                 self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -325,16 +441,20 @@ mod tests {
         assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
         ENTERED.with(|entered| {
             let entered = entered.borrow();
-            assert_eq!(entered.len(), 71);
-            assert_eq!(entered[70], (66, "loot_table_load"));
+            assert_eq!(
+                entered.as_slice(),
+                [(66, "loot_table_load"), (66, "loot_table_load")]
+            );
         });
     }
 
     #[test]
-    fn nested_default_on_another_zero_sized_type_does_not_prune_override() {
+    fn nested_default_does_not_affect_installed_subscribers() {
         struct Other;
+        #[mod_api::__subscriptions]
         impl Hooks for Other {}
         struct Active;
+        #[mod_api::__subscriptions]
         impl Hooks for Active {
             fn loot_table_load(&self, event: &mut LootTableLoadEvent<'_>) {
                 dispatch_modify_default_components("test", &mut Map::new());
@@ -373,10 +493,11 @@ mod tests {
     #[test]
     fn advancement_progress_reports_grant_and_revoke_identity() {
         struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn player_advancement_progress(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut PlayerAdvancementProgressEvent<'_>,
             ) {
                 assert_eq!(event.player, 123);
@@ -414,30 +535,32 @@ mod tests {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
     }
+    #[mod_api::__subscriptions]
     impl Hooks for Mod {
-        fn menu_button(&self, _: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+        fn menu_button(&self, _: &mut dyn ServerHost, event: &mut MenuButtonEvent<'_>) {
             assert_eq!(event.context.player, 123);
             assert_eq!(event.context.player_entity_id, 42);
             assert_eq!(event.context.pos, [1, 2, 3]);
             assert_eq!(event.context.id, 9);
-            event.entity.id.push_str("-changed");
+            assert_eq!(event.entity.id(), "machine");
+            event.entity.data.push(9);
             *event.carried = Some(ItemStack {
                 item: "bucket".into(),
             });
         }
-        fn block_entity_submit(&self, _: &dyn Host, event: &mut BlockEntitySubmitEvent<'_>) {
+        fn block_entity_submit(&self, _: &dyn ClientHost, event: &mut BlockEntitySubmitEvent<'_>) {
             assert_eq!(event.pos, [1, 2, 3]);
             assert_eq!(event.block, "example:machine");
             event.draw.0.push(self.id);
         }
         fn living_entity_use_item_finish(
             &self,
-            _: &mut dyn Host,
+            _: &mut dyn ServerHost,
             event: &mut LivingEntityUseItemFinishEvent<'_>,
         ) {
             *event.result = None;
         }
-        fn mouse_button_pre(&self, _: &mut dyn Host, _: &mut MouseButtonPreEvent) -> Flow {
+        fn mouse_button_pre(&self, _: &mut dyn ClientHost, _: &mut MouseButtonPreEvent) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
@@ -451,7 +574,7 @@ mod tests {
         }
         fn living_entity_use_item_tick(
             &self,
-            _: &mut dyn Host,
+            _: HostSide,
             event: &mut LivingEntityUseItemTickEvent<'_>,
         ) -> Flow {
             event.duration -= 1;
@@ -471,13 +594,13 @@ mod tests {
                 .or_insert_with(|| serde_json::json!([]));
             value.as_array_mut().unwrap().push(self.id.into());
         }
-        fn level_tick_pre(&self, _: &mut dyn Host, _: &mut LevelTickPreEvent<'_>) {
+        fn level_tick_pre(&self, _: &mut dyn ServerHost, _: &mut LevelTickPreEvent<'_>) {
             self.calls.lock().unwrap().push(self.id);
         }
-        fn tooltip(&self, _: &dyn Host, event: &mut TooltipEvent<'_>) {
+        fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
             event.lines.push((Text, self.id));
         }
-        fn zoom(&self, _: &dyn Host, _: &mut ZoomEvent) -> Option<NativeZoom> {
+        fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<NativeZoom> {
             self.calls.lock().unwrap().push(self.id);
             Some(NativeZoom(self.id))
         }
@@ -497,7 +620,7 @@ mod tests {
                 Flow::Continue
             }
         }
-        fn use_on(&self, _: &mut dyn Host, _: &mut UseOnEvent<'_>) -> Flow {
+        fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
             self.calls.lock().unwrap().push(self.id);
             if self.id == 1 {
                 Flow::Cancel
@@ -523,12 +646,11 @@ mod tests {
             pos: [1, 2, 3],
             id: 9,
         };
-        let mut entity = ModBlockEntity {
-            id: "machine".into(),
-        };
+        let mut entity = ModBlockEntity::new("machine");
         let mut carried = None;
         dispatch_menu_button(&mut TestHost, &context, &mut entity, &mut carried);
-        assert_eq!(entity.id, "machine-changed");
+        assert_eq!(entity.id(), "machine");
+        assert_eq!(entity.data, [9]);
         assert_eq!(carried.unwrap().item.as_ref(), "bucket");
     }
 
@@ -553,7 +675,7 @@ mod tests {
             [1, 2, 3],
             "example:machine",
             BlockStateId,
-            &ModBlockEntity { id: String::new() },
+            &ModBlockEntity::default(),
             &mut draw,
         );
         assert_eq!(draw.0, [1, 2]);
@@ -581,7 +703,7 @@ mod tests {
         assert_eq!((may_place, max_stack), (false, 1));
         let (mut duration, mut canceled) = (10, false);
         dispatch_living_entity_use_item_tick(
-            &mut TestHost,
+            HostSide::Server(&mut TestHost),
             &ItemStack::default(),
             None,
             Hand,
@@ -649,6 +771,7 @@ mod tests {
         struct Level;
         impl LevelHost for Level {}
         struct Refuse(Arc<Mutex<Vec<u32>>>, u32);
+        #[mod_api::__subscriptions]
         impl Hooks for Refuse {
             fn state_for_placement(
                 &self,
@@ -691,8 +814,13 @@ mod tests {
     #[test]
     fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
         struct Property;
+        #[mod_api::__subscriptions]
         impl Hooks for Property {
-            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+            fn item_model_property(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ItemModelPropertyEvent<'_>,
+            ) {
                 if event.property == "example:charged" {
                     event.value = event.stack.count > 1;
                 }
@@ -732,10 +860,11 @@ mod tests {
     #[test]
     fn incoming_damage_carries_the_attack_data() {
         struct Backstab;
+        #[mod_api::__subscriptions]
         impl Hooks for Backstab {
             fn living_incoming_damage_v2(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut LivingIncomingDamageV2Event<'_>,
             ) -> Flow {
                 assert_eq!(event.causing, 7);
@@ -783,6 +912,7 @@ mod tests {
     #[test]
     fn dispatch_contracts() {
         struct Weapon;
+        #[mod_api::__subscriptions]
         impl Hooks for Weapon {
             fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
                 assert_eq!(

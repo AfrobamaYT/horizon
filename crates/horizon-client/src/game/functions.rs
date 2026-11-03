@@ -30,7 +30,7 @@ pub(super) struct FnState {
     pub store: DataStore,
     packs: Vec<Arc<DataPack>>,
     /// Enabled pack ids, in load order (later overrides earlier).
-    enabled: Vec<String>,
+    pub(super) enabled: Vec<String>,
     loaded: bool,
     /// Run the `minecraft:load` tag on the next tick.
     load_pending: bool,
@@ -58,7 +58,7 @@ pub(super) struct PackStack {
 impl PackStack {
     /// The enabled packs in `enabled` (the selected) order, later overriding
     /// earlier: `PackRepository.openAllSelected` keeps the selected order.
-    fn enabled_packs(&self) -> impl Iterator<Item = &DataPack> {
+    pub(super) fn enabled_packs(&self) -> impl Iterator<Item = &DataPack> {
         self.enabled
             .iter()
             .filter_map(|id| self.packs.iter().find(|p| &p.id == id).map(Arc::as_ref))
@@ -150,16 +150,20 @@ impl Game<'_> {
         &mut self,
         run_load: bool,
         enabled_features: &[String],
-    ) -> PackStack {
+    ) -> Result<PackStack, super::server_reload::ServerDataReloadError> {
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
             enabled_features,
         );
+        let prepared = self.prepare_server_reload(&stack)?;
+        if !run_load {
+            self.fns = Default::default();
+        }
         self.fns.packs = stack.packs.clone();
         self.fns.enabled = stack.enabled.clone();
-        self.rebuild_store(&stack);
+        self.apply_server_reload(prepared, &stack);
         self.fns.loaded = true;
         self.fns.load_pending = true;
         // An explicit reload (`/reload`, `/datapack`) also rebuilds the
@@ -171,17 +175,7 @@ impl Game<'_> {
         if self.fns.schedule.is_empty() {
             self.load_schedule();
         }
-        stack
-    }
-    fn rebuild_store(&mut self, stack: &PackStack) {
-        // The built-in pack first (lowest priority), unless disabled.
-        let packs: Vec<&DataPack> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
-        let store = DataStore::load(&packs);
-        for (id, e) in &store.errors {
-            log::warn!("Horizon: failed to load function {id}: {e}");
-        }
-        self.fns.store = store;
-        self.sync_function_registries(stack);
+        Ok(stack)
     }
     fn save_datapack_settings(&self) {
         let disabled: Vec<&String> = self
@@ -194,7 +188,7 @@ impl Game<'_> {
         let json = serde_json::json!({"enabled": self.fns.enabled, "disabled": disabled});
         let _ = std::fs::write(self.datapack_settings_path(), json.to_string());
     }
-    fn sync_function_registries(&mut self, stack: &PackStack) {
+    pub(super) fn sync_function_registries(&mut self, stack: &PackStack) {
         self.sync_schedule_registry();
         let reg = &mut self.ui.registries;
         reg.functions = self.fns.store.functions.keys().cloned().collect();
@@ -647,7 +641,8 @@ impl Game<'_> {
     /// ReloadCommand: the message, then the (asynchronous) reload; returns 0.
     pub(super) fn cmd_reload(&mut self) -> R<i32> {
         self.feedback(Text::translate("commands.reload.success", &[]));
-        self.reload_datapacks(true, &self.level.enabled_features.clone());
+        self.reload_datapacks(true, &self.level.enabled_features.clone())
+            .map_err(Self::reload_failure)?;
         Ok(0)
     }
     /// `PackLocationInfo.createChatLink`: the id decorated with its source
@@ -768,6 +763,8 @@ impl Game<'_> {
             _ => None,
         };
         let selected = self.selected_packs();
+        let previous_enabled = self.fns.enabled.clone();
+        let previous_vanilla_disabled = self.cmds.vanilla_disabled;
         // `DataPackCommand.listAvailablePacks`: a feature pack the world's
         // features do not cover is not available.
         let available: Vec<String> = std::iter::once("vanilla".to_owned())
@@ -869,7 +866,7 @@ impl Game<'_> {
                     "commands.datapack.modify.enable",
                     &[self.pack_link(&name, true)],
                 ));
-                self.apply_pack_change();
+                self.apply_pack_change(previous_enabled, previous_vanilla_disabled)?;
                 Ok(self.selected_packs().len() as i32)
             }
             _ => {
@@ -894,7 +891,7 @@ impl Game<'_> {
                     "commands.datapack.modify.disable",
                     &[self.pack_link(&name, true)],
                 ));
-                self.apply_pack_change();
+                self.apply_pack_change(previous_enabled, previous_vanilla_disabled)?;
                 Ok(self.selected_packs().len() as i32)
             }
         }
@@ -902,20 +899,44 @@ impl Game<'_> {
     /// `ReloadCommand.reloadPacks`: no message of its own. It reloads the
     /// server's data as `/reload` does (`reload_datapacks`), the content
     /// tables with the functions.
-    fn apply_pack_change(&mut self) {
-        self.save_datapack_settings();
+    fn apply_pack_change(
+        &mut self,
+        previous_enabled: Vec<String>,
+        previous_vanilla_disabled: bool,
+    ) -> R<()> {
         // One resolve for the store and the tables, as `/reload`'s is: the
         // timers already in memory stay, and none come back from disk
         // (`ServerFunctionManager` keeps its queue over a pack change).
-        let stack = pack_stack(
+        let mut stack = pack_stack(
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
             &self.level.enabled_features,
         );
-        self.rebuild_store(&stack);
+        stack.enabled = self.fns.enabled.clone();
+        let prepared = match self.prepare_server_reload(&stack) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.fns.enabled = previous_enabled;
+                self.cmds.vanilla_disabled = previous_vanilla_disabled;
+                return Err(Self::reload_failure(error));
+            }
+        };
+        self.save_datapack_settings();
+        self.apply_server_reload(prepared, &stack);
         self.fns.load_pending = true;
         self.reload_world_tables(&stack);
+        Ok(())
+    }
+
+    fn reload_failure(
+        error: super::server_reload::ServerDataReloadError,
+    ) -> horizon_client::command::CommandError {
+        log::warn!("Horizon: {error}");
+        horizon_client::command::CommandError::new(
+            Text::translate("commands.reload.failure", &[])
+                .append(Text::literal(format!("\n{error}"))),
+        )
     }
 
     // ---- predicates -------------------------------------------------------------------
@@ -1046,7 +1067,9 @@ mod tests {
                 r#"{"features":{"enabled":["test:feature"]}}"#,
             )
             .unwrap();
-            let stack = game.reload_datapacks(false, &["test:feature".into()]);
+            let stack = game
+                .reload_datapacks(false, &["test:feature".into()])
+                .unwrap();
             assert!(
                 game.ui.registries.by_registry["minecraft:worldgen/biome"]
                     .tags

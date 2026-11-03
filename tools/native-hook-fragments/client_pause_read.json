@@ -1,0 +1,10 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "is_paused",
+      "side": "client",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_is_paused"
+    }
+  ]
+}

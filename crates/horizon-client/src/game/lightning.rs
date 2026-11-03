@@ -721,6 +721,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::{self, ServerHost};
     use horizon_client::mobs::{Anim, Brain, Mob, MobType, Part, Species};
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
@@ -739,7 +740,7 @@ mod tests {
     #[ignore = "needs prepared resources"]
     fn conversion_post_reads_original_and_lightning_outcome() {
         use horizon_client::mod_api::{
-            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, Host, LivingConversionPostEvent,
+            EntityJoinLevelEvent, EquipmentSlot, Flow, Hooks, LivingConversionPostEvent,
             LivingConversionPreEvent, install,
         };
         use std::sync::{
@@ -759,10 +760,11 @@ mod tests {
             pre: Arc<AtomicUsize>,
             cancel_cow: Arc<AtomicBool>,
         }
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn living_conversion_pre(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 _: &mut LivingConversionPreEvent<'_>,
             ) -> Flow {
                 self.pre.fetch_add(1, Ordering::SeqCst);
@@ -770,7 +772,7 @@ mod tests {
             }
             fn entity_join_level(
                 &self,
-                _: &mut dyn Host,
+                _: &mut dyn ServerHost,
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 if event.kind == "minecraft:cow" && self.cancel_cow.load(Ordering::SeqCst) {
@@ -781,7 +783,7 @@ mod tests {
             }
             fn living_conversion_post(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn ServerHost,
                 event: &mut LivingConversionPostEvent<'_>,
             ) {
                 let old = host

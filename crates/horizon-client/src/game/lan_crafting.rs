@@ -230,15 +230,15 @@ impl Game<'_> {
     /// (a mod's menu slot write, at the root commit): the result made again from the grid, with
     /// `native_prepare_item_craft` as a click has it, kept by the guest and their menu. The
     /// client hears it with the tick's inventory sync.
-    pub(super) fn guest_craft_result(&mut self, uuid: u128) {
+    pub(super) fn guest_craft_result(&mut self, conn: u32) {
         let Some(g) = self
             .lan
             .as_ref()
-            .and_then(|host| host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid))
+            .and_then(|host| host.hub.guest(conn).filter(|g| g.placed))
         else {
             return;
         };
-        let conn = g.conn;
+        let uuid = g.uuid;
         let mut result = self
             .recipes()
             .find(&g.craft_grid, 2)
