@@ -746,6 +746,13 @@ pub trait Hooks: Send + Sync {
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
     /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
+    /// `attacker` is the attacking entity's network id (the recorded attack scope, or `causing`),
+    /// `weapon` what it holds in its main hand (a player's selected stack, a mob's main hand; none
+    /// when unknown, recorded only while a native mod is loaded) with its enchantment levels, and
+    /// `source_position`, `victim_position` and `victim_view` the hit's position, a mob victim's
+    /// position and look vector (none when not known, always for a player or the dragon), so an
+    /// enchantment can tell a blow from behind. There is no host here: read the world from a
+    /// tick hook.
     /// No `self`: the game is in the middle of the hit. API 50.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
@@ -4554,6 +4561,19 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn create_spawn_position(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CreateSpawnPositionEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
     /// `entity` (None for a player, whom `native_acting_player` names):
     /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
@@ -6909,6 +6929,11 @@ pub struct LivingIncomingDamageEvent<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
+    pub attacker: i32,
+    pub weapon: Option<&'a ItemStack>,
+    pub source_position: Option<[f64; 3]>,
+    pub victim_position: Option<[f64; 3]>,
+    pub victim_view: Option<[f64; 3]>,
     pub amount: f32,
 }
 pub fn dispatch_living_incoming_damage(
@@ -6918,6 +6943,11 @@ pub fn dispatch_living_incoming_damage(
     damage_type: &str,
     causing: i32,
     direct: i32,
+    attacker: i32,
+    weapon: Option<&ItemStack>,
+    source_position: Option<[f64; 3]>,
+    victim_position: Option<[f64; 3]>,
+    victim_view: Option<[f64; 3]>,
     amount: &mut f32,
     canceled: &mut bool,
 ) {
@@ -6930,6 +6960,11 @@ pub fn dispatch_living_incoming_damage(
         damage_type,
         causing,
         direct,
+        attacker,
+        weapon,
+        source_position,
+        victim_position,
+        victim_view,
         amount: *amount,
     };
     for mod_hook in super::entered(mods, "living_incoming_damage") {
@@ -14990,6 +15025,33 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::create_spawn_position`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreateSpawnPositionEvent<'a> {
+    pub position: &'a mut [i32; 3],
+    pub rotation: &'a mut [f32; 2],
+}
+pub fn dispatch_create_spawn_position(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    position: &mut [i32; 3],
+    rotation: &mut [f32; 2],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CreateSpawnPositionEvent { position, rotation };
+    for mod_hook in super::entered(mods, "create_spawn_position") {
+        if matches!(
+            mod_hook.create_spawn_position(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

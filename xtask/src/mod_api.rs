@@ -2091,6 +2091,53 @@ mod tests {
     }
 
     #[test]
+    fn incoming_damage_carries_the_attack_data() {
+        struct Backstab;
+        impl Hooks for Backstab {
+            fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
+                assert_eq!((event.attacker, event.causing), (7, 0));
+                let (from, at, look) = (
+                    event.source_position.unwrap(),
+                    event.victim_position.unwrap(),
+                    event.victim_view.unwrap(),
+                );
+                let behind = (0..3)
+                    .map(|axis| (from[axis] - at[axis]) * look[axis])
+                    .sum::<f64>();
+                if behind < 0.0 && event.weapon.is_some() {
+                    event.amount *= 3.0;
+                }
+                Flow::Continue
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Backstab)];
+        let held = ItemStack::default();
+        for (source_z, weapon, expected) in [
+            (-1.0, Some(&held), 12.0),
+            (1.0, Some(&held), 4.0),
+            (-1.0, None, 4.0),
+        ] {
+            let (mut amount, mut canceled) = (4.0, false);
+            dispatch_living_incoming_damage(
+                &mods,
+                1,
+                "minecraft:zombie",
+                "minecraft:player_attack",
+                0,
+                0,
+                7,
+                weapon,
+                Some([0.0, 0.0, source_z]),
+                Some([0.0; 3]),
+                Some([0.0, 0.0, 1.0]),
+                &mut amount,
+                &mut canceled,
+            );
+            assert_eq!((amount, canceled), (expected, false));
+        }
+    }
+
+    #[test]
     fn dispatch_contracts() {
         struct Weapon;
         impl Hooks for Weapon {
@@ -2168,6 +2215,11 @@ mod tests {
             "damage",
             0,
             0,
+            0,
+            None,
+            None,
+            None,
+            None,
             &mut amount,
             &mut canceled,
         );
@@ -2191,6 +2243,11 @@ mod tests {
             "damage",
             0,
             0,
+            0,
+            None,
+            None,
+            None,
+            None,
             &mut amount,
             &mut canceled,
         );

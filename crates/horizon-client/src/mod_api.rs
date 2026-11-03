@@ -445,6 +445,15 @@ impl LevelRef {
     }
 }
 
+/// The empty-context block shape requested from a level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockShapeKind {
+    /// Selection outline (`BlockState.getShape`).
+    Outline,
+    /// Collision shape (`BlockState.getCollisionShape`).
+    Collision,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {

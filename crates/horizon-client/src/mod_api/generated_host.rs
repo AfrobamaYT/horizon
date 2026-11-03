@@ -1377,6 +1377,22 @@ pub trait Host {
         let _ = level;
         unimplemented!("Host::level_day_time")
     }
+    /// Block-local outline or collision boxes with an empty context. Interaction,
+    /// visual, occlusion and support shapes are not exposed. Returns None on a
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
+    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// API @API:level_shapes@.
+    fn level_block_shape(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        let _ = level;
+        let _ = pos;
+        let _ = kind;
+        unimplemented!("Host::level_block_shape")
+    }
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it. API
     /// @API:level_world@.
     fn level_seed(&self, level: LevelRef) -> Option<i64> {
@@ -1593,6 +1609,19 @@ impl LevelRef {
     /// every level; it keeps counting past 24000. API @API:level_reads@.
     pub fn day_time(self, host: &dyn Host) -> Option<i64> {
         host.level_day_time(self)
+    }
+    /// Block-local outline or collision boxes with an empty context. Interaction,
+    /// visual, occlusion and support shapes are not exposed. Returns None on a
+    /// client, for a stale handle, or for a closed level. Unloaded blocks read
+    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// API @API:level_shapes@.
+    pub fn block_shape(
+        self,
+        host: &dyn Host,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        host.level_block_shape(self, pos, kind)
     }
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it. API
     /// @API:level_world@.

@@ -566,6 +566,14 @@ impl Host for super::Game<'_> {
     fn level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_day_time(level)
     }
+    fn level_block_shape(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        kind: NativeBlockShapeKind,
+    ) -> Option<Vec<[f64; 6]>> {
+        self.native_level_block_shape(level, pos, kind)
+    }
     fn level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_seed(level)
     }
