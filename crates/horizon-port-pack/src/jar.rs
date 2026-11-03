@@ -441,6 +441,20 @@ mod tests {
             ),
             ("no-version", vec![("fabric.mod.json", r#"{"id":"good"}"#)]),
             (
+                "neo-hyphen",
+                vec![(
+                    "META-INF/neoforge.mods.toml",
+                    "[[mods]]\nmodId = 'bad-id'\nversion = '1'\n",
+                )],
+            ),
+            (
+                "neo-template",
+                vec![(
+                    "META-INF/neoforge.mods.toml",
+                    "[[mods]]\nmodId = 'good'\nversion = '${version}'\n",
+                )],
+            ),
+            (
                 "legacy",
                 vec![("mcmod.info", r#"[{"modid":"legacy","version":"1"}]"#)],
             ),
