@@ -2792,7 +2792,7 @@ impl Game<'_> {
                     );
                     self.particles.add(&options, at, [0.0; 3]);
                 }
-                MobEvent::Experience { at, amount } => self.spawn_breeding_orb(at, amount),
+                MobEvent::Experience { at, amount } => self.add_orb(at, amount),
                 MobEvent::AxolotlSupportPlayer { mob } => {
                     let previous = self
                         .potions
@@ -3077,11 +3077,8 @@ impl Game<'_> {
             m.extra.egg_time = life;
         }
     }
-    /// `Animal.finalizeSpawnChildFromBreeding`'s single experience orb.
-    fn spawn_breeding_orb(&mut self, at: [f64; 3], amount: u32) {
-        self.add_orb(at, amount);
-    }
-    /// Draw and award breeding XP from the actual parent after the rule check.
+    /// `Animal.finalizeSpawnChildFromBreeding`'s single experience orb, drawn
+    /// from the breeding parent after the rule check.
     fn award_breeding_experience(&mut self, parent: u32, at: [f64; 3]) {
         let mob_drops = self.ui.rules.bool("mob_drops");
         if let Some(amount) = self
@@ -3090,7 +3087,7 @@ impl Game<'_> {
             .find(|m| m.id == parent)
             .and_then(|m| horizon_client::mobs::breeding_experience(m, mob_drops))
         {
-            self.spawn_breeding_orb(at, amount);
+            self.add_orb(at, amount);
         }
     }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
