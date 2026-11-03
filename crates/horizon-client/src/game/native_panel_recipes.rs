@@ -7,7 +7,8 @@ use super::{
     Game,
     native_hooks::{
         NativePanelEvent as BrowserEvent, NativeRecipeLayout as BrowserLayout,
-        NativeRecipeView as BrowserRecipe, NativeStack as BrowserStack,
+        NativeRecipeResult as BrowserResult, NativeRecipeView as BrowserRecipe,
+        NativeStack as BrowserStack,
     },
     native_panel::{Layout, Owner, browser_stack, inside},
 };
@@ -27,6 +28,8 @@ const GAP: f32 = 6.0;
 /// Recipes a page may show, slots in one, stacks a slot cycles, and tabs.
 const RECIPES: usize = 256;
 const RECIPE_SLOTS: usize = 9;
+const RESULTS: usize = 4;
+const FLUIDS: usize = 8;
 const SLOT_STACKS: usize = 64;
 const TABS: usize = 16;
 
@@ -59,7 +62,19 @@ impl RecipePage {
                 width: r.width.clamp(1, 3),
                 height: r.height.clamp(1, 3),
                 slots: r.slots.into_iter().take(RECIPE_SLOTS).map(cycle).collect(),
-                results: cycle(r.results),
+                results: r
+                    .results
+                    .into_iter()
+                    .take(RESULTS)
+                    .map(|BrowserResult { stacks, chance }| BrowserResult {
+                        stacks: cycle(stacks),
+                        chance: chance
+                            .filter(|c| c.is_finite())
+                            .map(|c| c.clamp(0.0, 100.0)),
+                    })
+                    .collect(),
+                fluid_inputs: r.fluid_inputs.into_iter().take(FLUIDS).collect(),
+                fluid_outputs: r.fluid_outputs.into_iter().take(FLUIDS).collect(),
                 ..r
             })
             .collect();
@@ -77,9 +92,12 @@ pub(super) struct Shown {
     layout: BrowserLayout,
     width: usize,
     height: usize,
-    /// Each slot's stacks (the result last), as the mod sent them and as
+    /// Each slot's stacks (the results last), as the mod sent them and as
     /// stacks; a stack the game doesn't have is left out of the cycle.
     slots: Vec<Vec<(BrowserStack, ItemStack)>>,
+    /// Each result's chance in percent, in order; its length is the number of
+    /// result slots at the end of `slots`.
+    chances: Vec<Option<f32>>,
     note: String,
     action: Option<bool>,
 }
@@ -113,12 +131,13 @@ impl Pages {
             .iter()
             .map(|r| {
                 let mut slots: Vec<_> = r.slots.iter().map(|s| cycle(s)).collect();
-                slots.push(cycle(&r.results));
+                slots.extend(r.results.iter().map(|res| cycle(&res.stacks)));
                 Shown {
                     layout: r.layout,
                     width: r.width as usize,
                     height: r.height as usize,
                     slots,
+                    chances: r.results.iter().map(|res| res.chance).collect(),
                     note: r.note.clone(),
                     action: r.action,
                 }
@@ -171,24 +190,29 @@ impl Shown {
         let note = if self.note.is_empty() { 0.0 } else { 11.0 };
         self.block(room) + note + GAP
     }
-    /// Every slot's place from the recipe's corner (the result last), the
-    /// arrow's and the action button's: beside the result, or under it
-    /// when the panel is `room` wide and that doesn't fit.
+    /// Every slot's place from the recipe's corner (the results last, in a
+    /// row), the arrow's and the action button's: beside the last result, or
+    /// under it when the panel is `room` wide and that doesn't fit.
     fn places(&self, room: f32) -> (Vec<(f32, f32)>, (f32, f32), (f32, f32)) {
         let ((w, h), mut at) = self.inputs();
         // The mod's slots beyond the layout's are not shown.
-        at.truncate(self.slots.len() - 1);
+        let inputs = self.slots.len() - self.chances.len();
+        at.truncate(inputs);
         let arrow = (w + 4.0, ((h - 16.0) / 2.0).floor());
-        let result = (w + 32.0, ((h - SLOT) / 2.0).floor());
+        let first = (w + 32.0, ((h - SLOT) / 2.0).floor());
+        let result = (
+            first.0 + self.chances.len().saturating_sub(1) as f32 * SLOT,
+            first.1,
+        );
         let action = if result.0 + SLOT + 16.0 <= room {
             (result.0 + SLOT + 4.0, ((h - 12.0) / 2.0).floor())
         } else {
             (result.0 + 3.0, result.1 + SLOT + 2.0)
         };
-        while at.len() < self.slots.len() - 1 {
+        while at.len() < inputs {
             at.push((f32::NAN, f32::NAN));
         }
-        at.push(result);
+        at.extend((0..self.chances.len()).map(|j| (first.0 + j as f32 * SLOT, first.1)));
         (at, arrow, action)
     }
 }
@@ -382,6 +406,7 @@ impl Game<'_> {
             let h = r.block(layout.width());
             let (cooking, note, button) =
                 (r.layout == BrowserLayout::Cooking, r.note.clone(), r.action);
+            let (chances, inputs) = (r.chances.clone(), r.slots.len() - r.chances.len());
             let atlas = &self.gui.atlas;
             for &(sx, sy) in at.iter().filter(|p| p.0.is_finite()) {
                 batch.sprite(atlas, "gui/sprites/container/slot", x + sx, y + sy);
@@ -433,6 +458,14 @@ impl Game<'_> {
                     continue;
                 };
                 self.draw_item(batch, &stack, x + sx + 1.0, y + sy + 1.0);
+                let chance = k.checked_sub(inputs).and_then(|j| chances[j]);
+                if let Some(chance) = chance {
+                    let text = format!("{chance}%");
+                    let atlas = &self.gui.atlas;
+                    let w = HudBatch::text_width(atlas, &text);
+                    let at = (x + sx + SLOT - w, y + sy + SLOT - 9.0);
+                    batch.text(atlas, &text, at.0, at.1, rgba(255, 255, 85, 255), true);
+                }
                 if inside(cursor, [x + sx, y + sy, SLOT, SLOT]) {
                     batch.fill(
                         &self.gui.atlas,
@@ -564,5 +597,30 @@ impl Game<'_> {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The results sit in a row after the arrow, numbered after the inputs.
+    #[test]
+    fn results_form_a_row_after_the_inputs() {
+        let shown = Shown {
+            layout: BrowserLayout::Single,
+            width: 1,
+            height: 1,
+            slots: vec![Vec::new(); 4],
+            chances: vec![None, Some(25.0), None],
+            note: String::new(),
+            action: None,
+        };
+        let (at, _, action) = shown.places(200.0);
+        assert_eq!(at.len(), 4);
+        assert_eq!(at[0], (0.0, 0.0));
+        assert_eq!((at[2].0 - at[1].0, at[3].0 - at[2].0), (SLOT, SLOT));
+        assert_eq!(at[1].1, at[3].1);
+        assert!(action.0 > at[3].0);
     }
 }

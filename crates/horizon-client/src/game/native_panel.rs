@@ -562,7 +562,8 @@ pub(super) fn browser_stack(
 #[cfg(test)]
 mod tests {
     use super::{BrowserStack, Owner, Panel, RecipePage};
-    use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeView};
+    use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeResult, NativeRecipeView};
+    use horizon_client::mod_api::FluidStack;
 
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {
@@ -577,7 +578,14 @@ mod tests {
             width: 5,
             height: 1,
             slots: vec![vec![stack("minecraft:oak_log")]; 12],
-            results: vec![stack("minecraft:oak_planks")],
+            results: (0..6)
+                .map(|i| NativeRecipeResult {
+                    stacks: vec![stack("minecraft:oak_planks")],
+                    chance: (i == 1).then_some(250.0),
+                })
+                .collect(),
+            fluid_inputs: vec![FluidStack::new("minecraft:water", 1000); 10],
+            fluid_outputs: vec![FluidStack::new("minecraft:lava", 250)],
             note: String::new(),
             action: Some(true),
         }
@@ -610,7 +618,13 @@ mod tests {
         // Cut as `set-recipes` cuts it: a 3 x 3 grid at most, 9 slots.
         let r = &page.recipes[0];
         assert_eq!((r.width, r.height, r.slots.len()), (3, 1, 9));
-        assert_eq!(r.results, [stack("minecraft:oak_planks")]);
+        // At most four results, a chance kept to 0..=100, at most eight fluids.
+        let results = r.results.iter().map(|x| (x.stacks.len(), x.chance));
+        assert_eq!(
+            results.collect::<Vec<_>>(),
+            [(1, None), (1, Some(100.0)), (1, None), (1, None)]
+        );
+        assert_eq!((r.fluid_inputs.len(), r.fluid_outputs.len()), (8, 1));
 
         // Another mod clearing its own (empty) panel leaves this one.
         panel.show_items("other", Vec::new());
