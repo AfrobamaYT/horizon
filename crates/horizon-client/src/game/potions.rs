@@ -889,7 +889,13 @@ impl Game<'_> {
             .is_some_and(|p| p.health.absorption() <= 0.0);
         let mut effects = std::mem::take(&mut self.potions.effects);
         let (actions, raid_omen_added) = effects.tick_with(
-            &mut |e, t, actions| {
+            &mut |e, t, actions, dispatch| {
+                for action in actions.drain(..) {
+                    self.apply_effect_action(action);
+                }
+                if !dispatch {
+                    return OmenTick::Continue;
+                }
                 if !brewing::is_mod_effect(e.id) {
                     self.omen_tick(e)
                 } else {
@@ -1945,6 +1951,8 @@ mod tests {
                         event.add_exhaustion(1.5);
                     }
                     1 => event.hurt(NativeEffectDamage::Magic, 3.0),
+                    3 if event.health > 1.0 => event.hurt(NativeEffectDamage::Magic, 1.0),
+                    3 => {}
                     _ => event.hurt(NativeEffectDamage::Wither, 100.0),
                 }
             }
@@ -2028,6 +2036,27 @@ mod tests {
                 game.tick_creature_entities().unwrap();
             }
             assert!(game.mobs.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_tick_sees_prior_regeneration() {
+        effect_test_mod();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player
+                .as_mut()
+                .unwrap()
+                .set_health(1.0, false)
+                .unwrap();
+            game.potions
+                .effects
+                .add(EffectInstance::new("regeneration", 50, 0));
+            let id = brewing::effect("test:effect").unwrap().id;
+            game.potions.effects.add(EffectInstance::new(id, 10, 3));
+            game.tick_mob_effects();
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 1.0);
         });
     }
 

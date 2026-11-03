@@ -901,9 +901,6 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
         for (name, ty) in args.iter().chain(collected) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
             let (field, scalar) = lifetimes.field(ty);
-            if event_type == "ApplyEffectTickEvent" && matches!(name.as_str(), "health" | "food") {
-                fields.push_str("/// For a player, read at the start of the effect tick; vanilla's queued periodic effects this tick aren't reflected yet.\n");
-            }
             let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
                 "pub(super)"
             } else {
