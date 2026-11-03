@@ -482,7 +482,7 @@ impl LevelRef {
 }
 
 /// A chunk position in an open level. A handle may be kept after unloading;
-/// reads resolve it again and return `None` when it is no longer loaded.
+/// reads resolve it again, returning `false` or `None` when it is no longer loaded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ChunkRef {
     pub(crate) level: LevelRef,

@@ -311,7 +311,7 @@ mod tests {
             let chunk = game.chunk(level, [-2, 3]).unwrap();
             assert_eq!(chunk.pos(), [-2, 3]);
             assert_eq!(chunk.level(), level);
-            assert_eq!(chunk.loaded(game), Some(true));
+            assert!(chunk.loaded(game));
             assert_eq!(chunk.status(game), Some(ChunkStatus::Full));
             assert!(game.chunk(level, [99, 99]).is_none());
             assert!(
@@ -325,7 +325,7 @@ mod tests {
                     .is_some()
             );
             game.world.chunks.remove(&(-2, 3));
-            assert_eq!(chunk.loaded(game), None);
+            assert!(!chunk.loaded(game));
             assert_eq!(chunk.status(game), None);
             game.world
                 .chunks
@@ -333,7 +333,7 @@ mod tests {
             game.native_lifecycle
                 .begin_open(NativeAuthority::IntegratedServer);
             assert!(game.chunk(level, [-2, 3]).is_none());
-            assert_eq!(chunk.loaded(game), None);
+            assert!(!chunk.loaded(game));
             assert_eq!(chunk.status(game), None);
         });
     }

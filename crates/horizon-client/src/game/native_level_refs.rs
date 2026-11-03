@@ -38,10 +38,10 @@ impl Game<'_> {
             .contains_key(&(pos[0], pos[1]))
             .then_some(ChunkRef { level, pos })
     }
-    /// Whether this chunk is loaded; None for an unloaded or stale handle.
+    /// Whether this chunk is loaded; false on a client or for a stale handle.
     /// API @API:chunk_refs@.
-    pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> Option<bool> {
-        self.native_chunk(chunk.level(), chunk.pos()).map(|_| true)
+    pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> bool {
+        self.native_chunk(chunk.level(), chunk.pos()).is_some()
     }
     /// The status of a loaded chunk. Proto chunks are not exposed here.
     /// API @API:chunk_refs@.
