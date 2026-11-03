@@ -1250,34 +1250,62 @@ pub(crate) struct Installed {
     types: Box<[std::any::TypeId]>,
 }
 
+impl Installed {
+    fn new(mods: Mods) -> Self {
+        let types = mods
+            .iter()
+            .map(|m| (&**m as &dyn std::any::Any).type_id())
+            .collect();
+        let subscribers =
+            horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
+        Self {
+            mods,
+            subscribers,
+            types,
+        }
+    }
+}
+
 static MODS: OnceLock<Installed> = OnceLock::new();
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     static TEST_MODS: std::cell::Cell<Option<&'static Installed>> = const { std::cell::Cell::new(None) };
 }
 
 fn installed() -> Option<&'static Installed> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     if let Some(installed) = TEST_MODS.get() {
         return Some(installed);
     }
     MODS.get()
 }
 
+/// Scoped trait-mod installation for tests, enabled by the `testing` feature.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
+    use super::{Installed, Mods, TEST_MODS};
+
+    /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
+    ///
+    /// The test allocation is leaked because dispatch exposes a static slice. Nested scopes and
+    /// panic unwinding restore the preceding list; other threads are unaffected.
+    pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
+        struct Restore(Option<&'static Installed>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_MODS.set(self.0);
+            }
+        }
+        let installed = Box::leak(Box::new(Installed::new(mods)));
+        let _restore = Restore(TEST_MODS.replace(Some(installed)));
+        f()
+    }
+}
+
 /// Install the process-wide ordered list of mods.
 pub(crate) fn install(mods: Mods) -> &'static Installed {
-    let types = mods
-        .iter()
-        .map(|m| (&**m as &dyn std::any::Any).type_id())
-        .collect();
-    let subscribers =
-        horizon_client_core::subscribers::Subscribers::new(generated::HOOK_COUNT, mods.len());
-    let installed = Installed {
-        mods,
-        subscribers,
-        types,
-    };
+    let installed = Installed::new(mods);
     #[cfg(test)]
     {
         // Tests can replace the list; mods() keeps its static slice lifetime.
@@ -1287,9 +1315,7 @@ pub(crate) fn install(mods: Mods) -> &'static Installed {
     }
     #[cfg(not(test))]
     {
-        if MODS.set(installed).is_err() {
-            log::warn!("Trait mods already installed; ignoring the second list");
-        }
+        assert!(MODS.set(installed).is_ok(), "trait mods are installed once");
         MODS.get().unwrap()
     }
 }

@@ -83,6 +83,44 @@ fn subscriber_guards_are_thread_local_for_one_installation() {
 }
 
 #[test]
+fn scoped_mods_dispatch_and_restore_after_panic() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use testing::with_mods;
+
+    struct HostDouble;
+    impl Host for HostDouble {}
+    struct Counter(Arc<AtomicUsize>);
+    impl Hooks for Counter {
+        fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let outer = Arc::new(AtomicUsize::new(0));
+    let inner = Arc::new(AtomicUsize::new(0));
+    with_mods(
+        vec![Box::new(Counter(outer.clone())) as Box<dyn Hooks>].into(),
+        || {
+            dispatch_tick(&mut HostDouble);
+            let result = std::panic::catch_unwind(|| {
+                with_mods(
+                    vec![Box::new(Counter(inner.clone())) as Box<dyn Hooks>].into(),
+                    || {
+                        dispatch_tick(&mut HostDouble);
+                        panic!("test unwind");
+                    },
+                );
+            });
+            assert!(result.is_err());
+            dispatch_tick(&mut HostDouble);
+        },
+    );
+    assert_eq!(outer.load(Ordering::Relaxed), 2);
+    assert_eq!(inner.load(Ordering::Relaxed), 1);
+    assert!(mods().is_empty());
+}
+
+#[test]
 fn movement_input_writes_back_all_fields() {
     struct TestHost;
     impl Host for TestHost {}
