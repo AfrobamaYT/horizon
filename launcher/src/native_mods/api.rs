@@ -92,6 +92,12 @@ pub(super) fn stage(
         .map(|&i| (i, &bundles[i]))
         .filter(|(_, b)| b.api.is_some())
         .collect();
+    if mods.is_empty() {
+        return Ok(false);
+    }
+    let template = fs::read_to_string(stage.join(MAIN_TEMPLATE)).map_err(|e| {
+        format!("{}: {e}", crate::i18n::tr("This game source has no readable native entry template. Update Horizon and rebuild the mods against this game."))
+    })?;
     let mut packages = std::collections::HashMap::new();
     for (_, bundle) in &mods {
         let path = bundle
@@ -105,9 +111,6 @@ pub(super) fn stage(
             .and_then(toml::Value::as_str)
             .ok_or_else(|| format!("{}: missing package name", path.display()))?;
         packages.insert(bundle.id.as_str(), name.to_owned());
-    }
-    if mods.is_empty() {
-        return Ok(false);
     }
     let mut deps = toml::Table::new();
     for name in ["horizon-client", "horizon-threads", "horizon-mods"] {
@@ -236,13 +239,6 @@ pub(super) fn stage(
     );
     write(&game.join("Cargo.toml"), &manifest)?;
     let ids: Vec<_> = mods.iter().map(|(_, bundle)| bundle.id.as_str()).collect();
-    let template_path = stage.join(MAIN_TEMPLATE);
-    let template = fs::read_to_string(&template_path).map_err(|e| {
-        format!(
-            "{}: {e}; update the game before building native mods.",
-            template_path.display()
-        )
-    })?;
     fs::write(game.join("src/main.rs"), main_rs(&template, &ids)).map_err(|e| e.to_string())?;
     let root = stage.join("Cargo.toml");
     let mut workspace = read(&root)?;
@@ -316,9 +312,21 @@ mod tests {
     #[test]
     fn generated_main_keeps_mod_order() {
         let template = include_str!("../../../crates/horizon-client/src/native_main.rs.template");
-        let text = main_rs(template, &["base", "extra"]);
-        assert!(text.contains(r#""base" => mod_0::hooks,"#));
-        assert!(text.contains(r#""extra" => mod_1::hooks,"#));
+        let ids = ["base", "extra"];
+        for count in 0..=2 {
+            let text = main_rs(template, &ids[..count]);
+            let facts: Vec<_> = text
+                .lines()
+                .filter(|line| line.contains(" => mod_"))
+                .collect();
+            assert_eq!(
+                facts,
+                &[
+                    "        \"base\" => mod_0::hooks,",
+                    "        \"extra\" => mod_1::hooks,",
+                ][..count]
+            );
+        }
     }
 
     #[test]
@@ -326,7 +334,12 @@ mod tests {
         let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n");
         let bundle = super::super::bundle(&dir, None).unwrap();
         let stage_dir = dir.join("workspace");
-        fs::create_dir_all(stage_dir.join("crates/horizon-client")).unwrap();
+        fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
+        fs::write(
+            stage_dir.join(MAIN_TEMPLATE),
+            include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
+        )
+        .unwrap();
         fs::write(stage_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         fs::write(
             stage_dir.join("crates/horizon-client/Cargo.toml"),
@@ -406,6 +419,31 @@ mod tests {
             game["build-dependencies"]["horizon-mod-api-gen"]["path"].as_str(),
             Some("../horizon-mod-api-gen")
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn named_source_without_an_entry_template_is_refused_before_staging() {
+        let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n");
+        let stage_dir = dir.join("workspace");
+        let source = stage_dir.join("crates/horizon-client/src");
+        fs::create_dir_all(&source).unwrap();
+        let resolution = super::super::dependencies::Resolution { order: vec![0] };
+        for text in ["", "pub struct ModEntry { id: &'static str }"] {
+            fs::write(source.join("mod_api.rs"), text).unwrap();
+            let bundle = super::super::bundle(&dir, None).unwrap();
+            let error = stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap_err();
+            assert!(error.contains("Update Horizon and rebuild"), "{error}");
+            assert!(!stage_dir.join(GAME).exists());
+            assert!(!stage_dir.join("native-api").exists());
+        }
+        assert!(!stage(
+            &stage_dir,
+            &[],
+            &[],
+            &super::super::dependencies::Resolution { order: vec![] },
+        )
+        .unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
 

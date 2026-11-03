@@ -3054,6 +3054,22 @@ mod tests {
         assert!(!client.contains(&"--no-default-features".into()));
     }
 
+    #[test]
+    fn a_native_build_without_a_record_is_refused_before_preparation() {
+        let Err(error) = pipeline(
+            "native-missing-record-test",
+            Path::new("missing-mod-folder"),
+            false,
+            Profile::Dev,
+            Target::Client,
+            &|_| panic!("invalid records must not start a build"),
+        ) else {
+            panic!("invalid build must be refused");
+        };
+        assert!(error.contains("native-mods.json record"), "{error}");
+        assert!(error.contains("Rebuild it"), "{error}");
+    }
+
     /// A record (`native-mods.json`) must name its target ([`about`]).
     #[test]
     fn a_builds_record_requires_a_valid_target() {

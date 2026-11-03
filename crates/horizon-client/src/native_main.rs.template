@@ -4,15 +4,13 @@
 static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
 static GAME_IDENTITY: [u8; horizon_mods::game_identity::MARK.len()] = horizon_mods::game_identity::MARK;
 macro_rules! native_mods {
-    ($($id:literal => $hooks:path,)*) => {{
-        let mods: horizon_client::mod_api::Mods = vec![$($hooks(),)*].into();
-        horizon_client::mod_api::name_mods(&[$($id,)*]);
-        mods
-    }};
+    ($($id:literal => $hooks:path,)*) => {
+        vec![$(horizon_client::mod_api::ModEntry::new($id, $hooks()),)*].into()
+    };
 }
 fn main() {
     std::hint::black_box(&GAME_IDENTITY);
-    let mods = native_mods! {
+    let mods: horizon_client::mod_api::Mods = native_mods! {
 /* MOD_ENTRIES */
     };
     horizon_client::entry::main_with(mods);

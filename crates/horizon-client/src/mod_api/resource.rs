@@ -275,11 +275,21 @@ pub trait ResourceHandler<R> {
     }
 }
 
+/// A handler answered more than it was asked (`move_resources`): a mod bug, warned once naming
+/// the mod. Returned from a `host.transaction` closure with `?`, it aborts the whole move, so
+/// neither end keeps any of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Overanswered {
+    /// The mod whose handler answered, or "the game".
+    pub owner: String,
+}
+
 /// Moves up to `max` of what `filter` accepts out of `from` into wherever `to` takes it, index by
 /// index from 0 (NeoForge's `ResourceHandlerUtil.move`), in transaction `tx`: how much moved.
 /// Each move is all or nothing, in a transaction of its own: what `to` won't take stays in
-/// `from`. A handler answering more than it was asked is warned once by mod; its move is undone
-/// and the moving ends there.
+/// `from`, and a move `to` takes only part of is tried again with that part (a cauldron gives
+/// whole thirds). A handler answering more than it was asked has its move undone and ends the
+/// moving with [`Overanswered`].
 pub fn move_resources<R>(
     host: &mut dyn Host,
     from: &Capability<dyn ResourceHandler<R>>,
@@ -287,7 +297,7 @@ pub fn move_resources<R>(
     filter: impl Fn(&R) -> bool,
     max: u32,
     tx: &Transaction,
-) -> u32 {
+) -> Result<u32, Overanswered> {
     let _ = tx;
     let mut moved = 0;
     for index in 0..from.size(host) {
@@ -295,30 +305,66 @@ pub fn move_resources<R>(
             let Some(resource) = from.resource(host, index).filter(|r| filter(r)) else {
                 break;
             };
-            // `Err(Some(took))`: `to` took only that much, so the move is undone and tried again
-            // with that; `Err(None)`: a handler answered more than it was asked.
-            let step = |host: &mut dyn Host, want: u32| {
-                host.transaction(|host, tx| {
-                    let out = from.extract(host, tx, index, &resource, want);
-                    let out = from.checked(out, want, &index).ok_or(None)?;
-                    let took = to.insert_any(host, tx, &resource, out);
-                    match to.checked(took, out, &index).ok_or(None)? {
-                        took if took == out => Ok(out),
-                        took => Err(Some(took)),
-                    }
-                })
-            };
             let want = (max - moved).min(from.amount(host, index));
-            let went = match step(host, want) {
-                Err(Some(took)) if took > 0 => step(host, took),
-                answer => answer,
-            };
-            match went {
-                Ok(went) if went > 0 => moved += went,
-                Ok(_) | Err(Some(_)) => break,
-                Err(None) => return moved,
+            let went = move_once(
+                host,
+                Ends {
+                    from,
+                    to,
+                    at: &index,
+                },
+                want,
+                |host, tx, want| from.extract(host, tx, index, &resource, want),
+                |host, tx, out| to.insert_any(host, tx, &resource, out),
+            )?;
+            if went == 0 {
+                break;
             }
+            moved += went;
         }
     }
-    moved
+    Ok(moved)
+}
+
+/// The two ends of a move and where it is, for warnings.
+pub(super) struct Ends<'a, A: ?Sized, B: ?Sized> {
+    pub from: &'a Capability<A>,
+    pub to: &'a Capability<B>,
+    pub at: &'a dyn fmt::Debug,
+}
+
+/// One move of up to `want` by `extract` out of `ends.from` and `insert` into `ends.to`, all or
+/// nothing in a transaction of its own, nested in the caller's: how much moved. A move `to` takes
+/// only part of is undone and tried again with that part; a handler answering more than it was
+/// asked has its move undone and gives [`Overanswered`]. The one step of `move_resources` and
+/// `move_energy`.
+pub(super) fn move_once<A: ?Sized, B: ?Sized>(
+    host: &mut dyn Host,
+    ends: Ends<'_, A, B>,
+    want: u32,
+    extract: impl Fn(&mut dyn Host, &Transaction, u32) -> u32,
+    insert: impl Fn(&mut dyn Host, &Transaction, u32) -> u32,
+) -> Result<u32, Overanswered> {
+    let Ends { from, to, at } = ends;
+    // `Err(Ok(took))`: `to` took only that much; `Err(Err(_))`: a handler answered more than it
+    // was asked.
+    let step = |host: &mut dyn Host, want: u32| {
+        host.transaction(|host, tx| {
+            let Some(out) = from.checked(extract(host, tx, want), want, at) else {
+                return Err(Err(Overanswered {
+                    owner: from.owner(),
+                }));
+            };
+            match to.checked(insert(host, tx, out), out, at) {
+                None => Err(Err(Overanswered { owner: to.owner() })),
+                Some(took) if took == out => Ok(out),
+                Some(took) => Err(Ok(took)),
+            }
+        })
+    };
+    match step(host, want) {
+        Err(Ok(took)) if took > 0 => step(host, took),
+        answer => answer,
+    }
+    .or_else(|answer| answer.map(|_| 0))
 }
