@@ -5252,13 +5252,13 @@ impl Game<'_> {
     pub(super) fn native_menu_closed(&mut self, uuid: u128, window: i32) {
         mod_api::dispatch_menu_closed(self, uuid, window);
     }
-    /// An item's tooltip, wherever the game shows one (slots, the creative
-    /// tabs, the recipe book, chat's hover): the stack, with its components
-    /// (`stack.data()`: a shulker box's contents...), and its lines, the name
-    /// first, each with a colour as `rgba` packs it (`u32::MAX` keeps the
-    /// text's own). Add, change or take out lines; `Text::legacy` reads `§`
-    /// codes. Asked each frame the tooltip shows, never for one the stack
-    /// hides.
+    /// `Item.appendHoverText`: an item's own lines in its tooltip, after its
+    /// name and before its components' (enchantments, lore, attributes). Add
+    /// lines to `lines`, which arrives empty, each with a colour as `rgba` packs
+    /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
+    /// The stack has its components (`stack.data()`). Asked each frame the
+    /// tooltip shows, never for one the stack hides or a crossbow's loaded
+    /// projectile.
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, stack, lines);
     }

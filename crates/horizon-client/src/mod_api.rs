@@ -12,8 +12,8 @@ pub(crate) mod server_reload;
 pub use horizon_world::identifier::Identifier;
 pub use reload_order::ReloadOrderError;
 pub use server_reload::{
-    ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
-    ServerReloadListeners, VanillaServerListeners,
+    ListenerKey, ServerReloadApply, ServerReloadContext, ServerReloadError, ServerReloadListener,
+    ServerReloadListeners, ServerReloadResources, VanillaServerListeners,
 };
 
 pub use crate::biome::{BiomeColors, SpawnEntry};
@@ -2730,11 +2730,25 @@ mod tests {
         assert_eq!(render.translation, [3.0, 0.0, 0.0]);
     }
 
+    /// Installs one mod, `id`, that attaches `part` to sticks.
+    fn stick_part<P: ItemPart + Clone>(id: &'static str, part: P) {
+        struct StickMod<P>(P);
+        #[mod_api::__subscriptions]
+        impl<P: ItemPart + Clone> Hooks for StickMod<P> {
+            fn register(&self, r: &mut Registrar) {
+                r.item_part("minecraft:stick", self.0.clone());
+            }
+        }
+        let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
+        install(mods.clone());
+        install_parts(&mods).unwrap();
+    }
+
     /// Claims a use on stone, after telling the player what the block is.
+    #[derive(Clone)]
     struct Probe;
 
-    #[mod_api::__subscriptions]
-    impl Hooks for Probe {
+    impl ItemPart for Probe {
         fn use_on(&self, host: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
             let level = host.level(&player.dimension).expect("a loaded level");
@@ -2855,10 +2869,10 @@ mod tests {
     }
 
     /// Asks the host to tell a player without anyone having implemented it.
+    #[derive(Clone)]
     struct Chatty;
 
-    #[mod_api::__subscriptions]
-    impl Hooks for Chatty {
+    impl ItemPart for Chatty {
         fn use_on(&self, host: &mut dyn ServerHost, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
             Flow::Continue
@@ -2957,8 +2971,7 @@ mod tests {
     fn a_test_host_implements_only_what_its_hook_calls() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
-        let mods = [ModEntry::new("probe", Box::new(Probe))];
-        install(mods.into());
+        stick_part("probe", Probe);
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
             let mut host = Reader {
@@ -3121,8 +3134,7 @@ mod tests {
     fn an_unexpected_host_call_names_the_method() {
         // Another test installs parts with tags: a dispatch must run on a game thread.
         mark_game_thread();
-        let mods = [ModEntry::new("chatty", Box::new(Chatty))];
-        install(mods.into());
+        stick_part("chatty", Chatty);
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -3147,15 +3159,28 @@ mod tests {
         BlockHit::new([0.5, 1.0, 0.5], [0, 1, 0], false)
     }
 
-    /// Takes a click with the off hand on a block's top half.
+    /// Takes a click with the off hand on a block's top half; its sticks check what they hear.
     struct OffHandTop;
 
-    #[mod_api::__subscriptions]
-    impl Hooks for OffHandTop {
+    /// A stick's use, checking the hand, the hit and the player.
+    #[derive(Clone)]
+    struct HeardStick;
+
+    impl ItemPart for HeardStick {
         fn use_on(&self, _: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
             assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
+            HEARD_STICK.store(true, std::sync::atomic::Ordering::SeqCst);
             Flow::Continue
+        }
+    }
+
+    static HEARD_STICK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for OffHandTop {
+        fn register(&self, r: &mut Registrar) {
+            r.item_part("minecraft:stick", HeardStick);
         }
 
         fn right_click_block(
@@ -3188,8 +3213,9 @@ mod tests {
     #[test]
     fn a_block_use_hears_the_hand_the_hit_and_the_player() {
         mark_game_thread();
-        let mods = [ModEntry::new("off-hand-top", Box::new(OffHandTop))];
-        install(mods.into());
+        let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
+        install(mods.clone());
+        install_parts(&mods).unwrap();
         let mut host = Reader {
             block: "minecraft:stone",
             lines: Vec::new(),
@@ -3207,6 +3233,7 @@ mod tests {
             &mut claimed,
         );
         assert!(!claimed);
+        assert!(HEARD_STICK.load(std::sync::atomic::Ordering::SeqCst));
         let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
         let held = stick();
         for (hand, hit, stack, canceled, answer, use_block) in [
