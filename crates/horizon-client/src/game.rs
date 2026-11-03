@@ -22200,7 +22200,7 @@ mod tests {
         }
         let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
         mod_api::install_parts(&mods).unwrap();
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
             game.reload_world_tables();
@@ -22252,7 +22252,7 @@ mod tests {
                 Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
                     as Box<dyn Hooks>,
             ]);
-        assert!(mod_api::MODS.set(mods).is_ok());
+        mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
