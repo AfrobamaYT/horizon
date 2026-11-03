@@ -2301,6 +2301,7 @@ impl Game<'_> {
                     cart.lerp_steps.clear();
                 }
             }
+            // Persist is swapped per level, so parked dimensions retain their marks.
             self.persist.forced_meta.clear();
             // ServerEntity.sendChanges clears needsSync once it has looked.
             for m in &mut self.mobs {

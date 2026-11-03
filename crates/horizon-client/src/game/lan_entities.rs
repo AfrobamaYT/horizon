@@ -486,18 +486,12 @@ impl Game<'_> {
     /// selectors use, so a client can name it back (the crosshair UUID that
     /// `ClientSuggestionProvider.getSelectedEntities` suggests).
     pub(super) fn lan_entity_uuids(&mut self, states: &mut States) {
-        let mut forced = std::mem::take(&mut self.persist.forced_meta);
         for e in states.as_mut_slice() {
             e.uuid = ints_uuid(self.uuid_for(e.id as u32));
-            // SynchedEntityData.set(..., force): a forced write resends its
-            // entry even when the value is equal, once, then the mark is gone.
-            if !forced.is_empty()
-                && let Some(bits) = forced.remove(&(e.id as u32))
-            {
-                e.forced_meta = bits;
+            if let Some(bits) = self.persist.forced_meta.get(&(e.id as u32)) {
+                e.forced_meta = *bits;
             }
         }
-        self.persist.forced_meta = forced;
     }
 
     /// Gives the entities Horizon keeps without an id one (`Entity.id`, from

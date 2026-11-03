@@ -1003,6 +1003,39 @@ mod tests {
     use crate::game::native_entity_refs::tests::with_game;
     use horizon_core::geometry::Vec3;
 
+    /// `lan_guest_joined`'s placement-only pass, between a forced write and
+    /// the tracker pass, must not spend the marks in either dimension.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn guest_placement_keeps_forced_metadata_in_each_dimension() {
+        use horizon_client::lan::entity::{EntityState, States};
+        with_game(|game| {
+            for elsewhere in [false, true] {
+                game.persist.force_meta(12, 8);
+                let mut parked = elsewhere.then(|| std::mem::take(&mut game.persist));
+                let mut placement = States::default();
+                placement.push(EntityState {
+                    id: 12,
+                    ..Default::default()
+                });
+                game.lan_entity_uuids(&mut placement);
+                if let Some(ref mut saved) = parked {
+                    std::mem::swap(&mut game.persist, saved);
+                }
+                assert_eq!(game.persist.forced_meta.get(&12), Some(&[1 << 8, 0, 0, 0]));
+                let mut snapshot = States::default();
+                snapshot.push(EntityState {
+                    id: 12,
+                    ..Default::default()
+                });
+                game.lan_entity_uuids(&mut snapshot);
+                assert_eq!(snapshot.as_slice()[0].forced_meta, [1 << 8, 0, 0, 0]);
+                game.persist.forced_meta.clear();
+                assert!(game.persist.forced_meta.is_empty());
+            }
+        });
+    }
+
     /// `EntityDataAccessor.setData` keeps the entity's id and UUID: a
     /// `/data merge` that carries a different UUID does not take, and a
     /// display's load marks its start delay forced
