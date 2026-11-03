@@ -27,8 +27,7 @@ impl Game<'_> {
         if id == 0 {
             return None;
         }
-        // A guest action can take the hub out of the game while its player
-        // state is in place. Resolve that player before looking in the hub.
+        // The acting guest's state is in place, not in their hub record.
         if self.lan_acting_uuid.is_some()
             && self.lan_acting_entity == Some(entity.id())
             && self.player.is_some()
