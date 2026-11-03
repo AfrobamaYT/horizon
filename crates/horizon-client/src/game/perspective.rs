@@ -30,20 +30,47 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub(super) fn ray_shape_from_boxes(boxes: &[[f64; 6]]) -> io::Result<VoxelShape> {
+    let mut shape = VoxelShape::empty();
+    for b in boxes {
+        let part = VoxelShape::from_box(Aabb::new(
+            Vec3::new(b[0], b[1], b[2]),
+            Vec3::new(b[3], b[4], b[5]),
+        ))
+        .map_err(|e| io::Error::other(format!("{e:?}")))?;
+        shape = shape
+            .join(&part, ShapeOp::OR)
+            .map_err(|e| io::Error::other(format!("{e:?}")))?;
+    }
+    Ok(shape)
+}
+
+pub(super) fn ray_interaction_shape(
+    registry: &horizon_world::registry::BlockRegistry,
+    state: BlockStateId,
+) -> io::Result<VoxelShape> {
+    let state = registry
+        .state(state)
+        .ok_or_else(|| io::Error::other("unknown block state"))?;
+    ray_shape_from_boxes(&super::interaction_shapes::boxes(
+        &state.name,
+        state.properties.get("facing").map(String::as_str),
+    ))
+}
+
 /// `Level.clip` with `ClipContext.Block.VISUAL` and no fluids:
 /// `BlockBehaviour.getVisualShape` is the collision shape except for the
 /// blocks that override it.
 struct VisualRays<'a, 'r> {
-    scene: SceneCollisions<'a, 'r>,
+    inner: super::explosion::ColliderRays<'a, 'r>,
     facts: &'a BlockFacts,
-    context: CollisionContext<'static>,
 }
 impl RayWorld for VisualRays<'_, '_> {
     type Error = io::Error;
     type Block = BlockStateId;
     type Fluid = ();
     fn block_state(&mut self, p: BlockPos) -> io::Result<BlockStateId> {
-        Ok(self.scene.world.block(p.x, p.y, p.z))
+        self.inner.block_state(p)
     }
     fn fluid_state(&mut self, _: BlockPos) -> io::Result<()> {
         Ok(())
@@ -72,27 +99,12 @@ impl RayWorld for VisualRays<'_, '_> {
             return Ok(VoxelShape::block());
         }
         if name == "minecraft:snow" || name.ends_with("_fence") {
-            let mut shape = VoxelShape::empty();
-            for b in facts.outline.iter() {
-                let b = b.map(f64::from);
-                let part = VoxelShape::from_box(Aabb::new(
-                    Vec3::new(b[0], b[1], b[2]),
-                    Vec3::new(b[3], b[4], b[5]),
-                ))
-                .map_err(|e| io::Error::other(format!("{e:?}")))?;
-                shape = shape
-                    .join(&part, ShapeOp::OR)
-                    .map_err(|e| io::Error::other(format!("{e:?}")))?;
-            }
-            return Ok(shape);
+            return ray_shape_from_boxes(&facts.outline);
         }
-        let binding = self.scene.binding;
-        binding
-            .collision_shape_with_context(&mut self.scene, state, p, &self.context)
-            .map_err(|e| io::Error::other(format!("{e:?}")))
+        self.inner.block_shape(state, p, RayBlockMode::Collider)
     }
-    fn interaction_shape(&mut self, _: BlockStateId, _: BlockPos) -> io::Result<VoxelShape> {
-        Ok(VoxelShape::empty())
+    fn interaction_shape(&mut self, state: BlockStateId, p: BlockPos) -> io::Result<VoxelShape> {
+        self.inner.interaction_shape(state, p)
     }
     fn fluid_is_source(&mut self, _: ()) -> io::Result<bool> {
         Ok(false)
@@ -273,13 +285,17 @@ impl Game<'_> {
             false,
         );
         let mut rays = VisualRays {
-            scene: SceneCollisions {
-                world: &self.world,
-                binding: self.collision,
-                subject: None,
+            inner: super::explosion::ColliderRays {
+                scene: SceneCollisions {
+                    world: &self.world,
+                    binding: self.collision,
+                    subject: None,
+                },
+                registry: self.pack.assets.registry,
+                context,
+                clip_data: None,
             },
             facts: self.res.facts(),
-            context,
         };
         view.align_with_entity_distance(
             &entity,

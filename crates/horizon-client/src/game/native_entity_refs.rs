@@ -12,7 +12,7 @@ use super::{
 };
 use horizon_client::mod_api::{
     EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind, NativeBlockUpdateFlags,
-    NativeSupportType,
+    NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
@@ -245,6 +245,72 @@ impl Game<'_> {
         })
     }
 
+    /// Clip an empty-context ray against collider or outline shapes, without fluids.
+    /// None on failed reads, dynamic shapes, invalid rays or traversal limits.
+    /// API @API:level_shapes@.
+    pub(super) fn native_level_clip(
+        &self,
+        level: LevelRef,
+        from: [f64; 3],
+        to: [f64; 3],
+        blocks: NativeClipBlock,
+        fluids: NativeClipFluid,
+    ) -> Option<NativeClipHit> {
+        use horizon_client::collisions::SceneCollisions;
+        use horizon_core::geometry::Direction;
+        use horizon_world::{
+            collision_context::CollisionContext,
+            world_ray::{RayBlockMode, RayFluidMode, clip_world},
+        };
+        let world = self.native_level_world(level)?;
+        let mut rays = super::explosion::ColliderRays {
+            scene: SceneCollisions {
+                world,
+                binding: self.collision,
+                subject: None,
+            },
+            context: CollisionContext::empty(false),
+            registry: self.pack.assets.registry,
+            clip_data: Some(super::explosion::ClipData {
+                facts: self.res.facts(),
+                behaviours: self.res.behaviours(),
+            }),
+        };
+        let mode = match blocks {
+            NativeClipBlock::Collider => RayBlockMode::Collider,
+            NativeClipBlock::Outline => RayBlockMode::Outline,
+        };
+        let fluid = match fluids {
+            NativeClipFluid::None => RayFluidMode::None,
+        };
+        let result = clip_world(
+            &mut rays,
+            Vec3::new(from[0], from[1], from[2]),
+            Vec3::new(to[0], to[1], to[2]),
+            mode,
+            fluid,
+            4096,
+        )
+        .ok()?;
+        let h = result.hit;
+        let face = match h.direction {
+            Direction::Down => NativeBlockFace::Down,
+            Direction::Up => NativeBlockFace::Up,
+            Direction::North => NativeBlockFace::North,
+            Direction::South => NativeBlockFace::South,
+            Direction::West => NativeBlockFace::West,
+            Direction::East => NativeBlockFace::East,
+        };
+        Some(NativeClipHit {
+            miss: result.miss,
+            block: [h.block.x, h.block.y, h.block.z],
+            face,
+            location: [h.location.x, h.location.y, h.location.z],
+            inside: h.inside,
+            world_border: false,
+        })
+    }
+
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.
     pub(super) fn native_entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
@@ -448,6 +514,122 @@ mod tests {
             assert_eq!(
                 stale.block_face_sturdy(game, [0, 64, 0], Face::Down, Support::Full),
                 None
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn level_clip_reads_parked_world_and_refuses_unloaded() {
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{
+                NativeBlockFace as Face, NativeClipBlock as Block, NativeClipFluid as Fluid,
+            },
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(1, 64, 0, stone).unwrap();
+            let from = [0.5, 64.5, 0.5];
+            let to = [2.5, 64.5, 0.5];
+            for mode in [Block::Collider, Block::Outline] {
+                let hit = level.clip(game, from, to, mode, Fluid::None).unwrap();
+                assert!(!hit.miss);
+                assert_eq!(hit.block, [1, 64, 0]);
+                assert_eq!(hit.face, Face::West);
+                assert_eq!(hit.location, [1.0, 64.5, 0.5]);
+                assert!(!hit.inside && !hit.world_border);
+            }
+            assert!(
+                level
+                    .clip(
+                        game,
+                        [15.5, 64.5, 0.5],
+                        [17.5, 64.5, 0.5],
+                        Block::Collider,
+                        Fluid::None
+                    )
+                    .is_none()
+            );
+            let miss = level
+                .clip(
+                    game,
+                    [0.5, 67.5, 0.5],
+                    [2.5, 67.5, 0.5],
+                    Block::Collider,
+                    Fluid::None,
+                )
+                .unwrap();
+            assert!(miss.miss);
+            let inside = level
+                .clip(
+                    game,
+                    [1.5, 64.5, 0.5],
+                    [2.5, 64.5, 0.5],
+                    Block::Collider,
+                    Fluid::None,
+                )
+                .unwrap();
+            assert!(inside.inside && !inside.miss);
+            assert!(
+                level
+                    .clip(
+                        game,
+                        [f64::NAN, 64.0, 0.0],
+                        to,
+                        Block::Collider,
+                        Fluid::None
+                    )
+                    .is_none()
+            );
+            let stale = horizon_client::mod_api::LevelRef::new(
+                horizon_client::mod_api::NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert!(
+                stale
+                    .clip(game, from, to, Block::Collider, Fluid::None)
+                    .is_none()
+            );
+            let cauldron = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:cauldron")
+                .unwrap();
+            game.world.set(0, 64, 2, cauldron).unwrap();
+            let bowl = level
+                .clip(
+                    game,
+                    [0.5, 65.27, 0.5],
+                    [0.5, 64.85, 3.5],
+                    Block::Outline,
+                    Fluid::None,
+                )
+                .unwrap();
+            assert!(!bowl.miss);
+            assert_eq!(bowl.block, [0, 64, 2]);
+            assert_eq!(bowl.face, Face::Up);
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(
+                level
+                    .clip(game, from, to, Block::Collider, Fluid::None)
+                    .unwrap()
+                    .block,
+                [1, 64, 0]
             );
         });
     }

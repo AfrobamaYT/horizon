@@ -511,6 +511,32 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// Block shape used by an empty-context level ray.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeClipBlock {
+    Collider,
+    Outline,
+}
+
+/// Fluid mode for a level ray. More modes are a follow-up.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeClipFluid {
+    None,
+}
+
+/// Result of a block ray, including the vanilla miss result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeClipHit {
+    pub miss: bool,
+    pub block: [i32; 3],
+    pub face: NativeBlockFace,
+    pub location: [f64; 3],
+    pub inside: bool,
+    pub world_border: bool,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
