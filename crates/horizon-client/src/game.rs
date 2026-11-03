@@ -1270,7 +1270,9 @@ impl LevelAccess for GameLevel<'_> {
         pos: BlockPos,
         feature: Option<&'a str>,
     ) -> Option<std::borrow::Cow<'a, str>> {
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::BlockGrowFeature)
+        {
             return feature.map(std::borrow::Cow::Borrowed);
         }
         let mut feature = feature.map(str::to_owned);
@@ -1346,7 +1348,9 @@ impl LevelAccess for GameLevel<'_> {
         note: &mut i32,
     ) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;
-        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+        if !self.native_authoritative
+            || !crate::mod_api::listened(crate::mod_api::HookId::NoteBlockPlay)
+        {
             return true;
         }
         let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
@@ -1380,7 +1384,9 @@ impl LevelAccess for GameLevel<'_> {
         shape: &horizon_world::level::PortalShape,
     ) -> bool {
         let mut cancel = false;
-        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+        if self.native_authoritative
+            && crate::mod_api::listened(crate::mod_api::HookId::PortalSpawn)
+        {
             let b = shape.bottom_left;
             let shape = horizon_client::mod_api::NativePortalShape {
                 x_axis: shape.x_axis,
@@ -6783,7 +6789,7 @@ impl Game<'_> {
         if let Some(hit) = block_hit {
             let (player, player_entity_id) = self.native_clicker();
             let (hand, at) = (self.hand, hit.native());
-            self.native_use_item_on(
+            self.native_use_on(
                 &stack,
                 hit.pos,
                 hit.face,
@@ -8111,7 +8117,7 @@ impl Game<'_> {
         let active = self.focused || self.agent_pointer;
         if active
             && grabbed
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::CalculatePlayerTurn)
             && let Some(remote) = &self.remote
         {
             self.native_calculate_player_turn(
@@ -12411,8 +12417,8 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         self.fns = Default::default();
-        self.reload_datapacks(false, &level.enabled_features);
-        self.world_tables = self.build_world_tables();
+        let stack = self.reload_datapacks(false, &level.enabled_features);
+        self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
@@ -12440,7 +12446,7 @@ impl Game<'_> {
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
-        self.prefetch_advancement_tree();
+        self.prefetch_advancement_tree(&stack);
         self.restore_player_state = true;
         self.rand_sequences = rand_sequences;
         self.border = Default::default();
@@ -12929,7 +12935,7 @@ impl Game<'_> {
         });
         // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
         let mut amounts = [amount; 4];
-        if !horizon_client::mod_api::mods().is_empty()
+        if crate::mod_api::listened(crate::mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
             let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
@@ -14177,7 +14183,7 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<Vertex>,
     ) {
-        if !crate::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::RenderArm) {
             let eye = self.eye_position().unwrap_or_default();
             let mut draw = BlockEntityDraw::posed(
                 partial,
@@ -14307,7 +14313,7 @@ impl Game<'_> {
                 scale: 1.0,
             };
             let mut canceled = false;
-            if !horizon_client::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::RenderHand) {
                 self.native_render_hand(&mut render, &mut canceled);
             }
             if canceled {
@@ -15766,7 +15772,7 @@ impl Game<'_> {
         if wait {
             self.save.flush()?;
         }
-        if !horizon_client::mod_api::mods().is_empty() {
+        if crate::mod_api::listened(crate::mod_api::HookId::LevelSave) {
             self.native_level_save(self.dim.id());
         }
         Ok(())
@@ -19955,18 +19961,12 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-    fn build_world_tables(&self) -> Option<WorldTables> {
+    fn build_world_tables(&self, stack: &functions::PackStack) -> Option<WorldTables> {
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
-        let files = functions::overlay_files(
-            &self.world_root,
-            &self.options.resources,
-            self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
-            contributed,
-        );
+        let files = functions::overlay_files(stack, contributed);
         if files.is_empty() {
             return None;
         }
@@ -20051,11 +20051,11 @@ impl Game<'_> {
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self) {
+    pub(super) fn reload_world_tables(&mut self, stack: &functions::PackStack) {
         if self.remote.is_some() {
             return;
         }
-        self.world_tables = self.build_world_tables();
+        self.world_tables = self.build_world_tables(stack);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
@@ -22279,7 +22279,13 @@ mod tests {
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
-            game.reload_world_tables();
+            let stack = super::functions::pack_stack(
+                &game.world_root,
+                &game.options.resources,
+                game.cmds.vanilla_disabled,
+                &game.level.enabled_features,
+            );
+            game.reload_world_tables(&stack);
             assert!(
                 !mod_api::parts("test")
                     .block(|| Some("minecraft:stone"))

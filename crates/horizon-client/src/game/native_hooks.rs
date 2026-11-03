@@ -5285,7 +5285,7 @@ impl Game<'_> {
     /// (`UseOnContext.getClickLocation`, `getClickedFace`, `isInside`) and
     /// `player` (the acting player's UUID) and `player_entity_id` (the server's
     /// entity id),.
-    pub(super) fn native_use_item_on(
+    pub(super) fn native_use_on(
         &mut self,
         stack: &ItemStack,
         pos: [i32; 3],
@@ -5296,7 +5296,7 @@ impl Game<'_> {
         player_entity_id: i32,
         claimed: &mut bool,
     ) {
-        mod_api::dispatch_use_item_on(
+        mod_api::dispatch_use_on(
             self,
             stack,
             pos,
@@ -5328,7 +5328,7 @@ impl Game<'_> {
         mod_api::dispatch_dispense_item(self, dimension, pos, facing, stack, answer);
     }
     /// A player uses `stack` (right click) with `self.hand`: in the air, or
-    /// on a block once `native_use_item_on` let it through, where `Item.use`
+    /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
     /// hand swings and the item's own use doesn't run. Server-side, for every
     /// player of the world; an item on cooldown is never used.
@@ -5591,7 +5591,7 @@ impl Game<'_> {
     }
     /// A player placed `stack` as the block `state` at `pos`: where
     /// `BlockItem.place` set it, before the stack shrinks. It only hears; a
-    /// mod stops a placement by claiming `native_use_item_on`, which runs
+    /// mod stops a placement by claiming `native_use_on`, which runs
     /// before it. Server-side, for every player of the world.
     pub(super) fn native_place_block(
         &mut self,
@@ -5606,7 +5606,7 @@ impl Game<'_> {
     /// `useItemOn` starts, on the clicking client and on the server (`click`
     /// says which, with the block, the hit, the hand and its stack, and the
     /// player). Before the block's own use (a chest, a door, a lever) and the
-    /// item's (`Item.useOn`, `native_use_item_on`).
+    /// item's (`Item.useOn`, `native_use_on`).
     ///
     /// `use_block` forces the block's use off (`False`) or on even while
     /// sneaking with something in hand (`True`); `use_item` forces the
@@ -6741,7 +6741,7 @@ impl Game<'_> {
 /// `native_living_use_totem` for the damage code (`health::USE_TOTEM`): whether it
 /// canceled the totem. The entity and the source are named as the damage hook names them.
 pub(super) fn use_totem(hurting: Hurting<'_>, off_hand: bool) -> bool {
-    if mod_api::mods().is_empty() {
+    if !mod_api::listened(mod_api::HookId::LivingUseTotem) {
         return false;
     }
     let (entity, kind, source) = hurt_server_args(hurting);
@@ -8246,7 +8246,7 @@ impl Game<'_> {
         stack: Option<&ItemStack>,
     ) -> BlockClickAnswer {
         let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::RightClickBlock) {
             return BlockClickAnswer::Go {
                 use_block,
                 use_item,
@@ -8293,14 +8293,14 @@ impl Game<'_> {
         value: GameRuleValue,
         actor: Option<&GameRuleActor<'_>>,
     ) {
-        if !mod_api::mods().is_empty() {
+        if mod_api::listened(mod_api::HookId::GameRuleChanged) {
             self.native_game_rule_changed(&["minecraft:", name].concat(), value, actor);
         }
     }
     /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
     /// children: how many to spawn.
     pub(super) fn mob_split_count(&mut self, m: &horizon_client::mobs::Mob, count: u32) -> u32 {
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::MobSplit) {
             return count;
         }
         let (size, kind) = (m.extra.size, mob_kind(m));
@@ -8317,7 +8317,7 @@ impl Game<'_> {
         tamer: u128,
         tamer_entity_id: i32,
     ) -> bool {
-        if mod_api::mods().is_empty() {
+        if !mod_api::listened(mod_api::HookId::AnimalTame) {
             return false;
         }
         let m = &self.mobs[index];
