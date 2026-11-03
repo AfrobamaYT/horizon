@@ -7,7 +7,10 @@ use super::Game;
 use horizon_client::mod_api::LevelRef;
 use horizon_client::world::World;
 
-fn level_state(world: &World, [x, y, z]: [i32; 3]) -> Option<horizon_world::registry::BlockStateId> {
+fn level_state(
+    world: &World,
+    [x, y, z]: [i32; 3],
+) -> Option<horizon_world::registry::BlockStateId> {
     let inside = (world.bottom_y()..world.top_y()).contains(&y);
     (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
 }
