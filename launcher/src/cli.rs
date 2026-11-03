@@ -780,11 +780,11 @@ enum Cmd {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Native mods (docs/native-mods.md): compile mixin bundles against the instance's exact
+    /// Native mods (docs/native-mods.md): compile flat Rust mod projects against the instance's exact
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
     /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
-        /// A mod folder (horizon-mixin.toml, or an unpacked .hmod), or a folder of them
+        /// A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
         folder: Option<PathBuf>,
         /// Export mode: build a standalone dedicated-server engine into this folder instead of

@@ -554,6 +554,28 @@ impl GameLevel<'_> {
         mod_api::dispatch_is_signal_source(self, state, source);
     }
 
+    /// `BlockBehaviour.shouldRedstoneWireConnectTo`: set `connected` to say
+    /// whether redstone wire connects to the block `state` at `pos`.
+    /// `direction` points from the wire toward the neighbouring block, or is
+    /// None when the wire asks about the block above or below. `connected` holds vanilla's answer: change
+    /// it when the block is yours. Asked whenever wire settles its shape:
+    /// answer from `state` and `pos` without touching the world. When the
+    /// answer changes, and once the wire is placed, update its neighbours
+    /// (`native_update_signal_neighbors`). Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_should_redstone_wire_connect_to(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        connected: &mut bool,
+    ) {
+        mod_api::dispatch_should_redstone_wire_connect_to(
+            self, dimension, pos, state, direction, connected,
+        );
+    }
+
     /// `BlockState.hasAnalogOutputSignal`: set `output` for a block of yours
     /// that comparators read (how full or far along it is, as a composter's
     /// level), so they ask `native_analog_output`. Asked from inside the
