@@ -195,7 +195,10 @@ impl Game<'_> {
             return Some(amount);
         };
         let (mut amount, mut cancel) = (amount, false);
-        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        let player_entity_id = self
+            .lan_acting_entity
+            .map_or_else(|| self.own_entity_id(), |id| id as i32);
+        self.native_player_xp_change(player, player_entity_id, &name, &mut amount, &mut cancel);
         (!cancel).then_some(amount)
     }
 
@@ -2107,7 +2110,7 @@ impl Game<'_> {
         // An entity in another level is killed in the level that holds it.
         let _ = self.in_target_level(t, |g| g.kill_target_in_level(t));
     }
-    fn kill_target_in_level(&mut self, t: Target) {
+    pub(super) fn kill_target_in_level(&mut self, t: Target) {
         match t {
             Target::Guest(_) => {
                 self.for_player(t, |g| g.kill_target(Target::Player));
@@ -3044,7 +3047,7 @@ impl Game<'_> {
                 self.give_levels(amount);
                 return true;
             } else {
-                self.give_experience_points(amount, true);
+                self.give_experience_points(amount);
             }
             return true;
         }
