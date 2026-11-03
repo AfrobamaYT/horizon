@@ -211,6 +211,7 @@ mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
+mod native_dragon_refs;
 mod native_entities;
 mod native_entity_data;
 mod native_entity_invulnerable;
@@ -253,6 +254,7 @@ mod native_player_cooldowns;
 mod native_player_food;
 mod native_player_modes;
 mod native_player_stats;
+mod native_projectile_refs;
 mod native_projectiles;
 mod native_quick_move;
 mod native_recipes;
@@ -22230,7 +22232,8 @@ mod tests {
                 ));
             }
         }
-        let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
         mod_api::install_parts(&mods).unwrap();
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
@@ -22279,11 +22282,10 @@ mod tests {
         let allowed = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
         let calls = Arc::new(AtomicUsize::new(0));
-        let mods: mod_api::Mods =
-            Arc::from(vec![
-                Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
-                    as Box<dyn Hooks>,
-            ]);
+        let mods: mod_api::Mods = Arc::from([mod_api::ModEntry::new(
+            "right-click-observer",
+            Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone())),
+        )]);
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
