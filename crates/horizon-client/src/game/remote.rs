@@ -4258,17 +4258,6 @@ impl Game<'_> {
                 }
                 3 => {
                     let mode = p.param as i32;
-                    if !horizon_client::mod_api::mods().is_empty()
-                        && let Some((uuid, current)) =
-                            self.remote.as_ref().map(|r| (r.profile, r.game_mode))
-                    {
-                        self.native_client_player_change_game_type(
-                            self.own_entity_id(),
-                            uuid,
-                            current,
-                            mode,
-                        );
-                    }
                     self.set_mode_id(mode);
                     if let Some(r) = self.remote.as_mut() {
                         r.game_mode = mode;
@@ -4663,7 +4652,25 @@ impl Game<'_> {
                             }
                         }
                     }
-                    for e in p.entries {
+                }
+                for e in p.entries {
+                    if !horizon_client::mod_api::mods().is_empty()
+                        && self.player.is_some()
+                        && let Some(mode) = e.game_mode
+                        && let Some(r) = self.remote.as_ref()
+                        && r.profile == e.uuid
+                        && let Some(info) = r.tab_players.get(&e.uuid)
+                        && info.game_mode != mode
+                    {
+                        let current = info.game_mode;
+                        self.native_client_player_change_game_type(
+                            self.own_entity_id(),
+                            e.uuid,
+                            current,
+                            mode,
+                        );
+                    }
+                    if let Some(r) = self.remote.as_mut() {
                         if let Some(t) = r.tab_players.get_mut(&e.uuid) {
                             if let Some(mode) = e.game_mode {
                                 t.game_mode = mode;

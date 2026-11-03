@@ -8561,7 +8561,7 @@ impl Game<'_> {
     pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
         mod_api::dispatch_client_pause_change_post(self, mod_api::mods(), paused);
     }
-    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player's game type change.
+    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player info game type change.
     /// @API:client_player_change_game_type@.
     pub(super) fn native_client_player_change_game_type(
         &mut self,

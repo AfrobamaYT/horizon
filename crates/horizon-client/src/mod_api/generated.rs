@@ -4580,7 +4580,7 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player's game type change.
+    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player info game type change.
     /// @API:client_player_change_game_type@.
     fn client_player_change_game_type(
         &self,
