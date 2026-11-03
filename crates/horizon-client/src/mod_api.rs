@@ -2216,7 +2216,9 @@ impl AttachmentHost for dyn Host + '_ {
 /// Read-only level services, like vanilla's `LevelReader`.
 pub trait LevelHost {
     /// Read a block through `LevelAccess::block_state`.
-    fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
+    fn block_state(&self, _pos: [i32; 3]) -> BlockStateId {
+        unimplemented!("LevelHost::block_state")
+    }
     /// `Level.isClientSide`, through `LevelAccess::is_client_side`.
     fn is_client_side(&self) -> bool;
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
@@ -2242,34 +2244,50 @@ pub trait LevelRandomHost: LevelHost {
 /// A `LevelReader` with vanilla's `ScheduledTickAccess`. Shape updates cannot write blocks.
 pub trait LevelTicksHost: LevelHost {
     /// Schedule a block tick through `native_schedule_block_tick`.
-    fn schedule_block_tick(&mut self, pos: [i32; 3], block: &str, delay: i32) -> bool;
+    fn schedule_block_tick(&mut self, _pos: [i32; 3], _block: &str, _delay: i32) -> bool {
+        unimplemented!("LevelTicksHost::schedule_block_tick")
+    }
     /// Schedule a fluid tick through `native_schedule_fluid_tick`.
-    fn schedule_fluid_tick(&mut self, pos: [i32; 3], fluid: &str, delay: i32) -> bool;
+    fn schedule_fluid_tick(&mut self, _pos: [i32; 3], _fluid: &str, _delay: i32) -> bool {
+        unimplemented!("LevelTicksHost::schedule_fluid_tick")
+    }
 }
 
 /// Mutable level services, like vanilla's `ServerLevel`. Whole-block writes wait for block entity support.
 pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     /// Change a block property through `native_set_block_property`.
-    fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool;
+    fn set_block_property(
+        &mut self,
+        _pos: [i32; 3],
+        _key: &str,
+        _value: &str,
+        _flags: i32,
+    ) -> bool {
+        unimplemented!("LevelWriteHost::set_block_property")
+    }
     /// Play a sound for nearby players through `native_play_sound`.
     fn play_sound(
         &mut self,
-        sound: &str,
-        at: [f64; 3],
-        source: usize,
-        volume: f32,
-        pitch: f32,
-    ) -> bool;
+        _sound: &str,
+        _at: [f64; 3],
+        _source: usize,
+        _volume: f32,
+        _pitch: f32,
+    ) -> bool {
+        unimplemented!("LevelWriteHost::play_sound")
+    }
     /// `ServerLevel.sendParticles` through `native_send_particles`.
     fn send_particles(
         &mut self,
-        options: &ParticleOptions,
-        state: Option<BlockStateId>,
-        at: [f64; 3],
-        spread: [f64; 3],
-        speed: f64,
-        count: i32,
-    ) -> bool;
+        _options: &ParticleOptions,
+        _state: Option<BlockStateId>,
+        _at: [f64; 3],
+        _spread: [f64; 3],
+        _speed: f64,
+        _count: i32,
+    ) -> bool {
+        unimplemented!("LevelWriteHost::send_particles")
+    }
 }
 
 macro_rules! level_attachment_host {
@@ -2329,6 +2347,20 @@ mod hooks_tests;
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn level_family_accepts_empty_doubles() {
+        struct Empty;
+        impl LevelHost for Empty {}
+        impl LevelRandomHost for Empty {}
+        impl LevelTicksHost for Empty {}
+        impl LevelWriteHost for Empty {}
+
+        let _: &dyn LevelHost = &Empty;
+        let _: &mut dyn LevelRandomHost = &mut Empty;
+        let _: &mut dyn LevelTicksHost = &mut Empty;
+        let _: &mut dyn LevelWriteHost = &mut Empty;
+    }
 
     #[test]
     fn game_modes_round_trip_through_their_ids() {
