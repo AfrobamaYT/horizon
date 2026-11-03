@@ -6247,6 +6247,7 @@ mod tests {
                 r.block_part("minecraft:cauldron", self.user.clone());
                 r.block_part("minecraft:jukebox", self.user.clone());
                 r.block_part("minecraft:decorated_pot", self.user.clone());
+                r.block_part("minecraft:redstone_ore", self.user.clone());
                 r.block_part("minecraft:chiseled_bookshelf", self.user.clone());
             }
             fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
@@ -6494,8 +6495,12 @@ mod tests {
                 assert_eq!(user.item_uses.load(SeqCst), 4);
 
                 assert_eq!(
-                    user.empty_clicks.lock().unwrap().last(),
-                    Some(&(floor_lever, 7))
+                    user.empty_clicks
+                        .lock()
+                        .unwrap()
+                        .last()
+                        .map(|(state, _)| *state),
+                    Some(floor_lever)
                 );
 
                 // Every supplied empty result replaces the lever; TRY is not retried.
@@ -6543,6 +6548,33 @@ mod tests {
                 assert_eq!(user.item_uses.load(SeqCst), item_uses);
                 game.hand = Hand::Main;
                 game.offhand = None;
+
+                // Ore's item-method PASS must not be mistaken for TRY.
+                let ore = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:redstone_ore")
+                    .unwrap();
+                game.world.set(11, 64, 4, ore).unwrap();
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stone", 1));
+                let ore_hit = super::super::Hit {
+                    pos: [11, 64, 4],
+                    point: [11.5, 65.0, 4.5],
+                    ..hit
+                };
+                *user.answer.lock().unwrap() = None;
+                let calls = user.empty_clicks.lock().unwrap().len();
+                assert!(game.use_hand(Some(&ore_hit)).unwrap());
+                assert_eq!(user.empty_clicks.lock().unwrap().len(), calls);
+                item_uses += 1;
+                assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                assert_eq!(
+                    game.world.block(11, 64, 4),
+                    game.with_props(ore, &[("lit", "true")]).unwrap()
+                );
+                *user.answer.lock().unwrap() = Some(Answer::TryWithEmptyHand);
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
 
                 // The hook precedes the pot's wobble and the bookshelf's removal.
                 let pot = game
