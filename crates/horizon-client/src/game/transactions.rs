@@ -960,8 +960,18 @@ mod mod_capability_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_chemical_moves_between_two_mods_parts_and_an_abort_puts_it_back() {
-        with_game(|game| {
-            let _mods = game_thread();
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        if run_fresh_cases(
+            "game::transactions::mod_capability_tests::a_chemical_moves_between_two_mods_parts_and_an_abort_puts_it_back",
+            "HORIZON_CHEMICAL_DECLARATIONS_CHILD",
+            &["valid"],
+        ) {
+            return;
+        }
+        let _mods = game_thread();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default(), &[]).unwrap();
+        with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
@@ -975,6 +985,8 @@ mod mod_capability_tests {
                 (0, "test:chem_tank", nbt),
                 (1, "test:chem_vat", Compound::new()),
             ] {
+                let state = game.pack.assets.registry.default_state(id).unwrap();
+                game.world.set(x, 64, 0, state).unwrap();
                 let fields = ModBlockEntityFields {
                     nbt,
                     ..Default::default()

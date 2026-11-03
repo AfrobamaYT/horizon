@@ -2080,11 +2080,41 @@ pub(crate) mod tests {
         }
     }
 
+    struct FixtureContent;
+    #[mod_api::__subscriptions]
+    impl Hooks for FixtureContent {
+        fn register(&self, r: &mut Registrar) {
+            for id in ["chem_tank", "chem_vat"] {
+                r.block_entity_type(id)
+                    .blocks(&[&format!("test:{id}")])
+                    .build();
+            }
+        }
+        fn blocks(&self, event: &mut BlocksEvent<'_>) {
+            event.blocks.extend(
+                [
+                    "test:gauge",
+                    "test:connector",
+                    "test:press",
+                    "test:hoard",
+                    "test:chem_tank",
+                    "test:chem_vat",
+                ]
+                .map(|id| horizon_mods::content::Block {
+                    id: id.into(),
+                    template: "minecraft:stone".into(),
+                    ..Default::default()
+                }),
+            );
+        }
+    }
+
     /// The test mods, their parts installed, on a thread that runs a game.
     pub(crate) fn game_thread() -> super::super::Mods {
         let mods: super::super::Mods = vec![
             ModEntry::new("doubler", Box::new(Doubler)),
             ModEntry::new("chemist", Box::new(Chemist)),
+            ModEntry::new("test", Box::new(FixtureContent)),
         ]
         .into();
         super::super::install(mods.clone());

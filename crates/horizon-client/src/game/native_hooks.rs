@@ -9341,52 +9341,21 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
-        use super::super::native_entity_refs::tests::with_game_at;
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
         use horizon_client::{
             chunk::Chunk,
             containers::BlockEntity,
             mod_api::{self, *},
             save,
         };
-        use std::{process::Command, sync::Arc};
+        use std::sync::Arc;
 
         const CHILD: &str = "HORIZON_DECLARED_BE_GAME_CHILD";
-        if std::env::var_os(CHILD).is_none() {
-            for case in ["valid", "unknown_block"] {
-                let scratch = std::env::temp_dir().join(format!(
-                    "horizon-declared-be-game-{}-{}",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos()
-                ));
-                std::fs::create_dir(&scratch).unwrap();
-                let mut command = Command::new(std::env::current_exe().unwrap());
-                command
-                .args([
-                    "--ignored",
-                    "--exact",
-                    "game::native_hooks::tests::declared_types_create_tick_and_reload_through_game",
-                    "--nocapture",
-                    "--test-threads=4",
-                ])
-                .current_dir(&scratch)
-                .env(CHILD, case)
-                .env("HORIZON_NO_AUDIO", "1")
-                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1");
-                for key in [
-                    "HORIZON_HOME",
-                    "HORIZON_LAUNCHER_HOME",
-                    "XDG_DATA_HOME",
-                    "XDG_CONFIG_HOME",
-                ] {
-                    command.env(key, scratch.join(key));
-                }
-                let status = command.status().unwrap();
-                std::fs::remove_dir_all(scratch).unwrap();
-                assert!(status.success(), "{case}");
-            }
+        if run_fresh_cases(
+            "game::native_hooks::tests::declared_types_create_tick_and_reload_through_game",
+            CHILD,
+            &["valid", "unknown_block"],
+        ) {
             return;
         }
 
