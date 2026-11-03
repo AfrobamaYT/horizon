@@ -10,7 +10,8 @@
 //! waiting work, which nothing outside had seen.
 //!
 //! Covered here: block entities (slots, saved compound, custom name, lock, loot roll, attachments), a hopper's cooldown and
-//! cauldron block states. A block's tentative state is stored only (`World::set_stored`): the
+//! cauldron block states. The attachment map of every other holder (an entity, a player, a
+//! chunk, the level) is kept on the first access to it through `attachment_map`. A block's tentative state is stored only (`World::set_stored`): the
 //! one real write, with its remesh, relight and logs, is at the root commit. A jukebox is
 //! told at the root commit from its record before and after, so a disc swapped in one
 //! transaction changes the song. A player's inventory (slots, armour, off hand, cursor) is kept
@@ -23,7 +24,7 @@
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::mod_api::TransactionSeal;
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
-use horizon_world::attachments::Attachments;
+use horizon_world::attachments::{Attachments, Holder};
 use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);
@@ -47,6 +48,9 @@ pub(super) struct Level {
     item_entities: HashMap<u32, ItemStack>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
+    /// Each entity's, player's, chunk's and the level's attachment map before this transaction
+    /// first reached it (a block entity's is kept with it).
+    attachments: HashMap<Holder, Attachments>,
     /// What the root commit does, in order.
     after: Vec<After>,
 }
@@ -161,6 +165,9 @@ impl Game<'_> {
                 for (conn, kept) in level.menus {
                     outer.menus.entry(conn).or_insert(kept);
                 }
+                for (holder, kept) in level.attachments {
+                    outer.attachments.entry(holder).or_insert(kept);
+                }
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -188,6 +195,25 @@ impl Game<'_> {
             name: self.world.block_names.get(&pos).cloned(),
             extras: self.world.block_entity_extras(pos),
         });
+    }
+    /// Keeps `holder`'s attachment map as it is, if a transaction is open and hasn't yet: a
+    /// block entity's with the rest of it, any other's alone.
+    pub(super) fn journal_attachments(&mut self, holder: Holder) {
+        if let Holder::BlockEntity([x, y, z]) = holder {
+            return self.journal_block_entity((x, y, z));
+        }
+        let Some(level) = self.transactions.last() else {
+            return;
+        };
+        if level.attachments.contains_key(&holder) {
+            return;
+        }
+        let Ok(kept) = self.attachment_slot(holder).map(|map| map.clone()) else {
+            return;
+        };
+        if let Some(level) = self.transactions.last_mut() {
+            level.attachments.insert(holder, kept);
+        }
     }
     /// Keeps the inventory of the player whose state is in `Game` now, `uuid`, as it is, if a
     /// transaction is open and hasn't yet. Called inside `native_as_player`.
@@ -407,6 +433,11 @@ impl Game<'_> {
                 g.ender_items.clone_from(&kept.ender_items);
                 g.craft_grid.clone_from(&kept.craft_grid);
                 g.native_menu.clone_from(&kept.native_menu);
+            }
+        }
+        for (holder, kept) in level.attachments {
+            if let Ok(map) = self.attachment_slot(holder) {
+                *map = kept;
             }
         }
         for (uuid, kept) in level.players {
@@ -989,6 +1020,128 @@ mod mod_capability_tests {
             });
             assert!(aborted.is_err());
             assert_eq!(amounts(host), (350, 250));
+            assert!(game.transactions.is_empty());
+        });
+    }
+
+    /// A mod's attachments on an entity and on a player are kept by a transaction as a block
+    /// entity's are: a commit keeps what it wrote, an abort puts each map back as it was before
+    /// the transaction first reached it (none for an entity that had none), and a guest's is
+    /// put back wherever their state lives at the abort, swapped in for their turn or not.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entity_and_player_attachments_stay_on_commit_and_go_back_on_abort() {
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::mod_api::{AttachmentType, Holder};
+        use horizon_core::geometry::Vec3;
+        const ENERGY: AttachmentType<i32> = AttachmentType {
+            namespace: "robot",
+            name: "energy",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
+            game.armor_stands.push(ArmorStand::new(14, Vec3::ZERO, 0.0));
+            let guest = 0x5eed_u128;
+            let config = horizon_client::lan::hub::HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 10,
+                simulation_distance: 10,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 20,
+                integrated: false,
+                levels: Default::default(),
+            };
+            game.lan_host(
+                super::super::lan::LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                },
+                horizon_client::lan::NetConfig {
+                    announce: false,
+                    ..horizon_client::lan::NetConfig::lan(0, "test".into(), 2)
+                },
+                config,
+            )
+            .unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            let player_ref = game.native_fake_player(level, guest, "test").unwrap();
+            let conn = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.entity_id as u32 == player_ref.entity().id())
+                .unwrap()
+                .conn;
+            let (stand, fresh, player) = (
+                Holder::Entity(13),
+                Holder::Entity(14),
+                Holder::Player(guest),
+            );
+            let energy = |host: &mut dyn Host, holder| ENERGY.get_existing(host, holder).unwrap();
+
+            let host: &mut dyn Host = game;
+            let done = host.transaction(|host, _| {
+                ENERGY.set(host, stand, 100)?;
+                ENERGY.set(host, player, 40)
+            });
+            assert_eq!(done, Ok(()));
+            assert_eq!(
+                (energy(host, stand), energy(host, player)),
+                (Some(100), Some(40))
+            );
+
+            // Aborted, with a committed child inside: both maps as they were, and the entity
+            // that had no value has none.
+            let aborted: Result<(), _> = host.transaction(|host, _| {
+                ENERGY.set(host, stand, 250)?;
+                ENERGY.set(host, player, 90)?;
+                ENERGY.set(host, fresh, 7)?;
+                host.transaction(|host, _| ENERGY.set(host, stand, 300))?;
+                assert_eq!(energy(host, stand), Some(300));
+                Err(horizon_client::mod_api::AttachmentError::MissingHolder)
+            });
+            assert!(aborted.is_err());
+            assert_eq!(
+                (energy(host, stand), energy(host, player)),
+                (Some(100), Some(40))
+            );
+            assert_eq!(energy(host, fresh), None);
+
+            // Written while the guest's state is swapped in for their turn, aborted after it
+            // is swapped back out: the guest's own map is put back.
+            game.transaction_open();
+            game.lan_acting_uuid = Some(guest);
+            std::mem::swap(
+                &mut game.player_attachments,
+                game.guest_attachments.get_mut(&conn).unwrap(),
+            );
+            let host: &mut dyn Host = game;
+            ENERGY.set(host, player, 70).unwrap();
+            std::mem::swap(
+                &mut game.player_attachments,
+                game.guest_attachments.get_mut(&conn).unwrap(),
+            );
+            game.lan_acting_uuid = None;
+            game.transaction_close(false);
+            let host: &mut dyn Host = game;
+            assert_eq!(energy(host, player), Some(40));
             assert!(game.transactions.is_empty());
         });
     }

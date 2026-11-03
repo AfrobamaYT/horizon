@@ -110,16 +110,28 @@ impl Game<'_> {
         }
     }
 
-    /// `attachment_map` without recording the holder for the sync.
+    /// `attachment_map` without recording the holder for the sync. Inside a transaction, the
+    /// map is kept as it was on its first access, so an abort puts it back.
     pub(super) fn attachment_map_quiet(
         &mut self,
         holder: horizon_client::mod_api::Holder,
     ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
     {
-        use horizon_client::mod_api::AttachmentError;
         if !self.native_authoritative() {
-            return Err(AttachmentError::MissingHolder);
+            return Err(horizon_client::mod_api::AttachmentError::MissingHolder);
         }
+        self.journal_attachments(holder);
+        self.attachment_slot(holder)
+    }
+
+    /// Where `holder`'s attachment map lives now: an entity's by its UUID, a player's where
+    /// their state is (swapped in for a guest's turn, or kept beside), the world's others.
+    pub(super) fn attachment_slot(
+        &mut self,
+        holder: horizon_client::mod_api::Holder,
+    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
+    {
+        use horizon_client::mod_api::AttachmentError;
         if let horizon_client::mod_api::Holder::Entity(id) = holder {
             if !self.attachment_entity_exists(id) {
                 return Err(AttachmentError::MissingHolder);
@@ -144,9 +156,6 @@ impl Game<'_> {
                 .map(|guest| guest.conn)
                 .ok_or(AttachmentError::MissingHolder)?;
             return Ok(self.guest_attachments.entry(conn).or_default());
-        }
-        if let horizon_client::mod_api::Holder::BlockEntity([x, y, z]) = holder {
-            self.journal_block_entity((x, y, z));
         }
         world_attachments(&mut self.world, holder)
     }

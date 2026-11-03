@@ -1166,6 +1166,19 @@ pub(super) mod tests {
                 8
             );
             assert_ne!(overworld_actor, nether_actor);
+            game.transaction_open();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 99)
+                .unwrap();
+            game.transaction_close(false);
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
             let place = crate::mod_api::ItemPlace::PlayerSlot {
                 player: 2345,
                 slot: 0,
