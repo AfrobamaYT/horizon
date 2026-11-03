@@ -897,14 +897,7 @@ pub fn publish(
                     ),
                 ));
             }
-            if entry.kind != kind {
-                return Err(bad(format!(
-                    "{} is a {}, not a {}: a project's kind never changes",
-                    form.id,
-                    entry.kind.name(),
-                    kind.name()
-                )));
-            }
+            index::registry::check_kind(&form.id, &entry.kind, &kind).map_err(bad)?;
             if entry.versions.iter().any(|v| v.version == version.version) {
                 return Err(Refusal::new(
                     StatusCode::CONFLICT,

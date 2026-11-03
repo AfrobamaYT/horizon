@@ -940,10 +940,7 @@ async fn a_mod_cannot_turn_native() {
     native["signature"] = Value::Null;
     let (status, json) = client.submit(&csrf, &native, &hmod("0.2.0")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
-    assert_eq!(
-        json["error"],
-        "coords_hud is a mod, not a native-mod: a project's kind never changes"
-    );
+    assert_eq!(json["error"], "coords_hud: its kind can't change");
     assert!(mock.lock().unwrap().pulls.is_empty());
 }
 
