@@ -981,6 +981,10 @@ pub(super) mod tests {
             assert_eq!(game.command_guest(12).unwrap().vehicle, Some(21));
             assert!(game.native_entity_stop_riding(guest));
             assert_eq!(game.command_guest(12).unwrap().vehicle, None);
+            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().dimension =
+                "minecraft:the_nether".into();
+            assert!(!game.native_entity_start_riding(guest, vehicle, true));
+            assert!(!game.native_entity_start_riding(vehicle, guest, true));
             let _ = std::fs::remove_dir_all(root);
         });
     }
