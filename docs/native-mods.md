@@ -974,9 +974,10 @@ cannot fail. As vanilla's `SimpleJsonResourceReloadListener.scanDirectory`, a li
 parses its files logs and skips one that will not parse, carrying the rest through. Returning
 `Err` from `prepare` — like any preparation, registration or ordering error — aborts the whole
 reload: all pending applies are dropped and the old mod data and vanilla function library are
-kept. The error names the namespaced listener and, for file errors, resource ID; world open
-fails, and `/reload` reports the failure. A failed `/datapack` change also preserves the
-selected packs on disk.
+kept. A panic in `prepare` or an apply is not recovered: it stops the server, and the crash
+report names the listener and the mod that registered it. The error names the namespaced
+listener and, for file errors, resource ID; world open fails, and `/reload` reports the
+failure. A failed `/datapack` change also preserves the selected packs on disk.
 
 `event.listeners.add_dependency(first, second)` orders named listeners. Both names must
 already be registered; unknown names fail immediately, and cycles fail after registration.
