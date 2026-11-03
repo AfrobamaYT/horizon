@@ -5756,6 +5756,9 @@ impl Game<'_> {
     }
     /// Menus opened by PlayerEffect::OpenMenu.
     fn open_menu(&mut self, pos: [i32; 3]) {
+        if self.lan_acting_fake {
+            return;
+        }
         let name = self
             .res
             .facts()
@@ -9314,9 +9317,7 @@ impl Game<'_> {
             .iter()
             .map(|(r, _)| horizon_client::crafting::qualified(r))
             .collect();
-        let index = &world_stations!(self).recipe_index;
-        let (_, unlocked) = self.level.recipe_book.add_recipes(index, &recipes);
-        self.recipe_unlocked(&unlocked);
+        self.award_recipes(&recipes);
     }
     fn craft_recipe(&self) -> Option<(String, ItemStack)> {
         let n = self.craft_size;
@@ -14747,6 +14748,9 @@ impl Game<'_> {
     /// and (outside creative) no monsters within 8 blocks; the bed becomes the
     /// respawn point either way.
     fn try_sleep(&mut self, pos: [i32; 3]) {
+        if self.lan_acting_fake {
+            return;
+        }
         let Some((position, yaw)) = self.player.as_ref().map(|p| (p.position, p.yaw)) else {
             return;
         };
