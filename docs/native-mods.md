@@ -321,6 +321,7 @@ my_mod/
 Without `Cargo.toml`, it is a content mod. Code requires both `Cargo.toml` and `[native]`;
 inconsistent declarations are refused. The mod's id and version come only from `horizon-mod.toml`,
 not Cargo's package name or version. An id is a plain `[a-z0-9_]{1,64}` name, also used as its resource namespace.
+A code mod has no `rust-toolchain.toml`: the pinned Horizon commit decides the toolchain that builds it.
 There is no input `native/` or `rust/` directory, `horizon-native.json` or hand-written `horizon-mixin.toml`.
 The launcher writes the tool's manifest and stages the crate itself; those internal paths are not package layouts.
 
