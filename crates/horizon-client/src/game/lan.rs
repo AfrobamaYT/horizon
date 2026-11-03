@@ -2015,7 +2015,7 @@ impl Game<'_> {
                     self.lan_flight_toggled(&mut host, conn, flying);
                 }
                 HostEvent::Sneak { conn, sneaking } => {
-                    if horizon_client::mod_api::mods().is_empty() {
+                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerToggleSneak) {
                         continue;
                     }
                     if let Some(g) = host.hub.guest(conn) {
@@ -2031,7 +2031,7 @@ impl Game<'_> {
                     name,
                     reason,
                 } => {
-                    if horizon_client::mod_api::mods().is_empty() {
+                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerKicked) {
                         continue;
                     }
                     // The same poll can have removed the guest (their `Left`): the mods hear the
@@ -2045,7 +2045,7 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Input { conn, flags } => {
-                    if horizon_client::mod_api::mods().is_empty() {
+                    if !crate::mod_api::listened(crate::mod_api::HookId::PlayerInput) {
                         continue;
                     }
                     if let Some(g) = host.hub.guest(conn) {
