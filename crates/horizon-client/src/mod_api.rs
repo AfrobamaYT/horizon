@@ -34,6 +34,7 @@ pub use crate::items::ItemStack;
 pub use crate::menu::{LogicalSide, StackedOnOther};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
+pub use crate::mod_chunk_tickets::TicketOwner as NativeTicketOwner;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
@@ -1368,6 +1369,23 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
+/// current interaction ranges. Entity ids identify this world's network
+/// entities, including dragon parts; they are not persistent handles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum NativeCrosshairTarget {
+    Block {
+        pos: BlockPos,
+        state: BlockStateId,
+        hit: BlockHit,
+    },
+    Entity {
+        id: i32,
+        point: [f64; 3],
+    },
+}
+
 /// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeItemCooldown {
@@ -1847,6 +1865,11 @@ pub(crate) fn install(mods: Mods) -> &'static Installed {
 /// The process-wide list in dispatch order, or an empty list before installation.
 pub fn mods() -> &'static [ModEntry] {
     installed().map_or(&[], |installed| &installed.mods)
+}
+
+/// Whether a mod with this `[mod] id` is installed.
+pub fn is_loaded(id: &str) -> bool {
+    mods().iter().any(|entry| entry.id == id)
 }
 
 pub(crate) fn listened(hook: generated::HookId) -> bool {

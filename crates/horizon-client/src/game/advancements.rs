@@ -323,7 +323,7 @@ impl Game<'_> {
     /// Start reading the advancement files on another thread while the world
     /// loads. The first tick's first criterion trigger used to read and parse
     /// all of them on the game thread (about 60 ms).
-    pub(super) fn prefetch_advancement_tree(&mut self) {
+    pub(super) fn prefetch_advancement_tree(&mut self, stack: &super::functions::PackStack) {
         if !self.adv.tree.list.is_empty() || self.adv.pending_tree.is_some() {
             return;
         }
@@ -334,12 +334,7 @@ impl Game<'_> {
         // asked once, not again here.
         let files = match &self.world_tables {
             Some(tables) => tables.files.clone(),
-            None => super::functions::content_overlay(
-                &self.world_root,
-                &self.options.resources,
-                self.cmds.vanilla_disabled,
-                &self.level.enabled_features,
-            ),
+            None => super::functions::content_overlay(stack),
         };
         self.adv.pending_tree = std::thread::Builder::new()
             .name("horizon-advancements".into())
@@ -628,7 +623,7 @@ impl Game<'_> {
         criterion: &str,
         progress_type: NativeProgressType,
     ) {
-        if crate::mod_api::mods().is_empty() {
+        if !crate::mod_api::listened(crate::mod_api::HookId::PlayerAdvancementProgress) {
             return;
         }
         if let (Some(uuid), Some(entity_id), Some(name)) = (

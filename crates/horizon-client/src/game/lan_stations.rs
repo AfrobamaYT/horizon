@@ -194,7 +194,7 @@ impl Game<'_> {
             let anvil_created =
                 gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
             if anvil_created
-                && !horizon_client::mod_api::mods().is_empty()
+                && crate::mod_api::listened(crate::mod_api::HookId::AnvilUpdate)
                 && let Some(mut update) = gs.menu.anvil_update()
             {
                 let guest = &host.hub.guests[gi];
@@ -509,16 +509,17 @@ impl Game<'_> {
         let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
         // The enchantments the item got, for PlayerEnchantItemEvent.
-        let given = (!horizon_client::mod_api::mods().is_empty()).then(|| {
-            horizon_client::stations::enchantment_list(
-                &self.stations().enchantments,
-                self.items(),
-                seed,
-                button,
-                gs.menu.data[button],
-                &item.item,
-            )
-        });
+        let given =
+            crate::mod_api::listened(crate::mod_api::HookId::PlayerEnchantItem).then(|| {
+                horizon_client::stations::enchantment_list(
+                    &self.stations().enchantments,
+                    self.items(),
+                    seed,
+                    button,
+                    gs.menu.data[button],
+                    &item.item,
+                )
+            });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
         self.as_guest(host, conn, |game| {
             game.enchantment_performed(need);
