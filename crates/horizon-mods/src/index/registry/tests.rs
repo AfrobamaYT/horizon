@@ -244,47 +244,34 @@ fn a_review_protects_published_files() {
 }
 
 #[test]
-fn a_mod_may_turn_native_once() {
-    let base: Entry = toml::from_str(&hud_entry()).unwrap();
-    let mut native = base.clone();
+fn a_project_cannot_change_between_mod_and_native_mod() {
+    let content: Entry = toml::from_str(&hud_entry()).unwrap();
+    let mut native = content.clone();
     native.kind = Kind::NativeMod;
-    let mut next = native.versions[0].clone();
-    next.version = "2.0.0".into();
-    next.file = "coords_hud-2.0.0.hnmod".into();
-    native.versions.insert(0, next);
-    let r = review(
-        std::slice::from_ref(&base),
-        std::slice::from_ref(&native),
-        "ludovic111",
+    for (old, new) in [(&content, &native), (&native, &content)] {
+        let r = review(
+            std::slice::from_ref(old),
+            std::slice::from_ref(new),
+            "ludovic111",
+        );
+        assert!(
+            r.errors.iter().any(|e| e.contains("kind can't change")),
+            "{r:?}"
+        );
+    }
+}
+
+#[test]
+fn native_project_rejects_a_content_only_version() {
+    let s = Scratch::new("native-kind");
+    s.write(
+        "mods/coords_hud.toml",
+        &hud_entry().replace("kind = \"mod\"", "kind = \"native-mod\""),
     );
-    assert!(r.errors.is_empty(), "{r:?}");
-    assert!(r.notes.iter().any(|n| n.contains("turns native")), "{r:?}");
-    // Its content-only .hmod versions are from before; the new ones native, and a .hmod
-    // holding native code is native too.
-    let none = Path::new("no-such-file");
-    assert_eq!(file_kind(&native, &native.versions[1], none), Kind::Mod);
-    assert_eq!(
-        file_kind(&native, &native.versions[0], none),
-        Kind::NativeMod
-    );
-    let unified = std::env::temp_dir().join(format!("unified-{}.hmod", std::process::id()));
-    let mut zip = zip::ZipWriter::new(std::fs::File::create(&unified).unwrap());
-    zip.start_file(
-        super::super::native::MANIFEST,
-        zip::write::SimpleFileOptions::default(),
-    )
-    .unwrap();
-    zip.finish().unwrap();
-    assert_eq!(
-        file_kind(&native, &native.versions[1], &unified),
-        Kind::NativeMod
-    );
-    std::fs::remove_file(unified).unwrap();
-    // And never back.
-    let r = review(&[native], &[base], "ludovic111");
+    let errors = s.build().unwrap_err();
     assert!(
-        r.errors.iter().any(|e| e.contains("kind can't change")),
-        "{r:?}"
+        errors.iter().any(|e| e.contains("coords_hud 0.1.0:")),
+        "{errors:?}"
     );
 }
 

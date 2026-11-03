@@ -2,37 +2,37 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "entity_teleport_to",
+      "name": "entity_teleport_to", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_teleport_to",
       "receiver": "entity"
     },
     {
-      "name": "entity_set_rotation",
+      "name": "entity_set_rotation", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_set_rotation",
       "receiver": "entity"
     },
     {
-      "name": "entity_head_yaw",
+      "name": "entity_head_yaw", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_head_yaw",
       "receiver": "entity"
     },
     {
-      "name": "entity_set_head_yaw",
+      "name": "entity_set_head_yaw", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_set_head_yaw",
       "receiver": "entity"
     },
     {
-      "name": "entity_direction",
+      "name": "entity_direction", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_direction",
       "receiver": "entity"
     },
     {
-      "name": "entity_dimensions",
+      "name": "entity_dimensions", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_dimensions",
       "receiver": "entity"
     },
     {
-      "name": "entity_push",
+      "name": "entity_push", "side": "server",
       "target": "horizon_client::game::native_entity_moves::Game<'_>::native_entity_push",
       "receiver": "entity"
     }

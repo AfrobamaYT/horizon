@@ -81,6 +81,26 @@ pub struct NativeCamera {
     pub dimension: String,
 }
 
+/// Context and adjustable pose for a first-person hand render.
+///
+/// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
+/// The renderer applies the transform before the ordinary hand and item poses.
+pub struct NativeHandRender<'a> {
+    pub player: u128,
+    pub player_entity_id: i32,
+    pub hand: Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub interpolated_pitch: f32,
+    pub swing: f32,
+    pub equip: f32,
+    /// Vanilla packed light at the eyes (`LightCoordsUtil.pack`: block << 4 | sky << 20).
+    pub packed_light: u32,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 3],
+    pub scale: f32,
+}
+
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
@@ -1138,6 +1158,17 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// The player responsible for a game rule change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GameRuleActor<'a> {
+    /// Player UUID.
+    pub uuid: u128,
+    /// Server entity ID.
+    pub entity_id: i32,
+    /// Player name.
+    pub name: &'a str,
+}
+
 /// How a criterion's advancement progress changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeProgressType {
@@ -1423,15 +1454,19 @@ mod tests {
         }
     }
 
-    /// A double with the three `Host` methods the probe calls.
+    /// A double with the `Host` methods the probe calls.
     struct Reader {
         block: &'static str,
         lines: Vec<Text>,
     }
 
     impl Host for Reader {
-        fn block(&self, _pos: [i32; 3]) -> String {
-            self.block.to_string()
+        fn level(&self, dimension: &str) -> Option<LevelRef> {
+            (dimension == "minecraft:overworld")
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+        }
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {
@@ -1452,19 +1487,104 @@ mod tests {
         }
     }
 
+    #[test]
+    fn render_hand_chains_pose_until_cancelled() {
+        struct HandMod {
+            offset: f32,
+            cancel: bool,
+        }
+        impl Hooks for HandMod {
+            fn render_hand(&self, _host: &dyn Host, event: &mut RenderHandEvent<'_, '_>) -> Flow {
+                assert_eq!((event.render.player, event.render.player_entity_id), (7, 9));
+                event.render.translation[0] += self.offset;
+                if self.cancel {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![
+            Box::new(HandMod {
+                offset: 1.0,
+                cancel: false,
+            }),
+            Box::new(HandMod {
+                offset: 2.0,
+                cancel: true,
+            }),
+            Box::new(HandMod {
+                offset: 4.0,
+                cancel: false,
+            }),
+        ];
+        let host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut render = NativeHandRender {
+            player: 7,
+            player_entity_id: 9,
+            hand: Hand::Main,
+            stack: None,
+            partial: 0.5,
+            interpolated_pitch: 0.0,
+            swing: 0.0,
+            equip: 0.0,
+            packed_light: 0,
+            translation: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: 1.0,
+        };
+        let mut canceled = false;
+        dispatch_render_hand(&host, &mods, &mut render, &mut canceled);
+        assert!(canceled);
+        assert_eq!(render.translation, [3.0, 0.0, 0.0]);
+    }
+
     /// Claims a use on stone, after telling the player what the block is.
     struct Probe;
 
     impl Hooks for Probe {
         fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-            let block = host.block(event.pos);
             let player = host.acting_player().expect("a player acts");
+            let level = host.level(&player.dimension).expect("a loaded level");
+            let block = level.block(host, event.pos).expect("a loaded block");
             host.action_bar(player.uuid, Text::literal(block.clone()));
             if block == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue
             }
+        }
+    }
+
+    #[test]
+    fn xp_change_passes_identity_and_allows_signed_amount_or_cancellation() {
+        struct XpHook(bool);
+        impl Hooks for XpHook {
+            fn player_xp_change(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerXpChangeEvent<'_>,
+            ) -> Flow {
+                assert_eq!(
+                    (event.player, event.player_entity_id, event.name),
+                    (7, 42, "Probe")
+                );
+                event.amount = -5;
+                if self.0 { Flow::Cancel } else { Flow::Continue }
+            }
+        }
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for cancelled in [false, true] {
+            let mods = [Box::new(XpHook(cancelled)) as Box<dyn Hooks>];
+            let (mut amount, mut cancel) = (10, false);
+            dispatch_player_xp_change(&mut host, &mods, 7, 42, "Probe", &mut amount, &mut cancel);
+            assert_eq!((amount, cancel), (-5, cancelled));
         }
     }
 
@@ -1960,6 +2080,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn game_rule_change_reports_optional_actor() {
+        struct ActorRecorder(Arc<Mutex<Vec<Option<(u128, i32, String)>>>>);
+        impl Hooks for ActorRecorder {
+            fn game_rule_changed(&self, _: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+                self.0.lock().unwrap().push(
+                    event
+                        .actor
+                        .map(|actor| (actor.uuid, actor.entity_id, actor.name.to_owned())),
+                );
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let actor = GameRuleActor {
+            uuid: 123,
+            entity_id: 42,
+            name: "Alex",
+        };
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(true),
+            Some(&actor),
+        );
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(false),
+            None,
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [Some((123, 42, "Alex".into())), None]
+        );
+    }
+
     /// `GameRuleChangedEvent` as the server's setters fire it: only for a
     /// rule `GameRules.set` took, with its id and new value, to every mod.
     #[test]
@@ -1977,7 +2140,13 @@ mod tests {
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
-                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+                dispatch_game_rule_changed(
+                    &mut host,
+                    &mods,
+                    &["minecraft:", name].concat(),
+                    value,
+                    None,
+                );
             }
         };
         set("keep_inventory", GameRuleValue::Bool(true));
