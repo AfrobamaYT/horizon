@@ -3496,7 +3496,7 @@ mod tests {
         ]);
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
         assert_eq!(
-            m.extra.body.as_deref(),
+            m.extra.body().as_deref(),
             Some("minecraft:diamond_horse_armor")
         );
         assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
@@ -3547,8 +3547,8 @@ mod tests {
             ),
         ]);
         let m = mob_from_nbt(&raw, &types, 1, None).unwrap();
-        assert_eq!(m.extra.body.as_deref(), Some("minecraft:wolf_armor"));
-        assert_eq!(m.extra.body_damage, 9);
+        assert_eq!(m.extra.body().as_deref(), Some("minecraft:wolf_armor"));
+        assert_eq!(m.extra.body_damage(), 9);
         assert_eq!(m.extra.head.as_deref(), Some("minecraft:iron_helmet"));
     }
 
@@ -5965,7 +5965,7 @@ mod held_item_name_tests {
         let mut horse = mob_from_nbt(&raw, &types, 2, None).unwrap();
         assert_eq!(horse.extra.head.as_deref(), Some("minecraft:iron_helmet"));
         assert_eq!(
-            horse.extra.body.as_deref(),
+            horse.extra.body().as_deref(),
             Some("minecraft:diamond_horse_armor")
         );
         assert_eq!(horse.equipment_stacks()[6], Some(armor.clone()));

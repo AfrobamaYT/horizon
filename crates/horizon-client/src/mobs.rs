@@ -4873,7 +4873,8 @@ mod armor_hurt_tests {
             from: None,
         };
         let mut m = horse();
-        m.extra.body = Some("minecraft:diamond_horse_armor".into());
+        m.extra
+            .set_body(Some("minecraft:diamond_horse_armor".into()));
         assert!(m.damage(6.0, hit), "the hit landed");
         let owed = m.outbox.iter().find_map(|e| match e {
             MobEvent::ArmorHurt { amount, .. } => Some(*amount),
@@ -4901,7 +4902,7 @@ mod armor_hurt_tests {
     #[test]
     fn a_donkey_wearing_a_body_item_wears_nothing() {
         let mut donkey = mob("minecraft:donkey", Species::Donkey);
-        donkey.extra.body = Some("minecraft:wolf_armor".into());
+        donkey.extra.set_body(Some("minecraft:wolf_armor".into()));
         assert!(
             donkey.damage(6.0, Damage::of(DamageKind::MobAttack)),
             "the hit landed"
@@ -4924,7 +4925,8 @@ mod armor_hurt_tests {
         use horizon_world::player_inventory::EquipmentSlot;
         let mut m = horse();
         m.extra.head = Some("minecraft:iron_helmet".into());
-        m.extra.body = Some("minecraft:diamond_horse_armor".into());
+        m.extra
+            .set_body(Some("minecraft:diamond_horse_armor".into()));
         let gear = m.equipment_stacks();
         assert_eq!(
             gear[5].as_ref().map(|s| s.item.as_ref().to_owned()),
@@ -4958,7 +4960,8 @@ mod armor_hurt_tests {
     #[test]
     fn a_fall_does_not_wear_the_body_piece() {
         let mut m = horse();
-        m.extra.body = Some("minecraft:diamond_horse_armor".into());
+        m.extra
+            .set_body(Some("minecraft:diamond_horse_armor".into()));
         assert!(
             m.damage(6.0, Damage::of(DamageKind::Fall)),
             "the fall landed"
@@ -4980,7 +4983,8 @@ mod armor_hurt_tests {
         let mut m = horse();
         let k = Arc::make_mut(&mut m.kind);
         k.armor = 20.0;
-        m.extra.body = Some("minecraft:diamond_horse_armor".into());
+        m.extra
+            .set_body(Some("minecraft:diamond_horse_armor".into()));
         let before = m.health;
         assert!(m.damage(8.0, Damage::of(DamageKind::MobAttack)));
         assert!(m.health < before, "the hit reached the health");

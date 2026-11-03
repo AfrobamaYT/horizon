@@ -266,7 +266,7 @@ mod knockback_sync_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.body = Some("minecraft:tnt".into());
+        m.extra.set_body(Some("minecraft:tnt".into()));
         assert!(!m.needs_sync);
         m.damage(5.0, Damage::player([2.0, 0.0, 0.0]));
         assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
@@ -312,7 +312,7 @@ mod burning_arrow_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.body = head.map(Into::into);
+        m.extra.set_body(head.map(Into::into));
         m
     }
 
@@ -384,7 +384,7 @@ mod immune_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.body = head.map(Into::into);
+        m.extra.set_body(head.map(Into::into));
         m
     }
 
@@ -1098,7 +1098,7 @@ mod tnt_rule_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.body = Some("minecraft:tnt".into());
+        m.extra.set_body(Some("minecraft:tnt".into()));
         m
     }
 
@@ -1167,7 +1167,7 @@ mod fuse_anim_tests {
             HashSet::from(["minecraft:tnt".to_owned()]),
         )]));
         let mut m = cube();
-        m.extra.body = Some("minecraft:tnt".into());
+        m.extra.set_body(Some("minecraft:tnt".into()));
         assert!(prime(&mut m, false));
         assert!(m.invulnerable_flag);
         let (health, fuse_left) = (m.health, fuse(&m));
@@ -1205,7 +1205,7 @@ mod fuse_anim_tests {
         assert_eq!(source.kind, DamageKind::Fireworks);
         assert!(!source.no_knockback());
         let mut m = cube();
-        m.extra.body = Some("minecraft:tnt".into());
+        m.extra.set_body(Some("minecraft:tnt".into()));
         let health = m.health;
         m.damage(7.0, source);
         assert!((15..45).contains(&fuse(&m)), "fuse {}", fuse(&m));

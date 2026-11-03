@@ -164,11 +164,10 @@ mod tests {
                 crate::mobs::finalize::OFFHAND,
                 offhand.clone(),
             );
-            s.extra.body = Some("minecraft:wolf_armor".into());
-            s.extra.body_damage = 7;
             let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
+            armor.damage = 7;
             armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
-            s.extra.body_extra = armor.extra;
+            s.extra.set_body_stack(Some(armor));
             s.extra.leash = Some(crate::mobs::leash::Holder::Knot([3, 71, -3]));
             s.extra.mount = Some(7);
             s.extra.passenger = true;
@@ -191,10 +190,10 @@ mod tests {
                 Some(crate::mobs::leash::Holder::Knot([3, 71, -3]))
             );
             assert_eq!(st.extra.mount, Some(7));
-            assert_eq!(st.extra.body.as_deref(), Some("minecraft:wolf_armor"));
-            assert_eq!(st.extra.body_damage, 7);
+            assert_eq!(st.extra.body().as_deref(), Some("minecraft:wolf_armor"));
+            assert_eq!(st.extra.body_damage(), 7);
             assert_eq!(st.equipment_stacks()[1], Some(offhand));
-            assert_eq!(st.extra.body_extra, s.extra.body_extra);
+            assert_eq!(st.extra.body_stack(), s.extra.body_stack());
             // Health is the new type's own, not copied.
             assert_eq!(st.health, mob(3, "minecraft:stray").health);
             // Without keepEquipment the gear stays behind.
@@ -210,7 +209,7 @@ mod tests {
             assert!(
                 bare.extra.main_hand.is_none()
                     && bare.extra.chest.is_none()
-                    && bare.extra.body.is_none()
+                    && bare.extra.body().is_none()
             );
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));
         });
