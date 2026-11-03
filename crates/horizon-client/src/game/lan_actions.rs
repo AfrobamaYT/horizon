@@ -216,6 +216,8 @@ pub(super) struct GuestSwap {
         Option<u8>,
         Option<u32>,
     ),
+    /// Whether the outer turn is a fake player.
+    acting_fake: bool,
     /// That turn's `known_movement`.
     known_movement: Vec3,
     /// The packets queued for that guest.
@@ -553,7 +555,9 @@ impl Game<'_> {
         self.close_ender_chest();
         std::mem::swap(&mut self.ender_items, &mut g.ender_items);
         // The guest's advancements, recipe book and statistics.
-        self.advancement_tree();
+        if g.participates_in_player_simulation() {
+            self.advancement_tree();
+        }
         std::mem::swap(&mut self.adv.progress, &mut g.advancements);
         std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
@@ -575,6 +579,10 @@ impl Game<'_> {
             self.lan_acting_uuid.replace(g.uuid),
             self.lan_acting_permission.replace(g.permission),
             self.lan_acting_entity.replace(g.entity_id as u32),
+        );
+        let acting_fake = std::mem::replace(
+            &mut self.lan_acting_fake,
+            !g.participates_in_player_simulation(),
         );
         let packets = std::mem::take(&mut self.guest_packets);
         let entity_events = std::mem::take(&mut self.guest_entity_events);
@@ -655,6 +663,7 @@ impl Game<'_> {
             marks,
             death_cause,
             acting,
+            acting_fake,
             known_movement,
             packets,
             entity_events,
@@ -757,6 +766,7 @@ impl Game<'_> {
             death_cause,
             combat,
             acting,
+            acting_fake,
             known_movement,
             packets,
             entity_events,
@@ -868,6 +878,7 @@ impl Game<'_> {
             self.lan_acting_permission,
             self.lan_acting_entity,
         ) = acting;
+        self.lan_acting_fake = acting_fake;
         self.known_movement = known_movement;
         play.death_cause = std::mem::replace(&mut self.ui.death_cause, death_cause);
         // An ender chest the guest opened: the menu shows their inventory
@@ -1153,7 +1164,7 @@ impl Game<'_> {
     /// of them, not only on the host. A server has no player of its own.
     /// Inside a guest's action (the hub taken) only that player is in place.
     pub(super) fn for_each_player(&mut self, mut f: impl FnMut(&mut Self)) {
-        if self.player.is_some() {
+        if self.player.is_some() && !self.lan_acting_fake {
             f(self);
         }
         let Some(mut host) = self.lan.take() else {
@@ -1194,9 +1205,13 @@ impl Game<'_> {
         kind: &str,
         pos: Option<[i32; 3]>,
     ) -> bool {
-        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+        let Some(guest) = host.hub.guest(conn) else {
             return true;
         };
+        if !guest.participates_in_player_simulation() {
+            return false;
+        }
+        let (uuid, name) = (guest.uuid, guest.name.clone());
         let mut cancel = false;
         let mut hook =
             |game: &mut Self| game.native_container_opened(uuid, &name, kind, pos, &mut cancel);
@@ -3187,7 +3202,9 @@ impl Game<'_> {
                 .flatten();
             self.send_guest_motion(host, conn, sent);
             // The mob now answers to this guest (game/lan_mobs.rs).
-            if let Ok(id) = u32::try_from(id) {
+            if host.hub.guests[gi].participates_in_player_simulation()
+                && let Ok(id) = u32::try_from(id)
+            {
                 host.mob_players.insert(id, conn);
             }
             return;
@@ -3212,7 +3229,9 @@ impl Game<'_> {
             .flatten();
         self.send_guest_motion(host, conn, sent);
         // The mob now answers to this guest (game/lan_mobs.rs).
-        if let Ok(id) = u32::try_from(id) {
+        if host.hub.guests[gi].participates_in_player_simulation()
+            && let Ok(id) = u32::try_from(id)
+        {
             host.mob_players.insert(id, conn);
         }
         host.hub.guests[gi].yaw = old_yaw;
@@ -4156,13 +4175,14 @@ impl Game<'_> {
                 }
             }
         };
-        if self.player.is_some() && !self.spectator() {
+        if self.player.is_some() && !self.lan_acting_fake && !self.spectator() {
             count(self.sleeping.is_some(), self.sleep_timer);
         }
         if let Some(host) = self.lan.as_ref() {
             // A native mod's ignored players count only once in bed.
             for g in host.hub.guests.iter().filter(|g| {
                 g.placed
+                    && g.participates_in_player_simulation()
                     && !g.spectator()
                     && (g.bed.is_some() || !host.sleep_ignored.contains(&g.uuid))
             }) {

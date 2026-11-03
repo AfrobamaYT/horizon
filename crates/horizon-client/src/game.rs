@@ -3227,6 +3227,8 @@ struct Game<'a> {
     /// Their entity id, which the hub (often taken out of `lan` while they
     /// act) would otherwise have to be asked for.
     lan_acting_entity: Option<u32>,
+    /// Whether the player currently swapped into the game is connectionless.
+    lan_acting_fake: bool,
     /// Command feedback to forward to a guest.
     chat_capture: Option<Vec<horizon_client::text::Text>>,
     /// Packets for the guest acting now, sent once its action returns.
@@ -5714,6 +5716,9 @@ impl Game<'_> {
     }
     /// Menus opened by PlayerEffect::OpenMenu.
     fn open_menu(&mut self, pos: [i32; 3]) {
+        if self.lan_acting_fake {
+            return;
+        }
         let name = self
             .res
             .facts()
@@ -14635,6 +14640,9 @@ impl Game<'_> {
     /// and (outside creative) no monsters within 8 blocks; the bed becomes the
     /// respawn point either way.
     fn try_sleep(&mut self, pos: [i32; 3]) {
+        if self.lan_acting_fake {
+            return;
+        }
         let Some((position, yaw)) = self.player.as_ref().map(|p| (p.position, p.yaw)) else {
             return;
         };
@@ -19413,6 +19421,7 @@ impl<'a> Game<'a> {
             tnt_refused: None,
             lan_acting_permission: None,
             lan_acting_entity: None,
+            lan_acting_fake: false,
             chat_capture: None,
             admin_feedback: Vec::new(),
             console_broadcast: None,

@@ -569,7 +569,7 @@ impl Game<'_> {
     /// `SimpleCriterionTrigger.trigger`: test each open criterion of the
     /// trigger and award what it completes.
     pub(super) fn trigger(&mut self, name: &str, test: impl Fn(&Value, &dyn adv::World) -> bool) {
-        if self.remote.is_some() || self.no_player_here() {
+        if self.lan_acting_fake || self.remote.is_some() || self.no_player_here() {
             return;
         }
         self.load_advancements();
@@ -587,6 +587,9 @@ impl Game<'_> {
         list: &[(usize, usize)],
         test: impl Fn(&Value, &dyn adv::World) -> bool,
     ) {
+        if self.lan_acting_fake {
+            return;
+        }
         let mut hits = Vec::new();
         {
             let view = View(self);
@@ -755,6 +758,9 @@ impl Game<'_> {
     }
     /// `PlayerAdvancements.award` once done: rewards, toast, announcement.
     fn award(&mut self, index: usize) {
+        if self.lan_acting_fake {
+            return;
+        }
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
@@ -1996,6 +2002,9 @@ impl Game<'_> {
     /// `AdvancementCommands.Action.GRANT` on one advancement (or one of
     /// its criteria): false when nothing changed.
     pub(super) fn grant_advancement(&mut self, index: usize, criterion: Option<&str>) -> bool {
+        if self.lan_acting_fake {
+            return false;
+        }
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         if criterion.is_none() && self.adv.progress.done(a) {
@@ -2022,6 +2031,9 @@ impl Game<'_> {
     }
     /// `AdvancementCommands.Action.REVOKE`.
     pub(super) fn revoke_advancement(&mut self, index: usize, criterion: Option<&str>) -> bool {
+        if self.lan_acting_fake {
+            return false;
+        }
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         self.progress_changed(index);

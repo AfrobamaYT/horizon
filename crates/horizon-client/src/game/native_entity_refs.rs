@@ -111,7 +111,7 @@ impl Game<'_> {
             }
         });
         for guest in self.lan.iter().flat_map(|h| &h.hub.guests) {
-            if !guest.placed || guest.dimension != level.dimension() {
+            if !guest.participates_in_player_simulation() || !guest.placed || guest.dimension != level.dimension() {
                 continue;
             }
             let body = if self.lan_acting == Some(guest.conn)

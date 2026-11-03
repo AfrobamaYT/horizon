@@ -1398,7 +1398,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| g.placed)
+            .filter(|g| g.placed && g.participates_in_player_simulation())
             .map(|g| (g.conn, super::Dim::from_id(&g.dimension)))
             .collect();
         for (conn, dim) in open {
@@ -1410,6 +1410,9 @@ impl Game<'_> {
             log::error!("could not reopen {}: {e}", back.id());
         }
         for i in 0..host.hub.guests.len() {
+            if !host.hub.guests[i].participates_in_player_simulation() {
+                continue;
+            }
             let mut g = host.hub.guests.remove(i);
             self.take_parent_vehicle(host, &mut g);
             self.save_guest(host, &mut g);
@@ -1425,6 +1428,9 @@ impl Game<'_> {
         host: &LanHost,
         guest: &mut horizon_client::lan::guest::Guest,
     ) {
+        if !guest.participates_in_player_simulation() {
+            return;
+        }
         self.guest_attachments_into(guest);
         if guest.placed {
             let _ = self.finish_player_autosaves(true);
@@ -1576,7 +1582,7 @@ impl Game<'_> {
         host: &LanHost,
         guest: &horizon_client::lan::guest::Guest,
     ) {
-        if !guest.placed || self.adv.tree.list.is_empty() {
+        if !guest.participates_in_player_simulation() || !guest.placed || self.adv.tree.list.is_empty() {
             return;
         }
         let Some(uuid) = self.records_uuid(host, guest.uuid) else {
