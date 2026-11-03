@@ -1030,8 +1030,14 @@ mod tests {
             );
             assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
             assert!(game.stations().recipe_index.contains("test:sample"));
-            // Changing disk after open must not make the first tick reload it.
+            // Changes on disk must not make the first tick reload any table.
             std::fs::write(&function, "scoreboard objectives add changed dummy\n").unwrap();
+            std::fs::write(
+                pack.join("data/test/tags/item/sample.json"),
+                r#"{"values":["minecraft:diamond"]}"#,
+            )
+            .unwrap();
+            std::fs::remove_file(pack.join("data/test/recipe/sample.json")).unwrap();
             game.tick_functions();
             assert!(game.score.board.objective("loaded").is_some());
             assert!(game.score.board.objective("changed").is_none());
