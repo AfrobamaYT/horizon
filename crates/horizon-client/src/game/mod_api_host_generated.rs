@@ -631,6 +631,27 @@ impl Host for super::Game<'_> {
     ) -> Option<Vec<EntityRef>> {
         self.native_level_entities_in(level, min, max)
     }
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        self.native_level_block_state(level, pos)
+    }
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        self.native_level_block(level, pos)
+    }
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
+        self.native_level_block_property(level, pos, key)
+    }
+    fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        self.native_level_is_loaded(level, pos)
+    }
+    fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+        self.native_level_height(level)
+    }
+    fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+        self.native_level_game_time(level)
+    }
+    fn level_day_time(&self, level: LevelRef) -> Option<i64> {
+        self.native_level_day_time(level)
+    }
     fn level_block_shape(
         &self,
         level: LevelRef,
@@ -638,6 +659,24 @@ impl Host for super::Game<'_> {
         kind: NativeBlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
         self.native_level_block_shape(level, pos, kind)
+    }
+    fn level_seed(&self, level: LevelRef) -> Option<i64> {
+        self.native_level_seed(level)
+    }
+    fn level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
+        self.native_level_difficulty(level)
+    }
+    fn level_game_rule(&self, level: LevelRef, rule: &str) -> Option<GameRuleValue> {
+        self.native_level_game_rule(level, rule)
+    }
+    fn level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
+        self.native_level_weather(level)
+    }
+    fn level_is_raining(&self, level: LevelRef) -> Option<bool> {
+        self.native_level_is_raining(level)
+    }
+    fn level_is_thundering(&self, level: LevelRef) -> Option<bool> {
+        self.native_level_is_thundering(level)
     }
     fn living(&self, entity: EntityRef) -> Option<LivingRef> {
         self.native_living(entity)

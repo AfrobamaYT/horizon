@@ -1491,6 +1491,56 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::level_entities_in")
     }
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block_state")
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block")
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        let _ = key;
+        unimplemented!("Host::level_block_property")
+    }
+    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_is_loaded")
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+        let _ = level;
+        unimplemented!("Host::level_height")
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_game_time")
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    fn level_day_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_day_time")
+    }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
     /// client, for a stale handle, or for a closed level. Unloaded blocks read
@@ -1506,6 +1556,44 @@ pub trait Host {
         let _ = pos;
         let _ = kind;
         unimplemented!("Host::level_block_shape")
+    }
+    /// The world's seed (`WorldOptions.seed`), as `/seed` shows it. API
+    /// @API:level_world@.
+    fn level_seed(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_seed")
+    }
+    /// The difficulty (`Level.getDifficulty`): `peaceful`, `easy`, `normal`
+    /// or `hard`, as `/difficulty` names it. API @API:level_world@.
+    fn level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
+        let _ = level;
+        unimplemented!("Host::level_difficulty")
+    }
+    /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
+    /// `/gamerule` queries it: None for an unknown rule. API @API:level_world@.
+    fn level_game_rule(&self, level: LevelRef, rule: &str) -> Option<GameRuleValue> {
+        let _ = level;
+        let _ = rule;
+        unimplemented!("Host::level_game_rule")
+    }
+    /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
+    /// `getThunderLevel`): both 0 in a level with no weather, as the Nether
+    /// and the End. API @API:level_world@.
+    fn level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
+        let _ = level;
+        unimplemented!("Host::level_weather")
+    }
+    /// Whether it rains (`Level.isRaining`: a rain level above 0.2). API
+    /// @API:level_world@.
+    fn level_is_raining(&self, level: LevelRef) -> Option<bool> {
+        let _ = level;
+        unimplemented!("Host::level_is_raining")
+    }
+    /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
+    /// API @API:level_world@.
+    fn level_is_thundering(&self, level: LevelRef) -> Option<bool> {
+        let _ = level;
+        unimplemented!("Host::level_is_thundering")
     }
     /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
     /// player, an armor stand or the dragon), or None for another kind or a
@@ -1667,6 +1755,44 @@ impl LevelRef {
     ) -> Option<Vec<EntityRef>> {
         host.level_entities_in(self, min, max)
     }
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    pub fn block_state(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block_state(self, pos)
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    pub fn block(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block(self, pos)
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    pub fn block_property(self, host: &dyn Host, pos: [i32; 3], key: &str) -> Option<String> {
+        host.level_block_property(self, pos, key)
+    }
+    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    pub fn is_loaded(self, host: &dyn Host, pos: [i32; 3]) -> bool {
+        host.level_is_loaded(self, pos)
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    pub fn height(self, host: &dyn Host) -> Option<(i32, i32)> {
+        host.level_height(self)
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    pub fn game_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_game_time(self)
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    pub fn day_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_day_time(self)
+    }
     /// Block-local outline or collision boxes with an empty context. Interaction,
     /// visual, occlusion and support shapes are not exposed. Returns None on a
     /// client, for a stale handle, or for a closed level. Unloaded blocks read
@@ -1679,6 +1805,37 @@ impl LevelRef {
         kind: NativeBlockShapeKind,
     ) -> Option<Vec<[f64; 6]>> {
         host.level_block_shape(self, pos, kind)
+    }
+    /// The world's seed (`WorldOptions.seed`), as `/seed` shows it. API
+    /// @API:level_world@.
+    pub fn seed(self, host: &dyn Host) -> Option<i64> {
+        host.level_seed(self)
+    }
+    /// The difficulty (`Level.getDifficulty`): `peaceful`, `easy`, `normal`
+    /// or `hard`, as `/difficulty` names it. API @API:level_world@.
+    pub fn difficulty(self, host: &dyn Host) -> Option<&'static str> {
+        host.level_difficulty(self)
+    }
+    /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
+    /// `/gamerule` queries it: None for an unknown rule. API @API:level_world@.
+    pub fn game_rule(self, host: &dyn Host, rule: &str) -> Option<GameRuleValue> {
+        host.level_game_rule(self, rule)
+    }
+    /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
+    /// `getThunderLevel`): both 0 in a level with no weather, as the Nether
+    /// and the End. API @API:level_world@.
+    pub fn weather(self, host: &dyn Host) -> Option<(f32, f32)> {
+        host.level_weather(self)
+    }
+    /// Whether it rains (`Level.isRaining`: a rain level above 0.2). API
+    /// @API:level_world@.
+    pub fn is_raining(self, host: &dyn Host) -> Option<bool> {
+        host.level_is_raining(self)
+    }
+    /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
+    /// API @API:level_world@.
+    pub fn is_thundering(self, host: &dyn Host) -> Option<bool> {
+        host.level_is_thundering(self)
     }
 }
 impl LivingRef {
