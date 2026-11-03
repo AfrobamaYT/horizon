@@ -151,6 +151,7 @@ mod tests {
             }
             pub mod mod_api {
                 pub struct NativeClientInfo;
+                pub struct NativeArmorHurt;
             }
             pub mod menu {
                 pub struct MenuButtonContext {

@@ -218,6 +218,7 @@ mod native_entity_moves;
 mod native_entity_refs;
 mod native_entity_remove;
 mod native_entity_riding;
+mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
@@ -2159,6 +2160,23 @@ impl Resources {
 }
 
 /// The equipment slot of `armor[index]`: head, chest, legs, feet.
+/// `doHurtEquipment`'s `durabilityDamage` before the cast to int: `max(1, damage / 4)`.
+pub(super) fn durability_damage(damage: f32) -> f32 {
+    (damage / 4.0).max(1.0)
+}
+/// The durability damage a mod left for `slot` (`NativeArmorHurt::new_damage`, cast to int
+/// as vanilla casts it); an entry it removed keeps vanilla's `fallback`.
+pub(super) fn answered_wear(
+    entries: &[horizon_client::mod_api::NativeArmorHurt],
+    slot: horizon_world::player_inventory::EquipmentSlot,
+    fallback: u32,
+) -> u32 {
+    entries
+        .iter()
+        .find(|e| e.slot == slot)
+        .map_or(fallback, |e| e.new_damage as u32)
+}
+
 pub(super) fn armor_slot(index: usize) -> horizon_world::player_inventory::EquipmentSlot {
     use horizon_world::player_inventory::EquipmentSlot;
     match index {
@@ -12866,33 +12884,79 @@ impl Game<'_> {
             .in_tag(source, "minecraft:is_fire");
         let mut broke = false;
         let mut broken_items = Vec::new();
-        let losses: Vec<Option<(u32, u32)>> = (0..4)
-            .map(|i| {
-                let stack = self.armor[i].clone()?;
-                let info = world_items!(self).get(&stack.item)?;
-                let component = |id| stack.data().and_then(|data| data.other(id));
-                // ItemStack.isDamageableItem: component removal and
-                // unbreakable are checked before enchantment RNG or hooks.
-                if stack.count == 0
-                    || !info.equip_damage_on_hurt
-                    || component("minecraft:unbreakable").is_some()
-                    || component("!minecraft:max_damage").is_some()
-                    || component("!minecraft:damage").is_some()
-                    || (fire && world_items!(self).resists_fire(&stack, &name))
-                {
-                    return None;
-                }
-                let max = match component("minecraft:max_damage") {
-                    Some(horizon_world::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
-                    _ => info.max_damage,
-                };
-                if max == 0 {
-                    return None;
-                }
-                let loss = self.wear(&stack, amount);
-                (loss > 0).then_some((loss, max))
-            })
-            .collect();
+        // The pieces that may wear, with their maximum (`doHurtEquipment`'s checks).
+        let eligible: [Option<(ItemStack, u32)>; 4] = std::array::from_fn(|i| {
+            let stack = self.armor[i].clone()?;
+            let info = world_items!(self).get(&stack.item)?;
+            let component = |id| stack.data().and_then(|data| data.other(id));
+            // ItemStack.isDamageableItem: component removal and
+            // unbreakable are checked before enchantment RNG or hooks.
+            if stack.count == 0
+                || !info.equip_damage_on_hurt
+                || component("minecraft:unbreakable").is_some()
+                || component("!minecraft:max_damage").is_some()
+                || component("!minecraft:damage").is_some()
+                || (fire && world_items!(self).resists_fire(&stack, &name))
+            {
+                return None;
+            }
+            let max = match component("minecraft:max_damage") {
+                Some(horizon_world::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
+                _ => info.max_damage,
+            };
+            if max == 0 {
+                return None;
+            }
+            Some((stack, max))
+        });
+        // ArmorHurtEvent: once for the pieces that would wear, a server player's only.
+        let mut amounts = [amount; 4];
+        if !horizon_client::mod_api::mods().is_empty()
+            && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
+        {
+            let mut entries: Vec<horizon_client::mod_api::NativeArmorHurt> = eligible
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| {
+                    Some(horizon_client::mod_api::NativeArmorHurt {
+                        slot: armor_slot(i),
+                        stack: e.as_ref()?.0.clone(),
+                        damage: durability_damage(damage),
+                        new_damage: durability_damage(damage),
+                    })
+                })
+                .collect();
+            let hit = horizon_client::health::HurtSource {
+                damage_type: &name,
+                causing: 0,
+                direct: 0,
+            };
+            let mut cancel = false;
+            self.native_armor_hurt(
+                Some(uuid),
+                player,
+                "minecraft:player",
+                &hit,
+                &mut entries,
+                &mut cancel,
+            );
+            if cancel {
+                return;
+            }
+            for (i, amount) in amounts.iter_mut().enumerate() {
+                *amount = answered_wear(&entries, armor_slot(i), *amount);
+            }
+        }
+        let losses: [Option<(u32, u32)>; 4] = std::array::from_fn(|i| {
+            let (stack, max) = eligible[i].clone()?;
+            // A mod may have put another stack in the slot: it is not worn by
+            // the piece that was decided on.
+            if amounts[i] == 0 || self.armor[i].as_ref() != Some(&stack) {
+                return None;
+            }
+            let loss = self.wear(&stack, amounts[i]);
+            (loss > 0).then_some((loss, max))
+        });
         for (index, (slot, loss)) in self.armor.iter_mut().zip(losses).enumerate() {
             if let (Some(stack), Some((amount, max))) = (slot.as_mut(), loss) {
                 stack.damage = stack.damage.saturating_add(amount).min(max);

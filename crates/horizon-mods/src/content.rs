@@ -233,6 +233,8 @@ struct BlockFile {
     wood_type: Option<String>,
     #[serde(default)]
     wall_block: Option<String>,
+    #[serde(default)]
+    base_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
@@ -279,6 +281,8 @@ pub struct Block {
     /// template is the matching wall sign and which has no item. The
     /// template's when unset.
     pub wall_block: Option<String>,
+    /// The block farmland turns into; the template's base when unset.
+    pub base_block: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -742,6 +746,7 @@ impl Content {
                 thickness: file.thickness,
                 wood_type: file.wood_type,
                 wall_block: file.wall_block,
+                base_block: file.base_block,
             };
             check_block(&block).map_err(|e| format!("{name}: {e}"))?;
             if block.item {
@@ -1028,6 +1033,14 @@ fn check_block(file: &Block) -> Result<(), String> {
             return Err("thickness sets the shapes, so a block has one or the other".into());
         }
         _ => {}
+    }
+    if let Some(base) = &file.base_block {
+        if file.template != "minecraft:farmland" {
+            return Err("base_block needs template minecraft:farmland".into());
+        }
+        if !namespaced_id(base) {
+            return Err("base_block is a block id, namespace:path".into());
+        }
     }
     // Every vanilla `SignBlock`'s id ends in `_sign`, and no other block's does.
     let sign = file.template.ends_with("_sign");
@@ -1320,6 +1333,7 @@ capabilities = ["registries"]
                 thickness: None,
                 wood_type: None,
                 wall_block: None,
+                base_block: None,
             }]
         );
         assert_eq!(content.items[0].id, "ruby:ruby");
@@ -1714,6 +1728,26 @@ capabilities = ["registries"]
                 format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    #[test]
+    fn farmland_base_requires_farmland_and_a_block_id() {
+        let block = |json: &str| {
+            hmod(
+                "farmland",
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/block/farm.json", json.as_bytes())],
+            )
+        };
+        let parsed =
+            block(r#"{"template":"minecraft:farmland","base_block":"ruby:soil"}"#).unwrap();
+        assert_eq!(parsed.blocks[0].base_block.as_deref(), Some("ruby:soil"));
+        for bad in [
+            r#"{"template":"minecraft:stone","base_block":"ruby:soil"}"#,
+            r#"{"template":"minecraft:farmland","base_block":"soil"}"#,
+        ] {
+            assert!(block(bad).unwrap_err().contains("base_block"));
         }
     }
 

@@ -63,6 +63,18 @@ use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
 
+/// One armor slot of an `ArmorHurtEvent`: the piece in `slot`, the durability
+/// damage vanilla works out for it (`damage`, `max(1, hit / 4)`) and the damage it
+/// takes (`new_damage`, starts equal; a mod may change it, below 1 for none; the
+/// game casts it to a whole number as vanilla does).
+#[derive(Clone, Debug)]
+pub struct NativeArmorHurt {
+    pub slot: EquipmentSlot,
+    pub stack: ItemStack,
+    pub damage: f32,
+    pub new_damage: f32,
+}
+
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 pub struct NativeCamera {
@@ -767,6 +779,34 @@ pub enum NativeExplosionInteraction {
     Block,
     /// Blocks break and drop by the `tnt_explosion_drop_decay` rule (`TNT`).
     Tnt,
+}
+
+/// Which volume slider a sound is played under (`SoundSource`). A sound source
+/// is the group a client's sound options control: an entity's is
+/// `Entity.getSoundSource`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSoundSource {
+    Master,
+    Music,
+    /// Jukeboxes and note blocks (`RECORDS`).
+    Records,
+    Weather,
+    /// Blocks (`BLOCKS`).
+    Blocks,
+    Hostile,
+    Neutral,
+    /// Players (`PLAYERS`).
+    Players,
+    Ambient,
+    Voice,
+    Ui,
+}
+
+impl NativeSoundSource {
+    /// Its position in vanilla's `SoundSource` order, as the network sends it.
+    pub fn index(self) -> usize {
+        self as usize
+    }
 }
 
 /// The empty-context block shape requested from a level.
@@ -1503,6 +1543,8 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
+mod entity_capability;
+pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
@@ -1513,12 +1555,12 @@ pub use resource::{ComponentId, ItemResource, ResourceHandler, move_resources};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{
-    Attached, BlockEntityProviders, BlockProvider, ItemProvider, Parts, Registrar,
+    Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, answered, ask_providers, install_parts, mark_game_thread, parts, place_provider,
-    providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, install_parts, mark_game_thread, parts,
+    place_provider, providers, resolve_parts,
 };
 
 mod generated {

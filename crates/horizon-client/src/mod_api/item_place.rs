@@ -440,7 +440,9 @@ impl ItemPlace {
     ) -> Option<Capability<T>> {
         let stack = self.stack(host)?;
         let mut game = None;
-        let parts = super::providers(true, key.name, host, |_| Some(&*stack.item));
+        let parts = super::providers(super::ProvidedBy::Item, key.name, host, |_| {
+            Some(&*stack.item)
+        });
         super::answered(
             super::ask_providers::<super::ItemProvider<T>, T>(
                 parts,
