@@ -214,21 +214,26 @@ mod native_entity_data;
 mod native_entity_motion;
 mod native_entity_moves;
 mod native_entity_refs;
+mod native_entity_state;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
+mod native_item_entity_refs;
 mod native_item_fluids;
 mod native_item_places;
 mod native_level_effects;
+mod native_level_events;
 mod native_level_refs;
 mod native_level_world;
 mod native_lifecycle;
 mod native_living_refs;
+mod native_menu_refs;
 mod native_menus;
 mod native_mob_draw;
+mod native_mob_navigation;
 mod native_mob_refs;
 mod native_mobs;
 mod native_motion;
@@ -236,6 +241,8 @@ mod native_mounts;
 mod native_net;
 mod native_panel;
 mod native_panel_recipes;
+mod native_player_cooldowns;
+mod native_player_modes;
 mod native_projectiles;
 mod native_quick_move;
 mod native_recipes;
@@ -1325,6 +1332,47 @@ impl LevelAccess for GameLevel<'_> {
                 note,
                 &mut cancel,
             );
+        }
+        !cancel
+    }
+    fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
+        use horizon_client::mod_api::NativeNoteInstrument;
+        if !self.native_authoritative || crate::mod_api::mods().is_empty() {
+            return true;
+        }
+        let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
+        let mut played = *note;
+        let mut cancel = false;
+        self.native_note_block_play(
+            self.dimension,
+            pos,
+            &mut played_instrument,
+            &mut played,
+            &mut cancel,
+        );
+        *instrument = played_instrument as u8;
+        // A note out of 0 to 24 keeps the block's own.
+        if (0..=24).contains(&played) {
+            *note = played;
+        }
+        !cancel
+    }
+    fn allow_portal_spawn(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        shape: &horizon_world::level::PortalShape,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative && !crate::mod_api::mods().is_empty() {
+            let b = shape.bottom_left;
+            let shape = horizon_client::mod_api::NativePortalShape {
+                x_axis: shape.x_axis,
+                bottom_left: [b.x, b.y, b.z],
+                width: shape.width,
+                height: shape.height,
+            };
+            self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
         }
         !cancel
     }
@@ -3466,15 +3514,13 @@ impl Game<'_> {
             return vec![std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i])];
         }
         let f = self.res.facts().get(state);
-        let o = if f.outline_offset {
-            self.pack
-                .context
-                .tables
-                .offset(state, pos[0], pos[2])
-                .unwrap_or([0.0; 3])
-        } else {
-            [0.0; 3]
-        };
+        let o = perspective::outline_offset(
+            &self.pack.context.tables,
+            state,
+            pos[0],
+            pos[2],
+            f.outline_offset,
+        );
         let base = [
             f64::from(pos[0]) + o[0],
             f64::from(pos[1]) + o[1],
@@ -10032,6 +10078,10 @@ impl Game<'_> {
         let brewed = std::mem::take(&mut menu.brewed);
         let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let equipped = std::mem::take(&mut menu.equipped);
+        let item_crafted = std::mem::take(&mut menu.item_crafted);
+        for (_, stack) in &item_crafted {
+            self.tutorial_get_item(Some(stack));
+        }
         for (i, stack) in after.into_iter().enumerate() {
             if let Some(g) = game_of[i] {
                 *self.slot_mut(g) = stack;
@@ -10758,6 +10808,7 @@ impl Game<'_> {
                 // (native_item_crafted).
                 let player = self.native_acting_id();
                 self.native_item_crafted(player, &format!("minecraft:{recipe}"), &taken);
+                self.tutorial_get_item(Some(&taken));
                 self.award_stat("crafted", &made.0, made.1 as i32);
                 self.award_crafted(&[(format!("minecraft:{recipe}"), ingredients)]);
                 if !shift || crafted >= 64 {
@@ -13523,7 +13574,10 @@ impl Game<'_> {
                 hit.pos[2] + hit.face[2],
             ];
             if self.can_place_used_fire(target) {
-                if !self.try_light_portal(target)? {
+                // With mods, the fire goes in and `BaseFireBlock.onPlace`
+                // fills the frame, as vanilla's order is, so that
+                // `portal_spawn` is asked once, where vanilla asks it.
+                if !horizon_client::mod_api::mods().is_empty() || !self.try_light_portal(target)? {
                     self.place_used_fire(target)?;
                 }
                 let sound = horizon_client::items::fire_starter_sound(item == "fire_charge");
@@ -15530,14 +15584,16 @@ impl Game<'_> {
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
         self.save.save_forced_chunks(&self.streaming.forced)?;
-        self.streaming.save(&mut self.world, wait);
+        let protos = self.streaming.prepare_save(&mut self.world, wait);
+        self.native_proto_snapshots(&protos);
+        self.streaming.finish_save(protos, wait);
         let keys: Vec<_> = self.world.modified.iter().copied().collect();
-        self.native_full_chunk_saves(&keys);
         self.save.save_attachments(&self.world.attachments)?;
         for key in &keys {
             self.world.modified.remove(key);
         }
         let chunks = self.with_entities(keys.iter().filter_map(|k| self.world.chunks.get(k)));
+        self.native_full_chunk_snapshots(&chunks);
         self.save
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         // Prepare entities while the chunk writer runs, then use one barrier.
@@ -15545,6 +15601,9 @@ impl Game<'_> {
         self.save_raids();
         if wait {
             self.save.flush()?;
+        }
+        if !horizon_client::mod_api::mods().is_empty() {
+            self.native_level_save(self.dim.id());
         }
         Ok(())
     }
@@ -16269,7 +16328,30 @@ impl Game<'_> {
     /// The frame shows the title's panorama, not a level: the title screen, or a
     /// LevelLoadingScreen (Reason.OTHER), which draws it too.
     fn shows_panorama(&self) -> bool {
-        self.title.is_some() || self.remote_loading()
+        // The two cases that always had one: the title screen and waiting on
+        // a server. Left exactly as they were.
+        self.title.is_some() || self.remote_loading() || self.screen_wants_panorama()
+    }
+    /// Whether the screen on top asked for the panorama through
+    /// [`horizon_client::screen_draw::Backdrop`].
+    ///
+    /// This is the opt-in path for Horizon's own screens: a screen sets its
+    /// `backdrop` and the renderer draws the panorama behind it, instead of
+    /// every such screen needing its own branch in `shows_panorama`. Vanilla
+    /// screens leave the backdrop at `None` and so never reach this.
+    ///
+    /// Only in a menu: in a world the panorama would replace the world the
+    /// player is standing in, which is not what any of these screens want.
+    fn screen_wants_panorama(&self) -> bool {
+        use horizon_client::screen_draw::Backdrop;
+        if self.player.is_some() {
+            return false;
+        }
+        self.ui
+            .options
+            .pack_screen
+            .as_ref()
+            .is_some_and(|p| p.backdrop == Backdrop::Panorama)
     }
     /// `LevelLoadingScreen.extractBackground`.
     pub(super) fn draw_level_loading_background(
@@ -16896,9 +16978,11 @@ impl Game<'_> {
         let plan = horizon_client::spans::time("streaming_plan", || {
             self.streaming.plan_update(&mut self.world)
         });
-        self.native_full_chunk_saves(plan.unloading());
+        let (commit, protos) = self.streaming.prepare_commit(&mut self.world, plan);
+        self.native_proto_snapshots(&protos);
+        self.streaming.submit_protos(protos);
         let (uploads, unloaded) = horizon_client::spans::time("streaming", || {
-            self.streaming.finish_update(&mut self.world, plan)
+            self.streaming.complete_commit(&mut self.world, commit)
         });
         self.streaming.extra.truncate(areas);
         let dirty: Vec<_> = unloaded
@@ -16907,6 +16991,7 @@ impl Game<'_> {
             .cloned()
             .collect();
         let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
+        self.native_full_chunk_snapshots(&modified);
         if !modified.is_empty()
             && let Err(e) = horizon_client::spans::time("save_chunks", || {
                 self.save
@@ -20070,10 +20155,15 @@ fn gameplay_tables(
     progress: &Progress,
 ) -> std::result::Result<GameplayTables, String> {
     let facts_step = startup::step("core.block_facts");
-    let behaviour_json: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(root.join("block-behaviours.json")).map_err(|e| e.to_string())?,
-    ))
-    .map_err(|e| e.to_string())?;
+    // Read whole, then parsed from the buffer: `serde_json::from_reader`
+    // pulls through a `BufReader` and is measurably slower on a file this
+    // size than one read plus `from_slice`, which is how `BlockFacts` next
+    // door already reads its own. Same value either way.
+    let behaviour_bytes =
+        std::fs::read(root.join("block-behaviours.json")).map_err(|e| e.to_string())?;
+    let behaviour_json: serde_json::Value =
+        serde_json::from_slice(&behaviour_bytes).map_err(|e| e.to_string())?;
+    drop(behaviour_bytes);
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
@@ -21309,6 +21399,12 @@ impl Loading {
         self.menu.handoff(&mut game);
         game.apply_settings();
         game.previous = Instant::now();
+        // Minecraft.onGameLoadFinished: a start that made it this far is clean.
+        game.settings.file.set(
+            "startedCleanly",
+            horizon_client::options_file::V::Bool(true),
+        );
+        game.settings.save(&Game::options_path());
         log::info!(
             "Horizon: startup handoff {} ms (renderer {} ms, start_game {} ms)",
             handoff_at.elapsed().as_millis(),
@@ -21411,6 +21507,25 @@ fn missing_resources(root: &std::path::Path) -> Option<String> {
         shown.display(),
         horizon_client::no_resources::DOWNLOAD_URL
     ))
+}
+
+/// `Minecraft.<init>`: `startedCleanly` left false means the previous start
+/// died before `onGameLoadFinished`. Vanilla then leaves fullscreen
+/// ("resetting fullscreen mode") so a start that died on the display mode can
+/// come back; the resource packs are rolled back only when their load fails
+/// (`rollbackResourcePacks`), not here. True when the last start was unclean.
+fn unclean_start_recovery(settings: &mut Settings) -> bool {
+    // Vanilla's field defaults true: only an explicit `false` is an unclean
+    // start; an options file that never had the key is not one.
+    let unclean = matches!(
+        settings.file.get("startedCleanly"),
+        Some(horizon_client::options_file::V::Bool(false))
+    );
+    if unclean {
+        settings.fullscreen = false;
+        settings.file.fullscreen_resolution = None;
+    }
+    unclean
 }
 
 /// The ordinary launch: load the resources on a worker while the window shows
@@ -21549,7 +21664,21 @@ pub fn run_with() -> Result<()> {
     }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models();
-    let early_settings = Settings::load(&Game::options_path());
+    let mut early_settings = Settings::load(&Game::options_path());
+    // Minecraft.<init>: read the last start's flag, then mark this one as not
+    // finished until onGameLoadFinished. A dedicated server has no options.txt.
+    if options.execution_role.is_client() {
+        if unclean_start_recovery(&mut early_settings) {
+            log::warn!(
+                "Detected unexpected shutdown during last game startup: resetting fullscreen mode"
+            );
+        }
+        early_settings.file.set(
+            "startedCleanly",
+            horizon_client::options_file::V::Bool(false),
+        );
+        early_settings.save(&Game::options_path());
+    }
     // Minecraft's constructor opens the narrator; a server has none.
     if options.execution_role.is_client() {
         narrator::start(&early_settings);
@@ -21612,7 +21741,15 @@ pub fn run_with() -> Result<()> {
         None,
         None,
     )?;
-    if let Some(game) = game {
+    if let Some(mut game) = game {
+        // Minecraft.onGameLoadFinished: a start that made it this far is clean.
+        if game.options.execution_role.is_client() {
+            game.settings.file.set(
+                "startedCleanly",
+                horizon_client::options_file::V::Bool(true),
+            );
+            game.settings.save(&Game::options_path());
+        }
         run_event_loop(game)?;
     }
     Ok(())
@@ -21937,6 +22074,38 @@ mod tests {
         // ticks, and a frozen clock (0) does too.
         assert_eq!(autosave_interval(0.5), 150);
         assert_eq!(autosave_interval(0.0), 100);
+    }
+
+    /// `Minecraft.<init>`: only an explicit `startedCleanly: false` is an
+    /// unclean start, and it leaves fullscreen; the packs stay selected.
+    #[test]
+    fn an_unclean_start_leaves_fullscreen_and_keeps_the_packs() {
+        let fullscreen = || Settings {
+            fullscreen: true,
+            resource_packs: vec!["pack".into()],
+            ..Default::default()
+        };
+        // The key absent (a first boot) is a clean start.
+        let mut settings = fullscreen();
+        assert!(!unclean_start_recovery(&mut settings));
+        assert!(settings.fullscreen);
+        let mut settings = fullscreen();
+        settings.file.fullscreen_resolution = Some("1920x1080@60:24".into());
+        settings.file.set(
+            "startedCleanly",
+            horizon_client::options_file::V::Bool(false),
+        );
+        assert!(unclean_start_recovery(&mut settings));
+        assert!(!settings.fullscreen);
+        assert_eq!(settings.file.fullscreen_resolution, None);
+        assert_eq!(settings.resource_packs, ["pack"]);
+        let mut settings = fullscreen();
+        settings.file.set(
+            "startedCleanly",
+            horizon_client::options_file::V::Bool(true),
+        );
+        assert!(!unclean_start_recovery(&mut settings));
+        assert!(settings.fullscreen);
     }
 
     /// `NativeScreenView.id` (the `screen_render_post` hook) is a mod's
