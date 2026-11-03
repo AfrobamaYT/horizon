@@ -345,10 +345,6 @@
       "target": "horizon_client::game::native_motion::Game<'_>::native_push_player", "side": "client"
     },
     {
-      "name": "set_flying_speed",
-      "target": "horizon_client::game::native_motion::Game<'_>::native_set_flying_speed", "side": "server"
-    },
-    {
       "name": "net_send_to_player",
       "target": "horizon_client::game::native_net::Game<'_>::native_net_send_to_player", "side": "server"
     },

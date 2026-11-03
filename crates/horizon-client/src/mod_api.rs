@@ -1111,7 +1111,7 @@ impl ApplyEffectTickEvent<'_> {
     }
 }
 
-/// A player's server-side abilities.
+/// A player's server-side abilities (`Abilities`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativePlayerAbilities {
@@ -1127,7 +1127,7 @@ pub struct NativePlayerAbilities {
     pub may_build: bool,
     /// Flying speed.
     pub fly_speed: f32,
-    /// Walking speed. Horizon currently keeps no per-player value; this is 0.1.
+    /// Walking speed (`Abilities.walkingSpeed`, vanilla's 0.1).
     pub walk_speed: f32,
 }
 

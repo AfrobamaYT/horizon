@@ -680,6 +680,24 @@ pub(super) mod tests {
             );
             let abilities = game.native_player_abilities(player).unwrap();
             assert!(!abilities.invulnerable && !abilities.may_fly && !abilities.instabuild);
+            // A write sticks, is refused for a speed that is not a number, and a
+            // mode change sets the flags again (the speeds stay).
+            let mut written = abilities;
+            written.may_build = false;
+            written.walk_speed = 0.2;
+            written.fly_speed = 0.1;
+            assert!(game.native_player_set_abilities(player, written));
+            assert_eq!(game.native_player_abilities(player), Some(written));
+            assert_eq!(game.native_player_may_build(player), Some(false));
+            let mut bad = written;
+            bad.walk_speed = f32::NAN;
+            assert!(!game.native_player_set_abilities(player, bad));
+            assert_eq!(game.native_player_abilities(player), Some(written));
+            assert!(game.native_player_set_game_mode(player, GameMode::Creative));
+            let abilities = game.native_player_abilities(player).unwrap();
+            assert!(abilities.may_build && abilities.instabuild && abilities.may_fly);
+            assert_eq!((abilities.walk_speed, abilities.fly_speed), (0.2, 0.1));
+            assert!(game.native_player_set_game_mode(player, GameMode::Survival));
             let mut stale = player;
             stale.entity = horizon_client::mod_api::EntityRef::new(
                 horizon_client::mod_api::NativeWorldEpoch::new(0),
@@ -708,10 +726,20 @@ pub(super) mod tests {
                     "minecraft:stone"
                 );
                 assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+                // In the player's own turn the write reaches the body as well.
+                let mut a = game.native_player_abilities(player).unwrap();
+                a.may_fly = true;
+                a.walk_speed = 0.3;
+                assert!(game.native_player_set_abilities(player, a));
+                assert_eq!(game.native_player_abilities(player), Some(a));
+                assert!(game.player.as_ref().unwrap().may_fly);
                 assert!(other.position(game).is_none());
                 assert!(game.native_living(other).is_none());
             })
             .unwrap();
+            // The turn's write is stored in the guest's record.
+            let stored = host.hub.guest(12).unwrap().abilities;
+            assert!(stored.may_fly && stored.walking_speed == 0.3);
             let swap = game.enter_guest(&mut host, 12).unwrap();
             game.lan = Some(host);
             assert!(game.native_entity(12).is_some());

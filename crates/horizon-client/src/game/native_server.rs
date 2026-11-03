@@ -12,7 +12,7 @@ use super::{Dim, Game, commands::execute, lan::LanHost};
 pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     items::ItemStack,
-    lan::{data::component_nbt, guest::Guest},
+    lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
     motion::PlayerMotion,
     text::Text,
@@ -33,6 +33,11 @@ pub(crate) struct NativeSidebar {
 
 /// The objective a mod's sidebar is sent as: the player's client only; the
 /// server's scoreboard never holds it.
+/// The fastest speed a mod may store in a player's abilities: 1000 times vanilla's 0.05 flying speed. It
+/// only stops a stray value from throwing the player millions of blocks in a tick; past about 0.45 a
+/// flying player moves more than 10 blocks a tick, and anyone but the single-player owner then meets the
+/// server's moved-too-quickly check (`ServerGamePacketListenerImpl.handleMovePlayer`).
+const ABILITY_SPEED_MAX: f32 = 50.0;
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
 
 /// The brigadier parser of an argument kind, and its properties.
@@ -206,6 +211,8 @@ enum PlayerRead<'a> {
     Acting {
         mode: i32,
         body: Option<&'a PlayerMotion>,
+        /// The player's stored abilities, when it is a server player's turn.
+        abilities: Option<PlayerAbilities>,
     },
     Guest(&'a Guest),
 }
@@ -223,8 +230,13 @@ impl PlayerRead<'_> {
     }
 
     fn may_build(&self) -> bool {
-        let mode = self.mode();
-        mode == 0 || mode == 1
+        match self {
+            Self::Acting {
+                abilities: Some(a), ..
+            } => a.may_build,
+            Self::Guest(guest) => guest.abilities.may_build,
+            Self::Acting { mode, .. } => *mode < 2,
+        }
     }
 
     fn body(&self) -> Option<&PlayerMotion> {
@@ -248,34 +260,32 @@ impl PlayerRead<'_> {
     }
 
     fn abilities(&self) -> Option<NativePlayerAbilities> {
-        let (invulnerable, flying, may_fly, fly_speed) = match self {
-            Self::Acting { body, .. } => {
+        let a = match self {
+            Self::Acting {
+                abilities: Some(a), ..
+            } => *a,
+            Self::Acting { mode, body, .. } => {
+                // No server turn: what the mode gives, with the body's flight.
                 let body = body.as_ref()?;
-                (
-                    body.invulnerable,
-                    body.flying,
-                    body.may_fly,
-                    body.flying_speed,
-                )
+                let mut a = PlayerAbilities {
+                    flying: body.flying,
+                    flying_speed: body.flying_speed,
+                    ..Default::default()
+                };
+                a.update_for_mode(*mode);
+                a.flying = body.flying;
+                a
             }
-            Self::Guest(guest) => {
-                let flags = guest.ability_flags();
-                (
-                    flags & 1 != 0,
-                    flags & 2 != 0,
-                    flags & 4 != 0,
-                    guest.flying_speed,
-                )
-            }
+            Self::Guest(guest) => guest.abilities,
         };
         Some(NativePlayerAbilities {
-            invulnerable,
-            flying,
-            may_fly,
-            instabuild: self.creative(),
-            may_build: self.may_build(),
-            fly_speed,
-            walk_speed: 0.1,
+            invulnerable: a.invulnerable,
+            flying: a.flying,
+            may_fly: a.may_fly,
+            instabuild: a.instabuild,
+            may_build: a.may_build,
+            fly_speed: a.flying_speed,
+            walk_speed: a.walking_speed,
         })
     }
 }
@@ -301,6 +311,7 @@ impl Game<'_> {
                 PlayerRead::Acting {
                     mode: self.mode_id(),
                     body: self.player.as_ref(),
+                    abilities: self.acting_abilities,
                 },
                 self.lan_acting_entity?,
             ));
@@ -325,6 +336,7 @@ impl Game<'_> {
                 PlayerRead::Acting {
                     mode: self.mode_id(),
                     body: Some(body),
+                    abilities: self.acting_abilities,
                 },
                 body.entity_id as u32,
             ));
@@ -363,6 +375,49 @@ impl Game<'_> {
         }) && changed
     }
 
+    /// Stores a server player's `Abilities` and tells their client
+    /// (`ServerPlayer.onUpdateAbilities`). They stay as written until the
+    /// player's game mode changes (`GameType.updatePlayerAbilities`), and are
+    /// saved with the player. The speeds are cut to 0 to `ABILITY_SPEED_MAX`;
+    /// a speed that is not a number refuses the write. Returns false for a
+    /// stale or unavailable player, another player during a swap, and a speed
+    /// that is not a number.
+    pub(super) fn native_player_set_abilities(
+        &mut self,
+        player: PlayerRef,
+        abilities: NativePlayerAbilities,
+    ) -> bool {
+        if !abilities.fly_speed.is_finite() || !abilities.walk_speed.is_finite() {
+            return false;
+        }
+        let stored = PlayerAbilities {
+            invulnerable: abilities.invulnerable,
+            flying: abilities.flying,
+            may_fly: abilities.may_fly,
+            instabuild: abilities.instabuild,
+            may_build: abilities.may_build,
+            flying_speed: abilities.fly_speed.clamp(0.0, ABILITY_SPEED_MAX),
+            walking_speed: abilities.walk_speed.clamp(0.0, ABILITY_SPEED_MAX),
+        };
+        if self.native_player_ref(player.uuid()) != Some(player) {
+            return false;
+        }
+        let mut stored_here = false;
+        self.native_as_player(player.uuid(), |game| {
+            let Some(slot) = game.acting_abilities.as_mut() else {
+                return;
+            };
+            *slot = stored;
+            if let Some(body) = game.player.as_mut() {
+                body.invulnerable = stored.invulnerable;
+                body.may_fly = stored.may_fly;
+                body.flying = stored.flying;
+                body.flying_speed = stored.flying_speed;
+            }
+            stored_here = true;
+        }) && stored_here
+    }
+
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_creative(&self, player: PlayerRef) -> Option<bool> {
         Some(self.player_handle_read(player)?.creative())
@@ -395,7 +450,6 @@ impl Game<'_> {
     }
 
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
-    /// Horizon currently keeps no per-player walk speed and sends 0.1.
     pub(super) fn native_player_abilities(
         &self,
         player: PlayerRef,
@@ -1265,7 +1319,7 @@ mod tests {
     #[test]
     fn player_reads_use_guest_mode_and_abilities() {
         let mut guest = player_guest();
-        guest.flying_speed = 0.08;
+        guest.abilities.flying_speed = 0.08;
         let read = PlayerRead::Guest(&guest);
         assert_eq!(read.mode(), 0);
         assert_eq!(
@@ -1286,7 +1340,8 @@ mod tests {
             })
         );
         guest.game_mode = 1;
-        guest.flying = true;
+        guest.abilities.update_for_mode(1);
+        guest.abilities.flying = true;
         let read = PlayerRead::Guest(&guest);
         assert_eq!(read.mode(), 1);
         assert_eq!(
@@ -1302,6 +1357,7 @@ mod tests {
             })
         );
         guest.game_mode = 3;
+        guest.abilities.update_for_mode(3);
         let abilities = PlayerRead::Guest(&guest).abilities().unwrap();
         assert!(!abilities.may_build && !abilities.instabuild && abilities.may_fly);
     }

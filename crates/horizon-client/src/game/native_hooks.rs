@@ -515,8 +515,7 @@
 //!
 //! API 106 adds data pack files for the tables a native mod contributes (`native_data_pack_files`), on a world's first open and on every `/reload`.
 //!
-//! API 105 adds a push for the local player and a player's flying speed (`native_push_player`,
-//! `native_set_flying_speed`).
+//! API 105 adds a push for the local player (`native_push_player`).
 //!
 //! API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`, the
 //! `ScreenEvent.KeyPressed.Pre` point, with the screen, vanilla's key name, whether it is an
