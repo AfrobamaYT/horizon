@@ -1601,6 +1601,7 @@ impl B {
                         parent: m.id,
                         partner: id,
                         llama: None,
+                        experience_inline: false,
                     });
                     if brain_mut(m).kind == Kind::Sniffer {
                         // Sniffer.spawnChildFromBreeding: the experience

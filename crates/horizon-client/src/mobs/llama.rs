@@ -346,8 +346,7 @@ mod tests {
         });
     }
     #[test]
-    fn breeding_experience_always_waits_for_the_game() {
-        // The game decides the event and gamerule before drawing experience.
+    fn breeding_experience_is_drawn_in_the_goal_unless_a_mod_must_decide() {
         let mut kind = None;
         super::super::world::with_test_world(&[], |_, types| {
             kind = Some(std::sync::Arc::new(types.types["minecraft:llama"].clone()));
@@ -364,12 +363,16 @@ mod tests {
         };
         let partner = [llama(2, 2.5).seen(None)];
         super::super::world::with_test_world(&partner, |w, _| {
-            for ask_mods in [false, true] {
+            for (ask_mods, mob_drops) in
+                [(false, true), (true, true), (false, false), (true, false)]
+            {
                 let w = MobWorld {
                     ask_mods,
+                    mob_drops,
                     ..w.clone()
                 };
                 let mut m = llama(1, 0.5);
+                m.random = LegacyRandom::new(0);
                 let mut events = Vec::new();
                 let mut goals = std::mem::take(&mut m.ai.goals);
                 let mut lr = LegacyRandom::new(0);
@@ -380,6 +383,13 @@ mod tests {
                 };
                 for _ in 0..80 {
                     goals.tick(&mut m, &mut cx);
+                    if cx
+                        .events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::Breed { .. }))
+                    {
+                        break;
+                    }
                 }
                 assert!(
                     events.iter().any(|e| matches!(
@@ -387,15 +397,30 @@ mod tests {
                         MobEvent::Breed {
                             parent: 1,
                             partner: 2,
-                            llama: Some(_)
+                            llama: Some(_),
+                            ..
                         }
                     )),
                     "the pair breeds a llama"
                 );
-                let experience = events
-                    .iter()
-                    .any(|e| matches!(e, MobEvent::Experience { .. }));
-                assert!(!experience, "asking mods: {ask_mods}");
+                let experience = events.iter().find_map(|e| match e {
+                    MobEvent::Experience { amount, .. } => Some(*amount),
+                    _ => None,
+                });
+                assert_eq!(
+                    m.random.state(),
+                    if !ask_mods && mob_drops {
+                        77_392_660_919_880
+                    } else {
+                        49_533_068_356_881
+                    },
+                    "asking mods: {ask_mods}, drops: {mob_drops}"
+                );
+                assert_eq!(
+                    experience,
+                    (!ask_mods && mob_drops).then_some(2),
+                    "asking mods: {ask_mods}, drops: {mob_drops}"
+                );
             }
         });
     }

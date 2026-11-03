@@ -1870,6 +1870,8 @@ pub enum MobEvent {
         /// A llama's baby, drawn from the parent's random as
         /// `Llama.getBreedOffspring` does.
         llama: Option<Box<super::mobs::llama::Offspring>>,
+        /// Whether the goal already handled the experience draw.
+        experience_inline: bool,
     },
     /// Replace a block by name (sheep turning grass to dirt), optionally with
     /// the destroy effect.
