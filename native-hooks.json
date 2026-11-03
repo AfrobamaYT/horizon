@@ -511,6 +511,7 @@
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_server_stopping",
       "neoforge": "ServerStoppingEvent",
+      "fabric": "ServerLifecycleEvents.SERVER_STOPPING",
       "side": "server",
       "cancellable": false,
       "mod_api": {
@@ -521,6 +522,7 @@
       "name": "server_tick",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_server_tick",
+      "fabric": ["ServerTickEvents.START_SERVER_TICK", "ServerTickEvents.END_SERVER_TICK"],
       "mod_api": {
         "contract": "listen"
       }
@@ -529,6 +531,7 @@
       "name": "level_tick_pre",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_level_tick_pre",
+      "fabric": "ServerTickEvents.START_LEVEL_TICK",
       "mod_api": {
         "contract": "listen"
       }
@@ -537,6 +540,7 @@
       "name": "level_tick_post",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_level_tick_post",
+      "fabric": "ServerTickEvents.END_LEVEL_TICK",
       "mod_api": {
         "contract": "listen"
       }
