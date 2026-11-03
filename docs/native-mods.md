@@ -149,7 +149,8 @@ own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`)
 
 API 20 adds buttons, tooltips and item icons on mod screens: `native_screen_click` and `native_screen_tooltip` (the client), `native_menu_button`
 (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `native_data`, `native_block`,
-`native_block_property`, `native_insert_item` and `native_cursor`. Bundles that use them need `"hooks": 20`.
+`native_block_property`, `native_insert_item` and `native_cursor`. Bundles that use them need `"hooks": 20`. `native_insert_item` was
+removed with the Parts core work (#41): a mod inserts through the block's item capability, `level.capability(host, &ITEMS, pos, side)`.
 
 API 21 adds what a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
 click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it: nothing
@@ -638,6 +639,8 @@ once; other gameplay spawns when the next tick starts, and a cancelled one is re
 API 48 adds [a block's items](#a-blocks-items) for server mods, what a pipe or a machine needs to pull from other blocks: `native_container_slots`, `native_extract_item`
 and `native_move_items`, and `native_dimension` for a machine's tick to name its level. `native_insert_item` now goes one item at a time, so it no longer overfills a slot,
 leaves a client's copy of the world alone, and can't reach a machine's own slots during its tick, where what went in was lost. Bundles that use the new helpers need `"hooks": 48`.
+`native_container_slots`, `native_extract_item`, `native_move_items` and `native_insert_item` were removed with the Parts core work (#41):
+the item capability and `move_resources` replace them ([a block's items](#a-blocks-items)).
 
 API 49 adds what a server mod needs for a public server's screens: `native_sidebar(uuid, sidebar)` shows one
 player a sidebar of up to 15 lines (a text, and one where the score would be) that only their client holds (the
@@ -3120,12 +3123,14 @@ an entity's or an item's slot into that container's other slots (`forHandlerInde
 with an `exchange` of one. An exchange inside one of two backpacks is done in one of them: that one is rewritten
 holding the change and splits off, and the other stays as it was.
 
-A stack's components change the same way, where it lives (NeoForge's `ItemResource.with`): `resource.component(id)`
-reads the stack's own value of a component as saved (`minecraft:damage`, `minecraft:custom_data`), and
-`resource.with_component(id, value)` and `resource.without_component(id)` make the changed item, which an exchange of
-one puts in place: `place.exchange(host, tx, &place.resource(host)?.with_component("minecraft:damage",
-Tag::Int(5)), 1)` damages one sword of a stack, splitting it off. Dropping a component's own value puts the item's
-default back; removing a component the item has by default isn't modelled.
+A stack's components change the same way, where it lives (NeoForge's `ItemResource.with` and `without`). A component
+is named by a `ComponentId`, checked once as a namespaced id (`ComponentId::new("minecraft:damage")`, None for
+`Damage` or `!minecraft:food`). `resource.component(&id)` reads the stack's own value in its patch as saved;
+`resource.with_component(&id, value)` sets it, and `resource.without_component(host, &id)` removes the component as
+vanilla's `PatchedDataComponentMap.remove` does: the stack's own value goes, and where the item has the component by
+default (`host.item_has_component(item, id)`) a removal (`"!minecraft:max_damage": {}`) is recorded in the patch.
+An exchange of one puts the changed item in place: `place.exchange(host, tx, &place.resource(host)?.with_component(&damage,
+Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
