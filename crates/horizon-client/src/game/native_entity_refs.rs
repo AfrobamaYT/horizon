@@ -814,17 +814,36 @@ pub(super) mod tests {
             game.leave_guest(&mut host, nested);
             game.leave_guest(&mut host, swap);
             assert!(game.lan_guest_swaps.is_empty());
-            // A creative player forced into the default mode (survival) on joining
-            // gets that mode's abilities, not creative flight and instabuild.
-            host.hub.config.force_game_mode = true;
+            // A player saved in creative (game mode 1, mayfly and instabuild)
+            // joins again: without force they stay creative; forced into the
+            // default mode (survival) they get its abilities.
+            let root = std::env::temp_dir().join(format!("abilities-force-{}", std::process::id()));
+            game.world_root = root.clone();
             let g = host.hub.guest_mut(13).unwrap();
             g.game_mode = 1;
             g.abilities.update_for_mode(1);
-            g.abilities.walking_speed = 0.2;
-            game.lan_guest_joined(&mut host, 13, &[], [0.0, 64.0, 0.0]);
-            let g = host.hub.guest(13).unwrap();
-            assert_eq!(g.game_mode, 0);
-            assert!(!g.abilities.may_fly && !g.abilities.instabuild && g.abilities.may_build);
+            assert!(g.abilities.may_fly && g.abilities.instabuild);
+            horizon_client::lan::playerdata::save(g, &root);
+            let joined = |game: &mut super::super::Game<'_>,
+                          host: &mut super::super::lan::LanHost,
+                          force| {
+                host.hub.config.default_game_mode = 0;
+                host.hub.config.force_game_mode = force;
+                let g = host.hub.guest_mut(13).unwrap();
+                g.game_mode = 0;
+                g.abilities = Default::default();
+                game.lan_guest_joined(host, 13, &[], [0.0, 64.0, 0.0]);
+                let g = host.hub.guest(13).unwrap();
+                (
+                    g.game_mode,
+                    g.abilities.may_fly,
+                    g.abilities.instabuild,
+                    g.abilities.may_build,
+                )
+            };
+            assert_eq!(joined(game, &mut host, false), (1, true, true, true));
+            assert_eq!(joined(game, &mut host, true), (0, false, false, true));
+            let _ = std::fs::remove_dir_all(root);
             game.lan = Some(host);
         });
     }
