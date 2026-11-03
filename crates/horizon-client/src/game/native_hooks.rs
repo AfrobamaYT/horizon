@@ -872,8 +872,9 @@ use super::{
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
     self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood, NativeProgressType,
-    NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
+    NativeHandRender, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
+    NativeProgressType, NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse,
+    WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
@@ -2725,29 +2726,17 @@ impl Game<'_> {
             text,
         );
     }
-    /// Before one first-person hand and its displayed stack are drawn (RenderHandEvent).
-    /// Equip progress is the inverse arm height, including the item's swap animation scale.
-    /// Cancel skips that hand's default geometry, including its map and arm geometry.
-    /// It only hides: the hook has no way to draw a replacement.
+    /// Before one first-person hand, item, map or empty arm is drawn
+    /// (`RenderHandEvent`, client). Adjust `render`'s pose or cancel the
+    /// default geometry. Equip progress includes the item's swap scale.
+    /// Unlike NeoForge, this does not expose the full pose stack, player
+    /// render state or submission collector, and cannot draw a replacement.
     pub(super) fn native_render_hand(
         &self,
-        hand: horizon_client::first_person::Hand,
-        stack: Option<&ItemStack>,
-        partial: f32,
-        swing: f32,
-        equip: f32,
+        render: &mut NativeHandRender<'_>,
         canceled: &mut bool,
     ) {
-        mod_api::dispatch_render_hand(
-            self,
-            mod_api::mods(),
-            hand,
-            stack,
-            partial,
-            swing,
-            equip,
-            canceled,
-        );
+        mod_api::dispatch_render_hand(self, mod_api::mods(), render, canceled);
     }
 
     /// Before this window's player's first-person `left` or right arm is
@@ -2756,7 +2745,7 @@ impl Game<'_> {
     /// the player is invisible. `player` and `player_entity_id` are the
     /// local player's UUID and entity id. `draw`'s pose stack starts at the
     /// arm model's origin, in blocks, posed as vanilla's arm is (with any
-    /// `native_render_hand_pose`), lit with the light at the eyes; add
+    /// `native_render_hand`), lit with the light at the eyes; add
     /// geometry with `native_draw_cube`, `native_draw_quad`, `native_draw_block`
     /// and `native_draw_item`. Set `canceled` to leave out vanilla's arm;
     /// what the mods drew stays. Client-side. API @API:render_arm@.
@@ -2778,42 +2767,6 @@ impl Game<'_> {
             canceled,
         );
     }
-    /// Additional first-person hand and item pose, including empty arms and maps.
-    /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
-    /// API @API:render_hand_pose@.
-    pub(super) fn native_render_hand_pose(
-        &self,
-        hand: horizon_client::first_person::Hand,
-        stack: Option<&ItemStack>,
-        partial: f32,
-        swing: f32,
-        equip: f32,
-        x: &mut f32,
-        y: &mut f32,
-        z: &mut f32,
-        pitch: &mut f32,
-        yaw: &mut f32,
-        roll: &mut f32,
-        scale: &mut f32,
-    ) {
-        mod_api::dispatch_render_hand_pose(
-            self,
-            mod_api::mods(),
-            hand,
-            stack,
-            partial,
-            swing,
-            equip,
-            x,
-            y,
-            z,
-            pitch,
-            yaw,
-            roll,
-            scale,
-        );
-    }
-
     /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
     pub(super) fn native_render_item_in_frame(
         &self,
