@@ -281,6 +281,12 @@ the catalog, not a global API number, source comments or documentation histories
   copy's `nbt`. A saved chunk sent past the view distance asks it on its own thread, so read only `entity`. Keep it to what clients show (a machine running, its facing, a tank's level), not a menu's progress:
   menus have their own data slots.
 
+- `native_pre_remove_side_effects` is a mod block entity's `BlockEntity.preRemoveSideEffects`: its block is being
+  replaced or broken with side effects (not under flag 256). Its part puts the stacks it held in `drops`, and they
+  scatter as `Containers.dropItemStack` scatters them, after the block entity's own container slots. It runs inside
+  the level's write with the level host, like `neighbor_changed`; the block entity is still in place, so the part
+  reads its attachments through `attachments(Holder::BlockEntity(pos))`. A part that returns nothing draws nothing.
+
 - `native_visuals`: a world-frame hook that appends block-rim and
   colored-light requests. Rims trace the client's existing block outline edges,
   depth-tested against terrain. Lights add camera-local RGB illumination to the
@@ -3048,7 +3054,8 @@ adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `S
 
 A block entity part names its block entity type and the blocks that hold one, as vanilla's
 `BlockEntityType` does: `r.block_entity_part("mymod:press", &["mymod:press", "mymod:big_press"], Press)`.
-The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `menu_button`, `menu_quick_move`)
+The hooks about the entity (`block_entity_tick`, `block_entity_update_tag`, `pre_remove_side_effects`, `menu_button`,
+`menu_quick_move`)
 find it by the type id its `block_entity` hook gave the entity; the others (`block_entity`, `screen`, the
 block hooks) by block.
 
