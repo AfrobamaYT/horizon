@@ -1711,18 +1711,19 @@ impl Game<'_> {
     }
 
     /// `RedStoneOreBlock.useItemOn`: a right-click lights the ore whatever the
-    /// hand holds. False (PASS) when the hand holds a block item, which goes on
-    /// to be placed; true (SUCCESS) otherwise.
+    /// hand holds. PASS when the hand holds a block item, which goes on
+    /// to be placed; SUCCESS otherwise.
     pub(super) fn use_redstone_ore(
         &mut self,
         pos: [i32; 3],
         held: Option<&horizon_client::items::ItemStack>,
-    ) -> Result<bool> {
+    ) -> Result<Option<horizon_client::mod_api::NativeInteractionResult>> {
+        use horizon_client::mod_api::NativeInteractionResult as Answer;
         if !matches!(
             &*self.block_name(pos),
             "minecraft:redstone_ore" | "minecraft:deepslate_redstone_ore"
         ) {
-            return Ok(false);
+            return Ok(None);
         }
         self.redstone_ore_particles(pos);
         self.attack_block(pos)?;
@@ -1732,7 +1733,11 @@ impl Game<'_> {
                 .get(&s.item)
                 .is_some_and(|i| i.block.is_some())
         });
-        Ok(!block_item)
+        Ok(Some(if block_item {
+            Answer::Pass
+        } else {
+            Answer::Success
+        }))
     }
 
     fn tick_mob_sculk_events(&mut self) {
