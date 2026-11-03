@@ -69,6 +69,12 @@ impl CombatTracker {
         let (credit, at) = self.last_hurt_by_player.take()?;
         (now - at <= 100).then_some(credit)
     }
+    /// Whether a player hurt this body within the last 100 ticks
+    /// (`lastHurtByPlayerMemoryTime > 0`), without forgetting them.
+    pub(super) fn recently_hit_by_player(&self, now: i64) -> bool {
+        self.last_hurt_by_player
+            .is_some_and(|(_, at)| now - at <= 100)
+    }
     /// `LivingEntity.setLastHurtByPlayer(player, 100)`.
     pub(super) fn note_hurt_by_player(&mut self, credit: PlayerCredit, now: i64) {
         self.last_hurt_by_player = Some((credit, now));

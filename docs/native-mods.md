@@ -2408,6 +2408,14 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   frame's entity, no table). A dispenser's shears and an explosion's frames aren't told. Leads: untying one or cutting it with
   shears is a use (the leashed mob, no table), and a mob a player killed while leashed drops its lead on its next tick as a call
   of its own, naming the killer (`used` false, no table). A lead that snaps or loses its holder names no player and isn't told.
+- **`native_living_drops(entity, kind, player, damage_type, attacker, recently_hit, drops, cancel)`**: NeoForge's
+  `LivingDropsEvent`, the whole of what a dying mob or server player drops, after `native_loot_drops` and with the rest
+  of `dropAllDeathLoot` in: an enderman's carried block, and a player's inventory (unless `keepInventory`). Each
+  `NativeItemDrop` holds the stack and the position, motion and pickup delay its item entity gets. Edit the list or set `cancel`
+  for no drops; experience orbs are separate (`native_living_experience_drop`). `native_loot_drops` stays for loot that is not a
+  death (blocks, shearing, leads); for a mob's death it is heard first, and this hook then sees its result.
+- **`native_equipment_drop_chance(entity, kind, slot, damage_type, attacker, recently_hit, chance)`**: NeoForge's
+  `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item in `slot`; the roll is drawn whatever the chance is.
 
 ### A block's items
 

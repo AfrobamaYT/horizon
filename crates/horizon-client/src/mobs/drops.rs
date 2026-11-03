@@ -46,6 +46,9 @@ pub struct Death<'a> {
     /// The `doMobLoot` game rule.
     pub mob_drops: bool,
     pub world_seed: i64,
+    /// A drop chance per `SLOTS` index that replaces the one vanilla computed
+    /// (`equipment_chances`: what a mod chose); `None` keeps vanilla's.
+    pub equipment_chance: [Option<f32>; 8],
 }
 
 /// `instanceof Monster` (Monster.shouldDropLoot/shouldDropExperience).
@@ -499,26 +502,14 @@ pub fn die(
         );
         out.extend(items.into_iter().filter(|i| !i.is_empty()).map(Drop::Item));
         // Mob.dropCustomDeathLoot.
-        let damage_params = EntityLootParams {
-            this: this.clone(),
-            damage: d.damage.clone(),
-            player: None,
-            luck: 0.0,
-        };
-        let living_attacker = d
-            .damage
-            .as_ref()
-            .and_then(|x| x.source.as_ref())
-            .is_some_and(|a| a.living);
-        for slot in SLOTS {
+        let damage_params = damage_context(this.clone(), d);
+        for (index, slot) in SLOTS.iter().enumerate() {
             let stack = slot_item(m, slot);
-            let mut chance = drop_chance(m, slot);
-            if chance == 0.0 {
+            let Some((mut chance, preserve)) = slot_chance(m, d, &damage_params, slot) else {
                 continue;
-            }
-            let preserve = chance > 1.0;
-            if living_attacker {
-                chance = d.loot.equipment_drop_chance(&damage_params, chance);
+            };
+            if let Some(chosen) = d.equipment_chance[index] {
+                chance = chosen;
             }
             let Some(mut stack) = stack else { continue };
             if d.loot.prevents_equipment_drop(&stack) || !(killed_by_player || preserve) {
@@ -586,6 +577,66 @@ pub fn die(
         out.push(Drop::Experience(base_experience(m)));
     }
     (out, skulls)
+}
+/// The loot parameters of the damage that killed `m`, as the equipment drop
+/// chance enchantments read them (no luck, no killing player).
+fn damage_context(this: LootEntity, d: &Death) -> EntityLootParams {
+    EntityLootParams {
+        this,
+        damage: d.damage.clone(),
+        player: None,
+        luck: 0.0,
+    }
+}
+/// `Mob.dropCustomDeathLoot`'s chance for `slot` before the roll, and whether
+/// the slot is preserved: none when `dropChances` is 0 (the slot is skipped),
+/// else the chance after `EnchantmentHelper.processEquipmentDropChance`.
+fn slot_chance(
+    m: &Mob,
+    d: &Death,
+    damage_params: &EntityLootParams,
+    slot: &str,
+) -> Option<(f32, bool)> {
+    let chance = drop_chance(m, slot);
+    if chance == 0.0 {
+        return None;
+    }
+    let living_attacker = d
+        .damage
+        .as_ref()
+        .and_then(|x| x.source.as_ref())
+        .is_some_and(|a| a.living);
+    let after = if living_attacker {
+        d.loot.equipment_drop_chance(damage_params, chance)
+    } else {
+        chance
+    };
+    Some((after, chance > 1.0))
+}
+/// The chance `die` will roll for each slot that holds an item, offered to
+/// `choose(slot index, chance)` for a different one. Draws no random: the
+/// roll `die` makes for a slot is the same whatever chance is chosen.
+pub fn equipment_chances(
+    m: &Mob,
+    d: &Death,
+    mut choose: impl FnMut(usize, f32) -> f32,
+) -> [Option<f32>; 8] {
+    let mut chosen = [None; 8];
+    if death_loot_table(m, d.mob_drops).is_none() {
+        return chosen;
+    }
+    let damage_params = damage_context(loot_entity(m, d.vehicle.clone()), d);
+    for (index, slot) in SLOTS.iter().enumerate() {
+        // Fox.dropAllDeathLoot drops the mouth item before the others.
+        let fox_mouth = m.species() == Species::Fox && *slot == "mainhand";
+        if fox_mouth || slot_item(m, slot).is_none() {
+            continue;
+        }
+        if let Some((chance, _)) = slot_chance(m, d, &damage_params, slot) {
+            chosen[index] = Some(choose(index, chance));
+        }
+    }
+    chosen
 }
 /// The loot table `die` rolls for `m` (`LivingEntity.getLootTable`), when it
 /// rolls one: none with `doMobLoot` off, nor for a baby that isn't a monster.
@@ -699,6 +750,7 @@ mod death_loot_table_tests {
             vehicle: None,
             mob_drops: true,
             world_seed: 0,
+            equipment_chance: [None; 8],
         };
         let items = |seed: i64, own: bool| {
             let kind = crate::mobs::sensor_scan_tests::kind();
@@ -720,5 +772,54 @@ mod death_loot_table_tests {
         assert_eq!(items(42, true), ["minecraft:diamond"]);
         // Without one, the type's table (a cow's beef and leather).
         assert!(items(0, false).iter().all(|i| i != "minecraft:diamond"));
+    }
+
+    /// `GetEquipmentDropChanceEvent`: the chance a mod chooses replaces
+    /// vanilla's, and the roll is drawn from the mob's random either way.
+    #[test]
+    fn a_chosen_equipment_drop_chance_replaces_the_roll_only() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("data").exists() {
+            return;
+        }
+        let loot = LootData::load(&root, &PackOverlay { files: &[] }).unwrap();
+        let death = |chosen| Death {
+            loot: &loot,
+            damage: None,
+            player: Some(LootEntity::new("minecraft:player")),
+            luck: 0.0,
+            vehicle: None,
+            mob_drops: true,
+            world_seed: 0,
+            equipment_chance: chosen,
+        };
+        let mob = || {
+            let kind = crate::mobs::sensor_scan_tests::kind();
+            let mut m = Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
+            m.extra.main_hand = Some("minecraft:stick".into());
+            m
+        };
+        let mut offered = Vec::new();
+        let chosen = equipment_chances(&mob(), &death([None; 8]), |slot, chance| {
+            offered.push((slot, chance));
+            1.0
+        });
+        assert_eq!(offered, [(0, DEFAULT_DROP_CHANCE)]);
+        assert_eq!(chosen[0], Some(1.0));
+        let run = |chosen| {
+            let mut m = mob();
+            let mut sequences = RandomSequences::default();
+            let (out, _) = die(&mut m, &death(chosen), &mut sequences, &mut LegacyRandom::new(7));
+            let stick = out.iter().any(
+                |d| matches!(d, Drop::Item(s) if s.item == "minecraft:stick"),
+            );
+            (stick, m.random.next_float())
+        };
+        let (always, after_always) = run(chosen);
+        let (never, after_never) = run([Some(0.0), None, None, None, None, None, None, None]);
+        assert!(always && !never);
+        assert_eq!(after_always, after_never);
     }
 }

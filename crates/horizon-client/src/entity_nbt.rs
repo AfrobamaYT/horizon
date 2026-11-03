@@ -5907,6 +5907,7 @@ mod held_item_name_tests {
             vehicle: None,
             mob_drops: true,
             world_seed: 0,
+            equipment_chance: [None; 8],
         };
         let (items, _) = drops::die(
             &mut horse,

@@ -154,6 +154,37 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// An item that drops where a living entity died, before it is an item entity
+/// in the level (`living_drops`): what `ItemEntity`'s constructor was given.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct NativeItemDrop {
+    pub stack: ItemStack,
+    /// Where the item entity appears.
+    pub position: [f64; 3],
+    /// Its motion in blocks per tick, as vanilla's constructor drew it.
+    pub velocity: [f64; 3],
+    /// Ticks before a player may pick it up.
+    pub pickup_delay: u32,
+}
+
+impl NativeItemDrop {
+    /// A drop of `stack` at `position` with a `velocity` and `pickup_delay`.
+    pub fn new(
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        pickup_delay: u32,
+    ) -> Self {
+        Self {
+            stack,
+            position,
+            velocity,
+            pickup_delay,
+        }
+    }
+}
+
 /// A statistic type (`BuiltInRegistries.STAT_TYPE`), for a player's
 /// statistics: what the stat's key names (a block, an item, an entity type,
 /// or a `minecraft:custom` stat).

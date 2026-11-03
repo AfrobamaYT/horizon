@@ -22,7 +22,7 @@ use horizon_client::{
         farm::Climate,
         spawning::{self, BiomeFacts},
     },
-    mod_api::NativeLootDrops,
+    mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld, clip_including_border},
     text::Text,
@@ -33,6 +33,19 @@ use horizon_core::{
     random::RandomSource,
 };
 use std::sync::Arc;
+
+/// A dying entity whose items drop (`LivingDropsEvent`).
+pub(super) struct DyingDrops<'a> {
+    pub(super) entity: u32,
+    pub(super) kind: &'a str,
+    /// The UUID of a dying player.
+    pub(super) player: Option<u128>,
+    /// The killing blow's damage type and attacker id (0 for none); none
+    /// when no mod listens.
+    pub(super) source: Option<(&'a str, u32)>,
+    /// Whether a player hurt it within 100 ticks.
+    pub(super) recently_hit: bool,
+}
 
 /// The world impact sound after successful arrow damage, including self-shots.
 /// `AbstractArrow.onHitEntity`'s damage: the crit bonus comes from the
@@ -1220,12 +1233,9 @@ impl Game<'_> {
             self.particles.add(&options, [x, y, z], [xa, ya, za]);
         }
     }
-    /// `LivingDeathEvent` for a mob whose health ran out: whether a native
-    /// mod canceled the death. A canceled mob stays alive at 1 health.
-    fn mob_death_canceled(&mut self, m: &Mob) -> bool {
-        if horizon_client::mod_api::mods().is_empty() {
-            return false;
-        }
+    /// The killing blow of a mob as the death hooks name it: its damage
+    /// type and the causing entity's id (0 for none).
+    fn mob_damage_source(&self, m: &Mob) -> (&'static str, u32) {
         let (damage_type, attacker) = match m.last_damage {
             Some((d, _)) => (source_damage_type(d), d.attacker),
             None => ("minecraft:generic", None),
@@ -1240,6 +1250,15 @@ impl Game<'_> {
             }
             None => 0,
         };
+        (damage_type, attacker)
+    }
+    /// `LivingDeathEvent` for a mob whose health ran out: whether a native
+    /// mod canceled the death. A canceled mob stays alive at 1 health.
+    fn mob_death_canceled(&mut self, m: &Mob) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let (damage_type, attacker) = self.mob_damage_source(m);
         let kind = super::native_hooks::mob_kind(m);
         let mut cancel = false;
         self.native_living_death(m.id, &kind, damage_type, attacker, &mut cancel);
@@ -1263,6 +1282,9 @@ impl Game<'_> {
             // The body may be gone already.
             self.set_bed_occupied(bed, false);
         }
+        // The killing blow for the drop hooks, before the player's hit is forgotten.
+        let source =
+            (!horizon_client::mod_api::mods().is_empty()).then(|| self.mob_damage_source(m));
         let killer = self.last_hurt_by_player.remove(&m.id);
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
@@ -1341,7 +1363,15 @@ impl Game<'_> {
         if let Some(player) = player.filter(|_| m.extra.leash.is_some()) {
             self.lead_killers.insert(m.id, (player, self.dim));
         }
-        self.drop_death_loot(&mut dying, player, by_player, killer_entity, consumed, pos);
+        self.drop_death_loot(
+            &mut dying,
+            player,
+            by_player,
+            killer_entity,
+            consumed,
+            pos,
+            source,
+        );
         self.create_wither_rose(m);
         if m.species() == Species::CopperGolem {
             // CopperGolem.dropEquipment: the preserved equipment too.
@@ -1514,6 +1544,7 @@ impl Game<'_> {
         killer: horizon_world::loot::LootEntity,
         consumed: bool,
         pos: [f64; 3],
+        source: Option<(&'static str, u32)>,
     ) {
         use horizon_client::mobs::{DamageKind, Who, drops};
         use horizon_world::loot::{LootDamage, LootEntity};
@@ -1574,7 +1605,8 @@ impl Game<'_> {
             .mount
             .and_then(|id| self.mobs.iter().find(|o| o.id == id))
             .map(|o| LootEntity::new(&o.kind.id));
-        let death = drops::Death {
+        let kind = super::native_hooks::mob_kind(m);
+        let mut death = drops::Death {
             loot: &loot,
             damage,
             player: by_player.then(player),
@@ -1582,7 +1614,24 @@ impl Game<'_> {
             vehicle,
             mob_drops: self.ui.rules.bool("mob_drops"),
             world_seed: self.level.seed,
+            equipment_chance: [None; 8],
         };
+        if let Some((damage_type, attacker)) = source {
+            // GetEquipmentDropChanceEvent, asked before `die` rolls the chances.
+            death.equipment_chance = drops::equipment_chances(m, &death, |slot, chance| {
+                let mut chance = chance;
+                self.native_equipment_drop_chance(
+                    m.id,
+                    &kind,
+                    EquipmentSlot::ALL[slot],
+                    damage_type,
+                    attacker,
+                    by_player,
+                    &mut chance,
+                );
+                chance
+            });
+        }
         // LootContextParams.ORIGIN of a death: the mob's position.
         let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
         let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
@@ -1613,7 +1662,6 @@ impl Game<'_> {
                 other => rest.push(other),
             }
         }
-        let kind = super::native_hooks::mob_kind(m);
         let table = drops::death_loot_table(m, death.mob_drops).filter(|t| loot.has_table(t));
         let context = NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
@@ -1628,36 +1676,82 @@ impl Game<'_> {
         };
         self.native_loot_drops(&context, &mut stacks);
         stacks.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
-        for item in stacks {
-            // Every death drop is its own ItemEntity, and the drop entity's
-            // own random (not the level's) gives it the constructor's
-            // horizontal push (its motion otherwise stays [0, 0.2, 0] and
-            // the drops land stacked at the mob's centre, without disturbing
-            // the level random that the orbs' merge ids and block ticks read
-            // next).
-            self.spawn_item(item, pos, dispenser::new_item_motion(), 10);
-        }
+        let mut experience = None;
         for d in rest {
             match d {
                 drops::Drop::CarriedBlock(state) => {
                     // Enderman.dropCustomDeathLoot: spawnAtLocation for each
                     // of the carried block's silk-touch drops.
-                    let stacks = horizon_client::mobs::enderman::carried_block_drops(
+                    stacks.extend(horizon_client::mobs::enderman::carried_block_drops(
                         world_items!(self),
                         self.pack.assets.registry,
                         state,
                         &mut self.world.random,
                         Some((&mut self.rand_sequences, self.level.seed)),
-                    );
-                    for item in stacks {
-                        self.spawn_item(item, pos, dispenser::new_item_motion(), 10);
-                    }
+                    ));
                 }
-                drops::Drop::Experience(reward) if !consumed => {
-                    let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
-                    self.spawn_orbs(pos, amount as u32);
-                }
+                drops::Drop::Experience(reward) if !consumed => experience = Some(reward),
                 drops::Drop::Item(_) | drops::Drop::Stack(_) | drops::Drop::Experience(_) => {}
+            }
+        }
+        // Every death drop is its own ItemEntity, and the drop entity's own
+        // random (not the level's) gives it the constructor's horizontal push
+        // (its motion otherwise stays [0, 0.2, 0] and the drops land stacked
+        // at the mob's centre, without disturbing the level random that the
+        // orbs' merge ids and block ticks read next).
+        let dying = DyingDrops {
+            entity: m.id,
+            kind: &kind,
+            player: None,
+            source,
+            recently_hit: by_player,
+        };
+        self.drop_death_items(&dying, stacks, pos, 10, |_| dispenser::new_item_motion());
+        if let Some(reward) = experience {
+            let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
+            self.spawn_orbs(pos, amount as u32);
+        }
+    }
+    /// Adds the items a dying entity dropped to the level. With mods, they
+    /// first hear the list (`native_living_drops`): edited or canceled.
+    pub(super) fn drop_death_items(
+        &mut self,
+        dying: &DyingDrops<'_>,
+        stacks: Vec<ItemStack>,
+        position: [f64; 3],
+        pickup_delay: u32,
+        mut velocity: impl FnMut(&mut Self) -> [f64; 3],
+    ) {
+        let Some((damage_type, attacker)) = dying.source else {
+            for stack in stacks {
+                let motion = velocity(self);
+                self.spawn_item(stack, position, motion, pickup_delay);
+            }
+            return;
+        };
+        // Vanilla builds each item entity (and draws its motion) when it
+        // collects the drop, before the event sees the list.
+        let mut drops: Vec<NativeItemDrop> = stacks
+            .into_iter()
+            .map(|stack| NativeItemDrop::new(stack, position, velocity(self), pickup_delay))
+            .collect();
+        let mut cancel = false;
+        self.native_living_drops(
+            dying.entity,
+            dying.kind,
+            dying.player,
+            damage_type,
+            attacker,
+            dying.recently_hit,
+            &mut drops,
+            &mut cancel,
+        );
+        if cancel {
+            return;
+        }
+        for drop in drops {
+            if drop.stack.count > 0 && &*drop.stack.item != "minecraft:air" {
+                self.spawn_item(drop.stack, drop.position, drop.velocity, drop.pickup_delay);
             }
         }
     }

@@ -861,10 +861,10 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, EffectTickChange, GameRuleActor, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeLifecycleContext, NativeNoteBlockChange, NativePlayerFood,
-    NativeProgressType, NativeServerPlayer, RecipeBookCategory, ServerTickPhase, ToolUse,
-    WorldPhase,
+    self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
+    NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
+    NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
+    RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
@@ -4653,6 +4653,78 @@ impl Game<'_> {
             original,
             amount,
             cancel,
+        );
+    }
+    /// A dying mob or server player `entity` of `kind` (`player` is the
+    /// player's UUID) is about to drop `drops`, the items
+    /// `LivingEntity.dropAllDeathLoot` collected (NeoForge's
+    /// `LivingDropsEvent`): the loot tables' stacks (after `native_loot_drops`),
+    /// the equipment that rolled to drop, a mob's own extras (an enderman's
+    /// carried block, a fox's mouth item, a piglin's inventory) and a player's
+    /// inventory, each with the position, motion and pickup delay its item
+    /// entity will have. Edit the list (take out, change or add drops) or set
+    /// `cancel` for no drops at all; empty stacks don't drop. `damage_type`
+    /// (`minecraft:player_attack`) and `attacker` (an entity id, 0 for none)
+    /// are the killing blow and `recently_hit` is whether a player hurt it
+    /// within 100 ticks, which is what lets a mob drop its equipment.
+    /// Experience orbs are not in the list (`native_living_experience_drop`),
+    /// and a spectator dropping nothing, an armor stand and a block's drops
+    /// don't call this. Server-side.
+    pub(super) fn native_living_drops(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        player: Option<u128>,
+        damage_type: &str,
+        attacker: u32,
+        recently_hit: bool,
+        drops: &mut Vec<NativeItemDrop>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_drops(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            player,
+            damage_type,
+            attacker,
+            recently_hit,
+            drops,
+            cancel,
+        );
+    }
+    /// A dying mob `entity` of `kind` is about to roll its drop chance for
+    /// the item in `slot` (`Mob.dropCustomDeathLoot`, NeoForge's
+    /// `GetEquipmentDropChanceEvent`). `chance` is vanilla's, after the
+    /// enchantments of the attacker and the victim; change it (1.0 or more
+    /// always drops, 0 or less never does). Only a slot that holds an item
+    /// and whose chance isn't 0 is asked, once, in `EquipmentSlot` order. The
+    /// roll is drawn whatever the chance is, so the mob's random follows
+    /// vanilla's order. A chance above 1.0 (`preserve`: saddles, body armour)
+    /// keeps its meaning of an item that drops without a player kill; a mod's
+    /// choice doesn't change that. `damage_type`, `attacker` and
+    /// `recently_hit` are as in `native_living_drops`. Server-side.
+    pub(super) fn native_equipment_drop_chance(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        slot: EquipmentSlot,
+        damage_type: &str,
+        attacker: u32,
+        recently_hit: bool,
+        chance: &mut f32,
+    ) {
+        mod_api::dispatch_equipment_drop_chance(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            slot,
+            damage_type,
+            attacker,
+            recently_hit,
+            chance,
         );
     }
     /// A server player's experience points are about to change through

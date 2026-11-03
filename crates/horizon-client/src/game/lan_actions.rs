@@ -3900,27 +3900,19 @@ impl Game<'_> {
     /// `ServerPlayer.die` for a guest whose health has run out: the death
     /// message, the loot and experience, the death screen.
     fn guest_die(&mut self, host: &mut LanHost, gi: usize, conn: u32) {
-        if host.hub.guests[gi].health <= 0.0
-            && !host.hub.guests[gi].dead
-            && !horizon_client::mod_api::mods().is_empty()
-        {
+        let dying = host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead;
+        // The killing blow, for the death hooks.
+        let blow = (dying && !horizon_client::mod_api::mods().is_empty())
+            .then(|| self.guest_damage_source(host, conn));
+        if let Some((damage_type, attacker)) = &blow {
             // LivingDeathEvent: a canceled death keeps the player at 1 health.
-            let (damage_type, attacker) =
-                match host.play.get(&conn).and_then(|p| p.death_cause.as_deref()) {
-                    Some("death.attack.genericKill") => ("minecraft:generic_kill", 0),
-                    _ => self
-                        .guest_combat
-                        .get(&conn)
-                        .and_then(|tracker| tracker.last_blow())
-                        .unwrap_or(("minecraft:generic", 0)),
-                };
-            let (damage_type, entity) = (damage_type.to_owned(), host.hub.guests[gi].entity_id);
+            let entity = host.hub.guests[gi].entity_id;
             let mut cancel = false;
             self.native_living_death(
                 entity as u32,
                 "minecraft:player",
-                &damage_type,
-                attacker,
+                damage_type,
+                *attacker,
                 &mut cancel,
             );
             if cancel {
@@ -4007,9 +3999,23 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3, at);
+            let recently_hit = blow.is_some()
+                && self
+                    .guest_combat
+                    .get(&conn)
+                    .is_some_and(|c| c.recently_hit_by_player(self.world.game_time));
+            let dropping = super::creatures::DyingDrops {
+                entity: id as u32,
+                kind: "minecraft:player",
+                player: Some(uuid),
+                source: blow
+                    .as_ref()
+                    .map(|(damage_type, attacker)| (damage_type.as_str(), *attacker)),
+                recently_hit,
+            };
             self.as_guest(host, conn, |game| {
                 if let Some(eyes) = drops {
-                    game.drop_inventory(eyes);
+                    game.drop_inventory(eyes, &dropping);
                 }
                 game.score_player_died();
                 game.award_custom_stat("deaths", 1);
@@ -4036,6 +4042,21 @@ impl Game<'_> {
                 self.spawn_orbs(at, reward as u32);
             }
         }
+    }
+
+    /// The killing blow of a guest as `LivingDeathEvent` names it: the
+    /// damage type and the causing entity's id (0 for none).
+    fn guest_damage_source(&self, host: &LanHost, conn: u32) -> (String, u32) {
+        let (damage_type, attacker) =
+            match host.play.get(&conn).and_then(|p| p.death_cause.as_deref()) {
+                Some("death.attack.genericKill") => ("minecraft:generic_kill", 0),
+                _ => self
+                    .guest_combat
+                    .get(&conn)
+                    .and_then(|tracker| tracker.last_blow())
+                    .unwrap_or(("minecraft:generic", 0)),
+            };
+        (damage_type.to_owned(), attacker)
     }
 
     /// `ServerPlayer.die`'s message from a guest's own `CombatTracker`, which
