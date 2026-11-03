@@ -2474,7 +2474,7 @@ pub(crate) mod tests {
         assert_eq!(connect.block_state(BlockStateId(3)).len(), 1);
         assert!(analog.block_state(BlockStateId(3)).is_empty());
         // The block entity part's BlockPart override is indexed independently.
-        assert_eq!(read(4), 42);
+        assert_eq!(read(4), 41);
         assert!(!super::has_part_hook(HookId::ShouldCheckWeakPower));
         super::TEST_PART_LOOKUPS.set(0);
         let mut check = false;

@@ -37,6 +37,10 @@ fn cfg_attributes(method: &ImplItemFn) -> Vec<syn::Attribute> {
         .collect()
 }
 
+fn uninspectable(item: &ImplItem) -> bool {
+    matches!(item, ImplItem::Macro(_) | ImplItem::Verbatim(_))
+}
+
 fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let Some((_, trait_path, _)) = &implementation.trait_ else {
         return syn::Error::new_spanned(
@@ -61,15 +65,12 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         }
     };
     if part.is_some()
-        && let Some(item) = implementation
-            .items
-            .iter()
-            .find(|item| matches!(item, ImplItem::Macro(_)))
+        && let Some(item) = implementation.items.iter().find(|item| uninspectable(item))
     {
         let ty = &implementation.self_ty;
         return syn::Error::new_spanned(
             item,
-            format!("macros in impl {trait_path} for {ty} are not supported by horizon_part; write hook methods explicitly", trait_path = quote!(#trait_path), ty = quote!(#ty)),
+            format!("uninspectable items in impl {trait_path} for {ty} are not supported by horizon_part; write hook methods explicitly", trait_path = quote!(#trait_path), ty = quote!(#ty)),
         )
         .into_compile_error()
         .into();
@@ -106,6 +107,17 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         quote!()
     };
     quote!(#implementation #export).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_items_are_uninspectable() {
+        let item = ImplItem::Verbatim(quote!(future syntax));
+        assert!(uninspectable(&item));
+    }
 }
 
 /// Mark a trait mod or its renderer and derive its hook subscriptions.
