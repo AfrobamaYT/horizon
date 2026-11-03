@@ -1,7 +1,7 @@
 //! `host.transaction` (#41 §7): NeoForge 26.3's `Transaction`. Changes made through the
 //! capability helpers inside one are kept by the game and made final only when the outermost
 //! transaction commits; an abort puts back everything its closure changed.
-use super::Host;
+use super::ServerHost;
 
 /// What the game's raw transaction helpers take, and only `host.transaction`
 /// makes: a mod opens and closes transactions through it alone, so its drop guard closes every
@@ -13,7 +13,33 @@ pub struct TransactionSeal(());
 /// its closure alone.
 pub struct Transaction(());
 
-impl dyn Host + '_ {
+/// Transactions are available only on the logical server and preserve the receiver type.
+///
+/// ```
+/// use horizon_client::mod_api::{BlockEntityRef, HostTransaction, ServerHost};
+/// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
+///     let _: Result<(), ()> = host.transaction(|host, _tx| {
+///         block.set_changed(host);
+///         Ok(())
+///     });
+/// }
+/// ```
+/// ```compile_fail
+/// use horizon_client::mod_api::{BlockEntityRef, Host, HostTransaction};
+/// fn write(host: &mut dyn Host, block: BlockEntityRef) {
+///     let _: Result<(), ()> = host.transaction(|host, _tx| {
+///         block.set_changed(host);
+///         Ok(())
+///     });
+/// }
+/// ```
+/// ```compile_fail
+/// use horizon_client::mod_api::{ClientHost, HostTransaction};
+/// fn client(host: &mut dyn ClientHost) {
+///     let _: Result<(), ()> = host.transaction(|_, _| Ok(()));
+/// }
+/// ```
+pub trait HostTransaction: ServerHost {
     /// Runs `f` in a transaction, nested in the open one if any (`Transaction.openRoot` and
     /// `open`): `Ok` commits it (`commit`), into the transaction around it or, at the
     /// outermost, for good, with the world told of each change once; `Err` aborts it
@@ -24,27 +50,34 @@ impl dyn Host + '_ {
     /// Covered: block entities (item slots, saved compound, custom name and attachments), cauldrons,
     /// players' inventories and cursors, entities' inventories
     /// ([`ItemPlace::EntitySlot`](super::ItemPlace::EntitySlot)) and item entities' stacks.
-    pub fn transaction<T, E>(
+    fn transaction<T, E>(
         &mut self,
-        f: impl FnOnce(&mut dyn Host, &Transaction) -> Result<T, E>,
+        f: impl FnOnce(&mut Self, &Transaction) -> Result<T, E>,
+    ) -> Result<T, E>;
+}
+
+impl<H: ServerHost + ?Sized> HostTransaction for H {
+    fn transaction<T, E>(
+        &mut self,
+        f: impl FnOnce(&mut Self, &Transaction) -> Result<T, E>,
     ) -> Result<T, E> {
-        run_transaction(self, |host, tx| f(host, tx))
+        run_transaction(self, f)
     }
 }
 
 /// `host.transaction` for a host of a known type, which `f` gets back: the game's own moves (a
 /// hopper's) run in one through this.
-pub fn run_transaction<H: Host + ?Sized, T, E>(
+pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
     host: &mut H,
     f: impl FnOnce(&mut H, &Transaction) -> Result<T, E>,
 ) -> Result<T, E> {
     /// Closes its transaction when dropped: committed when `f` gave `Ok`, else aborted, as on
     /// a panic unwinding past it.
-    struct Open<'a, H: Host + ?Sized> {
+    struct Open<'a, H: ServerHost + ?Sized> {
         host: &'a mut H,
         commit: bool,
     }
-    impl<H: Host + ?Sized> Drop for Open<'_, H> {
+    impl<H: ServerHost + ?Sized> Drop for Open<'_, H> {
         fn drop(&mut self) {
             self.host
                 .transaction_close(TransactionSeal(()), self.commit);
@@ -63,6 +96,7 @@ pub fn run_transaction<H: Host + ?Sized, T, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::Host;
 
     /// Records the transactions it is asked to open and close.
     #[derive(Default)]
@@ -70,7 +104,8 @@ mod tests {
         depth: usize,
         closed: Vec<(usize, bool)>,
     }
-    impl Host for Journal {
+    impl Host for Journal {}
+    impl ServerHost for Journal {
         fn transaction_open(&mut self, _: TransactionSeal) {
             self.depth += 1;
         }
@@ -83,7 +118,7 @@ mod tests {
     #[test]
     fn a_transaction_commits_on_ok_and_aborts_on_err_and_nests() {
         let mut journal = Journal::default();
-        let host: &mut dyn Host = &mut journal;
+        let host: &mut dyn ServerHost = &mut journal;
         let outer = host.transaction(|host, _| {
             let inner: Result<(), &str> = host.transaction(|_, _| Err("refused"));
             assert_eq!(inner, Err("refused"));
@@ -98,7 +133,7 @@ mod tests {
     fn a_panic_aborts_exactly_the_transaction_it_leaves() {
         use std::panic::{AssertUnwindSafe, catch_unwind};
         let mut journal = Journal::default();
-        let host: &mut dyn Host = &mut journal;
+        let host: &mut dyn ServerHost = &mut journal;
         // A child's panic caught inside the root: the child aborts, the root still commits.
         let root = host.transaction(|host, _| {
             let child = catch_unwind(AssertUnwindSafe(|| {
@@ -109,7 +144,7 @@ mod tests {
         });
         assert_eq!(root, Ok(()));
         // A root's panic caught outside it: the root aborts before the catch sees anything.
-        let host: &mut dyn Host = &mut journal;
+        let host: &mut dyn ServerHost = &mut journal;
         let caught = catch_unwind(AssertUnwindSafe(|| {
             host.transaction(|_, _| -> Result<(), ()> { panic!("a broken handler") })
         }));
