@@ -397,7 +397,19 @@ pub(super) mod tests {
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
         game.resolve_parts().unwrap();
+        // The title's save folder is under the working directory: give each test its own, so a
+        // test that saves leaves the checkout clean and parallel tests don't share files.
+        let saves = std::env::temp_dir().join(format!(
+            "horizon-with-game-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+            saves.clone(),
+            horizon_client::save::LevelShape::OVERWORLD,
+        ));
         test(&mut game);
+        let _ = std::fs::remove_dir_all(saves);
     }
 
     #[test]
