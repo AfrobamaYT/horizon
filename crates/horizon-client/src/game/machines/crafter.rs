@@ -144,7 +144,12 @@ impl Game<'_> {
     fn crafter_eject(&mut self, pos: Pos, facing: Direction, stack: ItemStack, recipe: &str) {
         let target = offset(pos, facing);
         let mut rest = stack;
-        if let Some(into) = self.containers().view(target, false) {
+        if let Some(part) = self.item_part_at(target, facing.opposite()) {
+            // NeoForge's `insertCrafterOutput`: a part in front takes what it will in the
+            // container's place, and the rest is dispensed.
+            let at = [target.0, target.1, target.2];
+            rest.count -= self.insert_into_part(&part, &rest, at);
+        } else if let Some(into) = self.containers().view(target, false) {
             let one_by_one = self.crafter_at(target).is_some()
                 || rest.count > self.containers().max_stack(&rest);
             while rest.count > 0 {

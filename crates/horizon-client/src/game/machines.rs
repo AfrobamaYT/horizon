@@ -920,6 +920,22 @@ impl Game<'_> {
         let game = self.native_container_size(at).is_some();
         providers.ask(self, game)
     }
+    /// Offers `stack` to a capability part, in a transaction of its own: how many it took. A part
+    /// answering more than it was offered is a mod bug, and its move is undone (none taken).
+    pub(super) fn insert_into_part(
+        &mut self,
+        part: &Capability<dyn ResourceHandler<ItemResource>>,
+        stack: &ItemStack,
+        at: [i32; 3],
+    ) -> u32 {
+        let resource = ItemResource::of(stack);
+        mod_api::run_transaction(self, |game, tx| {
+            let host: &mut dyn Host = game;
+            let went = part.insert_any(host, tx, &resource, stack.count);
+            part.checked(went, stack.count, &at).ok_or(())
+        })
+        .unwrap_or(0)
+    }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
     /// is a capability part: whether a mod canceled the move.
     fn part_move_canceled(&self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
@@ -1482,7 +1498,26 @@ impl Game<'_> {
             return Ok(());
         };
         let target = offset(key, facing);
-        let remaining = if dropper {
+        let into_part = dropper
+            .then(|| self.item_part_at(target, facing.opposite()))
+            .flatten();
+        let remaining = if let Some(part) = into_part {
+            // NeoForge's `dropperInsertHook`: a part in front is offered one item in the
+            // container's place, and what it refuses stays.
+            let one = ItemStack {
+                count: 1,
+                ..stack.clone()
+            };
+            let at = [target.0, target.1, target.2];
+            match self.insert_into_part(&part, &one, at) {
+                1 => Some(ItemStack {
+                    count: stack.count - 1,
+                    ..stack
+                })
+                .filter(|s| s.count > 0),
+                _ => Some(stack),
+            }
+        } else if dropper {
             match self.containers().view(target, false) {
                 None => self.dispense_default(key, facing, stack),
                 Some(into) => {
@@ -1926,5 +1961,118 @@ mod capacity_tests {
                 "{block}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod part_front_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use horizon_client::chunk::Chunk;
+    use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use horizon_client::items::ItemStack;
+    use horizon_client::mod_api::NativeBlockUpdateFlags;
+    use horizon_core::position::BlockPos;
+    use std::sync::Arc;
+
+    fn stack(item: &str, count: u32) -> ItemStack {
+        ItemStack {
+            item: item.into(),
+            count,
+            damage: 0,
+            extra: None,
+        }
+    }
+
+    /// A dropper and a crafter facing a mod's item part (NeoForge's `dropperInsertHook` and
+    /// `insertCrafterOutput`): a truthful part, a pipe into the chest east of it, takes what
+    /// they put out in a container's place; a part answering more than it was offered has its
+    /// move undone, so the dropper keeps its item and the crafter's result is dispensed.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_dropper_and_a_crafter_put_into_a_mod_part_in_front_of_them() {
+        with_game(|game| {
+            let _mods = horizon_client::mod_api::part_tests::game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let state = |game: &super::Game<'_>, name: &str, prop: (&str, &str)| {
+                let state = horizon_world::chunk::BlockState {
+                    name: name.to_owned(),
+                    properties: [(prop.0.to_owned(), prop.1.to_owned())]
+                        .into_iter()
+                        .collect(),
+                };
+                game.pack.assets.registry.resolve(&state).unwrap()
+            };
+            let dropper = state(game, "minecraft:dropper", ("facing", "east"));
+            let crafter = state(game, "minecraft:crafter", ("orientation", "east_up"));
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let mod_part = |id: &str| {
+                let fields = ModBlockEntityFields {
+                    id: id.into(),
+                    ..Default::default()
+                };
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(fields)))
+            };
+            let chest_items =
+                |game: &super::Game<'_>, z| match game.world.block_entities.get(&(2, 64, z)) {
+                    Some(BlockEntity::Chest(items)) => {
+                        items.iter().flatten().map(|s| s.count).sum::<u32>()
+                    }
+                    _ => panic!("no chest"),
+                };
+            for (z, part, taken) in [(0, "test:pipe", true), (4, "test:greedy", false)] {
+                for (x, block) in [(0, dropper), (2, chest)] {
+                    assert!(game.native_level_set_block(level, [x, 64, z], block, flags));
+                }
+                game.world.block_entities.insert((1, 64, z), mod_part(part));
+                if let Some(BlockEntity::Chest(items)) =
+                    game.world.block_entities.get_mut(&(0, 64, z))
+                {
+                    items[4] = Some(stack("minecraft:stick", 2));
+                }
+                game.dispense_from(BlockPos::new(0, 64, z), dropper)
+                    .unwrap();
+                let left = match game.world.block_entities.get(&(0, 64, z)) {
+                    Some(BlockEntity::Chest(items)) => items[4].as_ref().map_or(0, |s| s.count),
+                    _ => panic!("no dropper"),
+                };
+                assert_eq!(
+                    (left, chest_items(game, z)),
+                    if taken { (1, 1) } else { (2, 0) },
+                    "{part}"
+                );
+
+                // Two planks make four sticks.
+                let z = z + 2;
+                for (x, block) in [(0, crafter), (2, chest)] {
+                    assert!(game.native_level_set_block(level, [x, 64, z], block, flags));
+                }
+                game.world.block_entities.insert((1, 64, z), mod_part(part));
+                if let Some(BlockEntity::Crafter(c)) =
+                    game.world.block_entities.get_mut(&(0, 64, z))
+                {
+                    c.items[0] = Some(stack("minecraft:oak_planks", 1));
+                    c.items[3] = Some(stack("minecraft:oak_planks", 1));
+                }
+                let items = game.dropped.len();
+                game.dispense_from(BlockPos::new(0, 64, z), crafter)
+                    .unwrap();
+                let spawned = game.dropped.len() - items;
+                assert_eq!(
+                    (chest_items(game, z), spawned),
+                    if taken { (4, 0) } else { (0, 1) },
+                    "{part}"
+                );
+            }
+        });
     }
 }
