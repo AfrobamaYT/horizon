@@ -335,6 +335,31 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_attributes_are_unavailable_for_nonplayers() {
+        use horizon_client::{entities::ArmorStand, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
+            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 14;
+            game.dragon = Some(dragon);
+            for id in [12, 13, 14] {
+                let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
+                assert_eq!(living.attribute_base(game, "minecraft:max_health"), None);
+                assert_eq!(living.attribute_value(game, "minecraft:max_health"), None);
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_shapes_use_empty_context() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::{

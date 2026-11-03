@@ -884,7 +884,7 @@ use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
     self, EffectTickChange, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
     NativeLifecycleContext, NativePlayerFood, NativeServerPlayer, RecipeBookCategory,
-    ServerTickPhase, WorldPhase,
+    ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -1096,6 +1096,31 @@ impl GameLevel<'_> {
         new: BlockStateId,
     ) {
         mod_api::dispatch_block_changed(self, mod_api::mods(), dimension, pos, old, new);
+    }
+
+    /// Liquid at `liquid_pos` is about to place `state` at `pos`. Set
+    /// `cancel` to prevent placement or change `new_state` to replace it.
+    /// Server-side. @API:fluid_place_block@.
+    #[inline(always)]
+    pub(super) fn native_fluid_place_block(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        liquid_pos: BlockPos,
+        state: BlockStateId,
+        new_state: &mut BlockStateId,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_fluid_place_block(
+            self,
+            mod_api::mods(),
+            dimension,
+            pos,
+            liquid_pos,
+            state,
+            new_state,
+            cancel,
+        );
     }
 
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
@@ -2174,6 +2199,55 @@ impl Game<'_> {
             uuid,
             died,
             dimension_changed,
+        );
+    }
+    /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
+    /// `original_message` is immutable; change `message` or set `cancel` to
+    /// prevent sending. @API:client_chat@.
+    pub(super) fn native_client_chat(
+        &mut self,
+        player_id: i32,
+        player_uuid: u128,
+        original_message: &str,
+        message: &mut String,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_client_chat(
+            self,
+            mod_api::mods(),
+            player_id,
+            player_uuid,
+            original_message,
+            message,
+            cancel,
+        );
+    }
+    /// NeoForge's `ClientPauseChangeEvent.Pre`: cancel a proposed pause change.
+    /// @API:client_pause_change@.
+    pub(super) fn native_client_pause_change_pre(&mut self, paused: bool, cancel: &mut bool) {
+        mod_api::dispatch_client_pause_change_pre(self, mod_api::mods(), paused, cancel);
+    }
+    /// NeoForge's `ClientPauseChangeEvent.Post`: the pause state changed.
+    /// @API:client_pause_change@.
+    pub(super) fn native_client_pause_change_post(&mut self, paused: bool) {
+        mod_api::dispatch_client_pause_change_post(self, mod_api::mods(), paused);
+    }
+    /// NeoForge's `ClientPlayerChangeGameTypeEvent`: observe the local player info game type change.
+    /// @API:client_player_change_game_type@.
+    pub(super) fn native_client_player_change_game_type(
+        &mut self,
+        player_id: i32,
+        player_uuid: u128,
+        current_game_type: i32,
+        new_game_type: i32,
+    ) {
+        mod_api::dispatch_client_player_change_game_type(
+            self,
+            mod_api::mods(),
+            player_id,
+            player_uuid,
+            current_game_type,
+            new_game_type,
         );
     }
     /// Once a tick, in every `Game`: the window's (in single player, on LAN
@@ -4719,6 +4793,23 @@ impl Game<'_> {
     pub(super) fn native_brewing_complete(&self, pos: [i32; 3]) {
         mod_api::dispatch_brewing_complete(self, mod_api::mods(), pos);
     }
+    /// A server player took `stack` from a brewing stand bottle slot
+    /// (`BrewingStandMenu.PotionSlot.onTake`): `player` is their UUID and
+    /// `player_entity_id` their network id. @API:player_brewed_potion@.
+    pub(super) fn native_player_brewed_potion(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        stack: &ItemStack,
+    ) {
+        mod_api::dispatch_player_brewed_potion(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            stack,
+        );
+    }
     /// An item was placed on a campfire at `pos` and began cooking. 202.
     pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_campfire_start(self, mod_api::mods(), pos, item);
@@ -6545,6 +6636,26 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
+    /// A tool is about to transform a block. Cancel or replace the final state;
+    /// `None` suppresses the transformation. @API:block_tool_modification@.
+    #[inline(never)]
+    pub(super) fn native_block_tool_modification(
+        &self,
+        stack: &ItemStack,
+        tool: &ToolUse,
+        final_state: &mut Option<BlockStateId>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_block_tool_modification(
+            self,
+            mod_api::mods(),
+            stack,
+            tool,
+            final_state,
+            cancel,
+        );
+    }
+
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
     /// `entity` (None for a player, whom `native_acting_player` names):
     /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
@@ -9278,7 +9389,7 @@ impl Game<'_> {
     }
     /// The slot a player's carried stack is in, by `native_inventory_tick`'s
     /// numbers: none for another number.
-    fn native_carried_slot(&mut self, slot: i32) -> Option<&mut Option<ItemStack>> {
+    pub(super) fn native_carried_slot(&mut self, slot: i32) -> Option<&mut Option<ItemStack>> {
         match slot {
             0.. if (slot as usize) < self.inventory.len() => self.inventory.get_mut(slot as usize),
             100..=103 => self.armor.get_mut(103 - slot as usize),

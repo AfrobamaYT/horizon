@@ -3775,9 +3775,6 @@ impl Game<'_> {
                     {
                         m.extra.charged = charged;
                     }
-                    // The body slot (6: horse armour, llama carpet, harness)
-                    // is kept in `head`, as Horizon's own mobs do.
-                    let body = horizon_client::mobs::drops::head_is_body(m.species());
                     for (slot, item, stack) in items {
                         let e = &mut m.extra;
                         match slot {
@@ -3802,14 +3799,14 @@ impl Game<'_> {
                                 e.chest = item;
                                 e.armor[1] = stack;
                             }
-                            5 if !body => {
+                            5 => {
                                 e.head = item;
                                 e.armor[0] = stack;
                             }
-                            6 if body => {
-                                // A wolf's armor shows its cracks.
+                            6 => {
                                 e.body_damage = stack.as_ref().map_or(0, |s| s.damage as i32);
-                                e.head = item;
+                                e.body_extra = stack.and_then(|s| s.extra);
+                                e.body = item;
                             }
                             7 => m.set_saddle(stack),
                             _ => {}
@@ -4695,7 +4692,25 @@ impl Game<'_> {
                             }
                         }
                     }
-                    for e in p.entries {
+                }
+                for e in p.entries {
+                    if !horizon_client::mod_api::mods().is_empty()
+                        && self.player.is_some()
+                        && let Some(mode) = e.game_mode
+                        && let Some(r) = self.remote.as_ref()
+                        && r.profile == e.uuid
+                        && let Some(info) = r.tab_players.get(&e.uuid)
+                        && info.game_mode != mode
+                    {
+                        let current = info.game_mode;
+                        self.native_client_player_change_game_type(
+                            self.own_entity_id(),
+                            e.uuid,
+                            current,
+                            mode,
+                        );
+                    }
+                    if let Some(r) = self.remote.as_mut() {
                         if let Some(t) = r.tab_players.get_mut(&e.uuid) {
                             if let Some(mode) = e.game_mode {
                                 t.game_mode = mode;
@@ -7462,7 +7477,7 @@ impl Game<'_> {
                 if result.should_swing() {
                     self.with_hand(hand, Game::swing_arm);
                 }
-            } else if self.predict_campfire_douse(hit.pos, held.as_ref(), seq) {
+            } else if self.with_hand(hand, |g| g.predict_campfire_douse(&hit, held.as_ref(), seq)) {
                 // CampfireBlock.useItemOn succeeded: this hand swings and the
                 // click ends, so a shield in the other hand is not raised.
                 self.with_hand(hand, Game::swing_arm);
@@ -7506,7 +7521,7 @@ impl Game<'_> {
                 }
                 return true;
             } else if let Some(stack) = held.as_ref()
-                && (self.predict_item_on_block(stack, &hit, hand)
+                && (self.with_hand(hand, |g| g.predict_item_on_block(stack, &hit, hand))
                     || self.predict_map_on_banner(stack, &hit))
             {
                 // Item.useOn succeeded here (InteractionResult.SUCCESS):
@@ -7611,9 +7626,7 @@ impl Game<'_> {
                     .play("minecraft:item.honeycomb.wax_on", Some(at), 1.0, 1.0);
             }
             waxes
-        } else if let Some((_, sound, _, _, particle)) =
-            self.block_transform(stack, hit.pos, hit.face)
-        {
+        } else if let Some((_, sound, _, _, particle)) = self.block_transform(stack, hit) {
             self.transform_particle(&particle, hit.pos);
             self.audio.play(&sound, Some(at), 1.0, 1.0);
             true
@@ -8956,6 +8969,20 @@ impl Game<'_> {
             }
         } else {
             self.send_signed_chat(message);
+        }
+    }
+    /// ChatScreen.handleChatInput fires the client event for chat, not commands.
+    pub(super) fn send_chat_from_screen(&mut self, message: &str) {
+        if message.starts_with('/') || horizon_client::mod_api::mods().is_empty() {
+            self.send_chat(message);
+        } else if let Some(uuid) = self.remote.as_ref().map(|r| r.profile) {
+            let id = self.own_entity_id();
+            let sent = chat_after_event(message, |outgoing, cancel| {
+                self.native_client_chat(id, uuid, message, outgoing, cancel);
+            });
+            if let Some(outgoing) = sent {
+                self.send_signed_chat(&outgoing);
+            }
         }
     }
     /// MultiPlayerGameMode.dropItem (key.drop): predict the removal, then send
@@ -10467,9 +10494,31 @@ fn client_millis() -> u64 {
         .as_millis() as u64
 }
 
+/// What `ChatScreen.handleChatInput` sends of typed chat once `ClientChatEvent` (`ask`, with
+/// the outgoing message and the cancel flag) had its say: nothing when canceled or emptied.
+fn chat_after_event(message: &str, ask: impl FnOnce(&mut String, &mut bool)) -> Option<String> {
+    let mut outgoing = message.to_owned();
+    let mut cancel = false;
+    ask(&mut outgoing, &mut cancel);
+    (!cancel && !outgoing.is_empty()).then_some(outgoing)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{keep_client_state, remote_use_swings, synced_local_use};
+    use super::{chat_after_event, keep_client_state, remote_use_swings, synced_local_use};
+
+    /// `ClientChatEvent`: a mod's edit is what is sent; a cancel or an emptied message sends
+    /// nothing; untouched chat goes out as typed.
+    #[test]
+    fn typed_chat_is_sent_as_the_client_chat_event_leaves_it() {
+        assert_eq!(chat_after_event("hello", |_, _| {}), Some("hello".into()));
+        assert_eq!(
+            chat_after_event("hello", |m, _| m.push_str(" world")),
+            Some("hello world".into())
+        );
+        assert_eq!(chat_after_event("hello", |_, c| *c = true), None);
+        assert_eq!(chat_after_event("hello", |m, _| m.clear()), None);
+    }
     use horizon_client::{
         containers::{Beacon, BlockEntity},
         items::ItemStack,

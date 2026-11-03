@@ -2470,7 +2470,7 @@ a dimension.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `/item replace entity` does (None or air empties it). Mob equipment writes return false until Horizon can
+  slot as `LivingEntity.setItemSlot` does (None or air empties it). Mob equipment writes return false until Horizon can
   preserve complete stacks for all mob slots.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
@@ -3059,6 +3059,26 @@ by side, by the rules hoppers follow). A handler holds no borrow: each call is g
 neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
 `insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
 mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
+
+An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
+block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
+(`ItemPlace::Mod`, read and written by the `PlaceProvider` it registers with `r.place_provider`).
+`r.item_capability(&ITEM_ITEMS, "mymod:backpack", Arc::new(Backpack))` answers `ITEM_ITEMS` for an item with a
+`StackItemHandler`; `host.item_capability(&ITEM_ITEMS, &place)` finds it, else the game's own over
+`item_container`. A handler keeps its contents in the stack, and reads and writes it only with
+`host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one, simulate)`. A write plans with
+`simulate` first, then commits: the old stack must come out whole and the new one go in whole, or it refuses and
+hands the stack back with nothing moved. An occupied slot can't be asked whether the new stack fits until it is
+empty: its `capacity` (NeoForge's `isValid` and `getCapacityAsLong`, how many if the slot were empty) is asked
+first, as a hint; then the old stack comes out, the empty slot is asked with a simulated insert, and where that
+falls short the old stack goes back and the write is refused, with no warning. So a handler's `simulate` must
+answer exactly as its real call does, as NeoForge's must, and pass it on to `set_place_stack`; one whose real call
+disagrees is a mod bug: what it leaves out goes back, else is dropped at the block, and the game warns once,
+naming the mod. With `one_by_one`, a changed item is split off a
+bigger stack: from a player's hand as vanilla's filled bucket (into the inventory, else dropped with no thrower,
+and in creative the hand is kept), from a block entity's or an item's slot into that container's other slots.
+A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and
+the other stays as it was.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion

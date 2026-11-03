@@ -464,12 +464,8 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        let body = horizon_client::mobs::drops::head_is_body(m.species());
-        let slot = if body {
-            EquipmentSlot::Body
-        } else {
-            EquipmentSlot::Head
-        };
+        let slot = m.sun_protection_slot();
+        let body = slot == EquipmentSlot::Body;
         let Some(mut stack) = m.item_by_slot(slot) else {
             return;
         };
@@ -501,7 +497,7 @@ impl Game<'_> {
         match (body, broke) {
             (true, false) => m.extra.body_damage = stack.damage as i32,
             (true, true) => {
-                m.extra.head = None;
+                m.extra.body = None;
                 m.extra.body_damage = 0;
             }
             (false, false) => m.extra.armor[0] = Some(stack),
@@ -580,7 +576,7 @@ impl Game<'_> {
                 return;
             };
             if lost >= max {
-                m.extra.head = None;
+                m.extra.body = None;
                 m.extra.body_damage = 0;
                 true
             } else {
@@ -5471,14 +5467,14 @@ impl Game<'_> {
                 if item == "minecraft:shears"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.head.is_some()
+                    && m.extra.body.is_some()
                     && !sneaking =>
             {
                 let mut stack = ItemStack::new("minecraft:wolf_armor", 1);
                 stack.damage = m.extra.body_damage.max(0) as u32;
                 stack.extra = m.extra.body_extra.take();
                 armor_drop = Some(stack);
-                m.extra.head = None;
+                m.extra.body = None;
                 m.extra.body_damage = 0;
                 eat = Some(("item.armor.unequip_wolf", 1.0, 1.0));
                 self.damage_held_tool();
@@ -5502,10 +5498,10 @@ impl Game<'_> {
                 if item == "minecraft:wolf_armor"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.head.is_none()
+                    && m.extra.body.is_none()
                     && !m.is_baby() =>
             {
-                m.extra.head = Some(item.as_str().into());
+                m.extra.body = Some(item.as_str().into());
                 m.extra.body_damage = held_damage;
                 m.extra.body_extra = held_extra;
                 consume = true;
@@ -5518,7 +5514,7 @@ impl Game<'_> {
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
                     && m.extra.sitting
-                    && m.extra.head.is_some()
+                    && m.extra.body.is_some()
                     && m.extra.body_damage > 0 =>
             {
                 m.extra.body_damage = (m.extra.body_damage
