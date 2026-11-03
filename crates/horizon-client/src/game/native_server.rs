@@ -388,7 +388,7 @@ impl Game<'_> {
         host.hub
             .guests
             .iter()
-            .filter(|g| g.placed)
+            .filter(|g| g.placed && g.participates_online())
             .map(|g| NativeServerPlayer {
                 uuid: g.uuid,
                 name: g.name.clone(),

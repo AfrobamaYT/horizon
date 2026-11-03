@@ -595,6 +595,8 @@ pub(super) mod tests {
             real.placed = true;
             hub.guests.push(real);
             hub.guests.push(fake);
+            assert!(hub.here(&hub.guests[0]));
+            assert!(!hub.here(&hub.guests[1]));
             let packet = Clientbound::SetSimulationDistance(Distance { distance: 8 });
             let hold = Holding::start();
             hub.send_to(fake_id, &packet);
@@ -619,6 +621,11 @@ pub(super) mod tests {
             .unwrap();
             let mut host = game.lan.take().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
+            game.lan = Some(host);
+            let players = game.native_server_players();
+            assert_eq!(players.len(), 1);
+            assert_eq!(players[0].uuid, 1);
+            let mut host = game.lan.take().unwrap();
             game.guest_packets
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(&mut host, fake_id, |game| {
