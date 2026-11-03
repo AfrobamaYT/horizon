@@ -1268,6 +1268,38 @@ pub(super) mod tests {
                 assert_eq!(cooldown.group, expected);
                 assert!(receiver.try_recv().is_err());
             }
+            game.lan = Some(host);
+            let fake = game.native_fake_player(level, 5678, "joiner").unwrap();
+            let shared = &game.lan.as_ref().unwrap().hub.lan.shared;
+            let conn = shared.next_id().unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            shared
+                .events
+                .send(horizon_client::lan::NetEvent::Joined(Box::new(Joined {
+                    conn,
+                    uuid: 5678,
+                    name: "joiner".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::default(),
+                    address: ([127, 0, 0, 1], 1).into(),
+                })))
+                .unwrap();
+            game.tick_lan_packets();
+            assert_eq!(game.native_player_is_fake(fake), None);
+            let matching: Vec<_> = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.uuid == 5678)
+                .collect();
+            assert_eq!(matching.len(), 1);
+            assert!(matching[0].participates_online());
         });
     }
 
