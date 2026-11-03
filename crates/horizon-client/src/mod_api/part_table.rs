@@ -1426,19 +1426,19 @@ pub(crate) mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub(crate) fn game_thread() -> Vec<Box<dyn Hooks>> {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Doubler)];
+    pub(crate) fn game_thread() -> super::super::Mods {
+        let mods: super::super::Mods = vec![Box::new(Doubler) as Box<dyn Hooks>].into();
+        super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
         mods
     }
 
     /// The comparator reading of state `state`, from 1.
-    fn read(mods: &[Box<dyn Hooks>], state: u32) -> i32 {
+    fn read(state: u32) -> i32 {
         let mut output = 1;
         dispatch_analog_output(
             &Level,
-            mods,
             LevelDimension::Overworld,
             BlockPos::new(0, 64, 0),
             BlockStateId(state),
@@ -1466,11 +1466,11 @@ pub(crate) mod tests {
 
     #[test]
     fn a_block_part_answers_for_its_block_only_after_the_mods() {
-        let mods = game_thread();
+        game_thread();
         // Doubled by the mod, then 5 more from the part: (1 * 2) + 5. No world is open, so the
         // tag part is not attached yet.
-        assert_eq!(read(&mods, 1), 7);
-        assert_eq!(read(&mods, 2), 2);
+        assert_eq!(read(1), 7);
+        assert_eq!(read(2), 2);
     }
 
     #[test]
@@ -1480,19 +1480,21 @@ pub(crate) mod tests {
         let resolved = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
+                super::super::install(mods.clone());
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
                 resolved.wait();
-                (read(&mods, 1), read(&mods, 2))
+                (read(1), read(2))
             });
             let server = scope.spawn(|| {
+                super::super::install(mods.clone());
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
                 resolved.wait();
-                let before = (read(&mods, 1), read(&mods, 2));
+                let before = (read(1), read(2));
                 // `/reload` with the tag emptied.
                 resolve(&[]).unwrap();
-                (before, read(&mods, 1))
+                (before, read(1))
             });
             // The tag part comes after the key part of the same mod: (1 * 2) + 5 + 100.
             assert_eq!(client.join().unwrap(), (7, 102));
@@ -2499,10 +2501,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_block_entity_part_answers_by_block_and_by_entity_type() {
-        let mods = game_thread();
+        game_thread();
         let ticks = |block| {
             let mut ticks = false;
-            dispatch_block_entity_ticks(&NoHost, &mods, block, &mut ticks);
+            dispatch_block_entity_ticks(&NoHost, block, &mut ticks);
             ticks
         };
         // The ticker is asked by block: the type id is not a block.
@@ -2511,7 +2513,7 @@ pub(crate) mod tests {
         let tick = |kind: &str| {
             let mut entity = ModBlockEntity::default();
             entity.id = kind.into();
-            dispatch_block_entity_tick(&mut NoHost, &mods, [0, 64, 0], &mut entity);
+            dispatch_block_entity_tick(&mut NoHost, [0, 64, 0], &mut entity);
             entity.data.len()
         };
         // The tick is asked by the entity's type, which differs from its block's id.
