@@ -19,6 +19,14 @@ use std::sync::Arc;
 mod bundle;
 pub mod place;
 
+/// Identity and location of a player pressing a mod container button.
+pub struct MenuButtonContext {
+    pub player: u128,
+    pub player_entity_id: i32,
+    pub pos: [i32; 3],
+    pub id: i32,
+}
+
 /// What a menu needs to know about items and recipes.
 pub struct Env<'a> {
     /// UUID of the player operating this menu, when a player is available.

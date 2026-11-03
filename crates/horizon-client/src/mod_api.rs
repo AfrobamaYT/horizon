@@ -1169,6 +1169,17 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+/// The player responsible for a game rule change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GameRuleActor<'a> {
+    /// Player UUID.
+    pub uuid: u128,
+    /// Server entity ID.
+    pub entity_id: i32,
+    /// Player name.
+    pub name: &'a str,
+}
+
 /// How a criterion's advancement progress changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeProgressType {
@@ -1454,15 +1465,19 @@ mod tests {
         }
     }
 
-    /// A double with the three `Host` methods the probe calls.
+    /// A double with the `Host` methods the probe calls.
     struct Reader {
         block: &'static str,
         lines: Vec<Text>,
     }
 
     impl Host for Reader {
-        fn block(&self, _pos: [i32; 3]) -> String {
-            self.block.to_string()
+        fn level(&self, dimension: &str) -> Option<LevelRef> {
+            (dimension == "minecraft:overworld")
+                .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+        }
+        fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
+            Some(self.block.to_string())
         }
         fn acting_player(&self) -> Option<NativeServerPlayer> {
             Some(NativeServerPlayer {
@@ -1543,8 +1558,9 @@ mod tests {
 
     impl Hooks for Probe {
         fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-            let block = host.block(event.pos);
             let player = host.acting_player().expect("a player acts");
+            let level = host.level(&player.dimension).expect("a loaded level");
+            let block = level.block(host, event.pos).expect("a loaded block");
             host.action_bar(player.uuid, Text::literal(block.clone()));
             if block == "minecraft:stone" {
                 Flow::Cancel
@@ -2075,6 +2091,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn game_rule_change_reports_optional_actor() {
+        struct ActorRecorder(Arc<Mutex<Vec<Option<(u128, i32, String)>>>>);
+        impl Hooks for ActorRecorder {
+            fn game_rule_changed(&self, _: &mut dyn Host, event: &mut GameRuleChangedEvent<'_>) {
+                self.0.lock().unwrap().push(
+                    event
+                        .actor
+                        .map(|actor| (actor.uuid, actor.entity_id, actor.name.to_owned())),
+                );
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(ActorRecorder(seen.clone()))];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let actor = GameRuleActor {
+            uuid: 123,
+            entity_id: 42,
+            name: "Alex",
+        };
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(true),
+            Some(&actor),
+        );
+        dispatch_game_rule_changed(
+            &mut host,
+            &mods,
+            "minecraft:keep_inventory",
+            GameRuleValue::Bool(false),
+            None,
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [Some((123, 42, "Alex".into())), None]
+        );
+    }
+
     /// `GameRuleChangedEvent` as the server's setters fire it: only for a
     /// rule `GameRules.set` took, with its id and new value, to every mod.
     #[test]
@@ -2092,7 +2151,13 @@ mod tests {
         // What `set_game_rule` and the other setters do.
         let mut set = |name: &str, value: GameRuleValue| {
             if rules.set(name, value) {
-                dispatch_game_rule_changed(&mut host, &mods, &["minecraft:", name].concat(), value);
+                dispatch_game_rule_changed(
+                    &mut host,
+                    &mods,
+                    &["minecraft:", name].concat(),
+                    value,
+                    None,
+                );
             }
         };
         set("keep_inventory", GameRuleValue::Bool(true));

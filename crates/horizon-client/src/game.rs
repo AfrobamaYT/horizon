@@ -14747,20 +14747,9 @@ impl Game<'_> {
             let moved = self
                 .respawn_config
                 .is_none_or(|c| (c.dim, c.pos) != (config.dim, config.pos));
-            let mut cancel = false;
-            if moved
-                && let (Some(player), Some(name)) =
-                    (self.lan_acting_uuid, self.lan_acting_name.clone())
-            {
-                self.native_player_spawn_point_set(
-                    player,
-                    &name,
-                    self.dim.id(),
-                    head,
-                    "bed",
-                    &mut cancel,
-                );
-            }
+            // `canSetSpawn` calls the setter every time, the same bed too (it
+            // refreshes the angle).
+            let cancel = self.spawn_point_change(self.dim, head, false);
             if !cancel {
                 self.respawn_config = Some(config);
                 if moved {
@@ -17627,7 +17616,7 @@ impl Game<'_> {
         // ScreenEvent.KeyPressed.Pre: the open screen hears of the key before
         // it acts on it, and a cancelled press goes no further — no focus
         // move, no Escape-close, no inventory or hotbar key, no typing by the
-        // key itself, no `native_key`. It fires after the window's own
+        // key itself. It fires after the window's own
         // shortcuts (fullscreen, screenshot, the debug keys, the narrator) so
         // those keep working with a mod that cancels; the key's release still
         // comes through.
@@ -18442,7 +18431,7 @@ impl Game<'_> {
                         && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                 {
                     if let PhysicalKey::Code(key) = event.physical_key {
-                        self.native_key_event(key, true, event.repeat);
+                        self.native_panel_key_event(key, true, event.repeat);
                     }
                     if let PhysicalKey::Code(key) = event.physical_key {
                         self.pause_key(key)?;
@@ -18452,7 +18441,7 @@ impl Game<'_> {
                     if self.screen == Screen::Dead && event.state == ElementState::Pressed =>
                 {
                     if let PhysicalKey::Code(key) = event.physical_key {
-                        self.native_key_event(key, true, event.repeat);
+                        self.native_panel_key_event(key, true, event.repeat);
                     }
                     if let PhysicalKey::Code(key) = event.physical_key {
                         self.death_key(key)?;
@@ -18553,7 +18542,11 @@ impl Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
-                    self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
+                    self.native_panel_key_event(
+                        key,
+                        event.state == ElementState::Pressed,
+                        event.repeat,
+                    );
                     // Screen.keyPressed sees the physical key, repeats included.
                     if event.state == ElementState::Pressed
                         && self.screen == Screen::Inventory
@@ -21656,6 +21649,7 @@ pub fn run_with() -> Result<()> {
     let _ = horizon_client::block_contact::HOOK.set(native_hooks::block_contact);
     let _ = horizon_client::health::KNOCKBACK.set(native_hooks::knockback);
     let _ = horizon_client::health::SHIELD_BLOCK.set(native_hooks::shield_block);
+    let _ = horizon_client::health::USE_TOTEM.set(native_hooks::use_totem);
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
     horizon_threads::put_helpers_behind();

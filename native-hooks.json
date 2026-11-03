@@ -153,10 +153,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_carried_stack", "side": "server"
     },
     {
-      "name": "set_block",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block", "side": "server"
-    },
-    {
       "name": "edit_blocks",
       "target": "horizon_client::game::native_world_edit::Game<'_>::native_edit_blocks", "side": "server"
     },
@@ -601,14 +597,6 @@
       }
     },
     {
-      "name": "key",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_key",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "command",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_command",
@@ -774,6 +762,8 @@
     },
     {
       "name": "menu_button",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event; vanilla AbstractContainerMenu.clickMenuButton)",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_button",
       "mod_api": {
@@ -1074,16 +1064,6 @@
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
-      }
-    },
-    {
-      "name": "menu_button_v2",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_button_v2",
-      "mod_api": {
-        "contract": "listen",
-        "scope": "block_entity",
-        "key": "entity"
       }
     },
     {
@@ -3483,16 +3463,6 @@
       }
     },
     {
-      "name": "world_game_rule_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_game_rule_change",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "player_advancement_done",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
@@ -3869,18 +3839,6 @@
       "side": "server",
       "mod_api": {
         "contract": "listen"
-      }
-    },
-    {
-      "name": "player_spawn_point_set",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_spawn_point_set",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerSpawnChangeEvent)",
-      "side": "server",
-      "cancellable": true,
-      "mod_api": {
-        "contract": "cancel",
-        "out": "cancel"
       }
     },
     {

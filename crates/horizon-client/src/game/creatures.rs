@@ -1372,27 +1372,21 @@ impl Game<'_> {
             // CopperGolem.dropEquipment: the preserved equipment too.
             self.golem_drop_equipment(&mut dying);
         }
-        if m.species() == Species::SulfurCube {
-            self.split_sulfur_cube(m);
-        }
-        if m.species() == Species::Slime || m.species() == Species::MagmaCube {
-            // Slime.remove: split into 2-4 smaller slimes.
-            let size = m.extra.size;
-            if size > 1 {
-                let drawn = 2 + self.world.random.next_int_bound(3).unwrap_or(0) as u32;
-                let n = self.mob_split_count(m, drawn) as i32;
-                for k in 0..n {
-                    let off = |kk: i32| (f64::from(kk % 2) - 0.5) * f64::from(size) / 4.0;
-                    let at = [
-                        m.position.x + off(k),
-                        m.position.y + 0.5,
-                        m.position.z + off(k / 2),
-                    ];
-                    if let Some(id) = self.spawn_mob(&m.kind.id, at, m.persistent)
-                        && let Some(c) = self.mobs.iter_mut().find(|c| c.id == id)
-                    {
-                        horizon_client::mobs::cube::set_size(c, size / 2);
-                    }
+        if matches!(
+            m.species(),
+            Species::Slime | Species::MagmaCube | Species::SulfurCube
+        ) && m.extra.size > 1
+        {
+            // AbstractCubeMob.remove: convert without spawn finalization.
+            let drawn = horizon_client::mobs::cube::split_count(&mut dying);
+            if drawn > 0 {
+                let count = self.mob_split_count(&dying, drawn);
+                for i in 0..count {
+                    self.next_entity += 1;
+                    let mut child = Mob::new(self.next_entity, m.kind.clone(), m.position, 0.0);
+                    horizon_client::mobs::cube::split_child(&mut dying, &mut child, i);
+                    self.mobs.push(child);
+                    self.native_mobs_joined(self.mobs.len() - 1, false);
                 }
             }
         }
