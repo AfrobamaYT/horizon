@@ -37,6 +37,17 @@ pub(crate) struct NativeSidebar {
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
 
 /// The brigadier parser of an argument kind, and its properties.
+const KINDS: [&str; 8] = [
+    "word",
+    "text",
+    "integer",
+    "number",
+    "boolean",
+    "player",
+    "item",
+    "block_pos",
+];
+
 fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
     Some(match kind {
         "word" => ("brigadier:string", json!({"type": "word"}), ArgType::Word),
@@ -231,22 +242,13 @@ fn register_dispatcher(dispatcher: &mut Dispatcher, tree: &Value) {
             let id = if node["type"] == "literal" {
                 dispatcher.literal(parent, name)
             } else {
-                let ty = [
-                    "word",
-                    "text",
-                    "integer",
-                    "number",
-                    "boolean",
-                    "player",
-                    "item",
-                    "block_pos",
-                ]
-                .into_iter()
-                .filter_map(parser)
-                .find_map(|(id, properties, ty)| {
-                    (node["parser"] == id && node["properties"] == properties).then_some(ty)
-                })
-                .expect("native command tree contains registered parsers");
+                let ty = KINDS
+                    .into_iter()
+                    .filter_map(parser)
+                    .find_map(|(id, properties, ty)| {
+                        (node["parser"] == id && node["properties"] == properties).then_some(ty)
+                    })
+                    .expect("native command tree contains registered parsers");
                 dispatcher.argument(parent, name, ty)
             };
             let level = node["permissions"]["permission"]["level"]
@@ -1163,7 +1165,7 @@ fn system_chat(line: &Text) -> C {
 /// Native command metadata and the server dispatcher containing their parsed usages.
 pub(super) struct NativeCommands {
     levels: HashMap<String, u8>,
-    pub(super) dispatcher: Option<Arc<Dispatcher>>,
+    pub(super) dispatcher: Arc<Dispatcher>,
 }
 
 /// Where the game calls the server hook points.
@@ -1185,13 +1187,9 @@ impl Game<'_> {
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
-        let dispatcher = if levels.is_empty() {
-            None
-        } else {
-            let mut dispatcher = vanilla.clone();
-            register_dispatcher(&mut dispatcher, &tree);
-            Some(Arc::new(dispatcher))
-        };
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree);
+        let dispatcher = Arc::new(dispatcher);
         host.hub.set_mod_commands(0, tree);
         host.native_commands = Some(NativeCommands { levels, dispatcher });
     }
@@ -1248,12 +1246,14 @@ impl Game<'_> {
 
     /// Parse a registered command using the source's permission before dispatching it.
     fn native_command_valid(&mut self, line: &str, permission: u8) -> bool {
-        let dispatcher = self
+        let Some(commands) = self
             .lan
             .as_ref()
             .and_then(|host| host.native_commands.as_ref())
-            .and_then(|commands| commands.dispatcher.clone())
-            .expect("registered native commands have a dispatcher");
+        else {
+            return false;
+        };
+        let dispatcher = commands.dispatcher.clone();
         let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
         let parse = dispatcher.parse(line, &self.ui.registries);
         self.ui.registries.permission = previous;
@@ -1551,6 +1551,11 @@ mod tests {
         assert!(c["pay"].get("permissions").is_none());
         assert_eq!(levels["eco"], 3);
         assert_eq!(levels["pay"], 0);
+    }
+
+    #[test]
+    fn every_supported_kind_has_a_parser() {
+        assert!(KINDS.into_iter().all(|kind| parser(kind).is_some()));
     }
 
     #[test]
