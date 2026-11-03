@@ -152,12 +152,12 @@ API 20 adds buttons, tooltips and item icons on mod screens: `native_screen_clic
 `native_block_property`, `native_insert_item` and `native_cursor`. Bundles that use them need `"hooks": 20`.
 
 API 21 adds what a server mod needs to guard land and move players. `native_right_click_block` hears a player's right
-click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it: nothing
-happens and the player sees the block as it is. `native_acting_player` says who acts inside a player's hook (UUID,
-name, level, position, game mode, health); `native_run_command` runs a command as the server's console (level 4, no
-output), so `execute in <dimension> run tp <player> <x> <y> <z>` moves a player across levels; `native_action_bar`
-tells a player why, even inside their own hook; and the players
-`native_server_players` lists carry their health. Bundles that use them need `"hooks": 21`.
+click on a block before the block's own use (a chest, a door, a lever) and the item's, and may cancel it (since API
+@API:right_click_block_answer@ with NeoForge's answer: `Fail` stops the click, and the player sees the block as it
+is). `native_acting_player` says who acts inside a player's hook (UUID, name, level, position, game mode, health);
+`native_run_command` runs a command as the server's console (level 4, no output), so `execute in <dimension> run tp
+<player> <x> <y> <z>` moves a player across levels; `native_action_bar` tells a player why, even inside their own
+hook; and the players `native_server_players` lists carry their health. Bundles that use them need `"hooks": 21`.
 
 API 22 adds what a server mod needs to keep the world itself out of guarded land. `native_block_spread` hears a
 fluid flow or fire spread into a block, `native_piston_move` a piston's push or pull, `native_explosion_detonate` the
@@ -2334,10 +2334,15 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (0 to 20) or set `cancel` to leave it at `from`, saturation included. It is heard once for what one turn of the
   player changed, not for the full bar a respawn gives, the food a player joins with, or the host of a LAN world. The
   player's state is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- **`native_right_click_block(pos, face, hand, hit, player, player_entity_id, canceled)`** (API 21; `hand`, `hit`, `player` and `player_entity_id` since
-  API @API:block_use_context@): a player's right click on a block, before the block's own use and the item's
-  (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both, without a swing; the
-  player's client is sent the block back. With `native_destroy_block` it keeps players out of claimed land.
+- **`native_right_click_block(click, use_block, use_item, cancellation_result, canceled)`** (API 21; this form since
+  API @API:right_click_block_answer@): NeoForge's `PlayerInteractEvent.RightClickBlock`, a player's right click on a
+  block, once per hand where `useItemOn` starts, on the clicking client and on the server (`click.side`). `click`
+  (`NativeBlockClick`) names the level, block, hit, hand, held stack and the player's UUID and entity id. `use_block`
+  and `use_item` (`NativeTriState`) force the block's use or the item's `useOn` off, or on (the block even while
+  sneaking with something in hand, the item even while it cools down). Cancelling skips both and answers
+  `cancellation_result` (`NativeInteractionResult`, default `Pass`, which goes on to the item's own use and the other
+  hand); with `native_destroy_block`, a cancel with `Fail` keeps players out of claimed land, and the player's client is
+  sent the block back.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_move(dimension, piston,
   direction, push, destroy, canceled)`** (API 22, on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.

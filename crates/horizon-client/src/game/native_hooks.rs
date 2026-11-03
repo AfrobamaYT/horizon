@@ -887,7 +887,8 @@ use horizon_client::mod_api::{
     RecipeBookCategory, ServerTickPhase, ToolUse, WorldPhase,
 };
 use horizon_client::mod_api::{
-    AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, Suggestion,
+    AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LogicalSide, NativeBlockClick,
+    NativeInteractionResult, NativeTriState, Suggestion,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -7176,35 +7177,37 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_place_block(self, mod_api::mods(), stack, pos, state);
     }
-    /// A player right clicks the block at `pos` with `self.hand`, `face` the
-    /// face clicked: where `ServerPlayerGameMode.useItemOn` starts, before
-    /// the block's own use (a chest, a door, a lever) and before
-    /// `native_use_item_on`. Set `canceled` to stop the click: neither the
-    /// block nor the item acts, the hand doesn't swing, and a guest sees the
-    /// block as it is. Server-side, for every player of the world
-    /// (`native_acting_player` says who), once per hand. API 21. `hand`,
-    /// `hit` (the packet's `BlockHitResult`), `player` (the acting player's
-    /// UUID) and `player_entity_id` (the server's entity id), since API
-    /// @API:block_use_context@.
+    /// A player right clicks a block (NeoForge's
+    /// `PlayerInteractEvent.RightClickBlock`): once per hand, where
+    /// `useItemOn` starts, on the clicking client and on the server (`click`
+    /// says which, with the block, the hit, the hand and its stack, and the
+    /// player). Before the block's own use (a chest, a door, a lever) and the
+    /// item's (`Item.useOn`, `native_use_item_on`).
+    ///
+    /// `use_block` forces the block's use off (`False`) or on even while
+    /// sneaking with something in hand (`True`); `use_item` forces the
+    /// item's `useOn` off, or on even while the item cools down. Cancelling
+    /// skips both and answers `cancellation_result` in their place:
+    /// `Pass` (the default) goes on to the item's own use (`Item.use`) and
+    /// then the other hand, `Fail` ends the click, and `Success`,
+    /// `SuccessServer` or `Consume` end it as used, with the swing they name.
+    /// A mod that keeps players out of land cancels with `Fail`. API
+    /// @API:right_click_block_answer@.
     pub(super) fn native_right_click_block(
         &mut self,
-        pos: [i32; 3],
-        face: [i32; 3],
-        hand: Hand,
-        hit: BlockHit,
-        player: u128,
-        player_entity_id: i32,
+        click: &NativeBlockClick<'_>,
+        use_block: &mut NativeTriState,
+        use_item: &mut NativeTriState,
+        cancellation_result: &mut NativeInteractionResult,
         canceled: &mut bool,
     ) {
         mod_api::dispatch_right_click_block(
             self,
             mod_api::mods(),
-            pos,
-            face,
-            hand,
-            hit,
-            player,
-            player_entity_id,
+            click,
+            use_block,
+            use_item,
+            cancellation_result,
             canceled,
         );
     }
@@ -9888,8 +9891,79 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// What the mods answered a right click on a block (`right_click_block`).
+pub(super) enum BlockClickAnswer {
+    /// Cancelled: this answers the click instead of the block and the item.
+    Canceled(NativeInteractionResult),
+    /// The block's use and the item's `useOn` run as these say.
+    Go {
+        use_block: NativeTriState,
+        use_item: NativeTriState,
+    },
+}
+
 /// Where the game calls the hook points.
 impl Game<'_> {
+    /// The player clicking, as the block-use hooks name them: the acting
+    /// player's UUID and entity id on a server, this client's own player on
+    /// a client.
+    pub(super) fn native_clicker(&mut self) -> (u128, i32) {
+        if self.remote.is_some() {
+            return (self.own_uuid(), self.own_entity_id());
+        }
+        let entity = self
+            .lan_acting_entity
+            .map_or_else(|| self.own_entity_id(), |id| id as i32);
+        (self.native_acting_id(), entity)
+    }
+    /// `PlayerInteractEvent.RightClickBlock` for a click on `hit` with
+    /// `hand` holding `stack`: what the mods let it use.
+    pub(super) fn right_click_block(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&ItemStack>,
+    ) -> BlockClickAnswer {
+        let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
+        if mod_api::mods().is_empty() {
+            return BlockClickAnswer::Go {
+                use_block,
+                use_item,
+            };
+        }
+        let (player, player_entity_id) = self.native_clicker();
+        let side = if self.remote.is_some() {
+            LogicalSide::Client
+        } else {
+            LogicalSide::Server
+        };
+        let click = NativeBlockClick {
+            side,
+            dimension: self.dim.level(),
+            pos: hit.pos,
+            hit: hit.native(),
+            hand,
+            stack,
+            player,
+            player_entity_id,
+        };
+        let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
+        self.native_right_click_block(
+            &click,
+            &mut use_block,
+            &mut use_item,
+            &mut result,
+            &mut canceled,
+        );
+        if canceled {
+            BlockClickAnswer::Canceled(result)
+        } else {
+            BlockClickAnswer::Go {
+                use_block,
+                use_item,
+            }
+        }
+    }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
     pub(super) fn game_rule_changed(&mut self, name: &str, value: GameRuleValue) {

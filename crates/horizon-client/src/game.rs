@@ -3290,6 +3290,14 @@ enum Dim {
     End,
 }
 impl Dim {
+    /// The level as block behaviour and the mods name it.
+    fn level(self) -> LevelDimension {
+        match self {
+            Self::Overworld => LevelDimension::Overworld,
+            Self::Nether => LevelDimension::Nether,
+            Self::End => LevelDimension::End,
+        }
+    }
     fn id(self) -> &'static str {
         match self {
             Self::Overworld => "minecraft:overworld",
@@ -4575,11 +4583,7 @@ impl Game<'_> {
             })
             .collect();
         let guest_boxes = self.lan_block_trigger_boxes();
-        let dimension = match self.dim {
-            Dim::Overworld => LevelDimension::Overworld,
-            Dim::Nether => LevelDimension::Nether,
-            Dim::End => LevelDimension::End,
-        };
+        let dimension = self.dim.level();
         let rules = self.level_rules();
         let fire_players: Vec<[f64; 3]> = self
             .player
@@ -6442,32 +6446,36 @@ impl Game<'_> {
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
         let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
         let mut anchor_passed = false;
-        // Native mods, where ServerPlayerGameMode.useItemOn starts: a
-        // canceled click does nothing (a guest's block is sent back).
+        // Native mods, where ServerPlayerGameMode.useItemOn starts
+        // (RightClickBlock): a cancel answers for the block and the item, and
+        // its PASS goes on to Item.use, which a guest's UseItem asks for.
+        use horizon_client::mod_api::{NativeInteractionResult as Answer, NativeTriState};
+        let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
+        let mut block_hit = block_hit;
+        let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
         if let Some(hit) = block_hit {
-            let mut canceled = false;
-            let player = self.native_acting_id();
-            let player_entity_id = self
-                .lan_acting_entity
-                .map_or_else(|| self.own_entity_id(), |id| id as i32);
-            let (hand, at) = (self.hand, hit.native());
-            self.native_right_click_block(
-                hit.pos,
-                hit.face,
-                hand,
-                at,
-                player,
-                player_entity_id,
-                &mut canceled,
-            );
-            if canceled {
-                // Nothing was used, so nothing consumed the action.
-                self.use_failed = true;
-                return Ok(true);
+            let held = self.held().cloned();
+            match self.right_click_block(hit, self.hand, held.as_ref()) {
+                native_hooks::BlockClickAnswer::Go {
+                    use_block: block,
+                    use_item: item,
+                } => (use_block, use_item) = (block, item),
+                native_hooks::BlockClickAnswer::Canceled(answer)
+                    if answer.consumes_action() || answer == Answer::Fail =>
+                {
+                    if matches!(answer, Answer::Success | Answer::SuccessServer) {
+                        self.swing_arm();
+                    }
+                    self.use_failed = answer == Answer::Fail;
+                    return Ok(true);
+                }
+                native_hooks::BlockClickAnswer::Canceled(_) => {
+                    (use_block, use_item) = (NativeTriState::False, NativeTriState::False);
+                }
             }
         }
         // MultiPlayerGameMode.useItemOn: blocks react first.
-        if !(sneaking && hands_full)
+        if use_block.or(!(sneaking && hands_full))
             && let Some(hit) = block_hit
         {
             let held = self.held().cloned();
@@ -6649,6 +6657,14 @@ impl Game<'_> {
                 }
             }
         }
+        // RightClickBlock's useItem FALSE: no ItemStack.useOn, so only
+        // Item.use is left (a guest's UseItem asks for it).
+        if !use_item.or(true) {
+            if on_block {
+                return Ok(false);
+            }
+            block_hit = None;
+        }
         let Some(stack) = self.held().cloned() else {
             return Ok(false);
         };
@@ -6656,26 +6672,25 @@ impl Game<'_> {
             return Ok(false);
         };
         // ServerPlayerGameMode.useItem and useItemOn: an item on cooldown is
-        // not used (PASS, so the other hand may still act).
-        if self
-            .cooldowns
-            .is_on_cooldown(&horizon_client::cooldowns::group(
-                &stack,
-                info.use_cooldown.as_ref(),
-            ))
+        // not used (PASS, so the other hand may still act), unless
+        // RightClickBlock's useItem TRUE forces a block click's useOn.
+        let forced = on_block && use_item == NativeTriState::True;
+        if !forced
+            && self
+                .cooldowns
+                .is_on_cooldown(&horizon_client::cooldowns::group(
+                    &stack,
+                    info.use_cooldown.as_ref(),
+                ))
         {
             return Ok(false);
         }
         // Native mods, where ItemStack.useOn and Item.use start: the block
         // aimed at had its turn, and the item is off cooldown. A guest's
         // UseItemOn reaches only useOn, its UseItem only use.
-        let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut claimed = false;
         if let Some(hit) = block_hit {
-            let player = self.native_acting_id();
-            let player_entity_id = self
-                .lan_acting_entity
-                .map_or_else(|| self.own_entity_id(), |id| id as i32);
+            let (player, player_entity_id) = self.native_clicker();
             let (hand, at) = (self.hand, hit.native());
             self.native_use_item_on(
                 &stack,

@@ -883,6 +883,9 @@
       "name": "right_click_block",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_right_click_block",
+      "neoforge": "PlayerInteractEvent.RightClickBlock",
+      "side": "both",
+      "cancellable": true,
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
