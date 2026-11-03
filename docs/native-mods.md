@@ -79,7 +79,11 @@ the catalog, not a global API number, source comments or documentation histories
 - The item panel beside container screens and its recipe pages (`native_panel_items`,
   `native_panel_recipes`, and the hook `native_panel_event` for the player's clicks, searches and keys over items), and
   the game's items and recipes (`native_recipes`, `native_known_recipes`, `native_place_recipe`, `native_give`): what a
-  recipe viewer needs.
+  recipe viewer needs. A recipe page (`NativeRecipeView`) also shows machine recipes: up to four `results`, each
+  cycling its stacks with an optional `chance` in percent written under it ("25%"); input slots past a 3 x 3 grid
+  continuing in rows under it, 27 in all; and up to eight `fluid_inputs` and `fluid_outputs`, each a well under the
+  slots with its amount in mB, drawn in the fluid's client look (`data/<mod>/horizon/fluid/`, [mods.md](mods.md)).
+  `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
 
 - `GameLevel::native_send_particles` on authoritative servers. It sends supported
   vanilla particles to nearby players. Block particles require a valid block state. Item, trail and
