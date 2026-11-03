@@ -532,13 +532,17 @@ mod tests {
         });
     }
 
-    use horizon_client::mod_api::{ChunkTicketsValidateEvent, Hooks, Host, ModEntry};
+    use horizon_client::mod_api::{ChunkTicketsValidateEvent, Hooks, ModEntry, ServerHost};
     use horizon_client::mod_chunk_tickets::{ModTicket, TicketOwner};
 
     /// Removes the block at [1, 64, 1] from the tickets it is shown.
     struct Prune;
     impl Hooks for Prune {
-        fn chunk_tickets_validate(&self, _: &mut dyn Host, e: &mut ChunkTicketsValidateEvent<'_>) {
+        fn chunk_tickets_validate(
+            &self,
+            _: &mut dyn ServerHost,
+            e: &mut ChunkTicketsValidateEvent<'_>,
+        ) {
             e.validation.remove_block_tickets([1, 64, 1]);
         }
     }
