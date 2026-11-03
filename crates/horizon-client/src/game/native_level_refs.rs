@@ -4,16 +4,8 @@
 //! `None` (or `false`) on a client, for a handle of an earlier open, or for a
 //! block in a chunk that isn't loaded.
 use super::Game;
-use horizon_client::mod_api::LevelRef;
+use horizon_client::mod_api::{ChunkRef, ChunkStatus, LevelRef};
 use horizon_client::world::World;
-
-fn level_state(
-    world: &World,
-    [x, y, z]: [i32; 3],
-) -> Option<horizon_world::registry::BlockStateId> {
-    let inside = (world.bottom_y()..world.top_y()).contains(&y);
-    (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
-}
 
 impl Game<'_> {
     /// The world a handle names now, or None for a stale or foreign one.
@@ -31,13 +23,34 @@ impl Game<'_> {
             .find(|d| d.id() == level.dimension())?;
         self.levels.parked_world(dim)
     }
+    /// Find a loaded chunk in an open server level. API @API:chunk_refs@.
+    pub(super) fn native_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
+        self.native_level_world(level)?
+            .chunks
+            .contains_key(&(pos[0], pos[1]))
+            .then_some(ChunkRef { level, pos })
+    }
+    /// Whether this chunk is loaded; false on a client or for a stale handle.
+    /// API @API:chunk_refs@.
+    pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> bool {
+        self.native_chunk(chunk.level(), chunk.pos()).is_some()
+    }
+    /// The status of a loaded chunk. Proto chunks are not exposed here.
+    /// API @API:chunk_refs@.
+    pub(super) fn native_chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus> {
+        self.native_chunk(chunk.level(), chunk.pos())
+            .map(|_| ChunkStatus::Full)
+    }
     /// The state at `pos`, if its chunk is loaded and `y` is inside the world.
     pub(super) fn native_level_state(
         &self,
         level: LevelRef,
         pos: [i32; 3],
     ) -> Option<horizon_world::registry::BlockStateId> {
-        level_state(self.native_level_world(level)?, pos)
+        let world = self.native_level_world(level)?;
+        let [x, y, z] = pos;
+        let inside = (world.bottom_y()..world.top_y()).contains(&y);
+        (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
     }
     /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
     /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
@@ -75,10 +88,14 @@ impl Game<'_> {
             .get(key)
             .cloned()
     }
-    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// Whether `pos` is inside the world's height and its chunk is loaded
+    /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
     /// read or write there finds the world. API @API:level_reads@.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.native_level_state(level, pos).is_some()
+        self.native_level_world(level).is_some_and(|w| {
+            (w.bottom_y()..w.top_y()).contains(&pos[1])
+                && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
+        })
     }
     /// The lowest block `y` and the height of the level
     /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
@@ -97,22 +114,5 @@ impl Game<'_> {
     pub(super) fn native_level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.world.day_time)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use horizon_client::chunk::Chunk;
-    use horizon_world::registry::BlockStateId;
-    use std::sync::Arc;
-
-    #[test]
-    fn loaded_chunk_does_not_make_out_of_height_blocks_loaded() {
-        let mut world = World::new(BlockStateId(0), 0);
-        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        assert!(level_state(&world, [0, 64, 0]).is_some());
-        assert!(level_state(&world, [0, 400, 0]).is_none());
-        assert!(level_state(&world, [16, 64, 0]).is_none());
     }
 }

@@ -2,7 +2,7 @@
 //! player's slots, hands and cursor, and item entities. Mods read and write them through
 //! `place_stack` and `set_place_stack`, which come here for these places; a block entity's slots,
 //! a stack inside an item and a mod's own places go through their handlers.
-use super::{Game, powder_snow::HeldSlot, shield::OFFHAND_SLOT};
+use super::{Game, minecarts::CartKind, powder_snow::HeldSlot, shield::OFFHAND_SLOT};
 use horizon_client::{cauldron, first_person::Hand, items::ItemStack, mod_api::ItemPlace};
 
 /// The player a place belongs to, if a player's.
@@ -16,6 +16,40 @@ fn place_player(place: &ItemPlace) -> Option<u128> {
 }
 
 impl Game<'_> {
+    /// The inventory of entity `id` in the level in place, if it has one: a chest or hopper
+    /// minecart's (the open menu's copy while one shows it, as `cart_slots`), a chest boat's, or
+    /// a chested donkey's, mule's or llama's (`AbstractHorse.inventory`, `getInventoryColumns`
+    /// rows of three). With where it stands, for what a split throws.
+    pub(super) fn entity_slots(&mut self, id: u32) -> Option<(&mut [Option<ItemStack>], [f64; 3])> {
+        let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, id as i32);
+        let at = |p: &horizon_core::geometry::Vec3| [p.x, p.y, p.z];
+        let container = |c: &super::minecarts::Minecart| {
+            c.id == id && matches!(c.kind, CartKind::Chest | CartKind::Hopper)
+        };
+        let position = if let Some(c) = self.carts.iter().find(|c| container(c)) {
+            at(&c.position)
+        } else if let Some(b) = self.boats.iter().find(|b| b.id == id && b.chest) {
+            at(&b.position)
+        } else {
+            let m = self
+                .mobs
+                .iter_mut()
+                .find(|m| m.id == id && m.extra.chested)?;
+            let size = super::mount_menu::mount_columns(m) * 3;
+            if m.extra.items.len() < size {
+                m.extra.items.resize(size, None);
+            }
+            return Some((&mut m.extra.items[..size], at(&m.position)));
+        };
+        if self.carts.iter().any(container) {
+            return Some((self.cart_slots(id)?, position));
+        }
+        if let Some(super::BlockEntity::Chest(open)) = self.world.block_entities.get_mut(&key) {
+            return Some((open, position));
+        }
+        let b = self.boats.iter_mut().find(|b| b.id == id)?;
+        Some((&mut b.items, position))
+    }
     /// Whether this game simulates a world: a client's copy has no places to write.
     fn places_simulated(&self) -> bool {
         self.serving.is_some() || self.options.dedicated.is_some()
@@ -47,6 +81,10 @@ impl Game<'_> {
                 .iter()
                 .find(|e| e.id == *id)
                 .map(|e| e.stack.clone());
+        }
+        if let ItemPlace::EntitySlot { entity, slot } = place {
+            let (slots, _) = self.entity_slots(*entity)?;
+            return slots.get(*slot).cloned().flatten().filter(|s| s.count > 0);
         }
         let mut stack = None;
         self.native_as_player(place_player(place)?, |g| {
@@ -97,6 +135,9 @@ impl Game<'_> {
             }
             return true;
         }
+        if let ItemPlace::EntitySlot { entity, slot } = place {
+            return self.set_entity_slot(*entity, *slot, stack, one_by_one, simulate);
+        }
         let Some(player) = place_player(place) else {
             return false;
         };
@@ -106,12 +147,18 @@ impl Game<'_> {
             if !written || simulate {
                 return;
             }
+            g.journal_player(player);
             if one_by_one && let ItemPlace::PlayerHand { hand, .. } = place {
                 let slot = match hand {
                     Hand::Main => g.selected,
                     Hand::Off => OFFHAND_SLOT,
                 };
-                cauldron::create_filled_result(&mut HeldSlot { game: g, slot }, stack, true);
+                let mut held = HeldSlot {
+                    game: g,
+                    slot,
+                    dropper: Some(player),
+                };
+                cauldron::create_filled_result(&mut held, stack, true);
                 return;
             }
             let Some(slot) = g.player_place(place) else {
@@ -126,17 +173,75 @@ impl Game<'_> {
                 held.count -= 1;
             }
             if let Some(rest) = (stack.count > 0).then(|| g.give(stack)).flatten() {
-                g.drop_plain(rest);
+                g.drop_after_commit(player, rest);
             }
         });
         written
+    }
+    /// `native_set_game_stack` for slot `slot` of entity `entity`'s inventory: with
+    /// `one_by_one` from a stack of more than one, the changed item goes into the inventory's
+    /// other slots, else is thrown where the entity stands.
+    fn set_entity_slot(
+        &mut self,
+        entity: u32,
+        slot: usize,
+        stack: ItemStack,
+        one_by_one: bool,
+        simulate: bool,
+    ) -> bool {
+        let Some((slots, _)) = self.entity_slots(entity) else {
+            return false;
+        };
+        if slot >= slots.len() || simulate {
+            return slot < slots.len();
+        }
+        self.journal_entity(entity);
+        let Some((slots, at)) = self.entity_slots(entity) else {
+            return false;
+        };
+        let split = one_by_one && slots[slot].as_ref().is_some_and(|held| held.count > 1);
+        if !split {
+            slots[slot] = (stack.count > 0).then_some(stack);
+            return true;
+        }
+        if let Some(held) = slots[slot].as_mut() {
+            held.count -= 1;
+        }
+        if stack.count == 0 {
+            return true;
+        }
+        let max = self.containers().max_stack(&stack);
+        let Some((slots, _)) = self.entity_slots(entity) else {
+            return true;
+        };
+        let mut rest = stack;
+        for held in slots.iter_mut() {
+            match held {
+                Some(h) if h.count < max && h.same_item_same_components(&rest) => {
+                    let moved = (max - h.count).min(rest.count);
+                    h.count += moved;
+                    rest.count -= moved;
+                }
+                None => {
+                    *held = Some(rest.clone());
+                    rest.count = 0;
+                }
+                _ => {}
+            }
+            if rest.count == 0 {
+                return true;
+            }
+        }
+        let pos = at.map(|p| p.floor() as i32);
+        self.after_commit(super::transactions::After::Drop(pos, rest));
+        true
     }
     /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up
     /// what it can't put back.
     pub(super) fn native_drop_at(&mut self, pos: [i32; 3], stack: ItemStack) {
         if self.places_simulated() && stack.count > 0 {
-            // `Block.popResource`'s default pickup delay.
-            self.spawn_item(stack, pos.map(|p| f64::from(p) + 0.5), [0.0; 3], 10);
+            // `Block.popResource`'s default pickup delay, at the root commit.
+            self.after_commit(super::transactions::After::Drop(pos, stack));
         }
     }
 }

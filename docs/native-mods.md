@@ -377,7 +377,8 @@ An injection names `hook` and `hook_version` instead of `target`, and horizon-mi
 of the source it applies to, so a hook point can move in the source without breaking the mods that use it. A name
 the catalog lacks is `E_HOOK_UNKNOWN` (the error lists the names it has), a version it lacks `E_HOOK_VERSION`. A
 contract is never changed, its `mod_api` entry (the trait method's contract) included: an incompatible change adds
-a version. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
+a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
+binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
@@ -1869,6 +1870,16 @@ Install and prepare the base release in that scratch launcher home first, then t
 - A list of every native build, to delete the ones no instance needs.
 - A prebuilt horizon-mixins from its CI instead of building it on the player's computer.
 
+## Counterparts
+
+A hook's optional `neoforge` catalog key names its NeoForge 26.3 counterpart;
+that counterpart sets the hook's name, side and cancellation contract. The optional
+`fabric` and `paper` keys name Fabric and Paper events at the same moment with the
+same contract. Each key is a string or a list of strings; omission is valid. One
+hook serves each matching moment; near matches with different timing, side or
+cancellation are gaps, not counterparts. A hook with none of these keys names the
+mod mixin or use it replaces in its design or PR.
+
 ## Named hook catalog (draft)
 
 `native-hooks.json` maps stable hook names and contract versions to the current
@@ -2309,10 +2320,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (0 to 20) or set `cancel` to leave it at `from`, saturation included. It is heard once for what one turn of the
   player changed, not for the full bar a respawn gives, the food a player joins with, or the host of a LAN world. The
   player's state is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- **`native_right_click_block(pos, face, canceled)`** (API 21): a player's right click on a block, before the block's
-  own use and the item's (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both,
-  without a swing; the player's client is sent the block back. With `native_destroy_block` it keeps players out of
-  claimed land.
+- **`native_right_click_block(pos, face, hand, hit, player, player_entity_id, canceled)`** (API 21; `hand`, `hit`, `player` and `player_entity_id` since
+  API @API:block_use_context@): a player's right click on a block, before the block's own use and the item's
+  (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both, without a swing; the
+  player's client is sent the block back. With `native_destroy_block` it keeps players out of claimed land.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_move(dimension, piston,
   direction, push, destroy, canceled)`** (API 22, on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.
@@ -2721,9 +2732,10 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
-  entity atlas and the shared quad index buffer. Not called on the title screen's panorama. `motion` says which mob,
-  player or dropped item each run of the entity quads is, by its entity id, so a mod can match an entity's vertices
-  with last frame's (a motion blur's own motion vectors); `spans` only name the type.
+  entity atlas, the shared quad index buffer and the block sprite arrays ([block textures](#block-textures)). Not
+  called on the title screen's panorama. `motion` says which mob, player or dropped item each run of the entity quads
+  is, by its entity id, so a mod can match an entity's vertices with last frame's (a motion blur's own motion
+  vectors); `spans` only name the type.
 - `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
   entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
   holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
@@ -2735,6 +2747,37 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
   several mods can ask. It's asked as each frame is built, so keep it cheap.
+
+### Block textures
+
+`crates/horizon-client/src/game/native_block_sprites.rs` and `WorldDrawn::block_sprites`: for a client mod drawing
+blocks in its own pass (flying debris as voxels, say) with the player's own block textures, resource packs included,
+as the terrain samples them. API @API:native_block_sprites@.
+
+- `WorldDrawn::block_sprites` (`BlockSpriteArrays`) holds the block sprite arrays as `D2Array` views: the terrain's
+  eight, a 1-layer stand-in past the ones in use, each with the mip levels the Mipmap Levels option leaves, animated
+  layers at the frame shown. Each texture is a whole square layer of `size` texels, its UVs 0 to 1 across it,
+  gamma-encoded as the world uses it. `split` layers go to an array (2048 on most GPUs, fewer where the GPU holds
+  fewer): every vanilla texture is usually in array 0. `nearest` samples texels sharp (nearest, repeating, the
+  nearest mip level), `filtered` is the terrain's own sampler.
+- `native_block_sprites(blocks)` says, for each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left
+  out take the default), what its model draws on each side, in `Direction` order (down, up, north, south, west,
+  east): its faces in the order drawn, each with its `sprite` (`array`, `layer`, `animated`, `cutout`), its `rect`
+  on the side and `inset` from the side's plane (a whole face is 0, 0, 1, 1 and 0), its `uv` map, its `tint` source
+  and whether it is `translucent`; the model's `particle` sprite; whether it is a plain `cube`. None for a block the
+  game doesn't know. A side's axes run along x then z for down and up, x then y for north and south, z then y for
+  west and east, from the block's corner nearest 0, 0, 0 (`block_sprites::side_axes`); the point (a, b) of a side
+  shows the sprite at `(uv[0], uv[1]) + a * (uv[2], uv[3]) + b * (uv[4], uv[5])`, rotations and mirrors included
+  (for a plain block's north side, `u = 1 - x, v = 1 - y`). A tinted face is multiplied by its source's colour:
+  `Grass`, `Foliage`, `DryFoliage` and `Water` are the biome's where the block is, `Fixed` a constant (spruce
+  leaves, redstone at its power). A grass block's side is two faces, the side and then its grey overlay tinted with
+  grass. The model is the state's first random variant; faces that don't lie flat on a side (a flower's crossed
+  planes) are left out, and the `particle` sprite stands for them. Fluids give their still texture on every side.
+- `native_texture_sprites(textures)`: a texture's sprite by name (`block/stone`), none for one no model uses.
+- `native_block_sprites_version()` changes each time the resources load (a resource pack turned on or off moves the
+  layers, and the arrays are new): ask again then.
+
+Look blocks up once and keep what you need (a few words a block for your own shader), not every frame.
 
 ### Menu slot rules
 
@@ -3112,6 +3155,24 @@ leftover of another item counts as the offered one. A leftover larger than the o
 dropped at the block (items) or, as above, lost with a warning (fluids). Either is a mod bug, warned once naming
 the mod; a broken handler can't make a move overflow, duplicate items or panic the game.
 
+`host.transaction(|host| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose `Err`
+aborts, nested in the open transaction if any. Inside, a capability write applies at once, so later steps see it,
+and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
+compound and attachments, a hopper's cooldown, a cauldron's block state, a player's inventory (slots, armour, off
+hand and cursor, whether the player is the host or a guest), and an entity's inventory (a chest or hopper minecart,
+a chest boat, a chested donkey, mule or llama). A nested commit hands its changes to
+the transaction around it, and only the outermost commit makes them final. Then the world is told of each change
+once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox starting or stopping, a cauldron's
+block update, and an item dropped at a block, thrown by a player (what a filled bucket's split no longer fits) or
+by an entity. An abort puts every storage back quietly, so nothing outside saw the
+change. A panic unwinding out of the closure aborts that transaction as it passes, and the one around it stays open. `host.transaction` is the only way to open one: the raw `transaction_open` and `transaction_close` helpers take a `TransactionSeal` that only it makes. A handler keeps no journal of its own:
+its state is the game's, so the game's journal covers it. An item entity's stack isn't covered: what a transaction
+changes there is final at once.
+
+`ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
+`Capabilities.Item.ENTITY`), read and written through `place_stack` and `set_place_stack` like any other place.
+Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
@@ -3131,7 +3192,8 @@ impl Host for Stone {
 }
 let mods = [Box::new(MyMod) as Box<dyn Hooks>];
 let mut claimed = false;
-dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], &mut claimed);
+let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
+dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], Hand::Main, hit, 7, &mut claimed);
 assert!(claimed);
 ```
 

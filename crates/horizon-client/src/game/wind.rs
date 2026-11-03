@@ -31,6 +31,16 @@ pub(super) struct Burst {
     multiplier: f32,
     breeze: bool,
     wind_charge: bool,
+    cause: BurstCause,
+}
+/// Who a burst's `ServerExplosion` names, as entity ids: the entity that
+/// bursts (`getDirectSourceEntity`: a wind charge, the bearer of Wind
+/// Charged, a mace's wielder with `attribute_to_user`) and its living
+/// `getIndirectSourceEntity` (the charge's thrower, the bearer or wielder).
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct BurstCause {
+    pub source: Option<u32>,
+    pub owner: Option<u32>,
 }
 /// `Projectile.deflect` with `ProjectileDeflection.REVERSE`.
 pub(super) fn reverse(p: &mut Projectile, jitter: f32) {
@@ -108,7 +118,17 @@ impl Game<'_> {
             ],
             Hit::None => return Ok(()),
         };
-        self.wind_burst(center, radius, knockback, breeze, !breeze)
+        // `getIndirectSourceEntity`: the charge's living owner.
+        let owner = match p.owner {
+            Some(Who::Player) => Some(self.own_entity_id() as u32),
+            Some(Who::Mob(id)) => self.mobs.iter().any(|m| m.id == id).then_some(id),
+            None => None,
+        };
+        let cause = BurstCause {
+            source: Some(p.id),
+            owner,
+        };
+        self.wind_burst(center, radius, knockback, breeze, !breeze, cause)
     }
     /// `AbstractWindCharge.onHitEntity`: one point of damage.
     fn wind_charge_damage(&mut self, p: &Projectile, who: Who) {
@@ -392,6 +412,7 @@ impl Game<'_> {
         multiplier: f32,
         breeze: bool,
         wind_charge: bool,
+        cause: BurstCause,
     ) -> Result<()> {
         // In a guest's turn (their charge landing, their mace's burst) the
         // host holds the other players (`as_guest`): the burst waits for the
@@ -403,8 +424,29 @@ impl Game<'_> {
                 multiplier,
                 breeze,
                 wind_charge,
+                cause,
             });
             return Ok(());
+        }
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let start = horizon_client::mod_api::NativeExplosionStart {
+                dimension: self.dim.id(),
+                center,
+                radius,
+                fire: false,
+                interaction: horizon_client::mod_api::NativeBlockInteraction::TriggerBlock,
+                // `DamageSources.explosion(source, owner)`.
+                damage_type: if cause.source.is_some() && cause.owner.is_some() {
+                    "minecraft:player_explosion"
+                } else {
+                    "minecraft:explosion"
+                },
+                source: cause.source,
+                owner: cause.owner,
+            };
+            if self.explosion_start_cancelled(&start) {
+                return Ok(());
+            }
         }
         // ServerExplosion.explode: the blast is heard first.
         let ctx = horizon_client::sculk::Context::default();
@@ -447,7 +489,14 @@ impl Game<'_> {
     pub(super) fn flush_wind_bursts(&mut self) -> Result<()> {
         self.flush_smash_pushes();
         for b in std::mem::take(&mut self.creatures.wind_bursts) {
-            self.wind_burst(b.center, b.radius, b.multiplier, b.breeze, b.wind_charge)?;
+            self.wind_burst(
+                b.center,
+                b.radius,
+                b.multiplier,
+                b.breeze,
+                b.wind_charge,
+                b.cause,
+            )?;
         }
         Ok(())
     }

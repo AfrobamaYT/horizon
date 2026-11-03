@@ -2684,7 +2684,7 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
                     continue;
                 }
                 if let Some(mods) = mods
-                    && !mods.tick_mod_effect(id, m.id, count, amp)
+                    && !mods.tick_mod_effect(id, m, count, amp)
                 {
                     // Removed before it counts down.
                     expired = true;

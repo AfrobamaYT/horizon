@@ -498,8 +498,7 @@ impl Game<'_> {
         match (body, broke) {
             (true, false) => m.extra.body_damage = stack.damage as i32,
             (true, true) => {
-                m.extra.body = None;
-                m.extra.body_damage = 0;
+                m.extra.set_body_stack(None);
             }
             (false, false) => m.extra.armor[0] = Some(stack),
             (false, true) => {
@@ -577,8 +576,7 @@ impl Game<'_> {
                 return;
             };
             if lost >= max {
-                m.extra.body = None;
-                m.extra.body_damage = 0;
+                m.extra.set_body_stack(None);
                 true
             } else {
                 m.extra.body_damage = lost as i32;
@@ -809,6 +807,7 @@ impl Game<'_> {
             } else {
                 None
             },
+            ask_taming: self.remote.is_none() && !horizon_client::mod_api::mods().is_empty(),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -5404,6 +5403,7 @@ impl Game<'_> {
             .as_ref()
             .map(|p| [p.position.x, p.position.y, p.position.z]);
         let acting = self.acting_player_uuid();
+        let (acting_id, acting_entity_id) = (self.native_acting_id(), self.own_entity_id());
         let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft)
             || self.keys.contains(&winit::keyboard::KeyCode::ShiftRight);
         let held_damage = held.as_ref().map_or(0, |h| h.damage as i32);
@@ -5560,12 +5560,8 @@ impl Game<'_> {
                     && m.extra.body.is_some()
                     && !sneaking =>
             {
-                let mut stack = ItemStack::new("minecraft:wolf_armor", 1);
-                stack.damage = m.extra.body_damage.max(0) as u32;
-                stack.extra = m.extra.body_extra.take();
-                armor_drop = Some(stack);
-                m.extra.body = None;
-                m.extra.body_damage = 0;
+                armor_drop = m.equipment_stacks()[6].clone();
+                m.extra.set_body_stack(None);
                 eat = Some(("item.armor.unequip_wolf", 1.0, 1.0));
                 self.damage_held_tool();
             }
@@ -5592,6 +5588,7 @@ impl Game<'_> {
                     && !m.is_baby() =>
             {
                 m.extra.body = Some(item.as_str().into());
+                m.extra.body_count = 0;
                 m.extra.body_damage = held_damage;
                 m.extra.body_extra = held_extra;
                 consume = true;
@@ -5658,7 +5655,10 @@ impl Game<'_> {
                     && !horizon_client::mobs::tame::angry(m) =>
             {
                 consume = true;
-                let tamed = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let rolled = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let tamed =
+                    rolled && !self.animal_tame_cancelled(index, acting_id, acting_entity_id);
+                let m = &mut self.mobs[index];
                 if tamed {
                     horizon_client::mobs::tame::set_tame(m, true);
                     m.extra.owner = Some(acting);
@@ -5672,6 +5672,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
                 let m = &self.mobs[index];
                 self.world.modified.insert((
@@ -5751,7 +5752,10 @@ impl Game<'_> {
             Species::Cat if !m.extra.tame && is_food => {
                 consume = true;
                 m.persistent = true;
-                let tamed = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let rolled = m.random.next_int_bound(3).unwrap_or(1) == 0;
+                let tamed =
+                    rolled && !self.animal_tame_cancelled(index, acting_id, acting_entity_id);
+                let m = &mut self.mobs[index];
                 if tamed {
                     m.extra.tame = true;
                     m.extra.owner = Some(acting);
@@ -5763,6 +5767,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
                 let m = &self.mobs[index];
                 self.world.modified.insert((
@@ -5826,7 +5831,10 @@ impl Game<'_> {
                     let pitch = 1.0 + (m.random.next_float() - m.random.next_float()) * 0.2;
                     eat = Some(("entity.parrot.eat", 1.0, pitch));
                 }
-                let tamed = m.random.next_int_bound(10).unwrap_or(1) == 0;
+                let rolled = m.random.next_int_bound(10).unwrap_or(1) == 0;
+                let tamed =
+                    rolled && !self.animal_tame_cancelled(index, acting_id, acting_entity_id);
+                let m = &mut self.mobs[index];
                 if tamed {
                     m.extra.tame = true;
                     m.extra.owner = Some(acting);
@@ -5836,6 +5844,7 @@ impl Game<'_> {
                 if tamed {
                     let view = self.mob_entity(&self.mobs[index]);
                     self.trigger_entity("minecraft:tame_animal", "entity", &view);
+                    self.pet_tamed(index);
                 }
             }
             // Dolphin.mobInteract: a fish makes a baby grow by a tenth and an
@@ -7641,6 +7650,7 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            ask_taming: false,
             border: None,
         };
         let pw = ProjWorld {

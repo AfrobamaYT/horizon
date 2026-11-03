@@ -38,6 +38,8 @@ mod tests {
         pub(super) struct Compound;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
+        pub(super) struct NativeExplosionStart<'a>(pub &'a ());
+        pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct StackedOnOther<'a> {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
@@ -51,6 +53,8 @@ mod tests {
         pub(super) struct UseAnimation;
         #[derive(Clone, Copy)]
         pub(super) struct Hand;
+        #[derive(Clone, Copy)]
+        pub(super) struct BlockHit;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
@@ -85,6 +89,11 @@ mod tests {
         pub(super) struct NativeLifecycleContext;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
+        #[derive(Clone, Copy)]
+        pub(super) struct NativePlayerFood;
+        #[derive(Clone, Copy)]
+        pub(super) struct LivingRef;
+        pub(super) struct EffectTickChange;
         #[derive(Clone, Copy)]
         pub(super) struct ServerTickPhase;
         #[derive(Clone, Copy)]
@@ -123,6 +132,9 @@ mod tests {
             }
             pub mod menu {
                 pub struct AnvilCraft;
+                pub struct AnvilUpdate;
+                pub struct GrindstonePlace;
+                pub struct GrindstoneTake;
             }
             pub mod stations {
                 pub struct EnchantmentRow<'a>(std::marker::PhantomData<&'a ()>);
@@ -642,6 +654,10 @@ mod tests {
             &ItemStack::default(),
             [0; 3],
             [0; 3],
+            Hand,
+            BlockHit,
+            0,
+            0,
             &mut claimed,
         );
         assert!(claimed);
@@ -653,6 +669,10 @@ mod tests {
             &ItemStack::default(),
             [0; 3],
             [0; 3],
+            Hand,
+            BlockHit,
+            0,
+            0,
             &mut claimed,
         );
         assert!(calls.lock().unwrap().is_empty());

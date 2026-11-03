@@ -1255,12 +1255,17 @@ pub fn mob_to_nbt(
             }
         }
         if let Some(id) = &m.extra.body {
-            let mut stack = crate::items::ItemStack::new(id, 1);
+            let mut stack = crate::items::ItemStack::new(id, m.extra.body_count.max(1));
             stack.damage = m.extra.body_damage.max(0) as u32;
             stack.extra = m.extra.body_extra.clone();
             equipment.insert("body".into(), crate::save::item_to_nbt(&stack));
         } else {
             equipment.remove(&"body".into());
+        }
+        if let Some(saddle) = m.saddle_item() {
+            equipment.insert("saddle".into(), crate::save::item_to_nbt(&saddle));
+        } else {
+            equipment.remove(&"saddle".into());
         }
         // Vanilla saves `equipment` only when something is equipped.
         if equipment.is_empty() {
@@ -1497,8 +1502,10 @@ pub fn mob_from_nbt(
         m.extra.head = slot("head");
         m.extra.body = slot("body");
         let body = eq.get("body").and_then(crate::save::item_from_nbt);
+        m.extra.body_count = body.as_ref().map_or(0, |s| s.count);
         m.extra.body_damage = body.as_ref().map_or(0, |s| s.damage as i32);
         m.extra.body_extra = body.and_then(|s| s.extra);
+        m.set_saddle(eq.get("saddle").and_then(crate::save::item_from_nbt));
         m.extra.chest = slot("chest");
         m.extra.legs = slot("legs");
         m.extra.feet = slot("feet");
@@ -2075,7 +2082,10 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
         ),
         (
             "PickupDelay",
-            Tag::Short(e.pickup_delay.min(i16::MAX as u32) as i16),
+            Tag::Short(
+                e.pickup_delay
+                    .clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16,
+            ),
         ),
     ] {
         put(&mut tag, key, value);
@@ -2150,7 +2160,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         vertical_collision: false,
         horizontal_collision: false,
         age: number(tag.get("Age")).unwrap_or(0) as i32,
-        pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
+        pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0),
         bob_offset,
         ticks: 0,
         needs_sync: false,
@@ -3680,6 +3690,103 @@ mod tests {
         assert_eq!(falling_block_flags(&tag), (false, false));
         assert_eq!(crate::falling_block::Damage::from_nbt(&tag, true), damage);
         assert_eq!(uuid(&tag), Some([1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn loaded_item_lifetime_counters_tick_with_signed_sentinels() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let registry = assets.registry;
+        let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
+        let collision = crate::collisions::load(&root, registry).unwrap();
+        let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
+        let mut world =
+            crate::world::World::new(registry.default_state("minecraft:air").unwrap(), 0);
+        world
+            .chunks
+            .insert((0, 0), Arc::new(crate::chunk::Chunk::empty(0, 0)));
+        let tick = |item: &mut ItemEntity| {
+            item.tick(
+                &world,
+                registry,
+                &facts,
+                &collision,
+                false,
+                &fluids,
+                &[],
+                None,
+            )
+        };
+        let fresh = Tag::compound([
+            ("id", string("minecraft:item")),
+            ("Pos", doubles(&[4.5, 210.0, 4.5])),
+            ("NoGravity", Tag::Byte(1)),
+            (
+                "Item",
+                Tag::compound([("id", string("minecraft:stone")), ("count", Tag::Int(1))]),
+            ),
+        ]);
+        for delay in [32767_i16, -1, 0, 1, 2] {
+            for age in [-32768_i16, -1, 0, 5998, 5999, 6000, 32767] {
+                let mut item = item_entity_from_nbt(&fresh, 1, 0.0).unwrap();
+                for _ in 0..3 {
+                    assert!(tick(&mut item));
+                }
+                assert_eq!(item.age, 3);
+                let mut data = item_entity_to_nbt(&item, [0, 0, 0, 1], None);
+                put(&mut data, "Age", Tag::Short(age));
+                put(&mut data, "PickupDelay", Tag::Short(delay));
+                let mut item = item_entity_from_nbt(&data, 1, 0.0).unwrap();
+                let mut alive = true;
+                for step in 0..=3 {
+                    if step > 0 && alive {
+                        alive = tick(&mut item);
+                    }
+                    let expected_age = if age == i16::MIN {
+                        i32::from(age)
+                    } else {
+                        i32::from(age) + step
+                    };
+                    let expected_alive = step == 0 || expected_age < 6000;
+                    assert_eq!(
+                        alive, expected_alive,
+                        "age={age}, delay={delay}, tick={step}"
+                    );
+                    if !alive {
+                        continue;
+                    }
+                    let data = item_entity_to_nbt(&item, [0, 0, 0, 1], None);
+                    let expected_delay = if delay > 0 && delay != i16::MAX {
+                        (i32::from(delay) - step).max(0)
+                    } else {
+                        i32::from(delay)
+                    };
+                    assert_eq!(
+                        number(data.get("Age")),
+                        Some(i64::from(expected_age)),
+                        "age={age}, tick={step}"
+                    );
+                    assert_eq!(
+                        number(data.get("PickupDelay")),
+                        Some(i64::from(expected_delay)),
+                        "age={age}, delay={delay}, tick={step}"
+                    );
+                }
+            }
+        }
+        let mut legacy = item_entity_from_nbt(&fresh, 1, 0.0).unwrap();
+        legacy.pickup_delay = i64::from(u32::MAX);
+        assert!(tick(&mut legacy));
+        assert_eq!(legacy.pickup_delay, i64::from(u32::MAX));
     }
 
     #[test]
@@ -5540,9 +5647,27 @@ mod held_item_name_tests {
             .into_iter()
             .map(|(id, kind)| (id, Arc::new(kind)))
             .collect();
+        let mut zombie = Mob::new(3, Arc::clone(&types["minecraft:zombie"]), Vec3::ZERO, 0.0);
+        let saddle = crate::items::ItemStack::new("minecraft:saddle", 3);
+        zombie.set_saddle(Some(saddle.clone()));
+        let mut offhand = crate::items::ItemStack::new("minecraft:shield", 2);
+        offhand.damage = 11;
+        offhand.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Shield".into()));
+        crate::mobs::finalize::set_item_stack(
+            &mut zombie,
+            crate::mobs::finalize::OFFHAND,
+            offhand.clone(),
+        );
+        let saved = mob_to_nbt(&zombie, [0; 4], None, None);
+        let zombie = mob_from_nbt(&saved, &types, 4, None).unwrap();
+        assert_eq!(zombie.saddle_item(), Some(saddle));
+        assert_eq!(zombie.equipment_stacks()[1], Some(offhand));
         let mut horse = Mob::new(1, Arc::clone(&types["minecraft:horse"]), Vec3::ZERO, 0.0);
         horse.extra.head = Some("minecraft:iron_helmet".into());
-        horse.extra.body = Some("minecraft:diamond_horse_armor".into());
+        let mut armor = crate::items::ItemStack::new("minecraft:diamond_horse_armor", 3);
+        armor.damage = 7;
+        armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Body".into()));
+        horse.extra.set_body_stack(Some(armor.clone()));
         let stacks = horse.equipment_stacks();
         assert_eq!(
             stacks[5].as_ref().unwrap().item.as_ref(),
@@ -5559,6 +5684,7 @@ mod held_item_name_tests {
             horse.extra.body.as_deref(),
             Some("minecraft:diamond_horse_armor")
         );
+        assert_eq!(horse.equipment_stacks()[6], Some(armor.clone()));
         let mut chances = [0.0; 8];
         chances[drops::SLOTS.iter().position(|s| *s == "head").unwrap()] = 2.0;
         chances[drops::SLOTS.iter().position(|s| *s == "body").unwrap()] = 2.0;
@@ -5578,6 +5704,11 @@ mod held_item_name_tests {
             &death,
             &mut crate::random_sequences::RandomSequences::default(),
             &mut horizon_core::random::LegacyRandom::new(7),
+        );
+        assert!(
+            items
+                .iter()
+                .any(|drop| matches!(drop, Drop::Stack(s) if s == &armor))
         );
         let ids: Vec<_> = items
             .into_iter()

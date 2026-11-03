@@ -142,6 +142,9 @@ impl Game<'_> {
                 .get_mut(&uuid)
                 .ok_or(AttachmentError::MissingHolder);
         }
+        if let horizon_client::mod_api::Holder::BlockEntity([x, y, z]) = holder {
+            self.journal_block_entity((x, y, z));
+        }
         world_attachments(&mut self.world, holder)
     }
 }

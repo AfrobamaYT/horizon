@@ -79,7 +79,12 @@ impl Game<'_> {
     /// `ItemUtils.createFilledResult(held, player, filled)` for the held stack.
     pub(super) fn filled_result(&mut self, filled: ItemStack) {
         let slot = self.held_slot();
-        cauldron::create_filled_result(&mut HeldSlot { game: self, slot }, filled, true);
+        let mut held = HeldSlot {
+            game: self,
+            slot,
+            dropper: None,
+        };
+        cauldron::create_filled_result(&mut held, filled, true);
     }
 }
 
@@ -100,6 +105,9 @@ fn added(stack: &mut ItemStack, rest: Option<ItemStack>, creative: bool) -> bool
 pub(super) struct HeldSlot<'g, 'a> {
     pub(super) game: &'g mut Game<'a>,
     pub(super) slot: usize,
+    /// The UUID of the player a mod's write acts as: what doesn't fit waits for the root
+    /// commit of an open transaction. None for the game's own use.
+    pub(super) dropper: Option<u128>,
 }
 impl cauldron::Player for HeldSlot<'_, '_> {
     fn creative(&self) -> bool {
@@ -123,7 +131,10 @@ impl cauldron::Player for HeldSlot<'_, '_> {
             .any(|have| have.same_item_same_components(stack))
     }
     fn drop_stack(&mut self, stack: ItemStack) {
-        self.game.drop_plain(stack);
+        match self.dropper {
+            Some(uuid) => self.game.drop_after_commit(uuid, stack),
+            None => self.game.drop_plain(stack),
+        }
     }
 }
 

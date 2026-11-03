@@ -183,6 +183,7 @@ impl Game<'_> {
             pos: hit.pos,
             face: hit.face,
             point: hit.point,
+            inside: hit.inside,
         };
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
         if self.items().block_in_tag(

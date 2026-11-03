@@ -6,6 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
+pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
@@ -23,7 +24,8 @@ pub use crate::game::{
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
-    RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
+    BlockSpriteArrays, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent,
+    wgpu,
 };
 pub use crate::health::{HurtSource, ShieldBlock};
 pub use crate::hud::HudBatch;
@@ -31,6 +33,7 @@ pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
 pub use crate::menu::StackedOnOther;
 pub use crate::merchant::MerchantOffer;
+pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
@@ -117,6 +120,53 @@ pub struct NativeLootDrops<'a> {
     /// the mob, `player` its killer, `table` empty, `used` false). API
     /// 102.
     pub used: bool,
+}
+
+/// A server explosion about to happen, for `explosion_start`
+/// (`ServerLevel.explode`'s `ServerExplosion`).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeExplosionStart<'a> {
+    /// The level it happens in (`minecraft:overworld`).
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub radius: f32,
+    /// It sets fires (`createFire`).
+    pub fire: bool,
+    pub interaction: NativeBlockInteraction,
+    /// The damage type of its damage source (`minecraft:explosion`,
+    /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`).
+    pub damage_type: &'a str,
+    /// The entity that explodes (`getDirectSourceEntity`): a creeper, a wind
+    /// charge, the bearer of Wind Charged, when Horizon tracks it.
+    pub source: Option<u32>,
+    /// `getIndirectSourceEntity`: a living source itself, a primed TNT's
+    /// owner, or a projectile's living owner (a ghast for its fireball, a
+    /// wither for its skull, the thrower of a wind charge).
+    pub owner: Option<u32>,
+}
+
+/// What an explosion does to blocks (`Explosion.BlockInteraction`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeBlockInteraction {
+    Keep,
+    Destroy,
+    DestroyWithDecay,
+    /// A wind burst: it pushes, and triggers doors, buttons, bells and the like.
+    TriggerBlock,
+}
+
+/// A fishing catch, for `item_fished` (`ItemFishedEvent`).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeItemFished<'a> {
+    /// The bobber's entity id and position.
+    pub hook: u32,
+    pub position: [f64; 3],
+    /// The items the fishing loot table rolled, which the player receives
+    /// (`getDrops`: they can't be changed here; loot tables change them).
+    pub drops: &'a [ItemStack],
 }
 
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
@@ -481,6 +531,33 @@ impl LevelRef {
     }
 }
 
+/// A chunk position in an open level. A handle may be kept after unloading;
+/// reads resolve it again, returning `false` or `None` when it is no longer loaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ChunkRef {
+    pub(crate) level: LevelRef,
+    pub(crate) pos: [i32; 2],
+}
+
+impl ChunkRef {
+    /// The chunk coordinates, `[x, z]`.
+    pub fn pos(self) -> [i32; 2] {
+        self.pos
+    }
+    /// The level containing the chunk.
+    pub fn level(self) -> LevelRef {
+        self.level
+    }
+}
+
+/// The status of a loaded chunk that Horizon can expose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ChunkStatus {
+    /// A full chunk in a level's live world.
+    Full,
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {
@@ -571,6 +648,57 @@ pub struct NativePlayerFood {
     pub saturation: f32,
     /// Food exhaustion.
     pub exhaustion: f32,
+}
+
+/// Damage sources supported for a mod effect tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeEffectDamage {
+    /// Poison's magic damage.
+    Magic,
+    /// The Wither effect's damage.
+    Wither,
+}
+impl NativeEffectDamage {
+    pub(crate) fn mob_kind(self) -> crate::mobs::DamageKind {
+        match self {
+            Self::Magic => crate::mobs::DamageKind::Magic,
+            Self::Wither => crate::mobs::DamageKind::Wither,
+        }
+    }
+}
+
+/// A change requested by an effect tick, applied after its hooks return.
+#[doc(hidden)]
+pub enum EffectTickChange {
+    Heal(f32),
+    Hurt(NativeEffectDamage, f32),
+    AddExhaustion(f32),
+    Eat(i32, f32),
+}
+
+impl ApplyEffectTickEvent<'_> {
+    /// Queue `LivingEntity.heal` on the holder.
+    pub fn heal(&mut self, amount: f32) {
+        self.changes.push(EffectTickChange::Heal(amount));
+    }
+
+    /// Queue damage with a supported source.
+    pub fn hurt(&mut self, damage_type: NativeEffectDamage, amount: f32) {
+        self.changes
+            .push(EffectTickChange::Hurt(damage_type, amount));
+    }
+
+    /// Queue food exhaustion; a non-player holder ignores it.
+    pub fn add_exhaustion(&mut self, amount: f32) {
+        self.changes.push(EffectTickChange::AddExhaustion(amount));
+    }
+
+    /// Queue `FoodData.eat`; a non-player holder ignores it.
+    pub fn eat(&mut self, nutrition: i32, saturation_modifier: f32) {
+        self.changes
+            .push(EffectTickChange::Eat(nutrition, saturation_modifier));
+    }
 }
 
 /// A player's server-side abilities.
@@ -783,6 +911,29 @@ pub enum Flow {
     Cancel,
 }
 
+/// Where a block use clicked, as vanilla's `BlockHitResult` says it. Fields
+/// may be added: build one with [`BlockHit::new`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct BlockHit {
+    /// The point clicked, in world coordinates (`getLocation`).
+    pub point: [f64; 3],
+    /// The face clicked, `[0, 1, 0]` for the top (`getDirection`), the same
+    /// as the event's `face`.
+    pub face: [i32; 3],
+    /// The ray started inside the block's shape (`isInside`).
+    pub inside: bool,
+}
+impl BlockHit {
+    pub const fn new(point: [f64; 3], face: [i32; 3], inside: bool) -> Self {
+        Self {
+            point,
+            face,
+            inside,
+        }
+    }
+}
+
 mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
@@ -872,7 +1023,9 @@ pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
+mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
+pub use transaction::TransactionSeal;
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
@@ -1070,7 +1223,20 @@ mod tests {
                 lines: Vec::new(),
             };
             let mut claimed = false;
-            dispatch_use_item_on(&mut host, &mods, &stack, [1, 2, 3], [0, 1, 0], &mut claimed);
+            let (pos, face) = ([1, 2, 3], [0, 1, 0]);
+            let hit = top_hit();
+            dispatch_use_item_on(
+                &mut host,
+                &mods,
+                &stack,
+                pos,
+                face,
+                Hand::Main,
+                hit,
+                7,
+                41,
+                &mut claimed,
+            );
             assert_eq!(claimed, expected, "{block}");
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
@@ -1136,7 +1302,93 @@ mod tests {
             lines: Vec::new(),
         };
         let mut claimed = false;
-        dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+        let (pos, face) = ([0; 3], [0, 1, 0]);
+        dispatch_use_item_on(
+            &mut host,
+            &mods,
+            &stick(),
+            pos,
+            face,
+            Hand::Main,
+            top_hit(),
+            7,
+            41,
+            &mut claimed,
+        );
+    }
+
+    /// The top of the block at the origin, clicked in its middle.
+    fn top_hit() -> BlockHit {
+        BlockHit::new([0.5, 1.0, 0.5], [0, 1, 0], false)
+    }
+
+    /// Takes a click with the off hand on a block's top half.
+    struct OffHandTop;
+
+    impl Hooks for OffHandTop {
+        fn use_item_on(&self, _: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+            assert_eq!((event.player, event.player_entity_id), (7, 41));
+            assert_eq!((event.hand, event.hit), (Hand::Off, top_hit()));
+            Flow::Continue
+        }
+
+        fn right_click_block(&self, _: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+            let top_half = event.hit.point[1] - f64::from(event.pos[1]) >= 0.5;
+            if event.hand == Hand::Off
+                && top_half
+                && event.player == 7
+                && event.player_entity_id == 41
+                && !event.hit.inside
+            {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    #[test]
+    fn a_block_use_hears_the_hand_the_hit_and_the_player() {
+        mark_game_thread();
+        let mods = [Box::new(OffHandTop) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut claimed = false;
+        dispatch_use_item_on(
+            &mut host,
+            &mods,
+            &stick(),
+            [0; 3],
+            [0, 1, 0],
+            Hand::Off,
+            top_hit(),
+            7,
+            41,
+            &mut claimed,
+        );
+        assert!(!claimed);
+        let low = BlockHit::new([0.5, 0.25, 0.0], [0, 0, -1], false);
+        for (hand, hit, expected) in [
+            (Hand::Off, top_hit(), true),
+            (Hand::Main, top_hit(), false),
+            (Hand::Off, low, false),
+        ] {
+            let mut canceled = false;
+            dispatch_right_click_block(
+                &mut host,
+                &mods,
+                [0; 3],
+                hit.face,
+                hand,
+                hit,
+                7,
+                41,
+                &mut canceled,
+            );
+            assert_eq!(canceled, expected, "{hand:?} {hit:?}");
+        }
     }
 
     /// Cancels every brew and leaves its own slots; records what it saw.
@@ -1241,6 +1493,72 @@ mod tests {
         assert_eq!(stand.items[0], Some(awkward));
         assert_eq!(&*stand.items[1].as_ref().unwrap().item, "minecraft:emerald");
         assert_eq!(stand.items[3].as_ref().map(|s| s.count), Some(1));
+    }
+
+    /// Keeps the cod: reads the catch, sets the rod's damage, and cancels a
+    /// catch with cod in it.
+    struct CodKeeper;
+
+    impl Hooks for CodKeeper {
+        fn item_fished(&self, _host: &mut dyn Host, event: &mut ItemFishedEvent<'_>) -> Flow {
+            event.rod_damage = 4;
+            let cod = event
+                .fished
+                .drops
+                .iter()
+                .any(|s| &*s.item == "minecraft:cod");
+            if cod { Flow::Cancel } else { Flow::Continue }
+        }
+    }
+
+    /// Fails the test if a mod after a cancel is asked.
+    struct Unreached;
+
+    impl Hooks for Unreached {
+        fn item_fished(&self, _host: &mut dyn Host, _event: &mut ItemFishedEvent<'_>) -> Flow {
+            panic!("asked after a cancel");
+        }
+    }
+
+    /// `ItemFishedEvent`: a mod reads the catch and sets the rod's damage,
+    /// which stays whether or not it cancels; a cancel stops later mods.
+    #[test]
+    fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        let mut host = Reader {
+            block: "minecraft:water",
+            lines: Vec::new(),
+        };
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper), Box::new(Unreached)];
+        let ask = |host: &mut Reader, item: &str| {
+            let drops = [ItemStack::new(item, 1)];
+            let fished = NativeItemFished {
+                hook: 9,
+                position: [0.5, 62.0, 0.5],
+                drops: &drops,
+            };
+            let (mut rod_damage, mut cancel) = (1, false);
+            dispatch_item_fished(host, &mods, 7, 3, &fished, &mut rod_damage, &mut cancel);
+            (rod_damage, cancel)
+        };
+        assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(CodKeeper)];
+        let drops = [ItemStack::new("minecraft:salmon", 1)];
+        let fished = NativeItemFished {
+            hook: 9,
+            position: [0.5, 62.0, 0.5],
+            drops: &drops,
+        };
+        let (mut rod_damage, mut cancel) = (2, false);
+        dispatch_item_fished(
+            &mut host,
+            &mods,
+            7,
+            3,
+            &fished,
+            &mut rod_damage,
+            &mut cancel,
+        );
+        assert_eq!((rod_damage, cancel), (4, false));
     }
 
     /// Records what `player_brewed_potion` told it.
