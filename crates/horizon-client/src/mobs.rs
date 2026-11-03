@@ -330,6 +330,17 @@ pub enum Brain {
 pub use anim::Anim;
 pub use species::Species;
 
+pub fn draws_parent_variant(species: Species) -> bool {
+    matches!(
+        species,
+        Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
+    )
+}
+
+pub fn orb_after_child(species: Species) -> bool {
+    species == Species::Fox
+}
+
 /// Per-type behaviour switches derived from vanilla classes and tags.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Flags {
@@ -1156,7 +1167,7 @@ pub struct Extra {
     /// What the native mods last heard it hold and wear
     /// (`LivingEntity.lastEquipmentItems`, empty at first), by
     /// `EquipmentSlot` ordinal: see `Mob::equipment_stacks`.
-    pub equipment_heard: Option<Box<[Option<crate::items::ItemStack>; 8]>>,
+    pub equipment_heard: Option<Box<horizon_items::equipment::Equipment>>,
 }
 impl Extra {
     pub fn set_body_stack(&mut self, stack: Option<crate::items::ItemStack>) {
@@ -1930,6 +1941,8 @@ pub enum MobEvent {
         /// A llama's baby, drawn from the parent's random as
         /// `Llama.getBreedOffspring` does.
         llama: Option<Box<super::mobs::llama::Offspring>>,
+        /// Whether the parent supplies the variant, if already drawn.
+        parent_variant: Option<bool>,
         /// The parent-RNG experience decision, if already made.
         experience: BreedExperience,
     },
@@ -2239,7 +2252,7 @@ impl Mob {
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
-    pub fn equipment_stacks(&self) -> [Option<crate::items::ItemStack>; 8] {
+    pub fn equipment_stacks(&self) -> horizon_items::equipment::Equipment {
         use crate::items::ItemStack;
         let e = &self.extra;
         let offhand = finalize::stored_stack(self, finalize::OFFHAND);
@@ -2290,7 +2303,7 @@ impl Mob {
                 extra: None,
             }));
         }
-        out
+        out.into()
     }
     /// Remove and return the complete body stack.
     pub fn take_body_equipment(&mut self) -> Option<crate::items::ItemStack> {
@@ -2780,12 +2793,12 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
-    /// A server with native mods, which the game asks before a tame or a
-    /// baby (`AnimalTameEvent`, `BabyEntitySpawnEvent`): the goals then
-    /// leave what a cancel would undo to the game (a horse's `tame`, a
-    /// llama's breeding experience). Ravagers also use it to defer their jump
-    /// when `BreakBlock` leaves may be kept by a mod (`IfBroke`).
-    pub ask_mods: bool,
+    /// Whether a listener can cancel animal taming.
+    pub asks_animal_tame: bool,
+    /// Whether a listener can cancel a mob's block destruction.
+    pub asks_living_destroy_block: bool,
+    /// Whether a server listener can cancel baby spawning.
+    pub asks_baby_spawn: bool,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,

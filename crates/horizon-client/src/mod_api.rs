@@ -160,10 +160,9 @@ pub struct NativeLootDrops<'a> {
     /// cave vines, a hit taking an item frame or its item, or untying a lead
     /// or cutting it with shears. `player` names them, or is `None` when a
     /// dispenser's shears sheared a mooshroom; `block` or `entity` says what
-    /// dropped them. API 100. A mob that a player killed while
+    /// dropped them. A mob that a player killed while
     /// leashed drops its lead on its next tick as a call of its own (`entity`
-    /// the mob, `player` its killer, `table` empty, `used` false). API
-    /// 102.
+    /// the mob, `player` its killer, `table` empty, `used` false).
     pub used: bool,
 }
 
@@ -388,7 +387,7 @@ pub struct NativeScreenView<'a> {
     /// on it. Every container, station and mod window draws on the inventory
     /// screen and so reports `inventory`: tell them apart by `menu` and
     /// `title` (both None on a window the client opened itself) and by
-    /// `slots`. The title's own screens report theirs (API 326): `title`,
+    /// `slots`. The title's own screens report theirs: `title`,
     /// `world_select`, `world_create`, `world_create_flat`, `world_edit`,
     /// `multiplayer`, `add_server`, `direct_connect`…, with no menu, no title
     /// and no slots.
@@ -553,10 +552,10 @@ pub struct NativeServerPlayer {
     pub position: [f64; 3],
     /// 0 survival, 1 creative, 2 adventure, 3 spectator.
     pub game_mode: i32,
-    /// Health points, 20 at full; 0 once dead. API 21.
+    /// Health points, 20 at full; 0 once dead.
     pub health: f32,
     /// Where they look, in degrees (`yRot`, `xRot`), as their last move told
-    /// the server. API 49.
+    /// the server.
     pub yaw: f32,
     pub pitch: f32,
 }
@@ -1027,6 +1026,41 @@ pub enum NativeArrowPickup {
     CreativeOnly,
 }
 
+/// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MinecartRef(EntityRef);
+
+impl MinecartRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
+/// Which minecart an entity is: one per vanilla `AbstractMinecart` subclass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeMinecartKind {
+    /// `Minecart`.
+    Rideable,
+    /// `MinecartChest`.
+    Chest,
+    /// `MinecartFurnace`.
+    Furnace,
+    /// `MinecartTNT`.
+    Tnt,
+    /// `MinecartHopper`.
+    Hopper,
+    /// `MinecartCommandBlock`.
+    CommandBlock,
+    /// `MinecartSpawner`.
+    Spawner,
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1101,6 +1135,11 @@ pub struct ChunkRef {
 }
 
 impl ChunkRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(level: LevelRef, pos: [i32; 2]) -> Self {
+        Self { level, pos }
+    }
     /// The chunk coordinates, `[x, z]`.
     pub fn pos(self) -> [i32; 2] {
         self.pos
@@ -2184,7 +2223,10 @@ pub use menu_slot::MenuSlotBacking;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider};
 mod resource;
-pub use resource::{ComponentId, ItemResource, Overanswered, ResourceHandler, move_resources};
+pub use resource::{
+    ComponentId, EnchantmentEffect, ItemResource, Overanswered, PREVENT_ARMOR_CHANGE,
+    ResourceHandler, move_resources,
+};
 pub use transaction::{Transaction, TransactionSeal, run_transaction};
 mod part_table;
 pub use part_table::{

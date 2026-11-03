@@ -112,6 +112,12 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct MinecartRef;
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativeMinecartKind {
+            Rideable,
+        }
         pub(super) struct EffectTickChange;
         pub(super) struct NativeItemDrop;
         #[derive(Clone, Copy)]

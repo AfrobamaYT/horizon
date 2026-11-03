@@ -1,7 +1,7 @@
 //! NeoForge 26.3's transfer API (#41 §7): a resource is what a handler holds, without an amount
 //! ([`ItemResource`]), and a [`ResourceHandler`] is the indexed contents of one holder, written
 //! only inside a transaction.
-use super::{Capability, Compound, Host, ItemStack, Tag, Transaction};
+use super::{Capability, Compound, Host, ItemStack, Tag, Transaction, backend_of};
 use horizon_world::nbt::JavaString;
 use std::fmt;
 
@@ -24,6 +24,29 @@ impl ComponentId {
         &self.0
     }
 }
+
+/// An enchantment effect component type (`EnchantmentEffectComponents`): what an enchantment's
+/// `effects` are keyed by, and what [`ItemResource::has_enchantment_effect`] asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EnchantmentEffect(&'static str);
+
+impl EnchantmentEffect {
+    /// `id` as an effect type (a mod's own, as `mymod:soulbound`), or None where it isn't a
+    /// namespaced identifier.
+    pub fn new(id: &'static str) -> Option<Self> {
+        horizon_world::identifier::Identifier::parse_namespaced(id)?;
+        Some(Self(id))
+    }
+    /// The id (`minecraft:prevent_armor_change`).
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+/// `EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE`: worn armour with it stays on outside
+/// creative (Curse of Binding's effect, and any data pack enchantment's that carries it).
+pub const PREVENT_ARMOR_CHANGE: EnchantmentEffect =
+    EnchantmentEffect("minecraft:prevent_armor_change");
 
 /// An item and its components, without a count, as NeoForge's `ItemResource`: what a slot holds.
 /// An empty slot holds none.
@@ -73,6 +96,12 @@ impl ItemResource {
             }
         }
         host.item_default_component(self.item(), id.as_str())
+    }
+    /// Whether an enchantment on this item has effect `effect` (`EnchantmentHelper.has`), by the
+    /// enchantments' definitions, data packs' included, not their ids.
+    pub fn has_enchantment_effect(&self, host: &dyn Host, effect: EnchantmentEffect) -> bool {
+        backend_of(host)
+            .is_some_and(|backend| backend.item_has_enchantment_effect(&self.0, effect.as_str()))
     }
     /// This item with component `id` set to `value` (`ItemResource.with`, as vanilla's
     /// `PatchedDataComponentMap.set`): a removal of it dropped, and the stack's own value too
