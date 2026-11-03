@@ -64,7 +64,6 @@ use horizon_client::{
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
-    random::RandomSource,
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::{
@@ -7160,6 +7159,11 @@ impl GameLevel<'_> {
         if !self.native_authoritative || !mod_sound_ok(sound, at, source, volume, pitch) {
             return false;
         }
+        // `Level.playSound` draws `soundSeedGenerator.nextLong` at the call;
+        // without a host nothing can be sent.
+        let Some(seed) = self.sound_seeds.map(|hub| hub.next_sound_seed()) else {
+            return false;
+        };
         self.native_sounds.push(super::creatures::NativeSound {
             dimension: dimension_id(self.dimension),
             sound: sound.to_owned(),
@@ -7167,7 +7171,7 @@ impl GameLevel<'_> {
             source: source as i32,
             volume,
             pitch,
-            seed: self.world.random.next_long(),
+            seed,
             except: None,
             entity: None,
         });
