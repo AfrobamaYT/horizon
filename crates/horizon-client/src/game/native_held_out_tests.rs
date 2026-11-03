@@ -4,7 +4,7 @@ use horizon_client::{
     chunk::Chunk,
     items::ItemStack,
     mobs::{Mob, leash::Holder, transport_items},
-    mod_api::{self, EntityMountEvent, EntityRef, Flow, Hooks, Host, ItemSpawnEvent},
+    mod_api::{self, EntityMountEvent, EntityRef, Flow, Hooks, ItemSpawnEvent, ServerHost},
 };
 use horizon_core::geometry::Vec3;
 
@@ -23,7 +23,7 @@ struct Observation {
 
 struct Observer(Arc<Mutex<Observation>>);
 impl Observer {
-    fn observe(&self, host: &mut dyn Host) {
+    fn observe(&self, host: &mut dyn ServerHost) {
         let mut state = self.0.lock().unwrap();
         let reads = state.handles.iter().map(|e| e.velocity(host)).collect();
         let results = state
@@ -36,10 +36,10 @@ impl Observer {
     }
 }
 impl Hooks for Observer {
-    fn item_spawn(&self, host: &mut dyn Host, _: &mut ItemSpawnEvent<'_>) {
+    fn item_spawn(&self, host: &mut dyn ServerHost, _: &mut ItemSpawnEvent<'_>) {
         self.observe(host);
     }
-    fn entity_mount(&self, host: &mut dyn Host, _: &mut EntityMountEvent<'_>) -> Flow {
+    fn entity_mount(&self, host: &mut dyn ServerHost, _: &mut EntityMountEvent<'_>) -> Flow {
         self.observe(host);
         Flow::Continue
     }
