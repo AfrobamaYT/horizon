@@ -189,8 +189,8 @@ impl Game<'_> {
     /// Sets the entity's health (`LivingEntity.setHealth`; Paper's
     /// `Damageable#setHealth`), cut to its maximum health. No heal or damage
     /// hook runs. False for a stale handle, a health that isn't finite or
-    /// above 0 (a write doesn't kill), an armor stand or the dragon.
-    /// API @API:living_health_writes@.
+    /// above 0 (a write doesn't kill), a dead or dying entity, an armor stand
+    /// or the dragon. API @API:living_health_writes@.
     pub(super) fn native_living_set_health(&mut self, living: LivingRef, health: f32) -> bool {
         if !health.is_finite() || health <= 0.0 {
             return false;
@@ -199,13 +199,25 @@ impl Game<'_> {
             Some(t @ (Target::Player | Target::Guest(_))) => self
                 .for_player(t, |g| {
                     let p = g.player.as_mut()?;
+                    // A write never raises the dead: the death screen's
+                    // player takes none (`living_health::set_health` would
+                    // store it blind).
+                    if p.health.health() <= 0.0 {
+                        return None;
+                    }
                     let max = p.attribute("minecraft:max_health").ok()? as f32;
                     p.set_health(health.min(max), false).ok()
                 })
                 .flatten()
                 .is_some(),
             Some(Target::Mob(id)) => {
-                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                // A dying mob, mid death animation, stays dead: the old
+                // mob write refused it and so does this one.
+                let Some(m) = self
+                    .mobs
+                    .iter_mut()
+                    .find(|m| m.id == id && !m.removed && m.alive())
+                else {
                     return false;
                 };
                 m.health = health.min(m.attrs.max_health);
@@ -532,6 +544,36 @@ mod tests {
             // body is out of reach, so the attacker reads None.
             game.lan_acting = Some(7);
             assert_eq!(pig_living.last_attacker(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_dead_entity_takes_no_health_write() {
+        use horizon_client::mobs::Mob;
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(12, pig, Vec3::ZERO, 0.0));
+            // Dying, mid death animation: not removed, but not alive.
+            game.mobs[0].health = 0.0;
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.player.as_mut().unwrap().entity_id = 20;
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let mob_living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            assert!(!mob_living.set_health(game, 10.0));
+            assert_eq!(mob_living.health(game), Some(0.0));
+            // The death screen's player: the write never raises the dead.
+            game.player
+                .as_mut()
+                .unwrap()
+                .set_health(0.0, false)
+                .unwrap();
+            let player_living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            assert!(!player_living.set_health(game, 10.0));
+            assert_eq!(player_living.health(game), Some(0.0));
         });
     }
 

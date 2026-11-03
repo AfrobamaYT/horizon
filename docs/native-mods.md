@@ -2451,7 +2451,8 @@ a dimension.
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
 - `living.set_health(host, health)` is `LivingEntity.setHealth` (Paper's `Damageable#setHealth`), cut to the
-  maximum, with no hook; a health that isn't finite or above 0 is refused, so a write never kills.
+  maximum, with no hook; a health that isn't finite or above 0 is refused, so a write never kills, and the
+  answer is false for a dead or dying entity.
   `living.heal(host, amount)` is `LivingEntity.heal`, through the `living_heal` hook. Both write players, guests
   (in their own turn) and mobs, and answer false for armor stands and the dragon.
   `living.last_attacker(host)` is `LivingEntity.getLastHurtByMob`: who last hurt the entity, within a hundred
