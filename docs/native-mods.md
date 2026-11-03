@@ -384,7 +384,7 @@ catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`,
 
 ### Host-aware weapon damage (API next)
 
-`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; upstream v1 keeps its signature and firing point. **Fork migration:** mods that read the extra damage or knockback fields previously added to the fork's v1 hooks must move to the corresponding v2 hooks. Those fork-only fields are no longer present on v1.
+`living_incoming_damage_v2` is an additive hook; upstream v1 keeps its signature and firing point. **Fork migration:** mods that read the extra damage or knockback fields previously added to the fork's v1 hooks must move to the corresponding v2 hooks. Those fork-only fields are no longer present on v1.
 It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
 and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
 levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
@@ -702,7 +702,7 @@ one, where vanilla gives the `by` one.
 
 Bundles that use it need `"hooks": 50`.
 
-API 51 adds `native_menu_button_v2`: a mod container's menu button (`AbstractContainerMenu.clickMenuButton(Player, int)`) with the clicking player's cursor stack, read and written, so a widget outside the slots can take or give what the player carries (a tank taking a bucket). It fires right after `native_menu_button`, on the server, for single player and LAN guests alike. Bundles need "hooks": 51.
+`native_menu_button` handles a mod container's button (`AbstractContainerMenu.clickMenuButton(Player, int)`) on the server, for single player and LAN guests. It exposes the player identity, button, block entity and mutable carried stack, so a widget outside the slots can take or give what the player carries.
 
 API 52 adds `native_block_entity_sync(pos)`, which sends the block and its update tag to clients again
 (`Level.sendBlockUpdated`): with the level's block changes, to the players who see its chunk, once per position
@@ -1365,7 +1365,7 @@ API 275 adds A server player about to shear a sheep, mooshroom, snow golem or bo
 
 API 276 adds A server player's shield was disabled by a blocked melee hit: `native_player_shield_disable(player, name, ticks)` fires immediately before the shield cooldown is set. Bundles need "hooks": 276.
 
-API 277 adds A server player's respawn point about to change: `native_player_spawn_point_set(player, name, dimension, pos, cause, cancel)` is heard for `bed`, `respawn_anchor`, `command` and `death_reset`; `pos` is the block position. Set `cancel` to keep the old point. A canceled `death_reset` keeps the old point even if its bed or anchor is gone. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 277.
+API 277 added a server player's respawn point about to change; `player_set_spawn` (NeoForge's `PlayerSetSpawnEvent`) replaced it.
 
 API 278 adds A server player selected stonecutter recipe button `recipe`, after the menu accepted it: `native_player_stonecutter_recipe_select(player, name, recipe)`. Bundles need "hooks": 278.
 
@@ -1873,9 +1873,7 @@ targets and the `hooks` metadata continue to work as before.
 
 ### Knockback hook versions
 
-`living_knockback_v2` keeps `living_knockback` version 1 unchanged, as `menu_button_v2` does for
-its older hook: v1's function signature is a target mixin mods attach to, so it cannot gain
-arguments. Both already receive the raw strength before knockback resistance (v1 did before
+`living_knockback_v2` keeps `living_knockback` version 1 unchanged. Both already receive the raw strength before knockback resistance (v1 did before
 v2 existed). V2 adds three things: the attacker's network entity id (falling back to a known
 last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
 `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
@@ -1965,11 +1963,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   server player through an advancement reward, a knowledge book or `/recipe give`. Set `cancel` to keep it locked;
   the client is sent the matching removal. The player's state is not swapped in, so helpers that look them up through
   `self.lan` may find nothing while a guest packet is being handled.
-- **`native_player_spawn_point_set(player, name, dimension, pos, cause, cancel)`**: a server player's respawn point
-  is about to change. `cause` is `bed`, `respawn_anchor`, `command` or `death_reset`; `pos` is its block position.
-  Set `cancel` to keep the old point. A canceled `death_reset` keeps the old point even if its bed or anchor is gone.
-  The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest
-  packet is being handled.
+- **`native_player_set_spawn(player, player_entity_id, name, dimension, pos, forced, cancel)`**: a server player's
+  respawn point is about to be set, at each `ServerPlayer.setRespawnPosition` call: every sleep in a bed, a new respawn
+  anchor point, `/spawnpoint`, and the copy to a respawned player (`pos` none for a player with no point). Set
+  `cancel` to keep the old point.
 - **`native_player_portal(player, name, from_dimension, to_dimension, cause, cancel)`**: a server player is about
   to travel through a Nether portal, End portal or End gateway; `cause` is `nether_portal`, `end_portal` or
   `end_gateway`. Set `cancel` to leave the player where they are. The player's state is not swapped in, so helpers that
