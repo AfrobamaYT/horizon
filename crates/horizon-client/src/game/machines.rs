@@ -299,89 +299,106 @@ impl Containers<'_> {
     fn is_empty(&self, view: &View) -> bool {
         (0..view.len()).all(|i| self.get(view, i).is_none())
     }
-    /// `Container.canPlaceItem` (+ `canPlaceItemThroughFace` for furnaces).
-    fn can_place(&self, view: &View, slot: usize, stack: &ItemStack) -> bool {
+    /// `Container.canPlaceItem` (+ `canPlaceItemThroughFace` for furnaces) with slot `slot`
+    /// empty: the item rule of the slot, whatever it holds now.
+    fn accepts(&self, view: &View, slot: usize, stack: &ItemStack) -> bool {
         if let Some(c) = &view.container {
             return c.inputs.contains(&slot);
         }
-        // ShulkerBoxBlockEntity.canPlaceItemThroughFace
-        if view.kind == Kind::Shulker {
-            return !is_shulker_box(&stack.item);
-        }
-        if view.kind == Kind::Crafter {
-            return match self.world.block_entities.get(&view.parts[0].0) {
-                Some(BlockEntity::Crafter(c)) => {
-                    // The slot's own stack sets the limit (`slotStack.getMaxStackSize`).
-                    let max = c.items.get(slot).and_then(Option::as_ref).unwrap_or(stack);
-                    c.can_place(slot, stack, self.max_stack(max))
-                }
+        match view.kind {
+            // ShulkerBoxBlockEntity.canPlaceItemThroughFace
+            Kind::Shulker => !is_shulker_box(&stack.item),
+            Kind::Crafter => match self.world.block_entities.get(&view.parts[0].0) {
+                Some(BlockEntity::Crafter(c)) => slot < 9 && !c.disabled[slot],
                 _ => false,
-            };
-        }
-        if view.kind == Kind::Jukebox {
-            // JukeboxBlockEntity.canPlaceItem: a playable disc, into the one
-            // slot, which has to be empty first (its maximum stack is 1).
-            return self
+            },
+            // JukeboxBlockEntity.canPlaceItem: a playable disc.
+            Kind::Jukebox => self
                 .items
                 .get(&stack.item)
-                .is_some_and(|i| i.jukebox_song.is_some())
-                && self.get(view, slot).is_none();
-        }
-        if view.kind == Kind::Bookshelf {
-            // ListBackedContainer.canPlaceItem: `acceptsItemType` (the books)
-            // and a free slot, as `getMaxStackSize` is 1.
-            return self
+                .is_some_and(|i| i.jukebox_song.is_some()),
+            // ListBackedContainer.canPlaceItem: `acceptsItemType` (the books).
+            Kind::Bookshelf => self
                 .items
                 .item_tags
                 .get("minecraft:bookshelf_books")
-                .is_some_and(|m| m.contains(&*stack.item))
-                && self.get(view, slot).is_none();
-        }
-        if view.kind == Kind::Brewing {
+                .is_some_and(|m| m.contains(&*stack.item)),
             // BrewingStandBlockEntity.canPlaceItem
-            return match slot {
+            Kind::Brewing => match slot {
                 4 => self
                     .items
                     .get(&stack.item)
                     .is_some_and(|i| i.brewing_fuel.is_some()),
                 3 => self.brewing.is_some_and(|b| b.is_reagent(stack)),
                 _ => {
-                    let input = self.brewing.is_some_and(|b| b.is_bottle(stack))
+                    self.brewing.is_some_and(|b| b.is_bottle(stack))
                         || self
                             .items
                             .item_tags
                             .get("minecraft:brewing_potion_inputs")
-                            .is_some_and(|m| m.contains(&*stack.item));
-                    input && self.get(view, slot).is_none()
+                            .is_some_and(|m| m.contains(&*stack.item))
                 }
-            };
-        }
-        if view.kind != Kind::Furnace {
-            return true;
-        }
-        match slot {
-            2 => false,
-            1 => {
-                let fuel = self
-                    .items
-                    .get(&stack.item)
-                    .is_some_and(|i| i.fuel.is_some());
-                let current_bucket = self
-                    .get(view, 1)
-                    .is_some_and(|s| &*s.item == "minecraft:bucket");
-                fuel || (&*stack.item == "minecraft:bucket" && !current_bucket)
-            }
+            },
+            Kind::Furnace => match slot {
+                2 => false,
+                1 => {
+                    &*stack.item == "minecraft:bucket"
+                        || self
+                            .items
+                            .get(&stack.item)
+                            .is_some_and(|i| i.fuel.is_some())
+                }
+                _ => true,
+            },
             _ => true,
         }
     }
-    /// How many of `stack` slot `slot` takes: `canPlaceItem`, then up to the slot's limit
-    /// (`Container.getMaxStackSize(stack)`: the container's and the item's, the lower).
+    /// `Container.canPlaceItem` (+ `canPlaceItemThroughFace` for furnaces): `accepts`, and what
+    /// the slot holds now. The slots of one item (a jukebox's, a chiseled bookshelf's, a brewing
+    /// stand's bottles) take one only when empty, a furnace's fuel slot no bucket onto a
+    /// bucket, and a crafter fills its smallest stack first.
+    fn can_place(&self, view: &View, slot: usize, stack: &ItemStack) -> bool {
+        if !self.accepts(view, slot, stack) {
+            return false;
+        }
+        let held = self.get(view, slot);
+        let is_bucket = |s: &ItemStack| &*s.item == "minecraft:bucket";
+        match view.kind {
+            _ if view.container.is_some() => true,
+            Kind::Jukebox | Kind::Bookshelf => held.is_none(),
+            Kind::Brewing => slot >= 3 || held.is_none(),
+            Kind::Furnace => slot != 1 || !is_bucket(stack) || !held.is_some_and(is_bucket),
+            Kind::Crafter => match self.world.block_entities.get(&view.parts[0].0) {
+                Some(BlockEntity::Crafter(c)) => {
+                    // The slot's own stack sets the limit (`slotStack.getMaxStackSize`).
+                    let max = c.items.get(slot).and_then(Option::as_ref).unwrap_or(stack);
+                    c.can_place(slot, stack, self.max_stack(max))
+                }
+                _ => false,
+            },
+            _ => true,
+        }
+    }
+    /// How many of `stack` slot `slot` holds when empty, whatever it holds now: none where
+    /// `accepts` refuses it, else the slot's limit (`Container.getMaxStackSize(stack)`: the
+    /// container's and the item's, the lower).
+    fn capacity(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
+        if !self.accepts(view, slot, stack) {
+            return 0;
+        }
+        view.slot_limit().min(self.max_stack(stack))
+    }
+    /// How many of `stack` slot `slot` takes now: none where `can_place` refuses it, else
+    /// `capacity` less what it holds.
     fn fits(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         if !self.can_place(view, slot, stack) {
             return 0;
         }
-        let limit = view.slot_limit().min(self.max_stack(stack));
-        room(limit, self.get(view, slot), stack)
+        room(
+            self.capacity(view, slot, stack),
+            self.get(view, slot),
+            stack,
+        )
     }
     /// `canTakeItemThroughFace` (furnaces and brewing stands restrict it).
     fn can_take(&self, view: &View, slot: usize, stack: &ItemStack, face: Direction) -> bool {
@@ -1805,5 +1822,89 @@ mod mod_container_tests {
         assert_eq!(room(limit(Kind::Jukebox), None, &books(64)), 1);
         assert_eq!(room(limit(Kind::Generic), None, &books(64)), 64);
         assert_eq!(room(limit(Kind::Generic), Some(&books(60)), &books(64)), 4);
+    }
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::{Containers, Kind, View, bone_meal};
+    use horizon_client::{brewing::Brewing, containers::BlockEntity, items::ItemStack};
+    use std::collections::HashSet;
+
+    /// A one-item slot answers its capacity as if empty (NeoForge's `getCapacityAsLong`), so a
+    /// write may swap what it holds, while it takes nothing more now: a jukebox's disc, a
+    /// chiseled bookshelf's book and a brewing stand's bottle.
+    #[test]
+    fn a_full_one_item_slot_still_has_room_for_a_replacement() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("block-behaviours.json").exists() {
+            return;
+        }
+        let assets = horizon_client::assets::Assets::load(&root).unwrap();
+        let registry = assets.registry;
+        let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
+        let overlay = &horizon_world::loot::PackOverlay::NONE;
+        let items = horizon_client::items::Items::load(&root, registry, &facts, overlay).unwrap();
+        let behaviours = horizon_world::level::Behaviours::load(registry, &root).unwrap();
+        let brewing = Brewing {
+            recipes: Vec::new(),
+            reagents: HashSet::new(),
+            inputs: HashSet::from(["minecraft:potion".to_owned()]),
+        };
+        let air = registry.default_state("minecraft:air").unwrap();
+        let mut world = horizon_client::world::World::new(air, 0);
+        let cases = [
+            (
+                "minecraft:jukebox",
+                Kind::Jukebox,
+                1,
+                "minecraft:music_disc_cat",
+                "minecraft:music_disc_13",
+            ),
+            (
+                "minecraft:chiseled_bookshelf",
+                Kind::Bookshelf,
+                6,
+                "minecraft:book",
+                "minecraft:enchanted_book",
+            ),
+            (
+                "minecraft:brewing_stand",
+                Kind::Brewing,
+                5,
+                "minecraft:potion",
+                "minecraft:potion",
+            ),
+        ];
+        for (x, &(block, _, _, held, _)) in (0..).zip(&cases) {
+            let mut entity = BlockEntity::for_block(block).unwrap();
+            entity.slots_mut()[0] = Some(ItemStack::new(held, 1));
+            world.block_entities.insert((x, 64, 0), entity);
+        }
+        let c = Containers {
+            world: &world,
+            behaviours: &behaviours,
+            items: &items,
+            registry,
+            brewing: Some(&brewing),
+            bone_meal: bone_meal(),
+        };
+        for (x, &(block, kind, len, _, offered)) in (0..).zip(&cases) {
+            let view = View {
+                parts: vec![((x, 64, 0), len)],
+                kind,
+                container: None,
+            };
+            let offered = ItemStack::new(offered, 1);
+            assert_eq!(c.capacity(&view, 0, &offered), 1, "{block}");
+            assert_eq!(c.fits(&view, 0, &offered), 0, "{block}");
+            assert_eq!(
+                c.capacity(&view, 0, &ItemStack::new("minecraft:stick", 1)),
+                0,
+                "{block}"
+            );
+        }
     }
 }
