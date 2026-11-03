@@ -57,6 +57,8 @@ pub(super) struct Rocket {
     pub(super) angled: bool,
     /// `DATA_ID_FIREWORKS_ITEM`: the stack it was launched from.
     pub(super) item: ItemStack,
+    /// `Entity.random`: what a mod's `Projectile.deflect` draws from.
+    pub(super) random: horizon_core::random::LegacyRandom,
 }
 impl Rocket {
     /// A rocket a server sent (`handleAddEntity`): placed and moved by it.
@@ -79,6 +81,7 @@ impl Rocket {
             attached_to: None,
             angled: false,
             item,
+            random: horizon_client::projectiles::unique_random(position),
         }
     }
     /// `FireworkRocketEntity.addAdditionalSaveData`; the owner only when it is `player`.
@@ -129,6 +132,7 @@ impl Rocket {
             attached_to: None,
             angled: r.angled,
             item,
+            random: horizon_client::projectiles::unique_random(r.position),
         }
     }
     /// One tick of a server's client: the rocket flies on by itself between
@@ -222,7 +226,8 @@ impl Game<'_> {
     pub(super) fn new_rocket(&mut self, at: Vec3, stack: &ItemStack, attached: bool) -> Rocket {
         let (flight, explosions) = fireworks_of(stack);
         // FireworkRocketEntity: motion and lifetime come from the rocket's own random.
-        let r = &mut super::dispenser::entity_random();
+        let mut random = super::dispenser::entity_random();
+        let r = &mut random;
         let tri = |r: &mut horizon_core::random::LegacyRandom| r.triangle(0.0, 0.002297);
         let velocity = Vec3::new(tri(r), 0.05, tri(r));
         let lifetime = 10 * (1 + i32::from(flight))
@@ -246,6 +251,7 @@ impl Game<'_> {
             attached_to: None,
             angled: false,
             item: stack.clone(),
+            random,
         }
     }
     /// `FireworkRocketItem.useOn`: launch from the clicked point.
