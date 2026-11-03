@@ -733,8 +733,9 @@ impl Game<'_> {
         }
         let t = self.res.mob_types().get(kind).cloned()?;
         let mut cancel = false;
-        let from_kind = crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPre)
-            .then(|| super::native_hooks::mob_kind(from));
+        let from_kind = (crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPre)
+            || crate::mod_api::listened(crate::mod_api::HookId::LivingConversionPost))
+        .then(|| super::native_hooks::mob_kind(from));
         if let Some(from_kind) = &from_kind {
             self.native_living_conversion_pre(from.id, from_kind, kind, &mut cancel);
         }
@@ -8237,6 +8238,69 @@ mod dye_mix_tests {
         assert_eq!(dye_color_mix_in_recipes(&recipes, orange, cyan), None);
         let kept = dye_mix(&recipes, &mut random, orange, cyan);
         assert!(kept == orange || kept == cyan, "kept {kept}");
+    }
+}
+
+#[cfg(test)]
+mod conversion_subscriber_tests {
+    use super::*;
+    use crate::mod_api::{self, Hooks, Host, LivingConversionPostEvent, ModEntry};
+    use std::sync::Mutex;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn post_only_listener_survives_pre_pruning() {
+        struct DefaultMod;
+        impl Hooks for DefaultMod {}
+        struct PostOnly(Arc<Mutex<Vec<(u32, u32)>>>);
+        impl Hooks for PostOnly {
+            fn living_conversion_post(
+                &self,
+                _: &mut dyn Host,
+                event: &mut LivingConversionPostEvent<'_>,
+            ) {
+                assert_eq!(event.kind, "minecraft:zombie");
+                assert_eq!(event.converted_kind, "minecraft:drowned");
+                self.0.lock().unwrap().push((event.entity, event.converted));
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![
+            ModEntry::new("default", Box::new(DefaultMod)),
+            ModEntry::new("post", Box::new(PostOnly(seen.clone()))),
+        ]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let zombie = game
+                    .res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone();
+                for _ in 0..2 {
+                    game.next_entity += 1;
+                    let from = Mob::new(
+                        game.next_entity,
+                        zombie.clone(),
+                        Vec3::new(0.5, 64.0, 0.5),
+                        0.0,
+                    );
+                    let converted = game
+                        .convert_to(
+                            &from,
+                            "minecraft:drowned",
+                            horizon_client::mobs::conversion::Params::KEEP_ALL,
+                            |_, _| {},
+                        )
+                        .unwrap();
+                    let events = seen.lock().unwrap();
+                    assert_eq!(events.last(), Some(&(from.id, converted)));
+                }
+                assert!(!mod_api::listened(mod_api::HookId::LivingConversionPre));
+                assert_eq!(seen.lock().unwrap().len(), 2);
+            });
+        });
     }
 }
 
