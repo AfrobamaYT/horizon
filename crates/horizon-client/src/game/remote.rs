@@ -1798,7 +1798,7 @@ impl Game<'_> {
                 forgotten.insert((p.pos[0], p.pos[1]));
                 continue;
             }
-            self.forget_remote_columns(&mut forgotten);
+            self.forget_remote_columns(&mut forgotten, true);
             let chunk = matches!(item, Received::Chunk(_));
             if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
                 events.push_front(item);
@@ -1996,7 +1996,7 @@ impl Game<'_> {
             }
         }
         if self.remote.is_some() {
-            self.forget_remote_columns(&mut forgotten);
+            self.forget_remote_columns(&mut forgotten, true);
         }
         if let Some(r) = self.remote.as_mut() {
             r.backlog_since = if events.is_empty() {
@@ -2255,19 +2255,20 @@ impl Game<'_> {
             .copied()
             .filter(|&(x, z)| !Self::chunk_inside_remote_range(center, distance, x, z))
             .collect();
-        self.forget_remote_columns(&mut gone);
+        self.forget_remote_columns(&mut gone, true);
     }
     fn forget_all_remote_columns(&mut self) {
         let mut gone = self.world.chunks.keys().copied().collect();
-        self.forget_remote_columns(&mut gone);
+        self.forget_remote_columns(&mut gone, false);
     }
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
-    /// entities, each store once for all of them. Far terrain keeps them as they were last
-    /// (`server_terrain`).
+    /// entities, each store once for all of them. When the level stays open,
+    /// far terrain keeps their last state (`server_terrain`).
     fn forget_remote_columns(
         &mut self,
         gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+        keep_terrain: bool,
     ) {
         if gone.is_empty() {
             return;
@@ -2275,7 +2276,7 @@ impl Game<'_> {
         let freed =
             horizon_client::streaming::Streaming::take_remote_columns(&mut self.world, gone);
         self.streaming.forget_columns(&mut self.world, gone);
-        if let Some(lod) = &mut self.lod {
+        if keep_terrain && let Some(lod) = &mut self.lod {
             for chunk in &freed {
                 lod.observe(chunk.clone(), self.res.facts());
             }
@@ -3226,7 +3227,7 @@ impl Game<'_> {
             C::ChunksBiomes(p) => self.remote_chunks_biomes(&p),
             // `poll_remote` forgets a run of them at once.
             C::ForgetLevelChunk(p) => {
-                self.forget_remote_columns(&mut [(p.pos[0], p.pos[1])].into_iter().collect());
+                self.forget_remote_columns(&mut [(p.pos[0], p.pos[1])].into_iter().collect(), true);
             }
             C::ChunkBatchFinished(_) => {
                 // ChunkBatchSizeCalculator's ceiling; meshing runs on workers.
@@ -10581,12 +10582,12 @@ mod tests {
             assert!(game.world.chunks.contains_key(&(0, 0)));
             assert!(game.streaming.is_lit(0, 0));
             let mut forgotten = [(0, 0)].into_iter().collect();
-            game.forget_remote_columns(&mut forgotten);
+            game.forget_remote_columns(&mut forgotten, true);
             assert!(!game.world.chunks.contains_key(&(0, 0)));
             assert!(!game.world.block_entities.contains_key(&(0, 64, 0)));
             assert!(!game.streaming.is_lit(0, 0));
             assert!(game.world.chunks.contains_key(&(1, 0)));
-            game.forget_remote_columns(&mut [(0, 0)].into_iter().collect());
+            game.forget_remote_columns(&mut [(0, 0)].into_iter().collect(), true);
             for x in [7, 13] {
                 game.streaming
                     .insert_remote(&mut game.world, Chunk::empty(x, 0));
@@ -10605,7 +10606,7 @@ mod tests {
             assert!(game.world.chunks.contains_key(&(13, 0)));
             assert!(!game.world.block_entities.contains_key(&(7 * 16, 64, 0)));
             // A later forget for an evicted column is harmless.
-            game.forget_remote_columns(&mut [(7, 0)].into_iter().collect());
+            game.forget_remote_columns(&mut [(7, 0)].into_iter().collect(), true);
             game.forget_all_remote_columns();
             assert!(game.world.chunks.is_empty());
             assert!(game.world.block_entities.is_empty());
