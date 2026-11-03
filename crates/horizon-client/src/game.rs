@@ -211,6 +211,7 @@ mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
+mod native_display_refs;
 mod native_dragon_refs;
 mod native_entities;
 mod native_entity_data;
@@ -240,6 +241,7 @@ mod native_living_writes;
 mod native_menu_refs;
 mod native_menus;
 mod native_merchant_refs;
+mod native_minecart_refs;
 mod native_mob_draw;
 mod native_mob_navigation;
 mod native_mob_refs;
@@ -256,9 +258,11 @@ mod native_player_stats;
 mod native_projectile_refs;
 mod native_projectiles;
 mod native_quick_move;
+mod native_raid_refs;
 mod native_recipes;
 mod native_server;
 mod native_shaders;
+mod native_sound_refs;
 mod native_ticks;
 mod native_visuals;
 mod native_world_columns;
@@ -2800,6 +2804,11 @@ struct Game<'a> {
     armor: [Option<ItemStack>; 4],
     /// The off hand (Inventory slot 40, saved as slot 150; menu slot 504 here).
     offhand: Option<ItemStack>,
+    /// The body and saddle slots (`EquipmentSlot.BODY`, `SADDLE`; Inventory
+    /// slots 41 and 42, saved as 151 and 152). The hands and armor stay in
+    /// the fields above. Nothing in the game reads these yet; they are kept
+    /// for mods and saves.
+    equipment: horizon_items::equipment::Equipment,
     /// `ItemStack.popTime` of the nine hotbar stacks, then the off hand: set to 5
     /// when a slot gains items, counted down each tick.
     hotbar_pop: [u8; 10],
@@ -4064,6 +4073,7 @@ impl Game<'_> {
             stacks.extend(self.inventory.iter_mut().filter_map(Option::take));
             stacks.extend(self.armor.iter_mut().rev().filter_map(Option::take));
             stacks.extend(self.offhand.take());
+            stacks.extend(self.equipment.take_all());
             stacks.retain(|s| s.enchantment_level("minecraft:vanishing_curse") == 0);
             self.apply_equipment();
         }
@@ -6229,7 +6239,7 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
-            && !crate::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck)
         {
             self.native_player_harvest_check(
                 self.own_entity_id() as u32,
@@ -6254,7 +6264,7 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if !crate::mod_api::mods().is_empty() {
+            if crate::mod_api::listened(crate::mod_api::HookId::PlayerHarvestCheck) {
                 self.native_player_harvest_check(
                     self.own_entity_id() as u32,
                     pos,
@@ -12415,12 +12425,17 @@ impl Game<'_> {
         // Warm the loot data with this world's packs before chunks decode
         // (`save::roll_loaded_loot` reads the cached copy).
         self.load_server_loot();
-        // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
-        // its chunks and players are.
         // MinecraftServer's constructor reads CustomBossEvents before any
         // server event.
         self.bosses = Default::default();
         self.load_bossbars();
+        // ServerLevel's constructor reads its Raids saved data before any
+        // server event; their randoms are seeded on the first raid tick.
+        if self.remote.is_none() {
+            self.read_raids();
+        }
+        // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
+        // its chunks and players are.
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
@@ -12430,29 +12445,7 @@ impl Game<'_> {
         self.border = Default::default();
         self.set_mode_id(level.mode());
         self.previous_mode = level.previous_game_mode.map(game_mode::mode_from_id);
-        let mut inventory = vec![None; 36];
-        self.armor = [None, None, None, None];
-        self.offhand = None;
-        self.ender_items = if level.ender_items.len() == 27 {
-            level.ender_items.clone()
-        } else {
-            vec![None; 27]
-        };
-        for (slot, id, count, damage) in &level.inventory {
-            let stack = ItemStack {
-                item: Arc::from(id.as_str()),
-                count: *count,
-                damage: *damage,
-                extra: level.inventory_components.get(slot).cloned(),
-            };
-            if (100..104).contains(slot) {
-                self.armor[usize::from(103 - slot)] = Some(stack);
-            } else if *slot == 150 {
-                self.offhand = Some(stack);
-            } else if let Some(cell) = inventory.get_mut(usize::from(*slot)) {
-                *cell = Some(stack);
-            }
-        }
+        let mut inventory = self.load_saved_inventory(&level);
         if self.creative && level.inventory.is_empty() && level.position.is_none() {
             for (i, name) in [
                 "minecraft:grass_block",
@@ -15433,6 +15426,7 @@ impl Game<'_> {
                     self.inventory.fill(None);
                     self.armor.fill(None);
                     self.offhand = None;
+                    self.equipment = Default::default();
                     self.craft_grid[..4].fill(None);
                     self.player_equipment_changed(&before);
                     self.apply_equipment();
@@ -15580,6 +15574,16 @@ impl Game<'_> {
                 level.inventory_components.insert(150, extra);
             }
         }
+        for (equipment_slot, s) in self.equipment.iter().enumerate() {
+            if let (Some(s), Some(slot)) = (s, horizon_client::save::saved_slot(equipment_slot)) {
+                level
+                    .inventory
+                    .push((slot, s.item.to_string(), s.count, s.damage));
+                if let Some(extra) = s.extra.clone() {
+                    level.inventory_components.insert(slot, extra);
+                }
+            }
+        }
         // Vanilla stores armor in slots 100 (feet) to 103 (head).
         for (i, s) in self.armor.iter().enumerate() {
             if let Some(s) = s {
@@ -15600,6 +15604,37 @@ impl Game<'_> {
         }
         level.ender_items = self.ender_items.clone();
         level.active_effects = self.potions.effects.saved();
+    }
+    /// The saved player's hands, armor, body, saddle and ender chest go in
+    /// their fields; the 36 inventory slots come back.
+    fn load_saved_inventory(&mut self, level: &Level) -> Vec<Option<ItemStack>> {
+        let mut inventory = vec![None; 36];
+        self.armor = [None, None, None, None];
+        self.offhand = None;
+        self.equipment = Default::default();
+        self.ender_items = if level.ender_items.len() == 27 {
+            level.ender_items.clone()
+        } else {
+            vec![None; 27]
+        };
+        for (slot, id, count, damage) in &level.inventory {
+            let stack = ItemStack {
+                item: Arc::from(id.as_str()),
+                count: *count,
+                damage: *damage,
+                extra: level.inventory_components.get(slot).cloned(),
+            };
+            if (100..104).contains(slot) {
+                self.armor[usize::from(103 - slot)] = Some(stack);
+            } else if *slot == 150 {
+                self.offhand = Some(stack);
+            } else if let Some(equipment_slot) = horizon_client::save::equipment_slot(*slot) {
+                self.equipment.set(equipment_slot, Some(stack));
+            } else if let Some(cell) = inventory.get_mut(usize::from(*slot)) {
+                *cell = Some(stack);
+            }
+        }
+        inventory
     }
     fn save_game(&mut self) -> Result<()> {
         self.save_game_with(true)
@@ -19302,6 +19337,7 @@ impl<'a> Game<'a> {
             title: None,
             armor: [None, None, None, None],
             offhand: None,
+            equipment: Default::default(),
             hotbar_pop: [0; 10],
             hand: Hand::Main,
             shield_cooldown: 0,

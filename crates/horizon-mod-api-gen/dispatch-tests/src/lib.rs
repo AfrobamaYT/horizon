@@ -112,6 +112,12 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct MinecartRef;
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativeMinecartKind {
+            Rideable,
+        }
         pub(super) struct EffectTickChange;
         pub(super) struct NativeItemDrop;
         #[derive(Clone, Copy)]
@@ -203,8 +209,11 @@ mod tests {
             .iter()
             .map(|entry| (&*entry.hooks as &dyn std::any::Any).type_id())
             .collect();
-        let subscribers =
-            horizon_client_core::subscribers::Subscribers::new(HOOK_COUNT, mods.len());
+        let subscribers = horizon_client_core::subscribers::Subscribers::new(
+            horizon_client_core::subscribers::Domain::Gameplay,
+            HOOK_COUNT,
+            mods.len(),
+        );
         // Test dispatch needs the same static lifetime as the real installation.
         MODS.set(Some(Box::leak(Box::new(Installed {
             mods,
