@@ -3365,6 +3365,8 @@ struct Game<'a> {
     server_lists: Option<std::sync::Arc<std::sync::Mutex<dedicated::Lists>>>,
     /// State of `/spectate`, `/posteffect`, `/debug`, `/waypoint` and friends.
     cmds: commands::extra::CommandExtras,
+    /// The retained server reload listeners of the last successful reload.
+    reload_resources: crate::mod_api::ServerReloadResources,
     ui: chat::UiState,
     combat: combat::CombatTracker,
     /// Each guest's own `CombatTracker`, out of `combat` between turns.
@@ -19778,6 +19780,7 @@ impl<'a> Game<'a> {
             server_loot: Default::default(),
             server_items: None,
             cmds: Default::default(),
+            reload_resources: Default::default(),
             ui: chat::UiState::new(),
             combat: Default::default(),
             guest_combat: Default::default(),
