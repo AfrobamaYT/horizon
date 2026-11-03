@@ -1045,11 +1045,7 @@ pub fn publish(
             .map_or(config.public_url.as_str(), |(_, host)| host),
         id = form.id,
         kind = kind.name(),
-        new = if is_new {
-            "new"
-        } else {
-            "update"
-        },
+        new = if is_new { "new" } else { "update" },
         version = v.version,
         game = v.game,
         file = v.file.name,

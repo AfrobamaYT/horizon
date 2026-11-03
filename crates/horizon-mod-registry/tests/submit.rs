@@ -928,7 +928,10 @@ async fn a_mod_cannot_turn_native() {
     let published = format!(
         "id = \"coords_hud\"\nkind = \"mod\"\nname = \"C\"\nsummary = \"s\"\nowners = [\"Alice\"]\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"0.1.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"coords_hud-0.1.0.hmod\"\nsha256 = \"{HMOD_SHA}\"\n"
     );
-    mock.lock().unwrap().main.insert("mods/coords_hud.toml".into(), published);
+    mock.lock()
+        .unwrap()
+        .main
+        .insert("mods/coords_hud.toml".into(), published);
     let csrf = client.sign_in().await;
     let mut native = form();
     native["kind"] = json!("native-mod");
@@ -937,7 +940,10 @@ async fn a_mod_cannot_turn_native() {
     native["signature"] = Value::Null;
     let (status, json) = client.submit(&csrf, &native, &hnmod("0.2.0")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
-    assert_eq!(json["error"], "coords_hud is a mod, not a native-mod: a project's kind never changes");
+    assert_eq!(
+        json["error"],
+        "coords_hud is a mod, not a native-mod: a project's kind never changes"
+    );
     assert!(mock.lock().unwrap().pulls.is_empty());
 }
 
