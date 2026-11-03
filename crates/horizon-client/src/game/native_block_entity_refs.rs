@@ -346,7 +346,10 @@ mod tests {
             assert!(chest.set_name(game, Some("Loot")));
             assert_eq!(chest.name(game), Some("Loot".to_owned()));
             let data = chest.data(game).unwrap();
-            assert_eq!(data.get(&"CustomName".into()), Some(&Tag::String("Loot".into())));
+            assert_eq!(
+                data.get(&"CustomName".into()),
+                Some(&Tag::String("Loot".into()))
+            );
             assert!(!sensor.set_name(game, Some("Nope")));
             assert_eq!(sensor.name(game), None);
             assert!(chest.set_name(game, None));
