@@ -3218,6 +3218,20 @@ impl Game<'_> {
             self.add_orb(at, amount);
         }
     }
+    fn breeding_orb(
+        &mut self,
+        parent: u32,
+        at: [f64; 3],
+        experience: horizon_client::mobs::BreedExperience,
+    ) {
+        match experience {
+            horizon_client::mobs::BreedExperience::Deferred => {
+                self.award_breeding_experience(parent, at)
+            }
+            horizon_client::mobs::BreedExperience::Drawn(Some(amount)) => self.add_orb(at, amount),
+            horizon_client::mobs::BreedExperience::Drawn(None) => {}
+        }
+    }
     /// `Animal.finalizeSpawnChildFromBreeding` before the experience orb.
     fn finalize_breeding(
         &mut self,
@@ -3577,27 +3591,17 @@ impl Game<'_> {
         };
         self.finalize_breeding(&p, partner, Some(&child), order);
         let at = [p.position.x, p.position.y, p.position.z];
-        let fox = order == OrbOrder::AfterChild;
-        let mut child = Some(child);
-        let joined = if fox {
-            self.insert_spawned_mob(child.take().unwrap(), true, false, false)
-        } else {
-            None
-        };
-        if fox {
-            self.mob_event_particles(parent, 18);
-        }
-        match experience {
-            horizon_client::mobs::BreedExperience::Deferred => {
-                self.award_breeding_experience(parent, at);
+        match order {
+            OrbOrder::AfterChild => {
+                let joined = self.insert_spawned_mob(child, true, false, false);
+                self.mob_event_particles(parent, 18);
+                self.breeding_orb(parent, at, experience);
+                joined
             }
-            horizon_client::mobs::BreedExperience::Drawn(Some(amount)) => self.add_orb(at, amount),
-            horizon_client::mobs::BreedExperience::Drawn(None) => {}
-        }
-        if let Some(child) = child {
-            self.insert_spawned_mob(child, true, false, false)
-        } else {
-            joined
+            OrbOrder::BeforeChild => {
+                self.breeding_orb(parent, at, experience);
+                self.insert_spawned_mob(child, true, false, false)
+            }
         }
     }
     /// `MobEffectUtil.addEffectToPlayersAround` for an elder guardian:
