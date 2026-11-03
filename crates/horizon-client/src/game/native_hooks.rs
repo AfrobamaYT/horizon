@@ -4103,7 +4103,8 @@ impl Game<'_> {
     /// Armor is about to take durability damage from a hit (NeoForge's
     /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
     /// hit, for the pieces that would wear. `entity` is the wearer's entity id,
-    /// `player` its UUID (None for a mob) and `kind` its type. Each entry has
+    /// `player` its UUID (None for a mob), `kind` its type and `source` the hit's
+    /// damage type (`causing` and `direct` are 0: the hit does not carry them here). Each entry has
     /// its `slot`, the `stack`, the `damage` vanilla worked out and a
     /// `new_damage` a mod may change (0 for none; Unbreaking is applied
     /// after). Canceling means no armor damage. A server player's `feet`,
@@ -4115,10 +4116,20 @@ impl Game<'_> {
         player: Option<u128>,
         entity: u32,
         kind: &str,
+        source: &HurtSource<'_>,
         entries: &mut Vec<horizon_client::mod_api::NativeArmorHurt>,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_armor_hurt(self, mod_api::mods(), player, entity, kind, entries, cancel);
+        mod_api::dispatch_armor_hurt(
+            self,
+            mod_api::mods(),
+            player,
+            entity,
+            kind,
+            source,
+            entries,
+            cancel,
+        );
     }
     /// A mob is about to destroy a block (NeoForge's `LivingDestroyBlockEvent`):
     /// a wither breaking blocks around it, a ravager breaking leaves, the ender

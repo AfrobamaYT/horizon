@@ -1350,6 +1350,20 @@ pub enum BreedExperience {
     Drawn(Option<u32>),
 }
 
+/// Makes the events pushed since `start` (the effects of a break a mod may stop)
+/// conditional on the game having broken one of `mob`'s blocks. Without a mod they
+/// stay plain events: nothing is allocated.
+pub fn after_break(events: &mut Vec<MobEvent>, mob: u32, start: usize) {
+    if crate::native_client_hooks::has_mods() {
+        let effects = events.split_off(start);
+        events.push(MobEvent::IfBroke {
+            mob,
+            effects,
+            otherwise: Vec::new(),
+        });
+    }
+}
+
 /// Events a mob tick asks the game to act on.
 #[derive(Clone, Debug)]
 pub enum MobEvent {
@@ -1835,11 +1849,26 @@ pub enum MobEvent {
         /// hears (a wither's, a ravager's, a silverfish's, a zombie's).
         by: Option<u32>,
     },
-    /// `EndermanTakeBlockGoal`: the enderman `mob` picks up the block at `pos`
-    /// (it already holds it); the block turns to air unless a mod stops it.
+    /// `EndermanTakeBlockGoal`: the enderman `mob` picks up the block `state` at
+    /// `pos` (it already holds it); the block turns to air unless a mod stops it
+    /// or it is no longer that block.
     TakeBlock {
         mob: u32,
         pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+    },
+    /// What follows a `BreakBlock { by: Some(mob) }` of this batch: `effects` when
+    /// the game broke at least one of the mob's blocks, `otherwise` when a mod kept
+    /// them all (vanilla plays the break's sound and particles only on a destruction).
+    /// Only made while a mod is loaded; without one the effects are plain events.
+    IfBroke {
+        mob: u32,
+        effects: Vec<MobEvent>,
+        otherwise: Vec<MobEvent>,
+    },
+    /// The mob `mob` jumps (`jumpFromGround`'s flag, set after a ravager broke no leaves).
+    Jump {
+        mob: u32,
     },
     Particles {
         kind: &'static str,

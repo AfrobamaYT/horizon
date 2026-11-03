@@ -467,6 +467,7 @@ impl Goal for TakeBlock {
         cx.events.push(MobEvent::TakeBlock {
             mob: m.id,
             pos: [x, y, z],
+            state,
         });
         m.extra.carried = Some(state);
     }
