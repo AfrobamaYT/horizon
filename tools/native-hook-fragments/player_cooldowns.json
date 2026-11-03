@@ -2,27 +2,27 @@
   "hooks": [],
   "helpers": [
     {
-      "name": "player_item_cooldowns",
+      "name": "player_item_cooldowns", "side": "server",
       "target": "horizon_client::game::native_player_cooldowns::Game<'_>::native_player_item_cooldowns",
       "receiver": "player"
     },
     {
-      "name": "player_has_item_cooldown",
+      "name": "player_has_item_cooldown", "side": "server",
       "target": "horizon_client::game::native_player_cooldowns::Game<'_>::native_player_has_item_cooldown",
       "receiver": "player"
     },
     {
-      "name": "player_item_cooldown_percent",
+      "name": "player_item_cooldown_percent", "side": "server",
       "target": "horizon_client::game::native_player_cooldowns::Game<'_>::native_player_item_cooldown_percent",
       "receiver": "player"
     },
     {
-      "name": "player_set_item_cooldown",
+      "name": "player_set_item_cooldown", "side": "server",
       "target": "horizon_client::game::native_player_cooldowns::Game<'_>::native_player_set_item_cooldown",
       "receiver": "player"
     },
     {
-      "name": "player_remove_item_cooldown",
+      "name": "player_remove_item_cooldown", "side": "server",
       "target": "horizon_client::game::native_player_cooldowns::Game<'_>::native_player_remove_item_cooldown",
       "receiver": "player"
     }

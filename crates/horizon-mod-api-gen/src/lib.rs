@@ -167,7 +167,7 @@ enum HelperSide {
 
 impl HelperSide {
     fn parse(value: &serde_json::Value) -> Result<Option<Self>, String> {
-        match value.get("side") {
+        let side = match value.get("side") {
             None => Ok(None),
             Some(serde_json::Value::String(side)) => match side.as_str() {
                 "server" => Ok(Some(Self::Server)),
@@ -176,7 +176,11 @@ impl HelperSide {
                 _ => Err(format!("unknown helper side {side}")),
             },
             Some(_) => Err("helper side must be a string".into()),
+        }?;
+        if value.get("client_target").is_some() && side != Some(Self::Both) {
+            return Err("client_target requires side both".into());
         }
+        Ok(side)
     }
 }
 
@@ -204,6 +208,24 @@ fn helper_target<'a>(
         ));
     }
     Ok(method)
+}
+
+fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<(), String> {
+    let normalize = |code: &str| -> Result<String, String> {
+        let mut sig = syn::parse_str::<syn::ImplItemFn>(code)
+            .map_err(|e| format!("{name}: {e}"))?
+            .sig;
+        for arg in &mut sig.inputs {
+            if let syn::FnArg::Typed(arg) = arg {
+                arg.pat = Box::new(syn::parse_quote!(_));
+            }
+        }
+        Ok(sig.to_token_stream().to_string())
+    };
+    if normalize(server)? != normalize(client)? {
+        return Err(format!("{name}: client and server signatures differ"));
+    }
+    Ok(())
 }
 
 fn host_method(
@@ -1202,62 +1224,19 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
         let side = HelperSide::parse(helper)?;
-        if helper.get("client_target").is_some() && side != Some(HelperSide::Both) {
-            return Err(format!("{name}: client_target requires side both"));
-        }
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
         let target = helper["target"].as_str().ok_or("helper target missing")?;
         let method = helper_target(&game, name, target)?;
-        let (declaration, mut implementation) = host_method(method, name, &types.exports)?;
+        let (declaration, implementation) = host_method(method, name, &types.exports)?;
         if let Some(client_target) = helper.get("client_target") {
             let client_target = client_target
                 .as_str()
                 .ok_or("client_target must be a string")?;
-            let client_native = client_target
-                .rsplit("::")
-                .next()
-                .ok_or("client target missing method")?;
             let client = helper_target(&game, name, client_target)?;
             let (_, client_implementation) = host_method(client, name, &types.exports)?;
-            let server_fn: syn::ImplItemFn =
-                syn::parse_str(&implementation).map_err(|e| format!("{name}: {e}"))?;
-            let client_fn: syn::ImplItemFn =
-                syn::parse_str(&client_implementation).map_err(|e| format!("{name}: {e}"))?;
-            let normalize = |mut sig: syn::Signature| {
-                for arg in &mut sig.inputs {
-                    if let syn::FnArg::Typed(arg) = arg {
-                        arg.pat = Box::new(syn::parse_quote!(_));
-                    }
-                }
-                sig.to_token_stream().to_string()
-            };
-            if normalize(server_fn.sig.clone()) != normalize(client_fn.sig.clone()) {
-                return Err(format!("{name}: client and server signatures differ"));
-            }
-            let sig = server_fn.sig;
-            let server_body = server_fn.block;
-            let args = sig
-                .inputs
-                .iter()
-                .skip(1)
-                .map(|arg| match arg {
-                    syn::FnArg::Typed(arg) => arg.pat.to_token_stream().to_string(),
-                    _ => unreachable!("host_method validated arguments"),
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let callee = if matches!(client.sig.inputs.first(), Some(syn::FnArg::Receiver(_))) {
-                "self."
-            } else {
-                "Self::"
-            };
-            implementation = format!(
-                "{} {{ if self.options.execution_role.is_client() {{ {callee}{client_native}({args}) }} else {} }}\n",
-                sig.to_token_stream(),
-                server_body.to_token_stream()
-            );
+            matching_helper_signatures(&implementation, &client_implementation, name)?;
         }
         let side_doc = match side {
             Some(HelperSide::Server) => "/// Side: server.\n",
@@ -1397,6 +1376,55 @@ mod tests {
         );
         assert!(HelperSide::parse(&json!({"side":null})).is_err());
         assert!(HelperSide::parse(&json!({"side":"unknown"})).is_err());
+        assert!(HelperSide::parse(&json!({"client_target":"somewhere"})).is_err());
+        assert!(HelperSide::parse(&json!({"side":"server", "client_target":"somewhere"})).is_err());
+        assert_eq!(
+            HelperSide::parse(&json!({"side":"both", "client_target":"somewhere"})),
+            Ok(Some(HelperSide::Both))
+        );
+    }
+    #[test]
+    fn helper_targets_must_name_the_real_game_method() {
+        let game = vec![(
+            "horizon_client::game::sample".to_owned(),
+            syn::parse_quote!(
+                fn native_sample(&self) {}
+            ),
+        )];
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::sample::Game<'_>::native_sample"
+            )
+            .is_ok()
+        );
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::wrong::Game<'_>::native_sample"
+            )
+            .is_err()
+        );
+        assert!(
+            super::helper_target(
+                &game,
+                "sample",
+                "horizon_client::game::sample::Game<'_>::missing"
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn dual_targets_require_matching_host_signatures() {
+        let server = "fn value(&self, x: i32) -> Option<i32> { None }";
+        let same = "fn value(&self, y: i32) -> Option<i32> { Some(y) }";
+        let wrong_type = "fn value(&self, y: u32) -> Option<i32> { None }";
+        let wrong_receiver = "fn value(&mut self, y: i32) -> Option<i32> { None }";
+        assert!(super::matching_helper_signatures(server, same, "value").is_ok());
+        assert!(super::matching_helper_signatures(server, wrong_type, "value").is_err());
+        assert!(super::matching_helper_signatures(server, wrong_receiver, "value").is_err());
     }
     use quote::ToTokens;
     use serde_json::Value;
