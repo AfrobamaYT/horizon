@@ -352,6 +352,15 @@ pub trait LevelAccess {
     fn allow_block_burn(&self, _pos: BlockPos) -> bool {
         true
     }
+    /// Select or cancel the feature a block is about to grow into; `None` when
+    /// vanilla has none to place.
+    fn block_grow_feature<'a>(
+        &mut self,
+        _pos: BlockPos,
+        feature: Option<&'a str>,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        feature.map(std::borrow::Cow::Borrowed)
+    }
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
     }

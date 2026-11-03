@@ -1212,6 +1212,57 @@ pub trait Host {
         let _ = pos;
         unimplemented!("Host::block_collision")
     }
+    /// The entity `id` (the id events carry) as a handle for the `entity_*`
+    /// methods: None on a client, with no world open, or for no such entity
+    /// in the level in place or among the server's players. API
+    /// @API:entity_handles@.
+    fn entity(&self, id: u32) -> Option<EntityRef> {
+        let _ = id;
+        unimplemented!("Host::entity")
+    }
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
+    /// client, with no world open, or for a dimension the server hasn't
+    /// loaded. API @API:entity_handles@.
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        let _ = dimension;
+        unimplemented!("Host::level")
+    }
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_position")
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_block_position")
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
+        let _ = entity;
+        unimplemented!("Host::entity_rotation")
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+        let _ = entity;
+        unimplemented!("Host::entity_kind")
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        let _ = entity;
+        unimplemented!("Host::entity_uuid")
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+        let _ = entity;
+        unimplemented!("Host::entity_level")
+    }
     /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
     /// empty ones included, kept in its `minecraft:container`. None for an
     /// item without slots, and for an empty stack.
@@ -1251,5 +1302,226 @@ pub trait Host {
         let _ = slot;
         let _ = max;
         unimplemented!("Host::item_container_extract")
+    }
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    fn level_entities_in(
+        &self,
+        level: LevelRef,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        let _ = level;
+        let _ = min;
+        let _ = max;
+        unimplemented!("Host::level_entities_in")
+    }
+    /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
+    /// player, an armor stand or the dragon), or None for another kind or a
+    /// stale handle. API @API:living_refs@.
+    fn living(&self, entity: EntityRef) -> Option<LivingRef> {
+        let _ = entity;
+        unimplemented!("Host::living")
+    }
+    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
+    /// None when it is empty, the entity has no such slot (a player has no
+    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
+        let _ = living;
+        let _ = slot;
+        unimplemented!("Host::living_equipment")
+    }
+    /// The stack in hand `hand` (`LivingEntity.getItemInHand`). API
+    /// @API:living_refs@.
+    fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack> {
+        let _ = living;
+        let _ = hand;
+        unimplemented!("Host::living_hand_item")
+    }
+    /// Puts `stack` (None: empties it) in equipment slot `slot`
+    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// when the entity has no such slot or is a mob. Mob equipment writes
+    /// are not supported until full equipment stacks can be stored.
+    /// API @API:living_refs@.
+    fn living_set_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        let _ = living;
+        let _ = slot;
+        let _ = stack;
+        unimplemented!("Host::living_set_equipment")
+    }
+    /// Resolve an online UUID on this server. During a player swap only the
+    /// acting player is available; other players return None because swaps can
+    /// nest and their records may hold displaced state. API @API:player_read@.
+    fn player(&self, uuid: u128) -> Option<PlayerRef> {
+        let _ = uuid;
+        unimplemented!("Host::player")
+    }
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    fn player_game_mode(&self, player: PlayerRef) -> Option<i32> {
+        let _ = player;
+        unimplemented!("Host::player_game_mode")
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    fn player_is_creative(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_creative")
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    fn player_is_spectator(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_is_spectator")
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    fn player_may_build(&self, player: PlayerRef) -> Option<bool> {
+        let _ = player;
+        unimplemented!("Host::player_may_build")
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+        let _ = player;
+        unimplemented!("Host::player_food")
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+        let _ = player;
+        unimplemented!("Host::player_abilities")
+    }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
+}
+impl EntityRef {
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    pub fn position(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_position(self)
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    pub fn block_position(self, host: &dyn Host) -> Option<[i32; 3]> {
+        host.entity_block_position(self)
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    pub fn rotation(self, host: &dyn Host) -> Option<[f32; 2]> {
+        host.entity_rotation(self)
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    pub fn kind(self, host: &dyn Host) -> Option<String> {
+        host.entity_kind(self)
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    pub fn uuid(self, host: &mut dyn Host) -> Option<u128> {
+        host.entity_uuid(self)
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
+        host.entity_level(self)
+    }
+}
+impl LevelRef {
+    /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
+    /// Face-only contact does not intersect; spectator players are excluded.
+    /// Returns None on a client, for a stale handle, or for a parked level:
+    /// its entity handles cannot resolve until the level is in place. The walk
+    /// is in entity-list order followed by players; each overlap requires a
+    /// handle lookup, so cost grows with the box's contents. Tridents cannot
+    /// yet resolve; frames, paintings, other special entities and the dragon
+    /// are not on the entity-list walk.
+    /// During a player's action with the hub taken out, players including the
+    /// acting player are not listed: their handles cannot resolve there yet.
+    /// During `hears_projectile_impacts`, the projectile list is taken out of
+    /// the game and is not visible; it is restored for `projectile_impact`.
+    /// API @API:level_entities_in@.
+    pub fn entities_in(
+        self,
+        host: &dyn Host,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Vec<EntityRef>> {
+        host.level_entities_in(self, min, max)
+    }
+}
+impl LivingRef {
+    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
+    /// None when it is empty, the entity has no such slot (a player has no
+    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    pub fn equipment(self, host: &dyn Host, slot: EquipmentSlot) -> Option<ItemStack> {
+        host.living_equipment(self, slot)
+    }
+    /// The stack in hand `hand` (`LivingEntity.getItemInHand`). API
+    /// @API:living_refs@.
+    pub fn hand_item(self, host: &dyn Host, hand: Hand) -> Option<ItemStack> {
+        host.living_hand_item(self, hand)
+    }
+    /// Puts `stack` (None: empties it) in equipment slot `slot`
+    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// when the entity has no such slot or is a mob. Mob equipment writes
+    /// are not supported until full equipment stacks can be stored.
+    /// API @API:living_refs@.
+    pub fn set_equipment(
+        self,
+        host: &mut dyn Host,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        host.living_set_equipment(self, slot, stack)
+    }
+}
+impl PlayerRef {
+    /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
+    /// None for stale, offline or unavailable players (including other players during a swap).
+    pub fn game_mode(self, host: &dyn Host) -> Option<i32> {
+        host.player_game_mode(self)
+    }
+    /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
+    pub fn is_creative(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_creative(self)
+    }
+    /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
+    pub fn is_spectator(self, host: &dyn Host) -> Option<bool> {
+        host.player_is_spectator(self)
+    }
+    /// `Player.mayBuild`; Paper `HumanEntity#getGameMode`.
+    pub fn may_build(self, host: &dyn Host) -> Option<bool> {
+        host.player_may_build(self)
+    }
+    /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
+    /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
+    /// guest's body exists, as well as for stale or unavailable players.
+    pub fn food(self, host: &dyn Host) -> Option<NativePlayerFood> {
+        host.player_food(self)
+    }
+    /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
+    /// Horizon currently keeps no per-player walk speed and sends 0.1.
+    pub fn abilities(self, host: &dyn Host) -> Option<NativePlayerAbilities> {
+        host.player_abilities(self)
     }
 }

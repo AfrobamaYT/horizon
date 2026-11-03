@@ -36,7 +36,7 @@ class DynaRoutingTests(unittest.TestCase):
             prefix.mkdir()
             (prefix / ".dyna-hash").write_text(hashlib.sha256(script.read_bytes()).hexdigest() + "\n")
             envfile, pathfile = cache / "env", cache / "path"
-            env = dict(os.environ, DYNA_CI_CACHE=directory, GITHUB_ENV=str(envfile), GITHUB_PATH=str(pathfile))
+            env = dict(os.environ, DYNA_CI_BUILD=directory, GITHUB_ENV=str(envfile), GITHUB_PATH=str(pathfile))
             subprocess.run(["bash", script], env=env, check=True)
             exports = envfile.read_text()
             for key, value in (("CARGO_TARGET_DIR", "target"), ("CARGO_HOME", "cargo"), ("RUSTUP_HOME", "rustup")):
@@ -55,7 +55,7 @@ class DynaRoutingTests(unittest.TestCase):
         for name in ("verify", "launcher"):
             block = blocks[name]
             self.assertIn("needs: changes", block)
-            self.assertIn("needs.changes.outputs.self_hosted == 'true' && 'dyna'", block)
+            self.assertIn("needs.changes.outputs.self_hosted == 'true' && 'dyna-medium'", block)
             self.assertNotIn("secrets.", block)
             self.assertNotIn("permissions:", block)
         self.assertIn("runs-on: ubuntu-latest", blocks["pool-watch"])
