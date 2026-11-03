@@ -238,9 +238,27 @@ mod tests {
                 .get("minecraft:zombie")
                 .unwrap()
                 .clone();
-            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let mut mob = Mob::new(12, kind, Vec3::ZERO, 0.0);
+            mob.ai.nav.path = Some(horizon_client::mobs::path::Path {
+                nodes: Vec::new(),
+                next: 0,
+                target: [1, 64, 1],
+                dist_to_target: 0.0,
+                reached: true,
+            });
+            mob.extra.mount = Some(42);
+            mob.extra.passenger = true;
+            mob.fall_distance = 5.0;
+            mob.velocity.y = -2.0;
+            game.mobs.push(mob);
             let entity = game.native_entity(12).unwrap();
             assert!(entity.teleport_to(game, [5.0, 70.0, -3.0], Some([90.0, 120.0])));
+            let mob = &game.mobs[0];
+            assert!(mob.ai.nav.path.is_none());
+            assert!(mob.extra.mount.is_none());
+            assert!(!mob.extra.passenger);
+            assert_eq!(mob.fall_distance, 0.0);
+            assert_eq!(mob.velocity.y, 0.0);
             assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
             assert_eq!(entity.rotation(game), Some([90.0, 90.0]));
             assert_eq!(entity.head_yaw(game), Some(90.0));

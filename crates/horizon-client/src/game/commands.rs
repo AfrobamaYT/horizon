@@ -4029,6 +4029,14 @@ mod teleport_mob_tests {
             assert_eq!(mob.fall_distance, 0.0);
             assert_eq!(mob.velocity.y, 0.0);
             assert!(mob.on_ground);
+            let mob = &mut game.mobs[0];
+            mob.extra.fall_flying = true;
+            mob.velocity.y = -3.0;
+            mob.on_ground = false;
+            assert!(game.run_command("tp @e[type=minecraft:zombie] 12 70 12"));
+            let mob = &game.mobs[0];
+            assert_eq!(mob.velocity.y, -3.0);
+            assert!(!mob.on_ground);
         });
     }
 }
