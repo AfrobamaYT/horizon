@@ -1935,8 +1935,11 @@ impl Game<'_> {
         mod_api::dispatch_minimap(self, minimap);
     }
     /// Register namespaced NBT component types before content loads.
-    pub(super) fn native_component_types(types: &mut Vec<String>) {
-        mod_api::dispatch_component_types(types);
+    pub(super) fn native_component_types(
+        context: &mod_api::RegistrationContext<'_>,
+        types: &mut Vec<String>,
+    ) {
+        mod_api::dispatch_component_types(context, types);
     }
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
@@ -1953,8 +1956,11 @@ impl Game<'_> {
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
-    pub(super) fn native_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
-        mod_api::dispatch_blocks(blocks);
+    pub(super) fn native_blocks(
+        context: &mod_api::RegistrationContext<'_>,
+        blocks: &mut Vec<horizon_mods::content::Block>,
+    ) {
+        mod_api::dispatch_blocks(context, blocks);
     }
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
@@ -1963,8 +1969,11 @@ impl Game<'_> {
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
     /// Asked once at start, on every side.
-    pub(super) fn native_items(items: &mut Vec<horizon_mods::content::Item>) {
-        mod_api::dispatch_items(items);
+    pub(super) fn native_items(
+        context: &mod_api::RegistrationContext<'_>,
+        items: &mut Vec<horizon_mods::content::Item>,
+    ) {
+        mod_api::dispatch_items(context, items);
     }
     /// Models no blockstate names that this client bakes beside the block
     /// models (NeoForge's `ModelEvent.RegisterStandalone`): push their ids
@@ -1974,10 +1983,13 @@ impl Game<'_> {
     /// only to bake its model. Asked once at start, before the resources
     /// load; every resource load, a pack reload included, bakes them again
     /// from that pack's files. A model that doesn't read is logged and left
-    /// out; an id without a namespace is dropped. Every side asks it, but
-    /// only a window bakes models.
-    pub(super) fn native_standalone_models(models: &mut Vec<String>) {
-        mod_api::dispatch_standalone_models(models);
+    /// out; an id without a namespace is dropped. Only the client asks it,
+    /// as NeoForge's ModelEvent.RegisterStandalone is a client mod-bus event.
+    pub(super) fn native_standalone_models(
+        context: &mod_api::RegistrationContext<'_>,
+        models: &mut Vec<String>,
+    ) {
+        mod_api::dispatch_standalone_models(context, models);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {

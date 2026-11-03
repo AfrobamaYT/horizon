@@ -22045,7 +22045,7 @@ pub fn run_with(launch: LaunchArguments) -> Result<()> {
         }
     }
     mods::register_components(&vanilla_root)?;
-    mods::register_standalone_models();
+    mods::register_standalone_models(options.execution_role);
     let mut early_settings = Settings::load(&Game::options_path());
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.

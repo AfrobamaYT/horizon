@@ -137,6 +137,7 @@ mod tests {
             Owners,
         }
         pub(super) struct NativeLifecycleContext;
+        pub(super) struct RegistrationContext<'a>(pub &'a str);
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
         #[derive(Clone, Copy)]

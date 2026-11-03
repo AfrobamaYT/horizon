@@ -1,4 +1,5 @@
-use super::{CatalogHook, HelperSide};
+use super::{CatalogHook, HelperSide, HookContext};
+use syn::Type;
 
 /// The hook's host parameter type and the expression passed by its native method.
 #[derive(Debug, PartialEq, Eq)]
@@ -15,6 +16,17 @@ pub(super) fn validate(
     mutable: Option<bool>,
     ticks: bool,
 ) -> Result<(), String> {
+    if hook.context.is_some()
+        && (mutable.is_some()
+            || is_level
+            || ticks
+            || hook.get("host").is_some()
+            || hook["mod_api"].get("scope").is_some())
+    {
+        return Err(format!(
+            "{name}: a phase context cannot be combined with a game/level host or Parts scope"
+        ));
+    }
     if let Some(marker) = hook.get("host") {
         if is_level || hook.side == HelperSide::Client {
             return Err(format!("{name}: this entry takes no host marker"));
@@ -38,6 +50,41 @@ pub(super) fn validate(
         ));
     }
     Ok(())
+}
+
+/// Remove the native phase input from the event, selecting its public context.
+pub(super) fn context_param(
+    hook: &CatalogHook,
+    args: &mut Vec<(String, &Type)>,
+) -> Result<Option<HostParam>, String> {
+    let Some(kind) = hook.context else {
+        return Ok(None);
+    };
+    let name = hook["name"].as_str().ok_or("hook name missing")?;
+    let expected = match kind {
+        HookContext::Registration => "RegistrationContext",
+        HookContext::DataLoad => "LoadContext",
+    };
+    let valid = args.first().is_some_and(|(name, ty)| {
+        name == "context"
+            && matches!(ty, Type::Reference(reference)
+            if reference.mutability.is_none() && matches!(&*reference.elem, Type::Path(path)
+                if path.path.segments.last().is_some_and(|segment| segment.ident == expected)))
+    });
+    if !valid {
+        return Err(format!(
+            "{name}: phase context requires first input context: &{expected}<'_>"
+        ));
+    }
+    args.remove(0);
+    Ok(Some(HostParam {
+        ty: match kind {
+            HookContext::Registration => "&RegistrationContext<'_>",
+            HookContext::DataLoad => "&DataLoadContext<'_>",
+        }
+        .into(),
+        call: "context",
+    }))
 }
 
 /// Select the host once for both generated signatures and the native call.
@@ -95,4 +142,48 @@ pub(super) fn host_param(
             },
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phase_context_is_not_an_event_field_or_game_host() {
+        for (kind, input, public) in [
+            (
+                HookContext::Registration,
+                "&RegistrationContext<'_>",
+                "&RegistrationContext<'_>",
+            ),
+            (
+                HookContext::DataLoad,
+                "&LoadContext<'_>",
+                "&DataLoadContext<'_>",
+            ),
+        ] {
+            let hook = CatalogHook {
+                entry: serde_json::json!({"name": "phase", "side": "both"}),
+                side: HelperSide::Both,
+                context: Some(kind),
+            };
+            let ty = syn::parse_str(input).unwrap();
+            let output = syn::parse_quote!(&mut Vec<String>);
+            let mut args = vec![("context".into(), &ty), ("values".into(), &output)];
+            assert_eq!(
+                context_param(&hook, &mut args).unwrap(),
+                Some(HostParam {
+                    ty: public.into(),
+                    call: "context",
+                })
+            );
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0].0, "values");
+            assert!(validate(&hook, "phase", false, None, false).is_ok());
+            assert!(validate(&hook, "phase", false, Some(true), false).is_err());
+            assert!(context_param(&hook, &mut args).is_err());
+            let mutable = syn::parse_str(&input.replacen('&', "&mut ", 1)).unwrap();
+            assert!(context_param(&hook, &mut vec![("context".into(), &mutable)]).is_err());
+        }
+    }
 }

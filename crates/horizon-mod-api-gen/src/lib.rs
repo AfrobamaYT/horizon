@@ -610,10 +610,17 @@ impl VisitMut for EventLifetimes {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HookContext {
+    Registration,
+    DataLoad,
+}
+
 #[derive(Debug)]
 struct CatalogHook {
     entry: serde_json::Value,
     side: HelperSide,
+    context: Option<HookContext>,
 }
 
 impl std::ops::Deref for CatalogHook {
@@ -725,7 +732,19 @@ fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<Catalog
                 }
             }
         }
-        validated.push(CatalogHook { entry: hook, side });
+        let context = match hook.get("context") {
+            None => None,
+            Some(value) => Some(match value.as_str() {
+                Some("registration") => HookContext::Registration,
+                Some("data_load") => HookContext::DataLoad,
+                _ => return Err(format!("hook {name}: invalid phase context")),
+            }),
+        };
+        validated.push(CatalogHook {
+            entry: hook,
+            side,
+            context,
+        });
     }
     Ok(validated)
 }
@@ -1401,10 +1420,12 @@ mod tests {
         let level = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
             side: super::HelperSide::Server,
+            context: None,
         };
         let game = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
             side: super::HelperSide::Both,
+            context: None,
         };
         use super::host_param::{HostParam, host_param};
         let param = |ty: &str, call| {
@@ -1434,6 +1455,7 @@ mod tests {
         let level_both = super::CatalogHook {
             entry: level.entry.clone(),
             side: super::HelperSide::Both,
+            context: None,
         };
         assert_eq!(
             host_param(&level_both, Some(false), false),
@@ -1456,6 +1478,7 @@ mod tests {
         let read = super::CatalogHook {
             entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
             side: super::HelperSide::Both,
+            context: None,
         };
         assert_eq!(
             host_param(&read, Some(false), false),
@@ -1464,6 +1487,7 @@ mod tests {
         let client = super::CatalogHook {
             entry: game.entry.clone(),
             side: super::HelperSide::Client,
+            context: None,
         };
         assert_eq!(
             host_param(&client, Some(false), false),
@@ -1476,6 +1500,7 @@ mod tests {
         let client_read = super::CatalogHook {
             entry: read.entry.clone(),
             side: super::HelperSide::Client,
+            context: None,
         };
         assert_eq!(
             super::host_param::validate(&client_read, "test", false, Some(false), false)
