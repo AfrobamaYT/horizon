@@ -228,15 +228,16 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          if [ ! -d /cache/horizon-local ]; then
-            echo "no prepared data on this runner ($RUNNER_NAME)"
-            if [ "$EVENT" = push ]; then exit 1; fi
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          for dir in minecraft datagen horizon-client tools; do
+            if [ ! -d "/cache/horizon-local/$dir" ]; then
+              echo "no prepared data on this runner ($RUNNER_NAME): /cache/horizon-local/$dir is missing"
+              if [ "$EVENT" = push ]; then exit 1; fi
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
           mkdir -p .local
           for dir in minecraft datagen horizon-client tools; do
-            test -d "/cache/horizon-local/$dir"
             ln -sfn "/cache/horizon-local/$dir" ".local/$dir"
           done
       - name: Run the ignored tests that need prepared data
