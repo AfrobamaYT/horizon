@@ -2476,7 +2476,10 @@ impl Streaming {
             let written: Vec<(i32, i32)> = self.written.drain().collect();
             return SaveStep::Protos(self.checkout_protos(written));
         }
-        let aborted = self.shared.aborted.load(std::sync::atomic::Ordering::Relaxed);
+        let aborted = self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed);
         while (self.saving > 0)
             || (!aborted
                 && (self.decorating > 0 || !self.finishing.is_empty() || !self.viewing.is_empty()))
