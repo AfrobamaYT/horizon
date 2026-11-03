@@ -2613,7 +2613,8 @@ impl Streaming {
         self.forced.extend(self.mod_tickets.chunks());
     }
     /// The level's saved forced state: `/forceload`'s chunks, and the mods'
-    /// tickets of the mods `loaded` accepts (the rest are discarded).
+    /// tickets of the mods `loaded` accepts (the rest are discarded), which
+    /// wait in `take_loaded_tickets`.
     pub fn load_forced(
         &mut self,
         commanded: HashSet<(i32, i32)>,
@@ -2623,7 +2624,12 @@ impl Streaming {
         self.mod_tickets = ModTickets::from_saved(tickets, loaded);
         self.commanded = commanded;
         self.forced.clone_from(&self.commanded);
-        self.forced.extend(self.mod_tickets.chunks());
+    }
+    /// The mods' tickets read from the save, which hold nothing until the
+    /// mods have validated them and the survivors are put back with
+    /// `set_mod_forced`.
+    pub fn take_loaded_tickets(&mut self) -> Vec<ModTicket> {
+        self.mod_tickets.take_loaded()
     }
     /// The `/forceload`ed chunks.
     pub fn commanded(&self) -> &HashSet<(i32, i32)> {
