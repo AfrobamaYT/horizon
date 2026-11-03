@@ -153,8 +153,8 @@ impl std::ops::Deref for PartsRef {
     }
 }
 
-/// The parts hook `hook` asks: with no tag parts, the key parts every game shares; otherwise this
-/// thread's game's, or the key parts until its world opens.
+/// The parts hook `hook` asks: this game thread's resolved table, then the shared key parts
+/// when there are no tag parts, then the off-thread path.
 pub(crate) fn parts(hook: &'static str) -> PartsRef {
     let Some(installed) = INSTALLED.get() else {
         return PartsRef::Shared(&NO_PARTS);

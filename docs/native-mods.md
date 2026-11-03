@@ -726,6 +726,8 @@ one, where vanilla gives the `by` one.
 
 - Context-free block and item tag lookups from server hooks (`native_server_block_in_tag`, `native_server_item_in_tag`). They return `NotServer` on a client and `TagsUnavailable` before the world loads its tags. An unknown tag returns false; an empty stack tests `minecraft:air`.
 
+- A block part's `can_connect_redstone` adjusts whether redstone wire connects to that block for the given position and optional direction.
+
 - A mod block's comparator output, as vanilla's `BlockBehaviour.hasAnalogOutputSignal` and `getAnalogOutputSignal`: `native_has_analog_output` says a block of yours has one,
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
@@ -3336,7 +3338,7 @@ builds. These generated Rust files are not kept in the source tree or committed,
 is needed after a merge. Every hook needs a `mod_api` entry: the build fails naming any hook without one. A hook that stands in for a
 method a vanilla block, block entity, item or menu overrides also gets a `scope` and a `key`
 (`{"contract": "collect", "out": "output", "scope": "block", "key": "state"}`): the key is a
-`BlockStateId` (with a level host to name its block), an `&ItemStack`, a `ModBlockEntity` or an id `&str`, and
+`BlockStateId` (looked up directly by state for block parts), an `&ItemStack`, a `ModBlockEntity` or an id `&str`, and
 the generator also puts the method on that scope's part trait ([Parts](#parts)). A body that is neither the
 placeholder nor already calls the dispatch is an error, and the generator never changes it. Hooks that are
 free functions outside `Game` are wired by hand: those crates can't see the mod list, so each calls a callback

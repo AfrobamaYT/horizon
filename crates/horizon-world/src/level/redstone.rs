@@ -232,7 +232,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.level
             .adjust_can_connect_redstone(pos, state, direction, vanilla)
     }
-    }
     /// `RedstoneWireBlock.canSurvive` and `updateShape`'s down face: the block
     /// below is read through `support_state`, since a retracting piston's
     /// `moving_piston` block carries the extended base only through its block

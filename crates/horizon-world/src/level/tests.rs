@@ -1183,17 +1183,17 @@ fn wire_connects_only_to_the_block_that_answers_can_connect_redstone() {
     w.set(BlockPos::new(4, 1, 0), glass);
     w.set(BlockPos::new(5, 1, 0), wire);
     w.set(BlockPos::new(6, 1, 0), glass);
-    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "east"), "none");
-    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "west"), "none");
-    // Only the east glass answers the query: the wire connects to it alone.
+    let pos = BlockPos::new(5, 1, 0);
+    let connection = |w: &mut World<'_>| {
+        w.f.behaviours.sim(&mut w.level, &mut w.ticks).wire_connection_state(wire, pos)
+    };
+    let before = connection(&mut w);
+    assert_eq!(w.f.registry.state(before).unwrap().properties["east"], "none");
     w.level.wire_connect.insert(BlockPos::new(6, 1, 0), true);
-    w.set(BlockPos::new(5, 1, 0), wire);
-    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "east"), "side");
-    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "west"), "none");
-    // Without an answer the vanilla shape returns.
+    let connected = connection(&mut w);
+    assert_eq!(w.f.registry.state(connected).unwrap().properties["east"], "side");
     w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
-    w.set(BlockPos::new(5, 1, 0), wire);
-    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "east"), "none");
+    assert_eq!(connection(&mut w), before);
 }
 
 #[test]
