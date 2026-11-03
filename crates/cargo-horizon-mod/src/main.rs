@@ -208,11 +208,11 @@ fn build() -> Result<PathBuf, String> {
 fn build_in(root: &Path) -> Result<PathBuf, String> {
     let manifest_text = std::fs::read_to_string(root.join(MANIFEST))
         .map_err(|e| format!("{MANIFEST}: {e} (run this in a mod's folder)"))?;
-    let manifest = Package::read(root)?.manifest;
+    let manifest = Manifest::parse(&manifest_text)?;
     if root.join("Cargo.toml").exists() {
         return Err("a Cargo.toml: code mods are native now (docs/native-mods.md)".into());
     }
-    // The same checks as the game's, and the files in the order it lists them.
+    // Content owns the packaged path list; the writer checks exactly those entries.
     let content = Content::read(root, &manifest)?;
     let mut reader = content.reader()?;
     let mut files = Vec::with_capacity(content.files.len());
@@ -315,13 +315,14 @@ mod tests {
             "{}",
             report.text()
         );
-        std::fs::write(path.join("mod.wasm"), b"\0asm").unwrap();
+        let executable = path.join("assets/gems/mod.wasm");
+        std::fs::write(&executable, b"\0asm").unwrap();
         assert!(
             build_in(&path)
                 .unwrap_err()
                 .contains("unsupported executable file")
         );
-        std::fs::remove_file(path.join("mod.wasm")).unwrap();
+        std::fs::remove_file(executable).unwrap();
         // Code is native now.
         std::fs::write(path.join("Cargo.toml"), "").unwrap();
         assert!(build_in(&path).unwrap_err().contains("native"));
