@@ -2737,7 +2737,7 @@ impl Game<'_> {
         }
     }
     /// Send the tick's level events, sounds and mob animations.
-    fn lan_flush_effects(&mut self, host: &mut LanHost) {
+    pub(super) fn lan_flush_effects(&mut self, host: &mut LanHost) {
         let critical_hits = std::mem::take(&mut self.lan_critical_hits);
         let kinetic_hits = std::mem::take(&mut self.lan_kinetic_hits);
         for (state, at) in std::mem::take(&mut self.lan_cushion_breaks) {
@@ -2848,7 +2848,8 @@ impl Game<'_> {
                 && !dead
                 && old.and_then(|o| o.2).is_none_or(|before| time < before)
             {
-                host.hub.swing(m.id as i32, 0, at, None);
+                host.hub
+                    .swing(m.id as i32, i32::from(m.swing_is_off_hand()), at, None);
             }
             seen.insert(m.id, (m.hurt_time, dead, swing));
         }
