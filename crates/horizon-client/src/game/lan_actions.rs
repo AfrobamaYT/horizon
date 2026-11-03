@@ -311,28 +311,17 @@ impl Game<'_> {
     /// Run `f` as the guest `conn`: the host's player state is swapped for theirs.
     pub(super) fn as_guest<R>(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
-        self.as_guest_with_host(host, conn, |g, _| f(g))
-    }
-
-    /// `as_guest`, passing the active `&LanHost` to `f`.
-    pub(super) fn as_guest_with_host<R>(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        f: impl FnOnce(&mut Self, &LanHost) -> R,
-    ) -> Option<R> {
-        let swap = self.enter_guest(host, conn)?;
+        let swap = self.enter_guest(conn)?;
         super::dedicated::crash_fixture("guest", || {
-            host.hub.guests.iter().any(|g| g.conn == conn && g.placed)
+            self.lan.as_ref().is_some_and(|host| host.hub.guests.iter().any(|g| g.conn == conn && g.placed))
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
-        let result = horizon_client::block_contact::in_level(dimension, || f(self, host));
-        self.leave_guest(host, swap);
+        let result = horizon_client::block_contact::in_level(dimension, || f(self));
+        self.leave_guest(swap);
         Some(result)
     }
 
@@ -340,16 +329,16 @@ impl Game<'_> {
     /// `player::sendSystemMessage` of a packet handler) sent to that guest.
     pub(super) fn as_guest_messaged<R>(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
-        let (result, lines) = self.as_guest(host, conn, |game| {
+        let (result, lines) = self.as_guest(conn, |game| {
             let outer = game.chat_capture.replace(Vec::new());
             let result = f(game);
             let lines = std::mem::replace(&mut game.chat_capture, outer).unwrap_or_default();
             (result, lines)
         })?;
+        let host = self.lan.as_ref()?;
         for line in lines {
             host.hub.send_to(
                 conn,
@@ -368,7 +357,8 @@ impl Game<'_> {
     /// can reach the other players (their commands, `for_player`), and a
     /// guest's turn can nest in another's: the acting guest and the packets
     /// queued for them are kept and restored too.
-    pub(super) fn enter_guest(&mut self, host: &mut LanHost, conn: u32) -> Option<GuestSwap> {
+    pub(super) fn enter_guest(&mut self, conn: u32) -> Option<GuestSwap> {
+        let host = self.lan.as_mut()?;
         // The guest whose turn it is is in place already (their record holds
         // the game's state until their turn ends).
         if self.lan_acting == Some(conn) {
@@ -482,7 +472,12 @@ impl Game<'_> {
         let selected = std::mem::replace(&mut self.selected, g.selected);
         let (mode, creative) = (self.mode, self.creative);
         let (entity_reach, block_reach) = (self.entity_reach, self.block_reach);
-        self.set_mode_raw(g.game_mode);
+        let game_mode = g.game_mode;
+        self.set_mode_raw(game_mode);
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
+        let g = &mut host.hub.guests[i];
         let xp = std::mem::replace(
             &mut self.experience,
             Experience {
@@ -537,6 +532,10 @@ impl Game<'_> {
         // Entity.collide: the guest's body collides with the level's world
         // border too, as it is this turn (it moves with /worldborder).
         self.player_border();
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
+        let g = &mut host.hub.guests[i];
         let host_station = self.station.take();
         // The guest's bed, sleep counter and respawn point; the host's
         // respawn point, anchor and action bar stay theirs.
@@ -553,9 +552,17 @@ impl Game<'_> {
         // into the host's while the guest acts.
         let host_ender = self.ender_open;
         self.close_ender_chest();
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
+        let g = &mut host.hub.guests[i];
         std::mem::swap(&mut self.ender_items, &mut g.ender_items);
         // The guest's advancements, recipe book and statistics.
         self.advancement_tree();
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
+        let g = &mut host.hub.guests[i];
         std::mem::swap(&mut self.adv.progress, &mut g.advancements);
         std::mem::swap(&mut self.adv.changed, &mut g.advancements_changed);
         std::mem::swap(&mut self.adv.unlocked, &mut g.recipes_unlocked);
@@ -674,7 +681,11 @@ impl Game<'_> {
 
     /// The second half of `as_guest`: the guest's state back into their
     /// record, the game's back in place, and what the turn changed sent.
-    pub(super) fn leave_guest(&mut self, host: &mut LanHost, swap: GuestSwap) {
+    pub(super) fn leave_guest(&mut self, swap: GuestSwap) {
+        let Some(host) = self.lan.as_ref() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
+        debug_assert_eq!(host.hub.guests.get(swap.i).map(|g| g.conn), Some(swap.conn));
         let turn_events = self
             .player
             .as_mut()
@@ -690,11 +701,13 @@ impl Game<'_> {
         // starving...), once for the change it made as a whole, with the
         // guest's state still swapped in; they may change or undo it before it
         // reaches the guest.
-        if let Some(now) = self.player.as_ref().map(|p| p.health.food.food)
-            && let Some(g) = host.hub.guests.get(swap.i)
-            && g.food != now
+        let now = self.player.as_ref().map(|p| p.health.food.food);
+        let food = self.lan.as_ref().and_then(|host| host.hub.guests.get(swap.i))
+            .filter(|g| now.is_some_and(|now| g.food != now))
+            .map(|g| (g.uuid, g.name.clone(), g.food, g.saturation));
+        if let Some(now) = now
+            && let Some((uuid, name, from, saturation)) = food
         {
-            let (uuid, name, from, saturation) = (g.uuid, g.name.clone(), g.food, g.saturation);
             let (mut to, mut cancel) = (now, false);
             self.native_food_level_changed(uuid, &name, from, &mut to, &mut cancel);
             if let Some(p) = self.player.as_mut() {
@@ -785,7 +798,6 @@ impl Game<'_> {
                 p.guest = Some(conn);
             }
         }
-        let guest = &host.hub.guests[i];
         let listening = !horizon_client::mod_api::mods().is_empty();
         for projectile in projectiles..self.creatures.projectiles.len() {
             if !listening {
@@ -810,13 +822,21 @@ impl Game<'_> {
                 _ => None,
             };
             if let Some(item) = item {
-                self.native_player_launch_projectile(guest.uuid, &guest.name, &item);
+                let Some(host) = self.lan.as_ref() else {
+                    unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+                };
+                let guest = &host.hub.guests[i];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                self.native_player_launch_projectile(uuid, &name, &item);
             }
         }
         // The guest's swings are theirs: the host's own count stays the host's.
         play.swings += self.swings_started.wrapping_sub(swings);
         self.swings_started = swings;
         let outgoing = std::mem::replace(&mut self.guest_packets, packets);
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
         if host.hub.guests[i].participates_online() {
             for packet in outgoing {
                 host.hub.send_to(conn, &packet);
@@ -931,6 +951,10 @@ impl Game<'_> {
         // `Entity.addPassenger`: a rider that gets in now sits behind the
         // players already in the vehicle, which is what tells its
         // `getControllingPassenger` apart from this one's.
+        let new_mode = self.mode_id();
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
         let seat_order = (guest_vehicle.is_some() && host.hub.guests[i].vehicle != guest_vehicle)
             .then(|| {
                 host.hub.seat_order += 1;
@@ -987,7 +1011,6 @@ impl Game<'_> {
         g.xp_level = new_xp.level;
         g.xp_progress = new_xp.progress;
         g.xp_total = new_xp.total;
-        let new_mode = self.mode_id();
         self.mode = mode;
         self.creative = creative;
         self.entity_reach = entity_reach;
@@ -1087,44 +1110,47 @@ impl Game<'_> {
                 self.totem_event(body, false);
             }
         }
+        let Some(host) = self.lan.as_mut() else {
+            unreachable!("LanHost dropped inside a guest turn; closes are deferred");
+        };
         host.play.insert(conn, play);
         for event in turn_events {
             match event {
                 MotionEvent::Health(horizon_client::health::HealthEvent::DamageBroadcast {
                     source,
-                }) => self.guest_damage_broadcast(host, conn, source),
-                MotionEvent::HurtSound(sound) => self.guest_hurt_sound(host, conn, sound),
+                }) => self.guest_damage_broadcast(conn, source),
+                MotionEvent::HurtSound(sound) => self.guest_hurt_sound(conn, sound),
                 _ => {}
             }
         }
         self.stat_criteria_changed(&name, stat_events);
         if let Some(pos) = opened
-            && !self.lan_open_container(host, conn, pos)
-            && !host.hub.guests[i].spectator()
+            && !self.lan_open_container(conn, pos)
+            && self.lan.as_ref().is_some_and(|host| !host.hub.guests[i].spectator())
         {
             // Nothing the guest can use opened: its lid closes again.
             self.container_openers_changed(pos, false);
         }
         if let Some(station) = opened_station {
-            self.lan_station_opened(host, conn, station);
+            self.lan_station_opened(conn, station);
         }
         if let Some(edit) = guest_sign {
-            self.lan_open_sign_editor(host, conn, edit);
+            self.lan_open_sign_editor(conn, edit);
         }
         if let Some(key) = guest_lectern {
-            self.lan_open_lectern(host, conn, key);
+            self.lan_open_lectern(conn, key);
         }
         if let Some(pos) = guest_command_block {
-            self.lan_open_command_block(host, conn, pos);
+            self.lan_open_command_block(conn, pos);
         }
         if let Some(pos) = opened_table {
-            self.lan_open_crafting(host, conn, pos);
+            self.lan_open_crafting(conn, pos);
         }
         if let Some(mob) = guest_mount {
-            self.lan_open_mount(host, conn, mob);
+            self.lan_open_mount(conn, mob);
         }
         // The turn's teleports are in the hub now: the mods hear them.
-        self.flush_teleport_notes(host);
+        self.flush_teleport_notes();
     }
 
     /// `ServerLevel.broadcastDamageEvent` for a guest that took an unblocked hit.
