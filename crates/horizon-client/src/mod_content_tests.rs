@@ -198,12 +198,11 @@ fn tags_merge_without_repeats() {
 #[test]
 fn a_mods_atlas_sources_follow_vanillas() {
     let vanilla = r#"{"sources": [{"type": "directory", "source": "block", "prefix": "block/"}]}"#;
-    let more = [J::Obj(vec![
-        ("type".into(), J::Str("directory".into())),
-        ("source".into(), J::Str("mek_chemical".into())),
-    ])];
-    let merged: serde_json::Value =
-        serde_json::from_str(&merge_atlas(Some(vanilla), &more, "a").unwrap()).unwrap();
+    let more = [serde_json::json!({"type": "directory", "source": "mek_chemical"})];
+    let merged: serde_json::Value = serde_json::from_slice(
+        &crate::packs::append_atlas_sources(Some(vanilla), &more, "a").unwrap(),
+    )
+    .unwrap();
     let sources: Vec<_> = merged["sources"]
         .as_array()
         .unwrap()
