@@ -390,7 +390,7 @@ pub(super) fn emit(
             format!("if !super::listened(HookId::{hook_id}) {{ return; }}")
         };
         dispatch.push_str(&format!(
-            "pub fn dispatch_{name}({dispatch_params}) {{ {early_return} {body} }}\n"
+            "pub fn dispatch_{name}({dispatch_params}) {{ {early_return}\n{body} }}\n"
         ));
     }
     Ok(HookSources {
