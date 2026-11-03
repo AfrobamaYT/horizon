@@ -963,6 +963,80 @@ const FEATURE_PACKS: &[(&str, &str)] = &[
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn world_open_loads_functions_before_first_tick() {
+        use crate::game::{native_entity_refs::tests::with_game, world_loading::WorldRequest};
+
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("world-open-datapacks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pack = root.join("datapacks/test");
+        for path in [
+            "data/test/function",
+            "data/minecraft/tags/function",
+            "data/test/tags/item",
+            "data/test/recipe",
+        ] {
+            std::fs::create_dir_all(pack.join(path)).unwrap();
+        }
+        std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+        let function = pack.join("data/test/function/start.mcfunction");
+        std::fs::write(&function, "scoreboard objectives add loaded dummy\n").unwrap();
+        std::fs::write(
+            pack.join("data/minecraft/tags/function/load.json"),
+            r#"{"values":["test:start"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pack.join("data/test/tags/item/sample.json"),
+            r#"{"values":["minecraft:stone"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pack.join("data/test/recipe/sample.json"), r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#).unwrap();
+        std::fs::write(
+            root.join("datapacks.json"),
+            r#"{"enabled":["file/test"],"disabled":[]}"#,
+        )
+        .unwrap();
+        with_game(|game| {
+            game.load_world(WorldRequest {
+                save_root: root.clone(),
+                folder: "test".into(),
+                name: Some("test".into()),
+                seed: Some(1),
+                creative: true,
+                create: None,
+            })
+            .unwrap();
+            assert!(game.fns.store.functions.contains_key("test:start"));
+            assert_eq!(
+                game.fns.store.tag_functions("minecraft:load"),
+                ["test:start"]
+            );
+            assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
+            assert!(game.stations().recipe_index.contains("test:sample"));
+            // Changing disk after open must not make the first tick reload it.
+            std::fs::write(&function, "scoreboard objectives add changed dummy\n").unwrap();
+            game.tick_functions();
+            assert!(game.score.board.objective("loaded").is_some());
+            assert!(game.score.board.objective("changed").is_none());
+            game.tick_functions();
+            assert_eq!(
+                game.score
+                    .board
+                    .objectives
+                    .iter()
+                    .filter(|o| o.name == "loaded")
+                    .count(),
+                1
+            );
+        });
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Two packs override the same recipe: the later one in the selected
     /// (`datapacks.json`) order wins, not the later one alphabetically.
     #[test]
