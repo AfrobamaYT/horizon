@@ -917,14 +917,16 @@ impl Game<'_> {
         self.combat.exploded.clear();
         // EntityTickEvent.Pre for the mobs about to tick, before the loop holds them.
         let mut round = self.native_tick_round();
-        if round.listening() {
+        if round.listening() || !horizon_client::mod_api::mods().is_empty() {
             let ticking = self.entity_ticking_area();
             let mut i = 0;
             while let Some(m) = self.mobs.get(i) {
                 let (x, z) = (m.position.x.floor() as i32, m.position.z.floor() as i32);
                 if self.world.loaded(x, z) && ticking(x, z) {
                     let (id, kind) = (m.id, super::native_ticks::TickKind::Mob(m.kind.clone()));
-                    self.native_tick_pre_batch(&mut round, id, kind);
+                    if self.native_tick_pre_batch(&mut round, id, kind) {
+                        self.sync_sleeping_mob(i);
+                    }
                 }
                 i += 1;
             }

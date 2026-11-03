@@ -1279,6 +1279,10 @@ mod tests {
         pub(super) struct Hand;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
+        #[derive(Clone, Copy)]
+        pub(super) struct PhantomSpawnResult;
+        #[derive(Clone, Copy)]
+        pub(super) struct SleepProblem;
         pub(super) struct Music;
         pub(super) struct MusicLayer;
         pub(super) struct NativeBlockRim;
