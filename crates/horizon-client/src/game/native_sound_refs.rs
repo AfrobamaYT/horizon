@@ -103,11 +103,9 @@ impl Game<'_> {
         ) else {
             return false;
         };
-        let queued = self.native_queue_sound(level, sound, at, source, volume, pitch, None);
-        if queued && let Some(last) = self.creatures.lan_sounds.last_mut() {
-            last.entity = Some(id);
-        }
-        queued
+        self.native_queue_sound(level, sound, at, source, volume, pitch, None)
+            .map(|queued| queued.entity = Some(id))
+            .is_some()
     }
 }
 
