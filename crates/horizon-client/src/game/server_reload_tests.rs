@@ -295,7 +295,10 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
     write(&pack.join("pack.mcmeta"), "{}");
     let malformed = pack.join("data/reload_test/machines/foo.json");
     write(&malformed, "{bad json");
-    write(&pack.join("data/reload_test/machines/bar.json"), "\"better\"");
+    write(
+        &pack.join("data/reload_test/machines/bar.json"),
+        "\"better\"",
+    );
     write(
         &world.join("datapacks.json"),
         r#"{"enabled":["file/test"],"disabled":[]}"#,

@@ -45,7 +45,11 @@ pub(super) enum PreparedReload {
 }
 
 impl PackStack {
-    fn reload_context(&self, listener: &Identifier, converter: &FileToIdConverter) -> ServerReloadContext {
+    fn reload_context(
+        &self,
+        listener: &Identifier,
+        converter: &FileToIdConverter,
+    ) -> ServerReloadContext {
         let mut selected = std::collections::BTreeMap::new();
         for pack in self.builtin.iter().chain(self.enabled_packs()) {
             for file in pack.list_kinds(&[converter.directory()]) {
