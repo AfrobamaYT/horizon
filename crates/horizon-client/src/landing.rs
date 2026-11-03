@@ -318,7 +318,9 @@ impl MotionWorld<'_, '_, '_> {
             if let Some((state, position, original_distance)) = contact {
                 self.mod_block_fall(state, position, original_distance, 0.0);
             }
-            if !self.player.replaying {
+            // Only for mods' `player_flyable_fall`: without them the landing
+            // stays as vanilla traces it.
+            if !self.player.replaying && crate::native_client_hooks::has_mods() {
                 self.fall_event(FallEvent::FlyableFall {
                     distance,
                     multiplier,
