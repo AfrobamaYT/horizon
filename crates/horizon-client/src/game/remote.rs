@@ -2273,6 +2273,16 @@ impl Game<'_> {
         if gone.is_empty() {
             return;
         }
+        // The client chunk seam: one unload per column still resident, with
+        // its data still there, before `take_remote_columns` frees it. A
+        // later forget for an already-freed column fires nothing.
+        if self.client_chunk_listener.is_some() {
+            for &(x, z) in gone.iter() {
+                if self.world.chunks.contains_key(&(x, z)) {
+                    self.client_chunk_unload(x, z);
+                }
+            }
+        }
         let freed =
             horizon_client::streaming::Streaming::take_remote_columns(&mut self.world, gone);
         self.streaming.forget_columns(&mut self.world, gone);
@@ -10650,6 +10660,85 @@ mod tests {
             game.forget_all_remote_columns();
             assert!(game.world.chunks.is_empty());
             assert!(game.world.block_entities.is_empty());
+        });
+    }
+
+    /// The client chunk seam (game/remote_chunks.rs) across every free
+    /// route: a forget packet, the eager centre-move drop (a cache-centre
+    /// packet), the radius-shrink drop (a cache-radius packet) and the
+    /// client level going. One unload per column, in the order the routes
+    /// free them, and never a load: adopting a column is a chunk packet's
+    /// doing (`remote_chunk`), not the streaming level's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn every_free_route_fires_one_client_chunk_unload_and_never_a_load() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use std::{cell::RefCell, rc::Rc};
+
+        with_game(|game| {
+            let heard = Rc::new(RefCell::new(Vec::new()));
+            let sink = heard.clone();
+            game.client_chunk_listener = Some(Box::new(move |moment, x, z| {
+                sink.borrow_mut().push((moment, x, z));
+            }));
+            for x in [0, 1] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+            }
+            // A forget packet's column fires once; the same forget again,
+            // for a column already freed, fires nothing.
+            game.forget_remote_columns(&mut [(0, 0)].into_iter().collect(), true);
+            game.forget_remote_columns(&mut [(0, 0)].into_iter().collect(), true);
+            for x in [7, 13] {
+                game.streaming
+                    .insert_remote(&mut game.world, Chunk::empty(x, 0));
+            }
+            // The centre move to (15, 0) at radius 10 drops (1, 0) only.
+            game.drop_remote_chunks_out_of_range((15, 0), 10);
+            // Shrinking the radius to 2 drops (7, 0) only.
+            game.drop_remote_chunks_out_of_range((15, 0), 2);
+            // The client level going frees what is left.
+            game.forget_all_remote_columns();
+            use super::super::remote_chunks::ClientChunkEvent::Unload;
+            assert!(matches!(
+                heard.borrow().as_slice(),
+                [
+                    (Unload, 0, 0),
+                    (Unload, 1, 0),
+                    (Unload, 7, 0),
+                    (Unload, 13, 0)
+                ]
+            ));
+        });
+    }
+
+    /// The seam sits at the packet level: streaming adopting, replacing or
+    /// re-sending a column fires nothing, so a chunk packet fires exactly
+    /// one load — never an unload beside it (a re-sent position is a load,
+    /// not an unload and a load).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn streaming_adoption_and_resend_fire_no_client_chunk_events() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use std::{cell::RefCell, rc::Rc};
+
+        with_game(|game| {
+            let heard = Rc::new(RefCell::new(Vec::new()));
+            let sink = heard.clone();
+            game.client_chunk_listener = Some(Box::new(move |moment, x, z| {
+                sink.borrow_mut().push((moment, x, z));
+            }));
+            game.streaming
+                .insert_remote(&mut game.world, Chunk::empty(0, 0));
+            // A re-send of a resident, lit column takes replace_remote.
+            game.streaming
+                .replace_remote(&mut game.world, Chunk::empty(0, 0));
+            // Freeing it still tells the seam, exactly once.
+            game.forget_remote_columns(&mut [(0, 0)].into_iter().collect(), true);
+            use super::super::remote_chunks::ClientChunkEvent::Unload;
+            assert!(matches!(heard.borrow().as_slice(), [(Unload, 0, 0)]));
         });
     }
 

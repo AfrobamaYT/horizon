@@ -252,6 +252,45 @@ pub(super) enum Next {
     Lost,
 }
 
+/// One client column lifecycle moment (the client chunk seam, milestone 8).
+///
+/// NeoForge's `ChunkEvent` fires on both sides; Horizon's `chunk_load` and
+/// `chunk_unload` are server-side today (Cut-A2 records them `server`), so
+/// the client keeps this seam where its columns live: `Load` when a chunk
+/// packet's column is adopted — a position sent again loads again and never
+/// unloads, and a biome packet is no load — and `Unload` once per column,
+/// with its data still there, whichever route frees it: a forget packet,
+/// the eager out-of-range drop of a centre move or a radius shrink (at or
+/// before vanilla's ring eviction; Horizon keeps a position-keyed map, not
+/// `ClientChunkCache.Storage`'s ring), or the client level going. Each
+/// load gets exactly one unload. No listener is installed outside tests
+/// until the hooks are wired to the client side, so the seam costs one
+/// branch per event and nothing per chunk otherwise.
+pub(in crate::game) enum ClientChunkEvent {
+    Load,
+    Unload,
+}
+
+impl Game<'_> {
+    /// A chunk packet's column was adopted (`ClientChunkEvent::Load`). The
+    /// dispatch point for the client side of `chunk_load`: a no-op until a
+    /// listener is installed.
+    pub(in crate::game) fn client_chunk_load(&mut self, x: i32, z: i32) {
+        if let Some(heard) = self.client_chunk_listener.as_mut() {
+            heard(ClientChunkEvent::Load, x, z);
+        }
+    }
+    /// A resident column is about to be freed on any route
+    /// (`ClientChunkEvent::Unload`), the last event for it. The dispatch
+    /// point for the client side of `chunk_unload`: a no-op until a
+    /// listener is installed.
+    pub(in crate::game) fn client_chunk_unload(&mut self, x: i32, z: i32) {
+        if let Some(heard) = self.client_chunk_listener.as_mut() {
+            heard(ClientChunkEvent::Unload, x, z);
+        }
+    }
+}
+
 impl Game<'_> {
     /// `handleLevelChunkWithLight`: the column replaces any loaded one, and
     /// its block entities load their update tags. `decoded` is the column the
@@ -286,6 +325,9 @@ impl Game<'_> {
             }
         };
         let (x, z) = (p.x, p.z);
+        // The client chunk seam: one load per packet adoption, a re-sent
+        // position included (below). A biome packet takes neither path.
+        self.client_chunk_load(x, z);
         // A column sent again while it is resident (a bulk edit): only what changed is lit and meshed again.
         if self.world.chunks.contains_key(&(x, z)) {
             horizon_client::spans::time("replace_remote", || {
