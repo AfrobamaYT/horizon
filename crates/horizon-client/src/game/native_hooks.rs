@@ -651,8 +651,7 @@
 //! API 60 adds the small bar under an item (`native_item_bar`): `GuiGraphicsExtractor.itemDecorations`
 //! hands it vanilla's choice (the damage bar, or a bundle's fullness already applied), to replace or hide.
 //!
-//! API 59 adds entities for server mods (`native_summon`,
-//! `native_set_display`, in `native_entities.rs`).
+//! API 59 adds entities for server mods (`native_summon`, in `native_entities.rs`).
 //!
 //! API 58 adds the renderer's hook points, in `horizon-client-render`'s
 //! `gfx/native_render.rs`: `native_world_drawn` (draw with the world's colour,

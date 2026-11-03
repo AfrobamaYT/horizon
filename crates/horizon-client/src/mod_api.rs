@@ -717,6 +717,164 @@ impl ItemEntityRef {
     }
 }
 
+/// A display entity of the open world (`block_display`, `item_display` or
+/// `text_display`), narrowed with `host.display`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DisplayRef(EntityRef);
+
+impl DisplayRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
+/// Which `Display` subclass an entity is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeDisplayKind {
+    Block,
+    Item,
+    Text,
+}
+
+impl NativeDisplayKind {
+    /// The entity type id: `minecraft:block_display`, `minecraft:item_display` or `minecraft:text_display`.
+    pub fn entity_type(self) -> &'static str {
+        match self {
+            Self::Block => "minecraft:block_display",
+            Self::Item => "minecraft:item_display",
+            Self::Text => "minecraft:text_display",
+        }
+    }
+    /// The kind of an entity type id, or None for another entity type.
+    pub fn from_entity_type(id: &str) -> Option<Self> {
+        [Self::Block, Self::Item, Self::Text]
+            .into_iter()
+            .find(|kind| kind.entity_type() == id)
+    }
+}
+
+/// `Display.BillboardConstraints`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeBillboard {
+    Fixed,
+    Vertical,
+    Horizontal,
+    Center,
+}
+
+impl NativeBillboard {
+    /// Every constraint, in ordinal order.
+    pub const ALL: [Self; 4] = [Self::Fixed, Self::Vertical, Self::Horizontal, Self::Center];
+    /// `getSerializedName`: `fixed`, `vertical`, `horizontal` or `center`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::Vertical => "vertical",
+            Self::Horizontal => "horizontal",
+            Self::Center => "center",
+        }
+    }
+    /// The constraint with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|b| b.name() == name)
+    }
+}
+
+/// `ItemDisplayContext`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeItemDisplayContext {
+    None,
+    ThirdPersonLeftHand,
+    ThirdPersonRightHand,
+    FirstPersonLeftHand,
+    FirstPersonRightHand,
+    Head,
+    Gui,
+    Ground,
+    Fixed,
+    OnShelf,
+}
+
+impl NativeItemDisplayContext {
+    /// Every context, in ordinal order (vanilla's id is the index).
+    pub const ALL: [Self; 10] = [
+        Self::None,
+        Self::ThirdPersonLeftHand,
+        Self::ThirdPersonRightHand,
+        Self::FirstPersonLeftHand,
+        Self::FirstPersonRightHand,
+        Self::Head,
+        Self::Gui,
+        Self::Ground,
+        Self::Fixed,
+        Self::OnShelf,
+    ];
+    /// `getSerializedName`: `none`, `thirdperson_lefthand`, ... `on_shelf`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ThirdPersonLeftHand => "thirdperson_lefthand",
+            Self::ThirdPersonRightHand => "thirdperson_righthand",
+            Self::FirstPersonLeftHand => "firstperson_lefthand",
+            Self::FirstPersonRightHand => "firstperson_righthand",
+            Self::Head => "head",
+            Self::Gui => "gui",
+            Self::Ground => "ground",
+            Self::Fixed => "fixed",
+            Self::OnShelf => "on_shelf",
+        }
+    }
+    /// The context with that name, or None for one vanilla doesn't have.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.name() == name)
+    }
+}
+
+/// `Display.TextDisplay.Align`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeTextAlignment {
+    Center,
+    Left,
+    Right,
+}
+
+impl NativeTextAlignment {
+    /// `getSerializedName`: `center`, `left` or `right`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Center => "center",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+/// A display's `Transformation`: a translation, a left rotation, a scale and a
+/// right rotation. Quaternions are `[x, y, z, w]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeTransformation {
+    pub translation: [f32; 3],
+    pub left_rotation: [f32; 4],
+    pub scale: [f32; 3],
+    pub right_rotation: [f32; 4],
+}
+
+impl NativeTransformation {
+    /// `Transformation.IDENTITY`.
+    pub const IDENTITY: Self = Self {
+        translation: [0.0; 3],
+        left_rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: [1.0; 3],
+        right_rotation: [0.0, 0.0, 0.0, 1.0],
+    };
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
