@@ -460,6 +460,26 @@ impl From<LivingRef> for EntityRef {
     }
 }
 
+/// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MobRef(EntityRef);
+
+impl MobRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an entity handle.
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The same entity as a living handle.
+    pub fn living(self) -> LivingRef {
+        LivingRef::new(self.0)
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
