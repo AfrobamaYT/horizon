@@ -41,6 +41,7 @@ mod tests {
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
+        pub(super) struct FeatureFlags<'a>(pub &'a ());
         pub(super) struct GameRuleActor<'a>(pub(super) &'a str);
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
@@ -63,6 +64,10 @@ mod tests {
         #[derive(Clone, Copy)]
         pub(super) struct BlockHit;
         pub(super) struct NativeBlockClick<'a>(pub &'a ());
+        #[derive(Clone, Copy)]
+        pub(super) enum BonemealSource {
+            Interaction,
+        }
         pub(super) struct NativeTriState;
         pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());

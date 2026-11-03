@@ -782,6 +782,48 @@ impl From<LivingRef> for EntityRef {
     }
 }
 
+/// A living entity's active effect (vanilla's `MobEffectInstance`), as
+/// [`LivingRef`] reads its effects and as `add_effect` gives one: the
+/// effect's id namespaced as the registry has it (`minecraft:speed`, a
+/// content mod's `mod:custom`; a bare vanilla id reads as `minecraft:`'s),
+/// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
+/// beacon-style effect carries: `ambient` (an ambient one gives no
+/// particles) and `visible` (whether its particles show). Horizon keeps no
+/// separate show-icon flag: the icon always shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NativeActiveEffect {
+    /// The effect's namespaced id.
+    pub id: &'static str,
+    /// The ticks left; -1 is infinite.
+    pub duration: i32,
+    /// The amplifier, from 0.
+    pub amplifier: i32,
+    /// `MobEffectInstance.isAmbient`: an ambient effect shows no particles.
+    pub ambient: bool,
+    /// `MobEffectInstance.isVisible`: whether its particles show.
+    pub visible: bool,
+}
+
+impl NativeActiveEffect {
+    /// Construct an effect with its duration, amplifier and visual flags.
+    pub fn new(
+        id: &'static str,
+        duration: i32,
+        amplifier: i32,
+        ambient: bool,
+        visible: bool,
+    ) -> Self {
+        Self {
+            id,
+            duration,
+            amplifier,
+            ambient,
+            visible,
+        }
+    }
+}
+
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MobRef(EntityRef);
@@ -1423,6 +1465,34 @@ pub enum LightLayer {
     Sky,
 }
 
+/// The feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`), each
+/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), borrowed from the world.
+/// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
+/// Reading it allocates nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeatureFlags<'a>(&'a [String]);
+
+impl<'a> FeatureFlags<'a> {
+    /// The flags of a world's `enabled_features` list; an empty list is vanilla's default.
+    pub fn new(ids: &'a [String]) -> Self {
+        Self(ids)
+    }
+    /// `FeatureFlagSet.contains`: whether the flag `flag` (`minecraft:redstone_experiments`, or
+    /// `redstone_experiments`) is enabled.
+    pub fn contains(&self, flag: &str) -> bool {
+        let bare = !flag.contains(':');
+        self.iter()
+            .any(|id| id == flag || (bare && id.strip_prefix("minecraft:") == Some(flag)))
+    }
+    /// The enabled flag ids.
+    pub fn iter(&self) -> impl Iterator<Item = &'a str> + use<'a> {
+        let ids = self.0;
+        ids.iter()
+            .map(String::as_str)
+            .chain(ids.is_empty().then_some("minecraft:vanilla"))
+    }
+}
+
 /// What an explosion a mod sets off does to blocks
 /// (`Level.ExplosionInteraction`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1829,6 +1899,7 @@ impl BossBarOverlay {
 }
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
+/// Client menu handles are also invalidated on respawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
@@ -2444,6 +2515,17 @@ pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&m
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
+/// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BonemealSource {
+    /// Bone meal used through `BoneMealItem.growCrop`: by a player, a
+    /// dispenser or a villager.
+    Interaction,
+    /// A mob growing the block itself.
+    Mob,
+}
+
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.
@@ -2566,6 +2648,33 @@ pub trait LevelHost {
     fn state_block(&self, _state: BlockStateId) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
+    /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
+    /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
+    /// included. False for an unknown tag or state. None on a client level, whose tags are not
+    /// the server's, as `Host::block_state_in_tag` is.
+    fn block_state_in_tag(&self, _state: BlockStateId, _tag: &str) -> Option<bool> {
+        unimplemented!("LevelHost::block_state_in_tag")
+    }
+    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_state_in_tag` reads
+    /// a tag. An empty stack tests `minecraft:air`.
+    fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> Option<bool> {
+        unimplemented!("LevelHost::item_stack_in_tag")
+    }
+    /// `BlockGetter.getFluidState`: the fluid at `pos`, the empty fluid where there is none.
+    /// None where the position is not loaded or outside the build height; it never loads a chunk.
+    fn fluid_state(&self, _pos: [i32; 3]) -> Option<FluidState> {
+        unimplemented!("LevelHost::fluid_state")
+    }
+    /// `BlockState.getFluidState`: the fluid a state holds (water for a waterlogged one). None
+    /// for an id no state has.
+    fn state_fluid_state(&self, _state: BlockStateId) -> Option<FluidState> {
+        unimplemented!("LevelHost::state_fluid_state")
+    }
+    /// `FluidState.is(TagKey)`: the fluid is in the fluid tag `tag` (`minecraft:water`), as
+    /// `block_state_in_tag` reads a tag. The empty fluid is in none.
+    fn fluid_in_tag(&self, _fluid: FluidState, _tag: &str) -> Option<bool> {
+        unimplemented!("LevelHost::fluid_in_tag")
+    }
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
@@ -2590,6 +2699,16 @@ pub trait LevelHost {
     /// loads the chunk.
     fn is_loaded(&self, _pos: [i32; 3]) -> bool {
         unimplemented!("LevelHost::is_loaded")
+    }
+    /// `Level.isRainingAt`: it rains in this level and `pos` is open to the sky (full sky light,
+    /// nothing motion-blocking or fluid above it) in a biome whose precipitation there is rain,
+    /// not snow or none. False where `pos` is not loaded, the chunk is never loaded for it.
+    fn is_raining_at(&self, _pos: [i32; 3]) -> bool {
+        unimplemented!("LevelHost::is_raining_at")
+    }
+    /// `LevelReader.enabledFeatures`: the feature flags the world enables.
+    fn enabled_features(&self) -> FeatureFlags<'_> {
+        unimplemented!("LevelHost::enabled_features")
     }
 }
 

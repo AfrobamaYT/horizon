@@ -2882,7 +2882,7 @@ impl Game<'_> {
         }
     }
     /// Map a menu slot to Horizon's inventory screen slot ids.
-    fn menu_slot(menu: &str, slot: i32) -> Option<usize> {
+    pub(super) fn menu_slot(menu: &str, slot: i32) -> Option<usize> {
         let s = usize::try_from(slot).ok()?;
         // A container of `n` slots, then the inventory and the hotbar.
         let slots = |n: usize| -> Option<usize> {
@@ -7618,10 +7618,8 @@ impl Game<'_> {
                 self.with_hand(hand, Game::start_using_item);
                 return true;
             } else if item_used
-                && held
-                    .as_ref()
-                    .is_some_and(|s| &*s.item == "minecraft:bone_meal")
-                && self.remote_bone_meal_succeeds(&hit)
+                && let Some(stack) = held.as_ref().filter(|s| &*s.item == "minecraft:bone_meal")
+                && self.with_hand(hand, |g| g.remote_bone_meal_succeeds(&hit, stack))
             {
                 // BoneMealItem.useOn succeeded on this client's level (SUCCESS;
                 // the server grows the plant): this hand swings and the click
@@ -7801,13 +7799,14 @@ impl Game<'_> {
             && self.block_in_tag("minecraft:banners", &self.block_name(hit.pos))
     }
 
-    /// `BoneMealItem.useOn` on this client's level (a copy: nothing grows
-    /// here): whether it succeeds.
-    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit) -> bool {
+    /// `BoneMealItem.useOn` with the acting hand's `stack` on this client's
+    /// level (a copy: nothing grows here): whether it succeeds.
+    fn remote_bone_meal_succeeds(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
         let pos = horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
         let face = horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize];
+        let (crop, _) = self.held_bonemeal(pos, stack);
         self.with_level(|b, level, _| {
-            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face)
+            b.bone_meal_succeeds_on_client(&mut DryLevel::new(level), pos, face, crop)
         })
     }
 
@@ -10796,6 +10795,207 @@ mod tests {
         let before_replacement = menu.generation;
         menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
         assert_ne!(before_replacement, menu.generation);
+    }
+
+    #[test]
+    fn client_menu_slot_mapping_covers_inventory_and_containers() {
+        for (name, count, first, last) in [
+            ("inventory", 46, 200, 504),
+            ("minecraft:crafting", 46, 200, 8),
+            ("minecraft:generic_9x3", 63, 300, 8),
+            ("minecraft:hopper", 41, 300, 8),
+            ("minecraft:furnace", 39, 300, 8),
+            ("minecraft:brewing_stand", 41, 300, 8),
+        ] {
+            assert_eq!(super::Game::menu_slot(name, 0), Some(first));
+            assert_eq!(super::Game::menu_slot(name, count - 1), Some(last));
+            assert_eq!(super::Game::menu_slot(name, count), None);
+        }
+        assert_eq!(super::Game::menu_slot("minecraft:unknown", 0), None);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_menu_reads_follow_packets_and_lifetimes() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{
+            connection::Pipe,
+            item::Stack,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use horizon_world::nbt::Tag;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "MenuReadTest").unwrap();
+            assert!(
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .is_none()
+            );
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            remote.profile = 42;
+            let menu = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(menu), Some(46));
+            assert_eq!(game.native_menu_slot(menu, 46), None);
+            assert_eq!(game.native_menu_slot(menu, 36), Some(None));
+            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 3));
+            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
+                slot: 0,
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_slot(menu, 36).unwrap().unwrap().count, 3);
+            game.handle_packet(C::SetCursorItem(play::SetCursorItem {
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_carried(menu).unwrap().unwrap().count, 3);
+            let crafting_id = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:crafting")
+                .unwrap();
+            let open = || {
+                C::OpenScreen(play::OpenScreen {
+                    container: 7,
+                    menu: crafting_id,
+                    title: Tag::String("Crafting".into()),
+                })
+            };
+            game.handle_packet(open()).unwrap();
+            assert_eq!(game.native_menu_slot_count(menu), None);
+            let crafting = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(crafting), Some(46));
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 1,
+                item: stone.clone(),
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_slot(crafting, 1).unwrap().unwrap().count,
+                3
+            );
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 0,
+                item: stone,
+            }))
+            .unwrap();
+            assert_eq!(
+                game.native_menu_slot(crafting, 0).unwrap().unwrap().count,
+                3
+            );
+            game.handle_packet(open()).unwrap();
+            assert_eq!(game.native_menu_slot_count(crafting), None);
+            let crafting = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            game.handle_packet(C::Respawn(play::Respawn {
+                spawn: spawn.clone(),
+                keep: 0,
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_slot_count(crafting), None);
+            let inventory = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_ne!(inventory, menu);
+            let chest_id = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:menu")
+                .unwrap()
+                .id("minecraft:generic_9x3")
+                .unwrap();
+            game.handle_packet(C::OpenScreen(play::OpenScreen {
+                container: 7,
+                menu: chest_id,
+                title: Tag::String("Chest".into()),
+            }))
+            .unwrap();
+            let chest = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            assert_eq!(game.native_menu_slot_count(chest), Some(63));
+            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 4));
+            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 7,
+                state: 0,
+                slot: 2,
+                item: stone,
+            }))
+            .unwrap();
+            assert_eq!(game.native_menu_slot(chest, 2).unwrap().unwrap().count, 4);
+            assert_eq!(game.native_menu_slot(chest, 3), Some(None));
+            game.remote
+                .as_mut()
+                .unwrap()
+                .menu
+                .set(Some((7, "minecraft:unknown".into())));
+            assert!(
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .is_none()
+            );
+            assert_eq!(game.native_menu_slot_count(inventory), None);
+            assert_eq!(game.native_menu_slot_count(chest), None);
+            game.remote.as_mut().unwrap().menu.set(None);
+            let before_replacement = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            let mut other = spawn;
+            other.dimension = "test:other_overworld".into();
+            game.enter_remote_dimension(&other, true, Reason::Other);
+            assert_eq!(game.native_menu_slot_count(before_replacement), None);
+            let before_logout = game
+                .native_local_player()
+                .and_then(|player| game.native_menu_ref(player))
+                .unwrap();
+            game.client_logging_out();
+            assert_eq!(game.native_menu_slot_count(before_logout), None);
+            assert!(
+                game.native_local_player()
+                    .and_then(|player| game.native_menu_ref(player))
+                    .is_none()
+            );
+        });
     }
 
     #[test]

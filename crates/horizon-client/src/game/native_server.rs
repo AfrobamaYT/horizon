@@ -506,6 +506,19 @@ impl Game<'_> {
     /// outer players whose records are displaced return None.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
+        if let Some(remote) = self
+            .remote
+            .as_ref()
+            .filter(|r| r.logged_in && r.profile == uuid)
+        {
+            return Some(PlayerRef {
+                entity: crate::mod_api::EntityRef::new(
+                    epoch,
+                    u32::try_from(remote.entity_id).ok()?,
+                ),
+                uuid,
+            });
+        }
         let (_, id) = self.player_lookup(uuid)?;
         Some(PlayerRef {
             entity: crate::mod_api::EntityRef::new(epoch, id),

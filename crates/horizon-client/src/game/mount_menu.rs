@@ -346,6 +346,14 @@ impl Game<'_> {
             _ => None,
         }
     }
+    pub(super) fn mount_slot(&self, i: usize) -> &Option<ItemStack> {
+        match self.mount_menu.open.as_ref() {
+            Some(open) if i == SADDLE => &open.saddle,
+            Some(open) if i == ARMOR => &open.armor,
+            Some(open) if i >= CHEST && i - CHEST < CHEST_SIZE => &open.items[i - CHEST],
+            _ => &self.scratch_slot,
+        }
+    }
     pub(super) fn mount_slot_mut(&mut self, i: usize) -> &mut Option<ItemStack> {
         match self.mount_menu.open.as_mut() {
             Some(open) if i == SADDLE => &mut open.saddle,
