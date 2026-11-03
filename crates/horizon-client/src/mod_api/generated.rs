@@ -4706,6 +4706,24 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// NeoForge's `LivingShieldBlockEvent`: entity `entity` of type `kind`
+    /// (`minecraft:player`, `minecraft:zombie`) is hit for `damage` from `source` (its
+    /// type and entities, as `native_living_incoming_damage` names them), and
+    /// `LivingEntity.applyItemBlocking` is
+    /// about to resolve what a raised `blocks_attacks` item stops. Every hit with damage
+    /// asks, raised item or not: `original_blocked` is whether vanilla blocks (only a
+    /// player raises one). Change `block`: `blocked` makes the entity block or not (a block
+    /// forced on a hit vanilla lets through stops all of it), `blocked_damage` what is
+    /// stopped (kept within 0 and `damage`) and `shield_damage` the durability a raised
+    /// item loses (below 0: vanilla's `itemDamage` of what is stopped). Set `canceled` and nothing is blocked. No `self`, as
+    /// `native_living_incoming_damage`: the game is in the middle of the hit.
+    /// @API:living_shield_block@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_shield_block(&self, event: &mut LivingShieldBlockEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -4824,6 +4842,22 @@ pub trait Hooks: Send + Sync {
     fn screen_opening(&self, host: &dyn Host, event: &mut ScreenOpeningEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// NeoForge's `SweepAttackEvent`: a player's damaging melee hit on a
+    /// `target` (`minecraft:zombie`, `minecraft:oak_boat`) is about to sweep or
+    /// not, after `native_critical_hit`. `vanilla_sweep` is `Player.isSweepAttack`
+    /// (a charged, grounded, not critical sword hit below the speed limit);
+    /// `sweeping` starts as it and may force or stop the sweep; `canceled` skips
+    /// the later mods and keeps `sweeping` as it is (a mod doing its own sweep
+    /// cancels with `sweeping` false). A critical hit that sweeps has both
+    /// sounds. Fires on the Game that runs the attack, and on the attacking
+    /// client, which only asks. @API:sweep_attack@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn sweep_attack(&self, host: &mut dyn Host, event: &mut SweepAttackEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Change a tooltip box's background and border gradient colors, as ARGB.
     /// Stack is None for tooltips not associated with an item.
@@ -15472,6 +15506,44 @@ pub fn dispatch_living_get_projectile(
         mod_hook.living_get_projectile(host, &mut event);
     }
 }
+/// What [`Hooks::living_shield_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingShieldBlockEvent<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub source: &'a HurtSource<'a>,
+    pub damage: f32,
+    pub original_blocked: bool,
+    pub block: &'a mut ShieldBlock,
+}
+pub fn dispatch_living_shield_block(
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    source: &HurtSource<'_>,
+    damage: f32,
+    original_blocked: bool,
+    block: &mut ShieldBlock,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingShieldBlockEvent {
+        entity,
+        kind,
+        source,
+        damage,
+        original_blocked,
+        block,
+    };
+    for mod_hook in super::entered(mods, "living_shield_block") {
+        if matches!(mod_hook.living_shield_block(&mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -15853,6 +15925,37 @@ pub fn dispatch_screen_opening(
     for mod_hook in super::entered(mods, "screen_opening") {
         mod_hook.screen_opening(host, &mut event);
     }
+}
+/// What [`Hooks::sweep_attack`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SweepAttackEvent<'a> {
+    pub target: &'a str,
+    pub vanilla_sweep: bool,
+    pub sweeping: bool,
+}
+pub fn dispatch_sweep_attack(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    target: &str,
+    vanilla_sweep: bool,
+    sweeping: &mut bool,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = SweepAttackEvent {
+        target,
+        vanilla_sweep,
+        sweeping: *sweeping,
+    };
+    for mod_hook in super::entered(mods, "sweep_attack") {
+        if matches!(mod_hook.sweep_attack(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *sweeping = event.sweeping;
 }
 /// What [`Hooks::tooltip_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
