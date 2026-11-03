@@ -2625,6 +2625,35 @@ the server entity and level reads available on a client.
 
 A helper whose catalog entry names a `receiver` (`entity`, `level`, `block_entity`) is called on that handle (for example `entity.position(host)`), rather than as an ID-based `Host` method.
 
+### Mob AI goals
+
+`crates/horizon-client/src/game/native_mob_goals.rs` (#29's "movement and goals"): a mob's AI is vanilla's two goal
+selectors, and a `MobRef` reads and changes them. `mob.goals(host)` and `mob.target_goals(host)` list each selector's
+goals as a `NativeMobGoalEntry` — the priority (a lower number preempts a higher one), the kind id (`melee_attack`) and
+whether the goal runs now. `mob.add_goal(host, priority, &goal)` is `GoalSelector.addGoal`: the `NativeGoal` names one of
+the vanilla goal kinds Horizon itself runs, with the vanilla constructor's parameters
+(`MeleeAttackGoal(speed, followUnseen)`), and `mob.add_target_goal(host, priority, &goal)` adds to the target selector.
+`mob.remove_goal(host, id)` and `mob.remove_target_goal(host, id)` are `removeGoal`: every goal of that kind goes, a
+running one stopped first, and the count comes back; as vanilla's `removeAllGoals` with a `getClass()` predicate, a
+species variant of a vanilla goal (a bee's `BeeHurtByOtherGoal`, a labeled stroll) keeps its own name, is read under it
+and is removed by it.
+
+The kinds, by their id: `float`, `climb_on_top_of_powder_snow`, `panic` (with `water_range` for the turtle's),
+`stroll` (`water_avoiding`, `swim` and `flying` pick RandomStroll's variants), `look_at_player`, `random_look_around`,
+`melee_attack`, `leap_at_target`, `avoid_entity`, `tempt` (item ids, `minecraft:wheat`), `breed`, `follow_parent`,
+`follow_mob`, `restrict_sun`, `flee_sun`, `eat_block`, `breath_air`, `try_find_water`, and the target selector's
+`nearest_target` (with `prey` and `interval`) and `hurt_by_target` (with `alert`). Species ids in `prey`, `what` and
+`only` are namespaced (`minecraft:zombie`); a bare id reads as `minecraft:`'s.
+
+An add refuses what the mob's vanilla class does not hold: a `PathfinderMob` goal for a bat, ghast or phantom,
+and `breed` / `follow_parent` for a mob that is no animal. Slimes, magma cubes and shulkers are `PathfinderMob`s.
+`follow_mob` accepts ground or flying navigation, but not water-bound or amphibious navigation. It also refuses
+non-finite numbers, negative speeds and distances, a probability outside 0..=1, a
+negative interval, an empty `items` list, and a species id no mob type carries. Reads and removes answer `None`/`false`
+for a stale handle, a client, the dragon, and a mob whose copy is held out — nothing in a mob's own tick resolves, as
+`Host` is not there yet: change goals in `entity_join`, which fires for a loaded chunk's mobs too. Goals are not saved,
+as in vanilla: after a reload the mob has its species' set again, and a mod's `entity_join` adds its own back.
+
 ### Mobs drawn by a mod
 
 `crates/horizon-client/src/game/native_mob_draw.rs`: `native_mob_submit(mob, draw, drawn)` (client) is asked once a frame for
