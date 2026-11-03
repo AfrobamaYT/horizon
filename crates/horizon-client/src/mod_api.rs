@@ -133,6 +133,48 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// A statistic type (`BuiltInRegistries.STAT_TYPE`), for a player's
+/// statistics: what the stat's key names (a block, an item, an entity type,
+/// or a `minecraft:custom` stat).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NativeStatType {
+    /// `minecraft:mined`, keyed by block.
+    Mined,
+    /// `minecraft:crafted`, keyed by item.
+    Crafted,
+    /// `minecraft:used`, keyed by item.
+    Used,
+    /// `minecraft:broken`, keyed by item.
+    Broken,
+    /// `minecraft:picked_up`, keyed by item.
+    PickedUp,
+    /// `minecraft:dropped`, keyed by item.
+    Dropped,
+    /// `minecraft:killed`, keyed by entity type.
+    Killed,
+    /// `minecraft:killed_by`, keyed by entity type.
+    KilledBy,
+    /// `minecraft:custom`, keyed by custom stat (`minecraft:jump`...).
+    Custom,
+}
+
+impl NativeStatType {
+    /// The type's registry path (`mined`, `killed_by`...).
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Mined => "mined",
+            Self::Crafted => "crafted",
+            Self::Used => "used",
+            Self::Broken => "broken",
+            Self::PickedUp => "picked_up",
+            Self::Dropped => "dropped",
+            Self::Killed => "killed",
+            Self::KilledBy => "killed_by",
+            Self::Custom => "custom",
+        }
+    }
+}
+
 /// A note block's instrument (`NoteBlockInstrument`), for `note_block_play`,
 /// in the `instrument` property's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

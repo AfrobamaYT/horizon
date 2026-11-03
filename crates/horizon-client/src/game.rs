@@ -246,6 +246,7 @@ mod native_panel_recipes;
 mod native_player_cooldowns;
 mod native_player_food;
 mod native_player_modes;
+mod native_player_stats;
 mod native_projectiles;
 mod native_quick_move;
 mod native_recipes;
