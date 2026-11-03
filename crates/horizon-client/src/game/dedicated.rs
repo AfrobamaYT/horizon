@@ -2071,9 +2071,9 @@ impl Game<'_> {
     /// `MinecraftServer.runServer`'s `finally`: a tick that panicked still saves. What the panic
     /// interrupted is not trusted: a guest's turn (`as_guest`) holds the game's player state
     /// swapped in, so its record is older than what the game holds, and writing it would put
-    /// back older data than the last autosave; that guest keeps the file it has. A hub that the
-    /// panic took with it (`self.lan.take()` was in progress) saves no players at all. The
-    /// levels, the scoreboard and the other state are saved as in a normal stop.
+    /// back older data than the last autosave; that guest keeps the file it has. If the hub
+    /// has already closed, no players can be saved. The levels, the scoreboard and the other
+    /// state are saved as in a normal stop.
     fn stop_after_crash(&mut self, message: &str) -> Result<()> {
         log("ERROR", &format!("The server thread panicked: {message}"));
         let acting = self.lan_acting;
