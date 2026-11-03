@@ -1,25 +1,32 @@
 //! Accepted native block entity membership, frozen before resources or worlds load.
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlockEntityTypes {
     blocks: BTreeMap<String, String>,
     /// Names in protocol order: a reload may not change numeric wire IDs either.
-    wire: Vec<String>,
+    wire: Vec<Arc<str>>,
+    keys: BTreeSet<Arc<str>>,
 }
 
 impl BlockEntityTypes {
     /// Membership has already been checked by the content plan.
     pub fn new(blocks: BTreeMap<String, String>, wire: Vec<String>) -> Self {
-        Self { blocks, wire }
+        let wire: Vec<Arc<str>> = wire.into_iter().map(Into::into).collect();
+        let keys = wire.iter().filter(|id| !id.is_empty()).cloned().collect();
+        Self { blocks, wire, keys }
     }
 
     pub fn type_for(&self, block: &str) -> Option<&str> {
         self.blocks.get(block).map(String::as_str)
     }
 
-    pub fn fits(&self, id: &str, block: &str) -> bool {
-        self.type_for(block) == Some(id)
+    /// A canonical registered identity, shared without allocating at lookup.
+    pub fn key(&self, id: &str) -> Option<Arc<str>> {
+        self.keys.get(id).cloned()
     }
 }
 
@@ -68,11 +75,10 @@ mod tests {
         freeze(&slot, types()).unwrap();
         let accepted = slot.get().unwrap();
         for block in ["test:press", "test:mill"] {
-            assert!(accepted.fits("test:machine", block));
-            assert!(!accepted.fits("test:unknown", block));
+            assert_eq!(accepted.type_for(block), Some("test:machine"));
         }
         for block in ["test:casing", "other:press", "minecraft:stone"] {
-            assert!(!accepted.fits("test:machine", block));
+            assert_eq!(accepted.type_for(block), None);
         }
         let mut changed = types();
         changed.blocks.remove("test:mill");
