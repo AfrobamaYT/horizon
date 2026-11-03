@@ -35,9 +35,11 @@ pub(super) struct Level {
     blocks: HashMap<Pos, BlockStateId>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
-    /// Each entity's inventory (`entity_slots`) before this transaction first wrote it, with
-    /// a chested mob's item list's length, which reading it as slots may have grown.
-    entities: HashMap<u32, (Vec<Option<ItemStack>>, Option<usize>)>,
+    /// Each entity's inventory (`entity_slots`) before this transaction first wrote it.
+    entities: HashMap<u32, Vec<Option<ItemStack>>>,
+    /// Each chested mob's item list's length before `entity_slots` first grew it to its slots
+    /// in this transaction.
+    mob_lengths: HashMap<u32, usize>,
     /// Each item entity's stack before this transaction first wrote it.
     item_entities: HashMap<u32, ItemStack>,
     /// What the root commit does, in order.
@@ -73,6 +75,14 @@ pub(super) enum After {
     Spawn([f64; 3], ItemStack),
     /// The item entity with this id was emptied: removed, unless it holds items again.
     Emptied(u32),
+}
+
+impl Level {
+    /// Keeps chested mob `id`'s item list's length, `len`, before `entity_slots` grows it, if
+    /// this transaction hasn't yet.
+    pub(super) fn keep_mob_length(&mut self, id: u32, len: usize) {
+        self.mob_lengths.entry(id).or_insert(len);
+    }
 }
 
 impl Game<'_> {
@@ -118,6 +128,9 @@ impl Game<'_> {
                 for (id, kept) in level.item_entities {
                     outer.item_entities.entry(id).or_insert(kept);
                 }
+                for (id, len) in level.mob_lengths {
+                    outer.mob_lengths.entry(id).or_insert(len);
+                }
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -162,14 +175,12 @@ impl Game<'_> {
         if self.transactions.is_empty() {
             return;
         }
-        let mob = self.mobs.iter().find(|m| m.id == id);
-        let len = mob.map(|m| m.extra.items.len());
         let Some((slots, _)) = self.entity_slots(id) else {
             return;
         };
         let slots = slots.to_vec();
         if let Some(level) = self.transactions.last_mut() {
-            level.entities.entry(id).or_insert((slots, len));
+            level.entities.entry(id).or_insert(slots);
         }
     }
     /// Sets item entity `id`'s stack, keeping it as it was if a transaction is open and hasn't
@@ -304,13 +315,15 @@ impl Game<'_> {
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
         }
-        for (id, (kept, len)) in level.entities {
+        for (id, kept) in level.entities {
             if let Some((slots, _)) = self.entity_slots(id) {
                 for (slot, kept) in slots.iter_mut().zip(kept) {
                     *slot = kept;
                 }
             }
-            if let (Some(len), Some(m)) = (len, self.mobs.iter_mut().find(|m| m.id == id)) {
+        }
+        for (id, len) in level.mob_lengths {
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                 m.extra.items.truncate(len);
             }
         }
@@ -634,17 +647,21 @@ mod tests {
                 .items
                 .len()
         };
-        let before = len(&game);
+        // Its list is short (none kept yet): reading it as slots grows it, and the abort puts
+        // that back too.
+        let mob = game.mobs.iter_mut().find(|m| m.id == id).unwrap();
+        mob.extra.items.clear();
         let host: &mut dyn Host = &mut game;
         let _ = host.transaction(|host, tx| {
             let place = horizon_client::mod_api::ItemPlace::EntitySlot {
                 entity: id,
                 slot: 0,
             };
-            place.insert(host, tx, &stick, 1);
+            assert!(place.stack(host).is_none());
+            assert_eq!(place.insert(host, tx, &stick, 1), 1);
             Err::<(), ()>(())
         });
-        assert_eq!(len(&game), before);
+        assert_eq!(len(&game), 0);
 
         for (kind, nbt) in vehicles {
             let id = game

@@ -42,6 +42,9 @@ impl Game<'_> {
                 .find(|m| m.id == id && m.extra.chested)?;
             let size = super::mount_menu::mount_columns(m) * 3;
             if m.extra.items.len() < size {
+                if let Some(level) = self.transactions.last_mut() {
+                    level.keep_mob_length(id, m.extra.items.len());
+                }
                 m.extra.items.resize(size, None);
             }
             return Some((&mut m.extra.items[..size], at(&m.position)));

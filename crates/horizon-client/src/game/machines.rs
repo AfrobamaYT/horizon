@@ -947,16 +947,8 @@ impl Game<'_> {
             let one = ItemResource::of(&stack);
             let moved = mod_api::run_transaction(self, |game, tx| {
                 let host: &mut dyn Host = game;
-                let mut went = 0;
-                for into in 0..part.size(host) {
-                    went = part
-                        .checked(part.insert(host, tx, into, &one, 1), 1, &at)
-                        .ok_or(())?;
-                    if went > 0 {
-                        break;
-                    }
-                }
-                if went == 0 {
+                let went = part.insert_any(host, tx, &one, 1);
+                if part.checked(went, 1, &at).ok_or(())? == 0 {
                     return Err(());
                 }
                 for &(pos, _) in &hopper.parts {

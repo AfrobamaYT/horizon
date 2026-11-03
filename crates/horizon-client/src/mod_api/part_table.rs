@@ -709,6 +709,9 @@ pub(crate) mod tests {
             r.item_capability_before_game(&ITEM_ITEMS, "test:bag", |_, place| {
                 Some(Box::new(Bag(place.clone())))
             });
+            r.item_capability_before_game(&ITEM_ITEMS, "test:case", |_, place| {
+                Some(Box::new(Case(place.clone())))
+            });
             r.place_provider("test:charms", Arc::new(Charms));
             // `test:ordered`: one provider that declines, two that answer, and one ahead of the
             // game that answers only at x = 9.
@@ -1015,6 +1018,77 @@ pub(crate) mod tests {
             }
             let empty = ItemResource::of(&stack("test:bag", 1, 0));
             self.0.exchange(host, tx, &empty, 1)
+        }
+    }
+
+    /// A case at `.0` with two slots kept in its damage: diamonds in the hundreds, sticks in
+    /// the units. Before taking sticks it tries emptying its diamond slot in a transaction of
+    /// its own and aborts that, as a handler checking what a write would do may.
+    struct Case(ItemPlace);
+    impl Case {
+        fn held(&self, host: &mut dyn Host, index: usize) -> u32 {
+            let damage = self.0.stack(host).map_or(0, |case| case.damage);
+            [damage / 100, damage % 100][index]
+        }
+        fn rewrite(&self, host: &mut dyn Host, tx: &Transaction, damage: u32) -> bool {
+            let case = ItemResource::of(&stack("test:case", 1, damage));
+            self.0.exchange(host, tx, &case, 1) == 1
+        }
+    }
+    impl ResourceHandler<ItemResource> for Case {
+        fn size(&self, _: &mut dyn Host) -> usize {
+            2
+        }
+        fn resource(&self, host: &mut dyn Host, index: usize) -> Option<ItemResource> {
+            let item = ["minecraft:diamond", "minecraft:stick"][index];
+            (self.held(host, index) > 0).then(|| ItemResource::of(&stack(item, 1, 0)))
+        }
+        fn amount(&self, host: &mut dyn Host, index: usize) -> u32 {
+            self.held(host, index)
+        }
+        fn capacity(&self, _: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
+            let item = ["minecraft:diamond", "minecraft:stick"][index];
+            if resource.item() == item { 99 } else { 0 }
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            tx: &Transaction,
+            index: usize,
+            resource: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            if index != 1 || resource.item() != "minecraft:stick" {
+                return 0;
+            }
+            let damage = self.0.stack(host).map_or(0, |case| case.damage);
+            match self.rewrite(host, tx, damage + amount) {
+                true => amount,
+                false => 0,
+            }
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            tx: &Transaction,
+            index: usize,
+            resource: &ItemResource,
+            amount: u32,
+        ) -> u32 {
+            if index != 1 || resource.item() != "minecraft:stick" {
+                return 0;
+            }
+            let damage = self.0.stack(host).map_or(0, |case| case.damage);
+            let tried: Result<(), ()> = host.transaction(|host, tx| {
+                self.rewrite(host, tx, damage % 100);
+                Err(())
+            });
+            assert!(tried.is_err());
+            let took = amount.min(damage % 100);
+            match self.rewrite(host, tx, damage - took) {
+                true => took,
+                false => 0,
+            }
         }
     }
 
@@ -1733,6 +1807,25 @@ pub(crate) mod tests {
             host.transaction(|host, tx| Err(pouch.insert(host, tx, 0, &sticks, 3)));
         assert_eq!(aborted, Err(3));
         assert_eq!(player.main_hand, Some(stack("test:bag", 2, 1)));
+        assert!(player.given.is_empty());
+    }
+
+    #[test]
+    fn an_aborted_inner_write_of_a_handler_inside_an_item_changes_nothing() {
+        game_thread();
+        // A case of one diamond and two sticks in a bag in the hand. The case's stick is
+        // exchanged for another stick; on its way the case tries emptying its diamond slot in a
+        // transaction it aborts. The diamond stays, and no item is made or lost.
+        let mut player = Player {
+            main_hand: Some(stack("test:case", 1, 102)),
+            ..Player::default()
+        };
+        let sticks = ItemPlace::Nested {
+            parent: Box::new(HAND),
+            slot: 1,
+        };
+        assert_eq!(exchange(&mut player, &sticks, stick()), 1);
+        assert_eq!(player.main_hand, Some(stack("test:case", 1, 102)));
         assert!(player.given.is_empty());
     }
 

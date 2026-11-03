@@ -318,23 +318,22 @@ impl ItemPlace {
         if amount == 0 {
             return 0;
         }
-        // Through index `slot` of `handler`, in passes while one moves something
-        // (`Inventory.add`'s and NeoForge's loops: a handler may move less per call than it
-        // could). What `slot` doesn't take goes to the other indices (`forHandlerIndex`).
+        // Through index `slot` of `handler`, then for an insert the whole handler, each in
+        // passes while one moves something (`Inventory.add`'s and NeoForge's loops: a handler
+        // may move less per call than it could): what `slot` doesn't take goes to the other
+        // indices (`forHandlerIndex`).
         let through = |handler: Capability<dyn ResourceHandler<ItemResource>>,
                        host: &mut dyn Host,
                        tx: &Transaction,
                        slot: usize| {
-            let others = match insert {
-                true => (0..handler.size(host)).filter(|&i| i != slot).collect(),
-                false => Vec::new(),
-            };
             let mut left = amount;
-            for index in std::iter::once(slot).chain(others) {
+            let passes: &[bool] = if insert { &[false, true] } else { &[false] };
+            for &anywhere in passes {
                 while left > 0 {
-                    let moved = match insert {
-                        true => handler.insert(host, tx, index, resource, left),
-                        false => handler.extract(host, tx, index, resource, left),
+                    let moved = match (insert, anywhere) {
+                        (true, false) => handler.insert(host, tx, slot, resource, left),
+                        (true, true) => handler.insert_any(host, tx, resource, left),
+                        (false, _) => handler.extract(host, tx, slot, resource, left),
                     };
                     match handler.checked(moved, left, self).ok_or(())? {
                         0 => break,

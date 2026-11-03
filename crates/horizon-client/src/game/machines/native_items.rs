@@ -87,21 +87,13 @@ impl Game<'_> {
             return Some(stack);
         }
         if let Some(part) = self.item_part_at((pos[0], pos[1], pos[2]), face) {
-            // Slot by slot, in a transaction: a part taking more than it was offered is a mod
-            // bug, and nothing goes in.
+            // In a transaction: a part taking more than it was offered is a mod bug, and
+            // nothing goes in.
             let resource = ItemResource::of(&stack);
             let went = mod_api::run_transaction(self, |game, tx| {
                 let host: &mut dyn Host = game;
-                let mut went = 0;
-                for slot in 0..part.size(host) {
-                    let asked = stack.count - went;
-                    if asked == 0 {
-                        break;
-                    }
-                    let answer = part.insert(host, tx, slot, &resource, asked);
-                    went += part.checked(answer, asked, &pos).ok_or(())?;
-                }
-                Ok::<_, ()>(went)
+                let answer = part.insert_any(host, tx, &resource, stack.count);
+                part.checked(answer, stack.count, &pos).ok_or(())
             });
             let left = stack.count - went.unwrap_or(0);
             return (left > 0).then_some(ItemStack {

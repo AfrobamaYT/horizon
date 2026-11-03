@@ -86,4 +86,28 @@ pub trait ResourceHandler<R> {
         resource: &R,
         amount: u32,
     ) -> u32;
+    /// Puts up to `amount` of `resource` in wherever it goes (NeoForge's `insert` without an
+    /// index): by default index by index from 0. How much went in.
+    fn insert_any(&self, host: &mut dyn Host, tx: &Transaction, resource: &R, amount: u32) -> u32 {
+        let mut went = 0u32;
+        for index in 0..self.size(host) {
+            if went >= amount {
+                break;
+            }
+            went = went.saturating_add(self.insert(host, tx, index, resource, amount - went));
+        }
+        went
+    }
+    /// Takes up to `amount` of `resource` out from wherever it is (`extract` without an index):
+    /// by default index by index from 0. How much came out.
+    fn extract_any(&self, host: &mut dyn Host, tx: &Transaction, resource: &R, amount: u32) -> u32 {
+        let mut came = 0u32;
+        for index in 0..self.size(host) {
+            if came >= amount {
+                break;
+            }
+            came = came.saturating_add(self.extract(host, tx, index, resource, amount - came));
+        }
+        came
+    }
 }
