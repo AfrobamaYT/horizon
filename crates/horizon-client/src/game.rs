@@ -9475,13 +9475,19 @@ impl Game<'_> {
         }
     }
     /// What a slot shows: the crafting result slots are computed.
-    fn slot_view(&mut self, i: usize) -> Option<ItemStack> {
+    fn slot_view(&self, i: usize) -> Option<ItemStack> {
         match i {
             200 => self.craft_result(),
             309 if matches!(self.container_kind(), Some(BlockEntity::Crafter(_))) => {
                 self.crafter_result()
             }
-            _ => self.slot_mut(i).clone(),
+            i if i >= mount_menu::SADDLE => self.mount_slot(i).clone(),
+            i if i >= stations::INPUT => self.station_slot(i).clone(),
+            500..=503 => self.armor[i - 500].clone(),
+            504 => self.offhand.clone(),
+            i if i >= 300 => self.container_slot(i - 300).clone(),
+            100..=108 => self.craft_grid[i - 100].clone(),
+            _ => self.inventory[i].clone(),
         }
     }
     fn craft_result(&self) -> Option<ItemStack> {

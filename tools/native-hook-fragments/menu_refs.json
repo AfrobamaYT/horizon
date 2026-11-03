@@ -1,15 +1,12 @@
 {
   "hooks": [],
   "helpers": [
-    {"name":"menu", "side":"both", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_ref"},
-    {"name":"client_menu", "side":"client", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_client_menu"},
-    {"name":"menu_client_slot_count", "side":"client", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_client_slot_count", "receiver":"menu"},
-    {"name":"menu_client_slot", "side":"client", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_client_slot", "receiver":"menu"},
-    {"name":"menu_client_carried", "side":"client", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_client_carried", "receiver":"menu"},
+    {"name":"local_player", "side":"client", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_local_player"},
+    {"name":"player_container_menu", "side":"both", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_ref", "receiver":"player"},
     {"name":"menu_container_id", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_container_id", "receiver":"menu"},
     {"name":"menu_kind", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_kind", "receiver":"menu"},
-    {"name":"menu_slot_count", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_count", "receiver":"menu"},
-    {"name":"menu_slot", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot", "receiver":"menu"},
-    {"name":"menu_carried", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_carried", "receiver":"menu"}
+    {"name":"menu_slot_count", "side":"both", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_count", "receiver":"menu"},
+    {"name":"menu_slot", "side":"both", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot", "receiver":"menu"},
+    {"name":"menu_carried", "side":"both", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_carried", "receiver":"menu"}
   ]
 }

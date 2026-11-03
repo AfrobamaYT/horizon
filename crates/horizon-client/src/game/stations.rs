@@ -644,6 +644,13 @@ impl Game<'_> {
             _ => None,
         }
     }
+    pub(super) fn station_slot(&self, i: usize) -> &Option<ItemStack> {
+        match self.station.as_ref() {
+            Some(s) if i == RESULT => &s.result,
+            Some(s) if i >= INPUT && i < INPUT + s.inputs.len() => &s.inputs[i - INPUT],
+            _ => &self.scratch_slot,
+        }
+    }
     pub(super) fn station_slot_mut(&mut self, i: usize) -> &mut Option<ItemStack> {
         match self.station.as_mut() {
             Some(s) if i == RESULT => &mut s.result,
