@@ -12,7 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, BlockSide, Capability, Host, ItemResource, ResourceHandler},
+    mod_api::{self, BlockSide, Capability, ItemResource, ResourceHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -788,6 +788,7 @@ impl Game<'_> {
             return;
         }
         self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
+        let c = self.containers();
         let mut changed = false;
         if !c.is_empty(&view) {
             changed = self.hopper_eject(pos, &view);
@@ -933,7 +934,7 @@ impl Game<'_> {
     ) -> u32 {
         let resource = ItemResource::of(stack);
         mod_api::run_transaction(self, |game, tx| {
-            let host: &mut dyn Host = game;
+            let host: &mut dyn horizon_client::mod_api::ServerHost = game;
             let went = part.insert_any(host, tx, &resource, stack.count);
             match part.checked(went, stack.count, &at) {
                 Some(0) | None => Err(()),
@@ -951,7 +952,7 @@ impl Game<'_> {
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
     /// is a capability part: whether a mod canceled the move.
-    fn part_move_canceled(&self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
+    fn part_move_canceled(&mut self, source: [i32; 3], destination: [i32; 3], item: &str) -> bool {
         let mut cancel = false;
         self.native_inventory_move_item(source, destination, item, &mut cancel);
         cancel
@@ -1004,7 +1005,7 @@ impl Game<'_> {
                 continue;
             }
             let moved = mod_api::run_transaction(self, |game, tx| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn horizon_client::mod_api::ServerHost = game;
                 let came = part.extract(host, tx, slot, &resource, 1);
                 if part.checked(came, 1, &at) != Some(1) {
                     return Err(());
@@ -1198,6 +1199,7 @@ impl Game<'_> {
             Some([above.0, above.1, above.2]),
             None,
         );
+        let c = self.containers();
         if let Kind::Composter(level) = source.kind {
             if level != 8 {
                 return Some(false);

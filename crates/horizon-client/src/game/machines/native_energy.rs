@@ -133,6 +133,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
 
     fn buffer(capacity: i32, max_insert: i32, max_extract: i32) -> ModEnergyBuffer {
         ModEnergyBuffer {
@@ -192,7 +194,7 @@ mod tests {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
         use horizon_client::fast_hash::FxHashMap;
-        use horizon_client::mod_api::{ENERGY, Host, NativeBlockUpdateFlags, move_energy};
+        use horizon_client::mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
         use horizon_core::geometry::Direction;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -231,7 +233,7 @@ mod tests {
                     .insert((pos[0], pos[1], pos[2]), entity);
             }
             let moved = |game: &mut Game<'_>, side, max, commit: bool| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 let source = level.capability(host, &ENERGY, from, None).unwrap();
                 let target = level.capability(host, &ENERGY, to, side).unwrap();
                 host.transaction(|host, tx| {
@@ -240,7 +242,7 @@ mod tests {
                 })
             };
             let held = |game: &mut Game<'_>| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 [from, to].map(|pos| {
                     let buffer = level.capability(host, &ENERGY, pos, None).unwrap();
                     buffer.amount(host)
