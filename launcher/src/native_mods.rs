@@ -3261,16 +3261,16 @@ mod tests {
 
     #[test]
     fn a_native_build_without_a_record_is_refused_before_preparation() {
-        let error = pipeline(
+        let Err(error) = pipeline(
             "native-missing-record-test",
             Path::new("missing-mod-folder"),
             false,
             Profile::Dev,
             Target::Client,
             &|_| panic!("invalid records must not start a build"),
-        )
-        .err()
-        .expect("invalid build refused");
+        ) else {
+            panic!("invalid build must be refused");
+        };
         assert!(error.contains("native-mods.json record"), "{error}");
         assert!(error.contains("Rebuild it"), "{error}");
     }
