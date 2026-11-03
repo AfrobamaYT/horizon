@@ -1441,6 +1441,25 @@ impl LevelAccess for GameLevel<'_> {
         }
         source
     }
+    fn adjust_can_connect_redstone(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        if self.native_authoritative {
+            self.native_can_connect_redstone(
+                self.dimension,
+                pos,
+                state,
+                direction,
+                &mut connected,
+            );
+        }
+        connected
+    }
     fn adjust_signal(
         &self,
         pos: BlockPos,

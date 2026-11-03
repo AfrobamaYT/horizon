@@ -692,6 +692,19 @@ pub trait LevelAccess {
     fn adjust_signal_source(&self, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// `BlockBehaviour.shouldRedstoneWireConnectTo` once the library answered
+    /// `vanilla` for the block `state` at `pos`, `direction` the side the wire
+    /// reaches it by (None when it asks about the block above or below):
+    /// whether redstone wire connects. The default keeps it.
+    fn adjust_can_connect_redstone(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        vanilla
+    }
     /// `BlockState.hasAnalogOutputSignal` once the library answered `vanilla`:
     /// whether comparators read the block. The default keeps it.
     fn adjust_has_analog_output(&self, _state: BlockStateId, vanilla: bool) -> bool {

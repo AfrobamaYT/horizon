@@ -59,6 +59,9 @@ pub(crate) struct TestLevel {
     /// `analog_states` (`adjust_has_analog_output`).
     pub analog: HashMap<BlockPos, i32>,
     pub analog_states: HashSet<BlockStateId>,
+    /// What `adjust_can_connect_redstone` answers at a position: whether
+    /// redstone wire connects there.
+    pub wire_connect: HashMap<BlockPos, bool>,
     /// What `before_fire_odds` answers for a state.
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
@@ -85,6 +88,7 @@ impl TestLevel {
             signals: HashMap::new(),
             analog: HashMap::new(),
             analog_states: HashSet::new(),
+            wire_connect: HashMap::new(),
             time: 0,
             day_time: 0,
             events: Vec::new(),
@@ -108,6 +112,15 @@ impl LevelAccess for TestLevel {
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
+    }
+    fn adjust_can_connect_redstone(
+        &self,
+        pos: BlockPos,
+        _state: BlockStateId,
+        _direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        self.wire_connect.get(&pos).copied().unwrap_or(vanilla)
     }
     fn adjust_analog_output(
         &self,
@@ -1159,6 +1172,28 @@ fn redstone_lever_wire_and_lamp() {
         w.tick();
     }
     assert_eq!(w.prop(BlockPos::new(6, 1, 0), "lit"), "false");
+}
+
+#[test]
+fn wire_connects_only_to_the_block_that_answers_can_connect_redstone() {
+    let mut w = world!();
+    w.floor(0, 20, "stone");
+    let wire = w.id("redstone_wire", &[]);
+    let glass = w.id("glass", &[]);
+    w.set(BlockPos::new(4, 1, 0), glass);
+    w.set(BlockPos::new(5, 1, 0), wire);
+    w.set(BlockPos::new(6, 1, 0), glass);
+    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "east"), "none");
+    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "west"), "none");
+    // Only the east glass answers the query: the wire connects to it alone.
+    w.level.wire_connect.insert(BlockPos::new(6, 1, 0), true);
+    w.set(BlockPos::new(5, 1, 0), wire);
+    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "east"), "side");
+    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "west"), "none");
+    // Without an answer the vanilla shape returns.
+    w.level.wire_connect.remove(&BlockPos::new(6, 1, 0));
+    w.set(BlockPos::new(5, 1, 0), wire);
+    assert_eq!(w.prop(BlockPos::new(5, 1, 0), "east"), "none");
 }
 
 #[test]

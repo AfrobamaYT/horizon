@@ -829,6 +829,14 @@ pub(crate) mod tests {
         }
     }
 
+    /// Connects redstone wire to its block from any side.
+    struct Connector;
+    impl BlockPart for Connector {
+        fn can_connect_redstone(&self, _: &dyn LevelHost, event: &mut CanConnectRedstoneEvent) {
+            event.connected = true;
+        }
+    }
+
     /// The block entity of type `test:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
@@ -870,6 +878,7 @@ pub(crate) mod tests {
     impl Hooks for Doubler {
         fn register(&self, r: &mut Registrar) {
             r.block_part("test:gauge", Gauge);
+            r.block_part("test:gauge", Connector);
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a

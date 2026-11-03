@@ -213,9 +213,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- redstone wire ----
 
-    fn should_wire_connect_to(&self, state: BlockStateId, direction: Option<Direction>) -> bool {
+    fn should_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+    ) -> bool {
         let b = self.b;
-        match b.data(state).class {
+        let vanilla = match b.data(state).class {
             Class::RedstoneWire => true,
             Class::Observer => direction == Some(b.facing(state)),
             Class::Repeater => {
@@ -223,7 +228,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 direction == Some(facing) || direction == Some(facing.opposite())
             }
             _ => self.is_signal_source(state) && direction.is_some(),
-        }
+        };
+        self.level
+            .adjust_can_connect_redstone(pos, state, direction, vanilla)
+    }
     }
     /// `RedstoneWireBlock.canSurvive` and `updateShape`'s down face: the block
     /// below is read through `support_state`, since a retracting piston's
@@ -245,7 +253,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if can_connect_up {
             let placeable_above =
                 b.instance_of(relative, Class::TrapDoor) || self.wire_can_survive_on(relative_pos);
-            if placeable_above && self.should_wire_connect_to(self.state(above(relative_pos)), None)
+            let above_pos = above(relative_pos);
+            if placeable_above
+                && self.should_wire_connect_to(above_pos, self.state(above_pos), None)
             {
                 return if b.is_face_sturdy(relative, direction.opposite()) {
                     "up"
@@ -254,9 +264,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 };
             }
         }
-        if !self.should_wire_connect_to(relative, Some(direction))
+        let below_pos = below(relative_pos);
+        if !self.should_wire_connect_to(relative_pos, relative, Some(direction))
             && (self.is_redstone_conductor(relative, relative_pos)
-                || !self.should_wire_connect_to(self.state(below(relative_pos)), None))
+                || !self.should_wire_connect_to(below_pos, self.state(below_pos), None))
         {
             "none"
         } else {
