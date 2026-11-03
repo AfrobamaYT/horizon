@@ -6747,6 +6747,7 @@ impl Game<'_> {
                     let result = if let Some(answer) = answer {
                         native_hooks::block_use_result(answer).unwrap_or(InteractionResult::Pass)
                     } else {
+                        let player = self.use_context();
                         self.with_level(|b, level, ticks| {
                             b.use_without_item(level, ticks, state, block_hit, player)
                         })

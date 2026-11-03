@@ -6194,6 +6194,7 @@ mod tests {
             answer: Arc<Mutex<Option<Answer>>>,
             replace_with: Arc<Mutex<Option<horizon_world::registry::BlockStateId>>>,
             empty_answer: Arc<Mutex<Option<Answer>>>,
+            empty_food: Arc<Mutex<Option<i32>>>,
             empty_clicks: Arc<Mutex<Vec<(horizon_world::registry::BlockStateId, u128)>>>,
             clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
@@ -6222,10 +6223,14 @@ mod tests {
             }
             fn use_without_item(
                 &self,
-                _: &mut dyn ServerHost,
+                host: &mut dyn ServerHost,
                 event: &mut UseWithoutItemEvent<'_>,
             ) -> Option<Answer> {
                 assert_eq!(event.click.hand, crate::first_person::Hand::Main);
+                if let Some(level) = self.empty_food.lock().unwrap().take() {
+                    let player = host.player(event.click.player).unwrap();
+                    assert!(player.set_food_level(host, level));
+                }
                 self.empty_clicks
                     .lock()
                     .unwrap()
@@ -6249,6 +6254,7 @@ mod tests {
                 r.block_part("minecraft:decorated_pot", self.user.clone());
                 r.block_part("minecraft:redstone_ore", self.user.clone());
                 r.block_part("minecraft:chiseled_bookshelf", self.user.clone());
+                r.block_part("minecraft:cake", self.user.clone());
             }
             fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
                 self.user
@@ -6262,6 +6268,7 @@ mod tests {
             answer: Arc::new(Mutex::new(Some(Answer::Success))),
             replace_with: Arc::new(Mutex::new(None)),
             empty_answer: Arc::new(Mutex::new(None)),
+            empty_food: Arc::new(Mutex::new(None)),
             empty_clicks: Arc::new(Mutex::new(Vec::new())),
             clicks: Arc::new(Mutex::new(Vec::new())),
             item_uses: Arc::new(AtomicUsize::new(0)),
@@ -6652,6 +6659,42 @@ mod tests {
                 assert_eq!(user.empty_clicks.lock().unwrap().last(), Some(&(lever, 12)));
                 assert_eq!(user.item_uses.load(SeqCst), item_uses);
                 assert_eq!(game.world.block(0, 64, 4), lever);
+
+                // A delegating Part's food write precedes vanilla's canEat check.
+                let cake = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:cake")
+                    .unwrap();
+                let bitten = game.with_props(cake, &[("bites", "1")]).unwrap();
+                *user.empty_answer.lock().unwrap() = None;
+                for (food_write, expected, food, item_calls) in [
+                    (None, bitten, 12, item_uses),
+                    (Some(20), cake, 20, item_uses + 1),
+                ] {
+                    game.world.set(0, 64, 4, cake).unwrap();
+                    let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
+                    guest.game_mode = 0;
+                    guest.food = 10;
+                    *user.empty_food.lock().unwrap() = food_write;
+                    game.lan_guest_packet(
+                        12,
+                        play::Serverbound::UseItemOn(play::UseItemOn {
+                            hand: 0,
+                            pos: hit.pos,
+                            face: 1,
+                            cursor: [0.5, 1.0, 0.5],
+                            inside: false,
+                            world_border: false,
+                            sequence: 2,
+                        }),
+                    );
+                    assert_eq!(game.world.block(0, 64, 4), expected);
+                    assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].food, food);
+                    assert_eq!(user.item_uses.load(SeqCst), item_calls);
+                }
+                game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
                 game.world.set(0, 64, 4, stone).unwrap();
                 game.lan_guest_packet(
                     12,
