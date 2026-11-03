@@ -738,7 +738,7 @@ impl Game<'_> {
                 if s.inputs[0].is_none() {
                     s.anvil_answer = None;
                 } else if self.remote.is_some()
-                    && !horizon_client::mod_api::mods().is_empty()
+                    && crate::mod_api::listened(crate::mod_api::HookId::AnvilUpdate)
                     && let Some(left) = s.inputs[0].clone()
                 {
                     match &s.anvil_answer {

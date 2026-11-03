@@ -804,7 +804,7 @@ impl Game<'_> {
             }
         }
         let guest = &host.hub.guests[i];
-        let listening = !horizon_client::mod_api::mods().is_empty();
+        let listening = crate::mod_api::listened(crate::mod_api::HookId::PlayerLaunchProjectile);
         for projectile in projectiles..self.creatures.projectiles.len() {
             if !listening {
                 break;
@@ -4689,7 +4689,7 @@ impl Game<'_> {
             return;
         };
         if jumps > 0
-            && !horizon_client::mod_api::mods().is_empty()
+            && crate::mod_api::listened(crate::mod_api::HookId::PlayerJump)
             && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
         {
             self.as_guest(host, conn, |game| {
