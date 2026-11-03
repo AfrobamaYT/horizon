@@ -108,8 +108,8 @@
 //!
 //! API 308 adds the time players wake at after sleeping through the night, changeable (`native_sleep_finished_time`).
 //!
-//! API 307 adds a mod item holding energy (`native_item_energy_buffer`), and the item energy helpers in
-//! `native_item_energy.rs`: `native_item_energy`, `native_item_energy_insert`, `native_item_energy_extract`.
+//! API 307 added a mod item holding energy (`native_item_energy_buffer`) and its helpers; Parts' item
+//! energy capability replaces them, and they are removed.
 //!
 //! API 306 adds A world save cycle completed (`native_world_saved`).
 //!
@@ -420,7 +420,8 @@
 //!
 //! API 148 adds a mob's or an armor stand's equipment slot taking another stack (`native_living_equipment_change`), and whether a mod listens to the mobs' (`native_living_equipment_listened`).
 //!
-//! API 147 adds a mod item as a fluid container (`native_item_fluid_tank`), and the item fluid helpers in `native_item_fluids.rs`: `native_item_fluid`, `native_item_fluid_fill`, `native_item_fluid_drain`.
+//! API 147 added a mod item as a fluid container (`native_item_fluid_tank`) and its helpers; Parts' item fluid
+//! capability (`Capabilities.Fluid.ITEM`) replaces them, and they are removed.
 //!
 //! API 146 adds entities ticking, which a mod can stop (`native_entity_tick_pre`, `native_entity_tick_post`, told while a mod sets `native_entity_tick_listened`).
 //!
@@ -850,7 +851,6 @@
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
-use super::native_item_energy::ItemEnergyBuffer;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
     execution_role::ExecutionRole,
@@ -2998,33 +2998,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_block_entity_energy(self, mod_api::mods(), block, energy);
     }
-    /// Item `item` (`mod_id:name`) is a fluid container
-    /// (`Capabilities.FluidHandler.ITEM`): set `capacity`, in millibuckets,
-    /// when the item is yours (clamped to 1..=1 000 000; vanilla's buckets
-    /// are built in and cannot be changed). Asked at each call of the item
-    /// fluid helpers (`native_item_fluid`, `native_item_fluid_fill`,
-    /// `native_item_fluid_drain`, in `native_item_fluids.rs`). What the
-    /// container holds is kept in the stack's `minecraft:custom_data`, under
-    /// `horizon_fluid`. API 147.
-    pub(super) fn native_item_fluid_tank(&self, item: &str, capacity: &mut Option<i32>) {
-        mod_api::dispatch_item_fluid_tank(self, mod_api::mods(), item, capacity);
-    }
-    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
-    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
-    /// its capacity and the most one insert and one extract move. A capacity
-    /// under 1 leaves the buffer out, and the limits are clamped to
-    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
-    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
-    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
-    /// is kept in the stack's `minecraft:custom_data`, as the int
-    /// `horizon_energy`. API 307.
-    pub(super) fn native_item_energy_buffer(
-        &self,
-        item: &str,
-        buffer: &mut Option<ItemEnergyBuffer>,
-    ) {
-        mod_api::dispatch_item_energy_buffer(self, mod_api::mods(), item, buffer);
-    }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
     /// `slots` when the item is yours, for a backpack, a storage cell or a
     /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
@@ -3736,8 +3709,8 @@ impl Game<'_> {
     /// below `container_slots` it is the block's own slot (`entity.items`),
     /// from there on the player's inventory (27 main slots, then the hotbar).
     /// `stack` is a copy of what the slot holds; take what you move out of
-    /// it (put it in `entity.items`, or in another block with
-    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// it (put it in `entity.items`, or in another block through its
+    /// `ITEMS` capability) and set `handled`: the slot then holds what is
     /// left of `stack` (whatever you wrote to that slot of `entity.items`),
     /// the game's routing is skipped, and the player's client gets the menu
     /// again. Left unhandled, `entity.items` goes back to what it held and
@@ -9597,18 +9570,6 @@ impl Game<'_> {
             .properties
             .get(key)
             .cloned()
-    }
-    /// Puts `stack` into the container at `pos` (a chest, a furnace, a mod
-    /// container) through its side `face`, as a hopper would, one by one, and
-    /// returns what did not fit: a machine's auto-output. A composter takes
-    /// one a call, and a client's copy of the world none. API 20.
-    pub(super) fn native_insert_item(
-        &mut self,
-        pos: [i32; 3],
-        face: Direction,
-        stack: ItemStack,
-    ) -> Option<ItemStack> {
-        self.insert_stack_through(pos, face, stack)
     }
     /// The window's width and height in physical pixels, independent of GUI
     /// scale; none on a server or when no window exists. API 165.
