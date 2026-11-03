@@ -1,0 +1,22 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "player_stop_sound", "side": "server",
+      "target": "horizon_client::game::native_sound_refs::Game<'_>::native_player_stop_sound",
+      "receiver": "player"
+    },
+    {
+      "name": "player_play_sound", "side": "server",
+      "target": "horizon_client::game::native_sound_refs::Game<'_>::native_player_play_sound",
+      "receiver": "player"
+    },
+    {
+      "name": "entity_play_bound_sound", "side": "server",
+      "target": "horizon_client::game::native_sound_refs::Game<'_>::native_entity_play_bound_sound",
+      "receiver": "entity"
+    }
+  ],
+  "rust_summary": "a sound to one player, stopping a player's sounds, and a sound that follows an entity (`native_player_play_sound`, `native_player_stop_sound`, `native_entity_play_bound_sound`).",
+  "doc_summary": "`player.stop_sound(host, sound, source)` (`StopSoundCommand`: `None` matches any), `player.play_sound(host, sound, source, volume, pitch)` (a sound for that player only, at their position) and `entity.play_bound_sound(host, sound, source, volume, pitch)` (`Level.playSound(null, entity, ...)`: the sound follows the entity for the players in range). Writes return false for a stale handle, a player who isn't online, or arguments the network can't carry."
+}
