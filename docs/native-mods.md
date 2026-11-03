@@ -3453,3 +3453,14 @@ The client `tooltip_color` hook changes the background and top and bottom border
 # Camera and collision reads
 
 The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
+
+`ClientHost::crosshair_target()` returns the ordinary interaction-range target as
+`NativeCrosshairTarget::Block { pos, state, hit }` or
+`NativeCrosshairTarget::Entity { id, point }`. The block hit contains its world-space
+location, face and inside flag; the entity point is also in world coordinates.
+It uses the game's current targeting ray and block/entity reach, respects blocks
+occluding entities, and returns `None` on a miss or without a client world.
+It can be read with a screen open. The entity id is a network id in the current
+world, including dragon-part ids, not a persistent handle; use the planned client
+handles for entity data. Unlike `view_hit` and `raycast`, this does not find blocks
+in distant terrain or return a block behind a targeted entity.
