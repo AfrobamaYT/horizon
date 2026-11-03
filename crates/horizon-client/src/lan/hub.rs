@@ -2669,7 +2669,6 @@ impl Hub {
             data: 0,
             meta,
             // The effect swirls go back to none.
-            forced: Vec::new(),
             defaults: vec![
                 (10, serializer::PARTICLES, Value::Particles(Vec::new())),
                 (11, serializer::BOOLEAN, Value::Bool(false)),

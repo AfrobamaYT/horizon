@@ -30,10 +30,6 @@ pub struct EntityMemory {
     pub(super) uuids: HashMap<u32, [i32; 4]>,
     /// The compound each mob or item entity was loaded with.
     pub(super) raw: HashMap<u32, Tag>,
-    /// Displays whose start delay a write set since the last tracking pass
-    /// (`Display.setTransformationInterpolationDelay` forces its send): the
-    /// tracker sends the entry again even when its value is unchanged.
-    pub(super) display_forced: HashSet<u32>,
     /// Entities of types Horizon does not simulate, kept per chunk and
     /// written back unchanged.
     unknown: HashMap<(i32, i32), Vec<Tag>>,

@@ -1011,7 +1011,6 @@ fn guests_see_each_other_and_the_world_entities() {
         data: 0,
         meta: Vec::new(),
         defaults: Vec::new(),
-        forced: Vec::new(),
         equipment: Vec::new(),
         attributes: Vec::new(),
         precise: false,

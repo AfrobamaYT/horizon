@@ -58,10 +58,6 @@ pub struct EntityState {
     /// sent when one goes back to its default (a calf grown up, a mob healed
     /// back to 1, wool grown back white) beyond Entity's own below.
     pub defaults: Vec<(u8, i32, Value)>,
-    /// Entries of `meta` to send this tick even when their value is the one
-    /// each client already holds (`SynchedEntityData.set(accessor, value,
-    /// true)`, as `Display.setTransformationInterpolationDelay` does).
-    pub forced: Vec<u8>,
     /// EquipmentSlot ordinals (0 main hand, 1 off hand, 2 feet, 3 legs,
     /// 4 chest, 5 head, 6 body, 7 saddle) and their stacks.
     pub equipment: Vec<(u8, Option<Stack>)>,
@@ -109,7 +105,6 @@ impl EntityState {
         self.data = 0;
         self.meta.clear();
         self.defaults.clear();
-        self.forced.clear();
         self.equipment.clear();
         self.attributes.clear();
         self.precise = false;
@@ -424,7 +419,7 @@ impl ServerEntity {
             self.leash = e.leash;
         }
         // SynchedEntityData.isDirty: once for every client.
-        let dirty = e.meta != self.meta || !e.forced.is_empty();
+        let dirty = e.meta != self.meta;
         let due = self.interval != 0 && self.tick.is_multiple_of(self.interval);
         if due || dirty || e.needs_sync {
             let rotation = (pack_degrees(e.pitch), pack_degrees(e.yaw));
@@ -635,15 +630,6 @@ impl ServerEntity {
                 if !e.meta.iter().any(|m| m.0 == *index) {
                     changed.push((*index, *kind, default));
                 }
-            }
-            for id in &e.forced {
-                let entry = e
-                    .meta
-                    .iter()
-                    .chain(&e.defaults)
-                    .find(|m| m.0 == *id)
-                    .filter(|m| !changed.iter().any(|c| c.0 == m.0));
-                changed.extend(entry.cloned());
             }
             if !changed.is_empty() {
                 out.push(play::Clientbound::SetEntityData(SetEntityData {
@@ -1256,7 +1242,6 @@ mod tests {
             data: 0,
             meta: Vec::new(),
             defaults: Vec::new(),
-            forced: Vec::new(),
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
@@ -1605,36 +1590,6 @@ mod tests {
                 (10, serializer::INT, Value::Int(0)),
             ]
         );
-    }
-
-    #[test]
-    fn a_forced_entry_is_sent_again_with_the_same_value() {
-        let mut e = state(0.0);
-        e.kind = "minecraft:text_display".into();
-        e.defaults = vec![(8, serializer::INT, Value::Int(0))];
-        let mut s = added(&e);
-        let sent = |s: &mut ServerEntity, e: &EntityState| {
-            changes(s, e)
-                .into_iter()
-                .filter_map(|p| match p {
-                    play::Clientbound::SetEntityData(d) => Some(d.values),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
-        // At its default, and unchanged: nothing goes out.
-        assert!(sent(&mut s, &e).is_empty());
-        e.forced = vec![8];
-        let entry = vec![(8, serializer::INT, Value::Int(0))];
-        assert_eq!(sent(&mut s, &e), vec![entry.clone()]);
-        assert_eq!(sent(&mut s, &e), vec![entry.clone()]);
-        // A set value is sent too, and an entry sent in the same pass only once.
-        e.meta = vec![(8, serializer::INT, Value::Int(-1))];
-        let entry = vec![(8, serializer::INT, Value::Int(-1))];
-        assert_eq!(sent(&mut s, &e), vec![entry.clone()]);
-        assert_eq!(sent(&mut s, &e), vec![entry]);
-        e.forced.clear();
-        assert!(sent(&mut s, &e).is_empty());
     }
 
     #[test]
