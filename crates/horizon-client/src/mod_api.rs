@@ -696,7 +696,9 @@ pub enum Flow {
     Cancel,
 }
 
-mod generated_host;
+mod generated_host {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
+}
 pub use generated_host::Host;
 
 /// Result of accessing or decoding an attachment.
@@ -788,7 +790,9 @@ pub(crate) use part_table::{
     KnownIds, capability_mod, install_parts, mark_game_thread, parts, resolve_parts,
 };
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
+}
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
