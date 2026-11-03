@@ -702,8 +702,6 @@
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
 //!
-//! API 51 adds `native_menu_button_v2`: a mod container's menu button with the clicking player's cursor stack (`clickMenuButton(Player, int)`).
-//!
 //! API 50 adds damage a mod can change or cancel (`native_living_incoming_damage`).
 //!
 //! API 49 adds, in `native_server.rs`, a sidebar and Tab list lines for one
@@ -3818,31 +3816,16 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_tooltip(self, mod_api::mods(), block, data, at, lines);
     }
-    /// A player pressed menu button `id` on the menu of the mod block entity
-    /// at `pos` (`AbstractContainerMenu.clickMenuButton`), on the server:
-    /// change `entity` when its id is yours. It is out of the world during
-    /// the call, as in `native_block_entity_tick`. API 20.
+    /// A player pressed a mod container's button (`clickMenuButton`), on
+    /// the server. The block entity is out of the world during the call;
+    /// mods may change it and the clicking player's carried stack.
     pub(super) fn native_menu_button(
         &mut self,
-        pos: [i32; 3],
+        context: &horizon_client::menu::MenuButtonContext,
         entity: &mut ModBlockEntity,
-        id: i32,
-    ) {
-        mod_api::dispatch_menu_button(self, mod_api::mods(), pos, entity, id);
-    }
-    /// `AbstractContainerMenu.clickMenuButton(Player, int)`'s other half:
-    /// the acting player's cursor stack, `getCarried()`/`setCarried()`,
-    /// which `native_menu_button` cannot reach. Fires right after it, same
-    /// moment, same `pos`/`entity`/`id`; change `carried` when its id is
-    /// yours. On the server. API 51.
-    pub(super) fn native_menu_button_v2(
-        &mut self,
-        pos: [i32; 3],
-        entity: &mut ModBlockEntity,
-        id: i32,
         carried: &mut Option<ItemStack>,
     ) {
-        mod_api::dispatch_menu_button_v2(self, mod_api::mods(), pos, entity, id, carried);
+        mod_api::dispatch_menu_button(self, mod_api::mods(), context, entity, carried);
     }
     /// A player shift-clicked slot `slot` of the menu of the mod block
     /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
@@ -10540,7 +10523,12 @@ impl Game<'_> {
     }
     /// Menu button `id` on the mod container at `pos` (`clickMenuButton`),
     /// with the acting player's cursor stack (`carried`, read and written).
-    pub(super) fn mod_menu_button(&mut self, pos: Pos, id: i32, carried: &mut Option<ItemStack>) {
+    pub(super) fn mod_menu_button(
+        &mut self,
+        context: horizon_client::menu::MenuButtonContext,
+        carried: &mut Option<ItemStack>,
+    ) {
+        let pos = (context.pos[0], context.pos[1], context.pos[2]);
         if self.mod_menu_at(pos).is_none() {
             return;
         }
@@ -10552,8 +10540,7 @@ impl Game<'_> {
         }
         let mut taken = std::mem::take(&mut **m);
         let items = taken.items.clone();
-        self.native_menu_button([pos.0, pos.1, pos.2], &mut taken, id);
-        self.native_menu_button_v2([pos.0, pos.1, pos.2], &mut taken, id, carried);
+        self.native_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
     /// The cursor from the open mod screen's top left, with its block and

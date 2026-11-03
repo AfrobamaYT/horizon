@@ -787,6 +787,8 @@
     },
     {
       "name": "menu_button",
+      "side": "server",
+      "neoforge": [],
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_button",
       "mod_api": {
@@ -1087,16 +1089,6 @@
       "mod_api": {
         "contract": "cancel",
         "out": "canceled"
-      }
-    },
-    {
-      "name": "menu_button_v2",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_button_v2",
-      "mod_api": {
-        "contract": "listen",
-        "scope": "block_entity",
-        "key": "entity"
       }
     },
     {
