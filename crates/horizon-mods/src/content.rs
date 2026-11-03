@@ -489,11 +489,7 @@ impl Content {
         declared: &[String],
     ) -> Result<Content, String> {
         let (source, sized) = if path.is_dir() {
-            let mut out = Vec::new();
-            for top in ["assets", "data"] {
-                walk(path, &path.join(top), &mut out)?;
-            }
-            (Source::Dir(path.to_owned()), out)
+            (Source::Dir(path.to_owned()), folder_files(path)?)
         } else {
             let mut zip = open_zip(path)?;
             let mut out = Vec::new();
@@ -1115,12 +1111,29 @@ fn open_zip(path: &Path) -> Result<zip::ZipArchive<std::fs::File>, String> {
 
 /// Files under `dir`, relative to `root` with `/` separators. Symbolic links
 /// are not followed: a mod folder holds its own files.
+pub(crate) fn folder_files(root: &Path) -> Result<Vec<(String, u64)>, String> {
+    let mut out = Vec::new();
+    for top in ["assets", "data"] {
+        walk(root, &root.join(top), &mut out)?;
+    }
+    Ok(out)
+}
+
 fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), String> {
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return Ok(());
-    };
-    for entry in read.flatten() {
-        let path = entry.path();
+    match std::fs::symlink_metadata(dir) {
+        Ok(m) if !m.is_dir() => {
+            return Err(format!(
+                "{}: unsupported file type in a content mod",
+                dir.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    }
+    let read = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for entry in read {
+        let path = entry.map_err(|e| e.to_string())?.path();
         let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
         if meta.is_dir() {
             walk(root, &path, out)?;
@@ -1129,6 +1142,11 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), Str
             let parts: Option<Vec<&str>> = rel.iter().map(|p| p.to_str()).collect();
             let name = parts.ok_or_else(|| format!("{} is not UTF-8", rel.display()))?;
             out.push((name.join("/"), meta.len()));
+        } else {
+            return Err(format!(
+                "{}: unsupported file type in a content mod",
+                path.display()
+            ));
         }
         if out.len() > MAX_FILES {
             return Err(format!("more than {MAX_FILES} content files"));

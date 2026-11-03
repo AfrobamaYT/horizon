@@ -181,6 +181,7 @@ impl Game<'_> {
             return false;
         }
         let frame = ItemFrame {
+            join: Default::default(),
             id: self.next_entity + 1,
             pos,
             facing: facing_of(hit.face),
