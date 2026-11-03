@@ -297,6 +297,112 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn equipping_mobs_by_hand_keeps_one_complete_stack() {
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            game.creative = false;
+            for (id, kind, item) in [
+                (12, "minecraft:horse", "minecraft:iron_horse_armor"),
+                (13, "minecraft:llama", "minecraft:red_carpet"),
+                (14, "minecraft:happy_ghast", "minecraft:red_harness"),
+                (15, "minecraft:nautilus", "minecraft:iron_nautilus_armor"),
+            ] {
+                let kind = game.res.mob_types().get(kind).unwrap().clone();
+                let mut mob = Mob::new(id, kind, Vec3::ZERO, 0.0);
+                mob.extra.tame = true;
+                let mut held = ItemStack::new(item, 3);
+                held.damage = 7;
+                held.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                game.inventory[game.selected] = Some(held.clone());
+                let index = game.mobs.len();
+                game.mobs.push(mob);
+                let used = match id {
+                    12 => game.interact_mount(index, item),
+                    13 => game.interact_llama(index, item),
+                    14 => game.interact_happy_ghast(index, item),
+                    _ => game.interact_nautilus(index, item),
+                };
+                assert!(used, "{item}");
+                assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 2);
+                held.count = 1;
+                assert_eq!(game.mobs[index].equipment_stacks()[6], Some(held), "{item}");
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sulfur_cube_absorbs_one_complete_stack_by_hand_and_pickup() {
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            game.creative = false;
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:sulfur_cube")
+                .unwrap()
+                .clone();
+            let item = kind.tempt.first().expect("a swallowable item").to_string();
+            let mut held = ItemStack::new(&item, 3);
+            held.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            game.inventory[game.selected] = Some(held.clone());
+            game.mobs.push(Mob::new(12, kind.clone(), Vec3::ZERO, 0.0));
+            assert!(game.interact_sulfur_cube(0, &item));
+            assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 2);
+            held.count = 1;
+            assert_eq!(game.mobs[0].equipment_stacks()[6], Some(held.clone()));
+            game.mobs.clear();
+            game.mobs.push(Mob::new(13, kind, Vec3::ZERO, 0.0));
+            game.spawn_item(
+                ItemStack {
+                    count: 3,
+                    ..held.clone()
+                },
+                [0.0, 0.0, 0.0],
+                [0.0; 3],
+                0,
+            );
+            game.sulfur_cube_pickups();
+            assert_eq!(game.mobs[0].equipment_stacks()[6], Some(held));
+            assert_eq!(game.dropped[0].stack.count, 2);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shearing_llama_and_happy_ghast_returns_full_body_stacks() {
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            for (id, kind, item) in [
+                (12, "minecraft:llama", "minecraft:red_carpet"),
+                (13, "minecraft:happy_ghast", "minecraft:red_harness"),
+            ] {
+                let kind = game.res.mob_types().get(kind).unwrap().clone();
+                let mut mob = Mob::new(id, kind, Vec3::ZERO, 0.0);
+                mob.extra.tame = true;
+                let mut stack = ItemStack::new(item, 3);
+                stack.damage = 7;
+                stack.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                mob.extra.set_body_stack(Some(stack.clone()));
+                let index = game.mobs.len();
+                game.mobs.push(mob);
+                let used = if item.ends_with("carpet") {
+                    game.interact_llama(index, "minecraft:shears")
+                } else {
+                    game.interact_happy_ghast(index, "minecraft:shears")
+                };
+                assert!(used);
+                assert!(game.dropped.iter().any(|drop| drop.stack == stack));
+                assert!(game.mobs[index].extra.body.is_none());
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn entities_in_returns_readable_handles_and_intersects_boxes() {
         use horizon_client::entities::ArmorStand;
         use horizon_client::mod_api::{LevelRef, NativeWorldEpoch};
