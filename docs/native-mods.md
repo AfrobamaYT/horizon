@@ -3152,9 +3152,14 @@ none, and a chunk that isn't loaded reads as the game's query does (full sky, no
 so check `is_loaded` first. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
-`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events). Whole-block writes wait for a
-later slice that creates block entities, as vanilla's `setBlock` does. The game owns
+`LevelWriteHost` adds random access, `set_block`, `native_set_block_property`, `native_play_sound` and
+`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events).
+`set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
+removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
+the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
+it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
+an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
 renderer list is installed once alongside the mod list. `render_needs` collects requests;
