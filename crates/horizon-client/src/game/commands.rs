@@ -1558,8 +1558,17 @@ impl Game<'_> {
             }
             Target::Mob(id) => {
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                    m.ai.nav.stop();
+                    if !m.extra.fall_flying {
+                        m.velocity.y = 0.0;
+                        m.on_ground = true;
+                    }
+                    m.extra.mount = None;
+                    m.extra.passenger = false;
+                    m.fall_distance = 0.0;
                     m.position = v;
                     m.previous = v;
+                    m.needs_sync = true;
                     // Entity.teleportSetPosition: setYRot, setYHeadRot, setXRot
                     // (clamped to -90..90), then setOldRot.
                     if let Some([yaw, pitch]) = rotation {
@@ -3978,5 +3987,48 @@ mod percent_f_tests {
         assert_eq!(percent_f(0.1234565, 6), "0.123457");
         assert_eq!(percent_f(-1.005, 2), "-1.01");
         assert_eq!(percent_f(3.0, 2), "3.00");
+    }
+}
+
+#[cfg(test)]
+mod teleport_mob_tests {
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::mobs::{Mob, path::Path};
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn command_stops_navigation_and_dismounts() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut mob = Mob::new(12, kind, Vec3::new(0.0, 64.0, 0.0), 0.0);
+            mob.ai.nav.path = Some(Path {
+                nodes: Vec::new(),
+                next: 0,
+                target: [1, 64, 1],
+                dist_to_target: 0.0,
+                reached: true,
+            });
+            mob.extra.mount = Some(42);
+            mob.extra.passenger = true;
+            mob.velocity = Vec3::new(1.0, -2.0, 3.0);
+            mob.fall_distance = 7.0;
+            game.mobs.push(mob);
+            game.ui.registries.permission = 4;
+            assert!(game.run_command("tp @e[type=minecraft:zombie] 10 70 10"));
+            let mob = &game.mobs[0];
+            assert_eq!(mob.position, Vec3::new(10.5, 70.0, 10.5));
+            assert!(mob.ai.nav.path.is_none());
+            assert!(mob.extra.mount.is_none());
+            assert!(!mob.extra.passenger);
+            assert_eq!(mob.fall_distance, 0.0);
+            assert_eq!(mob.velocity.y, 0.0);
+            assert!(mob.on_ground);
+        });
     }
 }
