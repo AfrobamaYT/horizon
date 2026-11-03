@@ -360,6 +360,26 @@ struct CreativeTabFile {
     items: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FluidFile {
+    sprite: Option<String>,
+    tint: Option<u32>,
+}
+
+/// How a fluid the mod names looks on the client (`data/<id>/horizon/fluid/`), as
+/// NeoForge's `IClientFluidTypeExtensions`: `getStillTexture` and `getTintColor`.
+/// The fluid needs no block, so it can be a fluid only a tank holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FluidLook {
+    /// `<mod id>:<path>`.
+    pub id: String,
+    /// An atlas sprite id (`namespace:path`); none draws a flat square of the tint.
+    pub sprite: Option<String>,
+    /// `0xAARRGGBB`.
+    pub tint: Option<u32>,
+}
+
 /// A creative inventory tab the mod adds (`data/<id>/horizon/creative_tab/`):
 /// its title, the item on its button, and its items in order. Items no mod
 /// or vanilla registers are left out when the game loads.
@@ -505,6 +525,8 @@ pub struct Content {
     pub effects: Vec<MobEffect>,
     /// Its creative inventory tabs, by id.
     pub creative_tabs: Vec<CreativeTab>,
+    /// How its fluids look, by id.
+    pub fluids: Vec<FluidLook>,
     pub entity_types: Vec<EntityType>,
     /// Block entity types declared by native code, not content files.
     pub block_entity_types: Vec<BlockEntityType>,
@@ -603,6 +625,7 @@ impl Content {
             items: Vec::new(),
             effects: Vec::new(),
             creative_tabs: Vec::new(),
+            fluids: Vec::new(),
             entity_types: Vec::new(),
             block_entity_types: Vec::new(),
             menu_types: Vec::new(),
@@ -622,6 +645,7 @@ impl Content {
             items: Vec::new(),
             effects: Vec::new(),
             creative_tabs: Vec::new(),
+            fluids: Vec::new(),
             entity_types: Vec::new(),
             block_entity_types: Vec::new(),
             menu_types: Vec::new(),
@@ -734,6 +758,7 @@ impl Content {
         let mut items = Vec::new();
         let mut effects = Vec::new();
         let mut tabs = Vec::new();
+        let mut fluids = Vec::new();
         let mut types = Vec::new();
         let mut menus = Vec::new();
         for name in &self.files {
@@ -766,13 +791,15 @@ impl Content {
                 effects.push((effect, name.clone()));
             } else if let Some(tab) = parse("creative_tab") {
                 tabs.push((tab, name.clone()));
+            } else if let Some(fluid) = parse("fluid") {
+                fluids.push((fluid, name.clone()));
             } else if let Some(kind) = parse("entity_type") {
                 types.push((kind, name.clone()));
             } else if let Some(menu) = parse("menu") {
                 menus.push((menu, name.clone()));
             } else {
                 return Err(format!(
-                    "{name}: data/{id}/horizon/ holds block/, item/, mob_effect/, creative_tab/, entity_type/ and menu/*.json only"
+                    "{name}: data/{id}/horizon/ holds block/, item/, mob_effect/, creative_tab/, fluid/, entity_type/ and menu/*.json only"
                 ));
             }
         }
@@ -875,6 +902,20 @@ impl Content {
                 title: file.title,
                 icon: file.icon,
                 items: file.items,
+            });
+        }
+        for (fluid, name) in fluids {
+            let file: FluidFile =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            if file.sprite.as_deref().is_some_and(|s| !namespaced_id(s)) {
+                return Err(format!(
+                    "{name}: sprite is an atlas sprite id (namespace:path)"
+                ));
+            }
+            self.fluids.push(FluidLook {
+                id: fluid,
+                sprite: file.sprite,
+                tint: file.tint,
             });
         }
         for (kind, name) in types {
@@ -1982,6 +2023,43 @@ capabilities = ["registries"]
     }
 
     /// A creative tab: a title, an icon and its items, all item ids.
+    #[test]
+    fn fluids_declare_a_sprite_and_a_tint() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/fluid/steam.json",
+                br#"{"sprite":"ruby:gui/fluids/steam","tint":4291343520}"#,
+            ),
+            ("data/ruby/horizon/fluid/bare.json", b"{}"),
+        ];
+        let content = hmod("fluid", MANIFEST_TEXT, files).unwrap();
+        assert_eq!(
+            content.fluids,
+            [
+                FluidLook {
+                    id: "ruby:bare".into(),
+                    sprite: None,
+                    tint: None
+                },
+                FluidLook {
+                    id: "ruby:steam".into(),
+                    sprite: Some("ruby:gui/fluids/steam".into()),
+                    tint: Some(4291343520)
+                },
+            ]
+        );
+        for sprite in [
+            &br#"{"sprite":"steam"}"#[..],
+            br#"{"sprite":"ruby:has space"}"#,
+            br#"{"sprite":"Ruby:steam"}"#,
+            br#"{"sprite":"ruby:"}"#,
+        ] {
+            let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", sprite)];
+            let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
+            assert!(e.contains("sprite"), "{e}");
+        }
+    }
+
     #[test]
     fn creative_tabs_name_their_items() {
         let tab = |json: &str| {
