@@ -8282,9 +8282,10 @@ mod living_drops_tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
         let mods: horizon_client::mod_api::Mods =
-            Arc::from(vec![
-                Box::new(Observer(seen.clone(), cancel.clone())) as Box<dyn Hooks>
-            ]);
+            Arc::from(vec![horizon_client::mod_api::ModEntry::new(
+                "living-drops-observer",
+                Box::new(Observer(seen.clone(), cancel.clone())),
+            )]);
         horizon_client::mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 game.load_server_loot();
