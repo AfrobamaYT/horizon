@@ -2722,6 +2722,34 @@ impl Game<'_> {
         );
     }
 
+    /// Before this window's player's first-person `left` or right arm is
+    /// drawn (`RenderArmEvent`, in `renderPlayerArm` and `renderMapHand`):
+    /// the empty main hand's arm, and the arms under a held map, never while
+    /// the player is invisible. `player` and `player_entity_id` are the
+    /// local player's UUID and entity id. `draw`'s pose stack starts at the
+    /// arm model's origin, in blocks, posed as vanilla's arm is (with any
+    /// `native_render_hand_pose`), lit with the light at the eyes; add
+    /// geometry with `native_draw_cube`, `native_draw_quad`, `native_draw_block`
+    /// and `native_draw_item`. Set `canceled` to leave out vanilla's arm;
+    /// what the mods drew stays. Client-side. API @API:render_arm@.
+    pub(super) fn native_render_arm(
+        &self,
+        player: u128,
+        player_entity_id: i32,
+        left: bool,
+        draw: &mut BlockEntityDraw,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_render_arm(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            left,
+            draw,
+            canceled,
+        );
+    }
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
     /// API @API:render_hand_pose@.
@@ -6979,12 +7007,16 @@ impl Game<'_> {
     }
     /// A player was saved to the world's store (NeoForge's
     /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
-    /// world closes, when the dedicated server saves everyone, and for an
-    /// integrated server's owner when the world saves them. LAN guests are
-    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// world closes, when a dedicated or integrated server saves its guests,
+    /// and for an integrated server's owner when the world saves them.
+    /// Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     pub(super) fn native_player_save_to_file(
         &mut self,
         player: u128,

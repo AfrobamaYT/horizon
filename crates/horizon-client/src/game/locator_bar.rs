@@ -57,7 +57,7 @@ impl Game<'_> {
         start != 0 && start + 100 > self.ticks
     }
     /// The local player's UUID, as servers know it.
-    fn own_uuid(&self) -> u128 {
+    pub(super) fn own_uuid(&self) -> u128 {
         match &self.remote {
             Some(r) => r.profile(),
             None => self.level.player_uuid.map_or(0, uuid),

@@ -1427,10 +1427,11 @@ impl Game<'_> {
     ) {
         self.guest_attachments_into(guest);
         if guest.placed {
+            let _ = self.finish_player_autosaves(true);
             if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
                 playerdata::save_owner(guest, &mut self.level, &self.world_root);
             } else {
-                playerdata::save(guest, &self.world_root);
+                self.player_autosaves.save_after(guest, &self.world_root);
             }
             let directory = playerdata::directory(&self.world_root);
             self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
@@ -2472,6 +2473,7 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
+            // Ready.spawn uses the world spawn's yaw and pitch.
             [g.yaw, g.pitch] = self.level.world_spawn_angle;
             g.head_yaw = g.yaw;
             g.health = 20.0;
@@ -2548,7 +2550,17 @@ impl Game<'_> {
                     // sound (2019, 2020).
                     let except = if matches!(
                         *id,
-                        2015 | 1503 | 1505 | 1029 | 1030 | 1045 | 1052 | 2019 | 2020 | 3000 | 3008
+                        2015 | 1501
+                            | 1503
+                            | 1505
+                            | 1029
+                            | 1030
+                            | 1045
+                            | 1052
+                            | 2019
+                            | 2020
+                            | 3000
+                            | 3008
                     ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
                     {
                         None
