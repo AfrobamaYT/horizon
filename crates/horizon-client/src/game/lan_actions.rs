@@ -4540,6 +4540,21 @@ impl Game<'_> {
                         host.hub.sound(name, at, volume, pitch, source, Some(conn));
                     }
                 }
+                // Player.causeFallDamage, mayfly: the mods hear the landing.
+                MotionEvent::Fall(horizon_client::landing::FallEvent::FlyableFall {
+                    distance,
+                    multiplier,
+                }) => {
+                    if let Some((uuid, id, name)) = host
+                        .hub
+                        .guest(conn)
+                        .map(|g| (g.uuid, g.entity_id, g.name.clone()))
+                    {
+                        self.as_guest(host, conn, |game| {
+                            game.native_player_flyable_fall(uuid, id, &name, distance, multiplier);
+                        });
+                    }
+                }
                 MotionEvent::Fall(event) => self.landing_block_updates(&event),
                 // PowderSnowBlock.entityInside: every player around sees the
                 // snowflake (`ServerLevel.sendParticles`).

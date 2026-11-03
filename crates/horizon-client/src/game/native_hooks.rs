@@ -906,6 +906,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
+    mod_api::NativePermissionLevel,
     mod_list::{self, Installed, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
@@ -4773,6 +4774,57 @@ impl Game<'_> {
             pos,
             cause,
             cancel,
+        );
+    }
+    /// NeoForge's `PermissionsChangedEvent`: the operator list is about to give player
+    /// `player` (`name`) the permission level `new` in place of `old`, through `PlayerList.op`
+    /// (`/op`, the console's `op`, the management API's `operators/add` and `operators/set`)
+    /// or `PlayerList.deop` (`/deop` and the same on the console and the management API;
+    /// `new` is then `All`). Set `cancel` and the list keeps the old level. The player need
+    /// not be online: `player_entity_id` is their server entity id when they are. Clearing
+    /// the list (`operators/clear`) is not a call to either, as in vanilla. Dedicated
+    /// servers only; a single-player world has no operator list. Server-side.
+    pub(super) fn native_permissions_changed(
+        &mut self,
+        player: u128,
+        player_entity_id: Option<i32>,
+        name: &str,
+        old: NativePermissionLevel,
+        new: NativePermissionLevel,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_permissions_changed(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            old,
+            new,
+            cancel,
+        );
+    }
+    /// NeoForge's `PlayerFlyableFallEvent`: server player `player` (`name`) landed after
+    /// falling `distance` blocks at damage multiplier `multiplier` while allowed to fly (a
+    /// creative or spectator player walking), so `Player.causeFallDamage` returned early
+    /// and nothing was hurt. Listen only. Once for each landing, after the fall's
+    /// block reaction. The player's state is swapped in. Server-side. It fires once per landing, not per tick.
+    pub(super) fn native_player_flyable_fall(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        distance: f64,
+        multiplier: f32,
+    ) {
+        mod_api::dispatch_player_flyable_fall(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            distance,
+            multiplier,
         );
     }
     /// A server player is about to travel through a Nether portal, End portal

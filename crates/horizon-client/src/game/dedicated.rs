@@ -10,6 +10,7 @@ use super::{Game, Options, lan::LanSettings, world_loading::WorldRequest};
 use horizon_client::{
     Result,
     lan::{LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig},
+    mod_api::NativePermissionLevel,
     server::{
         eula, profiles,
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
@@ -1328,6 +1329,32 @@ impl Game<'_> {
         self.resend_commands_filtered();
     }
 
+    /// The mods' say on `user` getting the permission level `new` (0 for `deop`) in the
+    /// operator list: true when one canceled it. The old level is the entry's, else 0.
+    pub(super) fn permission_change(
+        &mut self,
+        lists: &Arc<Mutex<Lists>>,
+        user: &NameAndId,
+        new: i32,
+    ) -> bool {
+        let old = lists.lock().unwrap().ops.get(user).map_or(0, |e| e.level);
+        let entity = self
+            .lan
+            .as_ref()
+            .and_then(|h| h.hub.guests.iter().find(|g| g.uuid == user.id))
+            .map(|g| g.entity_id);
+        let mut cancel = false;
+        self.native_permissions_changed(
+            user.id,
+            entity,
+            &user.name,
+            NativePermissionLevel::from_level(old),
+            NativePermissionLevel::from_level(new),
+            &mut cancel,
+        );
+        cancel
+    }
+
     /// A player on the server, by name.
     pub(super) fn online_player(&self, name: &str) -> Option<NameAndId> {
         let hub = &self.lan.as_ref()?.hub;
@@ -1516,7 +1543,13 @@ impl Game<'_> {
                     return;
                 };
                 let level = state.op_level;
-                let changed = {
+                let known = state.lists.lock().unwrap().ops.contains(&user);
+                let canceled = if command == "op" {
+                    !known && self.permission_change(&state.lists, &user, level)
+                } else {
+                    known && self.permission_change(&state.lists, &user, 0)
+                };
+                let changed = !canceled && {
                     let mut l = state.lists.lock().unwrap();
                     if command == "op" {
                         if l.ops.contains(&user) {
