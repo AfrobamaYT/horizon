@@ -2775,16 +2775,6 @@
       }
     },
     {
-      "name": "entity_transform",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_transform",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "entity_unleash",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_unleash",

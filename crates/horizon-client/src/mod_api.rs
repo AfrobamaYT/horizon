@@ -1238,6 +1238,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn conversion_post_reports_both_entities_once() {
+        struct Observer(Arc<Mutex<Vec<(u32, String, u32, String)>>>);
+        impl Hooks for Observer {
+            fn living_conversion_post(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut LivingConversionPostEvent<'_>,
+            ) {
+                self.0.lock().unwrap().push((
+                    event.entity,
+                    event.kind.to_owned(),
+                    event.converted,
+                    event.converted_kind.to_owned(),
+                ));
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        dispatch_living_conversion_post(
+            &mut host,
+            &mods,
+            12,
+            "minecraft:pig",
+            13,
+            "minecraft:zombified_piglin",
+        );
+        assert_eq!(
+            *observed.lock().unwrap(),
+            [(
+                12,
+                "minecraft:pig".into(),
+                13,
+                "minecraft:zombified_piglin".into()
+            )]
+        );
+    }
+
     struct MorePhantoms;
 
     impl Hooks for MorePhantoms {

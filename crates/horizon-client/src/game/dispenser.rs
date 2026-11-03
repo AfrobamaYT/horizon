@@ -1845,7 +1845,6 @@ impl Game<'_> {
         self.mobs[index].removed = true;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
-        self.native_entity_transform(old_id, &old_kind, id, kind);
         self.native_living_conversion_post(old_id, &old_kind, id, kind);
         Some(id)
     }

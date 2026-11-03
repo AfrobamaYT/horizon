@@ -680,7 +680,6 @@ impl Game<'_> {
             .kind
             .id
             .clone();
-        self.native_entity_transform(from.id, &from.kind.id, id, &transformed_kind);
         self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
         Some(id)
     }
