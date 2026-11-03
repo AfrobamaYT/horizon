@@ -83,11 +83,7 @@ impl Game<'_> {
     /// unknown or absent attribute, an unavailable entity, or on a client.
     /// Mobs, armor stands and the dragon return None until they have live
     /// attribute maps.
-    pub(super) fn native_living_attribute_value(
-        &self,
-        living: LivingRef,
-        id: &str,
-    ) -> Option<f64> {
+    pub(super) fn native_living_attribute_value(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(
             living,
             id,
@@ -97,11 +93,7 @@ impl Game<'_> {
 
     /// The base value of an attribute, before modifiers. Mobs, armor stands
     /// and the dragon return None until they have live attribute maps.
-    pub(super) fn native_living_attribute_base(
-        &self,
-        living: LivingRef,
-        id: &str,
-    ) -> Option<f64> {
+    pub(super) fn native_living_attribute_base(&self, living: LivingRef, id: &str) -> Option<f64> {
         self.native_living_attribute(living, id, horizon_world::attribute_map::ValueKind::Base)
     }
 
@@ -342,15 +334,44 @@ mod tests {
             let key = attributes.key("minecraft:max_health").unwrap();
             let instance = attributes.get_instance(Some(key.clone())).unwrap().unwrap();
             assert_eq!(attributes.instance(&instance).unwrap().value(), 20.0);
-            attributes.edit(&instance, |a, o| a.add_transient(Modifier::new("test:bonus", 5.0, Operation::AddValue).unwrap(), o)).unwrap();
+            attributes
+                .edit(&instance, |a, o| {
+                    a.add_transient(
+                        Modifier::new("test:bonus", 5.0, Operation::AddValue).unwrap(),
+                        o,
+                    )
+                })
+                .unwrap();
             assert_eq!(attributes.cached_value(Some(&key)).unwrap(), 20.0);
             let host: &dyn Host = game;
-            assert_eq!(living.attribute_base(host, "minecraft:max_health"), Some(20.0));
-            assert_eq!(game.player.as_ref().unwrap().attributes.cached_value(Some(&key)).unwrap(), 20.0);
-            assert_eq!(living.attribute_value(host, "minecraft:max_health"), Some(25.0));
+            assert_eq!(
+                living.attribute_base(host, "minecraft:max_health"),
+                Some(20.0)
+            );
+            assert_eq!(
+                game.player
+                    .as_ref()
+                    .unwrap()
+                    .attributes
+                    .cached_value(Some(&key))
+                    .unwrap(),
+                20.0
+            );
+            assert_eq!(
+                living.attribute_value(host, "minecraft:max_health"),
+                Some(25.0)
+            );
             assert_eq!(living.max_health(host), Some(25.0));
             assert_eq!(living.attribute_value(host, "missing:attribute"), None);
-            assert_eq!(game.player.as_ref().unwrap().attributes.cached_value(Some(&key)).unwrap(), 25.0);
+            assert_eq!(
+                game.player
+                    .as_ref()
+                    .unwrap()
+                    .attributes
+                    .cached_value(Some(&key))
+                    .unwrap(),
+                25.0
+            );
         });
     }
 
