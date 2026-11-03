@@ -194,16 +194,25 @@ impl Game<'_> {
     }
     /// `Mob.dropPreservedEquipment`: the guaranteed drops in `EquipmentSlot`
     /// order, the carried stack (main hand) then the antenna flower (saddle),
-    /// each `spawnAtLocation` at the golem's feet.
-    pub(super) fn golem_drop_equipment(&mut self, m: &mut Mob) {
-        let at = m.position;
+    /// taken off the golem.
+    pub(super) fn golem_preserved_equipment(m: &mut Mob) -> Vec<ItemStack> {
+        let mut stacks = Vec::new();
         if let Some(stack) = held(m).cloned() {
             set_held(m, None);
-            self.spawn_at_location(at, 0.0, stack);
+            stacks.push(stack);
         }
         if let Some(antenna) = m.saddle_item() {
             m.set_saddle(None);
-            self.spawn_at_location(at, 0.0, antenna);
+            stacks.push(antenna);
+        }
+        stacks
+    }
+    /// `golem_preserved_equipment`, each `spawnAtLocation` at the golem's feet
+    /// (a golem turning into a statue).
+    pub(super) fn golem_drop_equipment(&mut self, m: &mut Mob) {
+        let at = m.position;
+        for stack in Self::golem_preserved_equipment(m) {
+            self.spawn_at_location(at, 0.0, stack);
         }
     }
     // ---- interactions -----------------------------------------------------
