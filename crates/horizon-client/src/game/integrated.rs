@@ -835,11 +835,11 @@ impl Game<'_> {
         if let Some(s) = self.serving.take() {
             s.flags.published.store(0, Ordering::Relaxed);
         }
-        if let Some(mut host) = self.lan.take() {
-            self.flush_native_net(&mut host);
-            // PlayerList.removeAll: the owner and every guest leave the game.
-            self.award_leave_game_to_all(&mut host);
-            self.save_leaving_guests(&mut host);
+        self.flush_native_net();
+        // PlayerList.removeAll: the owner and every guest leave the game.
+        self.award_leave_game_to_all();
+        self.save_leaving_guests();
+        if let Some(host) = self.lan.as_mut() {
             let conns: Vec<u32> = host.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {
                 host.hub.kick(
@@ -848,7 +848,6 @@ impl Game<'_> {
                 );
             }
             let has_remote_guests = host.hub.guests.iter().any(|g| g.conn != 0);
-            self.lan = Some(host);
             if has_remote_guests {
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -927,15 +926,15 @@ impl Game<'_> {
                     out.push(line.plain());
                     if let Some(host) = self.lan.as_ref() {
                         host.hub.send_to(
-                        conn,
-                        &horizon_protocol::packets::play::Clientbound::SystemChat(
-                            horizon_protocol::packets::play::SystemChat {
-                                content: horizon_client::lan::data::component_nbt(
-                                    &line.component(),
-                                ),
-                                overlay: false,
-                            },
-                        ),
+                            conn,
+                            &horizon_protocol::packets::play::Clientbound::SystemChat(
+                                horizon_protocol::packets::play::SystemChat {
+                                    content: horizon_client::lan::data::component_nbt(
+                                        &line.component(),
+                                    ),
+                                    overlay: false,
+                                },
+                            ),
                         );
                     }
                 }

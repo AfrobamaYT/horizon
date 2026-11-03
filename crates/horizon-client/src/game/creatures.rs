@@ -1374,7 +1374,8 @@ impl Game<'_> {
             // A guest's kill is theirs: their statistics, scores and
             // advancements (LivingEntity.die credits lastHurtByPlayer).
             let guest = killer.flatten().filter(|_| self.lan_acting.is_none());
-            let credited = guest.is_some_and(|conn| self.as_guest(conn, |g| g.credit_kill(m)).is_some());
+            let credited =
+                guest.is_some_and(|conn| self.as_guest(conn, |g| g.credit_kill(m)).is_some());
             if !credited {
                 self.credit_kill(m);
             }
@@ -1499,7 +1500,7 @@ impl Game<'_> {
             e
         };
         if let Some(conn) = guest.filter(|_| self.lan_acting.is_none())
-            && let Some(entity) = self.as_guest(conn, own)
+            && let Some(entity) = self.as_guest(conn, |g| own(g))
         {
             return entity;
         }
@@ -1527,7 +1528,7 @@ impl Game<'_> {
     }
     fn killer_uuid(&mut self, conn: Option<u32>) -> Option<u128> {
         match conn {
-            // During that guest's own turn, the hub is out of `lan`.
+            // During that guest's own turn, the player in place has their UUID.
             Some(conn) if self.lan_acting != Some(conn) => {
                 Some(self.lan.as_ref()?.hub.guest(conn)?.uuid)
             }
@@ -1923,14 +1924,7 @@ impl Game<'_> {
             let bubble_options = ParticleOptions::simple(ParticleType::Bubble);
             self.particles
                 .send_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1);
-            self.lan_level_particles(
-                &bubble_options,
-                bubble,
-                [0.0, 0.01, 0.0],
-                0.2,
-                1,
-                None,
-            );
+            self.lan_level_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1, None);
         }
     }
     /// A mob's projectile enters the level.
@@ -3184,11 +3178,7 @@ impl Game<'_> {
     /// it is bound to in `bindings` (game/lan_mobs.rs), else the host's
     /// player, so only the mobs whose binding is `conn` (`None` for the
     /// host's player) hear it.
-    pub(super) fn tell_neutral_mobs_player_died(
-        &mut self,
-        feet: [f64; 3],
-        conn: Option<u32>,
-    ) {
+    pub(super) fn tell_neutral_mobs_player_died(&mut self, feet: [f64; 3], conn: Option<u32>) {
         // A client of someone else's world has the server's mobs only to show.
         if self.remote.is_some() || !self.ui.rules.bool("forgive_dead_players") {
             return;
@@ -3199,7 +3189,9 @@ impl Game<'_> {
             Vec3::new(block[0] + 1.0, block[1] + 1.0, block[2] + 1.0),
         )
         .inflate(Vec3::new(32.0, 10.0, 32.0));
-        let Some(host) = self.lan.as_ref() else { return };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         for m in self.mobs.iter_mut() {
             if host.mob_players.get(&m.id).copied() == conn && m.bounds().intersects(area) {
                 horizon_client::mobs::ai::forgive_dead_player(m);
@@ -4184,9 +4176,11 @@ impl Game<'_> {
         }
         for (owner, guest, at) in shoot_events {
             if let Some(conn) = guest.filter(|conn| self.lan_acting != Some(*conn)) {
-                let dispatched = self.as_guest(conn, |g| {
-                    g.projectile_event("minecraft:projectile_shoot", owner, at);
-                }).is_some();
+                let dispatched = self
+                    .as_guest(conn, |g| {
+                        g.projectile_event("minecraft:projectile_shoot", owner, at);
+                    })
+                    .is_some();
                 // An owner who left cannot resolve to the host. The event
                 // still occurs, with no resolved owner (Projectile.getOwner).
                 if !dispatched {

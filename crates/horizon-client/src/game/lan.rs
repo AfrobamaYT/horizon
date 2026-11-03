@@ -198,14 +198,8 @@ impl Game<'_> {
     /// `PlayerList.remove`: `player.awardStat(Stats.LEAVE_GAME)` before the
     /// player is saved, heard by native mods first. Once per guest, however
     /// often they are saved.
-    pub(super) fn award_leave_game(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        player: u128,
-        name: &str,
-    ) {
-        let Some(play) = host.play.get_mut(&conn) else {
+    pub(super) fn award_leave_game(&mut self, conn: u32, player: u128, name: &str) {
+        let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) else {
             return;
         };
         if std::mem::replace(&mut play.left_game, true) {
@@ -220,13 +214,16 @@ impl Game<'_> {
             1,
             &mut cancel,
         );
-        if !cancel && let Some(play) = host.play.get_mut(&conn) {
+        if !cancel && let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
             play.stats.custom("leave_game", 1);
         }
     }
 
     /// `PlayerList.removeAll`: every player who joined leaves with the world.
-    pub(super) fn award_leave_game_to_all(&mut self, host: &mut LanHost) {
+    pub(super) fn award_leave_game_to_all(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let players: Vec<(u32, u128, String)> = host
             .hub
             .guests
@@ -235,7 +232,7 @@ impl Game<'_> {
             .map(|g| (g.conn, g.uuid, g.name.clone()))
             .collect();
         for (conn, player, name) in players {
-            self.award_leave_game(host, conn, player, &name);
+            self.award_leave_game(conn, player, &name);
         }
     }
 }
@@ -1363,11 +1360,14 @@ impl Game<'_> {
         }
         self.friends_lan_closed();
         self.native_players_leaving();
+        if self.lan.is_none() {
+            return;
+        }
+        self.award_leave_game_to_all();
+        self.save_leaving_guests();
         let Some(mut host) = self.lan.take() else {
             return;
         };
-        self.award_leave_game_to_all(&mut host);
-        self.save_leaving_guests(&mut host);
         host.hub.disconnect_all();
         // Give the writer threads a moment to flush the disconnect packets.
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1389,7 +1389,10 @@ impl Game<'_> {
 
     /// `PlayerList.removeAll`: every guest leaves in turn, the vehicle it
     /// alone rides with it (`PlayerList.remove`), and is saved.
-    pub(super) fn save_leaving_guests(&mut self, host: &mut LanHost) {
+    pub(super) fn save_leaving_guests(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         // Every open menu closes first, in its guest's level
         // (`ServerPlayer.disconnect` -> `doCloseContainer`), so the cursor,
         // the trade and the inputs are back in the file that is saved.
@@ -1402,17 +1405,27 @@ impl Game<'_> {
             .map(|g| (g.conn, super::Dim::from_id(&g.dimension)))
             .collect();
         for (conn, dim) in open {
-            if self.enter_level(Some(host), dim).is_ok() {
-                self.guest_close_all(host, conn);
+            if self.enter_level(dim).is_ok() {
+                self.guest_close_all(conn);
             }
         }
-        if let Err(e) = self.enter_level(Some(host), back) {
+        if let Err(e) = self.enter_level(back) {
             log::error!("could not reopen {}: {e}", back.id());
         }
-        for i in 0..host.hub.guests.len() {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        let count = host.hub.guests.len();
+        for i in 0..count {
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             let mut g = host.hub.guests.remove(i);
-            self.take_parent_vehicle(host, &mut g);
-            self.save_guest(host, &mut g);
+            self.take_parent_vehicle(&mut g);
+            self.save_guest(&mut g);
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             host.hub.guests.insert(i, g);
         }
     }
@@ -1420,15 +1433,16 @@ impl Game<'_> {
     /// `take_parent_vehicle`, `PlayerList.save`): an integrated server's owner
     /// into the level (`/data`) and both its files (`playerdata::save_owner`),
     /// anyone else into their own file.
-    pub(super) fn save_guest(
-        &mut self,
-        host: &LanHost,
-        guest: &mut horizon_client::lan::guest::Guest,
-    ) {
-        self.guest_attachments_into(guest);
+    pub(super) fn save_guest(&mut self, guest: &mut horizon_client::lan::guest::Guest) {
+        Self::guest_attachments_into(&self.guest_attachments, guest);
         if guest.placed {
             let _ = self.finish_player_autosaves(true);
-            if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
+            if self
+                .lan
+                .as_ref()
+                .and_then(|host| host.owner.as_ref())
+                .is_some_and(|o| o.uuid == guest.uuid)
+            {
                 playerdata::save_owner(guest, &mut self.level, &self.world_root);
             } else {
                 self.player_autosaves.save_after(guest, &self.world_root);
@@ -1436,7 +1450,9 @@ impl Game<'_> {
             let directory = playerdata::directory(&self.world_root);
             self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
         }
-        self.save_guest_records(host, guest);
+        if let Some(host) = self.lan.as_ref() {
+            self.save_guest_records(host, guest);
+        }
     }
     /// The vehicles the other players in level `dim` ride, all but the
     /// guest `but` (`Entity.hasExactlyOnePlayerPassenger`); `host` adds the
@@ -1463,7 +1479,6 @@ impl Game<'_> {
     /// leaves the world with the player (`PlayerList.remove`).
     fn parent_vehicle_in(
         &mut self,
-        mut host: Option<&mut LanHost>,
         dim: &str,
         vehicle: Option<u32>,
         others: &[u32],
@@ -1473,7 +1488,7 @@ impl Game<'_> {
         let back = self.dim;
         let theirs = super::Dim::from_id(dim);
         if theirs != back
-            && let Err(e) = self.enter_level(host.as_deref_mut(), theirs)
+            && let Err(e) = self.enter_level(theirs)
         {
             log::error!("could not open {}: {e}", theirs.id());
             return None;
@@ -1487,7 +1502,7 @@ impl Game<'_> {
             self.remove_vehicle_tree(*root);
         }
         if self.dim != back
-            && let Err(e) = self.enter_level(host, back)
+            && let Err(e) = self.enter_level(back)
         {
             log::error!("could not reopen {}: {e}", back.id());
         }
@@ -1497,20 +1512,19 @@ impl Game<'_> {
     /// vehicle it alone rides (`saveParentVehicle`'s RootVehicle, kept in
     /// `saved` as a file not yet ridden again), the vehicle tree leaves the
     /// world, and the guest stops riding (`unRide`).
-    pub(super) fn take_parent_vehicle(
-        &mut self,
-        host: &mut LanHost,
-        guest: &mut horizon_client::lan::guest::Guest,
-    ) {
+    pub(super) fn take_parent_vehicle(&mut self, guest: &mut horizon_client::lan::guest::Guest) {
         let Some(vehicle) = guest.vehicle.take() else {
             return;
         };
         if !guest.placed {
             return;
         }
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let others = self.ridden_by_others(&host.hub.guests, &guest.dimension, None, true);
         let Some((tag, attach)) =
-            self.parent_vehicle_in(Some(host), &guest.dimension, Some(vehicle), &others, true)
+            self.parent_vehicle_in(&guest.dimension, Some(vehicle), &others, true)
         else {
             return;
         };
@@ -1524,7 +1538,10 @@ impl Game<'_> {
     }
     /// `ServerPlayer.loadAndSpawnParentVehicle`: a guest whose file names the
     /// vehicle it rode rides it again, once the vehicle is in the world.
-    fn restore_guest_vehicles(&mut self, host: &mut LanHost) {
+    fn restore_guest_vehicles(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let waiting: Vec<(usize, [i32; 4])> = host
             .hub
             .guests
@@ -1544,9 +1561,15 @@ impl Game<'_> {
             })
             .collect();
         for (i, uuid) in waiting {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let raw = host.hub.guests[i].saved.clone();
             let Some(id) = self.restore_saved_vehicle(uuid, raw.as_ref()) else {
                 continue;
+            };
+            let Some(host) = self.lan.as_mut() else {
+                return;
             };
             host.hub.seat_order += 1;
             let order = host.hub.seat_order;
@@ -1640,7 +1663,7 @@ impl Game<'_> {
         })?;
         // The vehicle the owner rides (`ServerPlayer.saveParentVehicle`).
         let vehicle = self
-            .parent_vehicle_in(None, &dim, riding, &others, false)
+            .parent_vehicle_in(&dim, riding, &others, false)
             .map(|(tag, _)| tag);
         let host = self.lan.as_ref()?;
         let mut stored = None;
@@ -1705,16 +1728,13 @@ impl Game<'_> {
     /// The entities guests track: mobs, items and the rest (game/lan_entities.rs).
     /// `mob_players` is the guest each mob sees as its player (game/lan_mobs.rs).
     /// Only the entities whose id is above `after` (0: all of them).
-    fn lan_entities(
-        &mut self,
-        mob_players: &horizon_client::fast_hash::FxHashMap<u32, u32>,
-        hub: &mut Hub,
-        out: &mut States,
-        drain_minecart_steps: bool,
-        after: u32,
-    ) {
+    fn lan_entities(&mut self, out: &mut States, drain_minecart_steps: bool, after: u32) {
         out.clear();
         for m in self.mobs.iter().filter(|m| !m.removed && m.id > after) {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
+            let (mob_players, hub) = (&host.mob_players, &host.hub);
             // The lead's holder: the player the mob sees, another mob or a
             // fence knot (game/lan_entities.rs).
             let player_entity = mob_players
@@ -1751,12 +1771,18 @@ impl Game<'_> {
             e.precise = m.species() == horizon_client::mobs::Species::HappyGhast
                 && horizon_client::mobs::happy_ghast::on_still_timeout(m);
             mob_freeze_meta(m, &mut e.meta, &mut e.defaults);
-            mob_equipment(m, hub, &mut e.equipment);
             self.mob_attributes(m, &mut e.attributes);
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
+            mob_equipment(m, &mut host.hub, &mut e.equipment);
             e.leash = leash;
         }
         for d in self.dropped.iter().filter(|d| d.id > after) {
-            let stack = hub.stack(&Some(d.stack.clone()));
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
+            let stack = host.hub.stack(&Some(d.stack.clone()));
             let e = out.add(d.id as i32, entity_uuid(d.id), "minecraft:item");
             e.position = [d.position.x, d.position.y, d.position.z];
             e.on_ground = d.on_ground;
@@ -1783,7 +1809,7 @@ impl Game<'_> {
             e.meta
                 .push((8, serializer::INT, Value::Int(o.value as i32)));
         }
-        self.lan_object_states(hub, out, drain_minecart_steps, after);
+        self.lan_object_states(out, drain_minecart_steps, after);
     }
 
     /// Apply gameplay events produced while the hub handles guest packets.
@@ -2120,7 +2146,7 @@ impl Game<'_> {
         if self.level_pass.packets_drained {
             return;
         }
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
         let holding = lan::Holding::start();
@@ -2130,6 +2156,9 @@ impl Game<'_> {
         let spawn = self.spawn.map_or([0.5, 80.0, 0.5], |s| [s.x, s.y, s.z]);
         let events = {
             let clock_rate = self.network_clock_rate();
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             let mut ctx = TickCtx {
                 world: &mut self.world,
                 entities: entities.as_slice(),
@@ -2159,38 +2188,30 @@ impl Game<'_> {
             events.extend(host.hub.drain_packets(&mut ctx));
             events
         };
-        let Some(back) = self.lan_process_events(host, events, entities.as_slice(), spawn) else {
+        self.lan_process_events(events, entities.as_slice(), spawn);
+        if self.lan.as_ref().is_some_and(|host| !host.quiet.is_empty()) {
+            self.run_quiet_commands();
+        }
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.native_advancement_grants.is_empty())
+        {
+            self.run_native_advancement_grants();
+        }
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.native_menu_events.is_empty())
+        {
+            self.run_native_menu_events();
+        }
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
-        host = back;
-        if !host.quiet.is_empty() {
-            self.lan = Some(host);
-            self.run_quiet_commands();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the quiet commands");
-        }
-        if !host.hub.native_advancement_grants.is_empty() {
-            self.lan = Some(host);
-            self.run_native_advancement_grants();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the advancement grants");
-        }
-        if !host.hub.native_menu_events.is_empty() {
-            self.lan = Some(host);
-            self.run_native_menu_events();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the menu events");
-        }
         host.states = entities;
         self.level_pass.packets_drained = true;
         drop(holding);
-        self.lan = Some(host);
     }
 
     /// The entity id counter, once the entities Horizon keeps without one
@@ -2241,7 +2262,7 @@ impl Game<'_> {
     /// described (their ids are above the counter the states were taken at),
     /// and nothing when the counter has not moved or no guest is in the level.
     pub(super) fn lan_note_joined(&mut self) {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
         if let Some(next) = host.states_next_entity.take()
@@ -2250,13 +2271,14 @@ impl Game<'_> {
             self.lan_assign_ids();
             if self.next_entity != next {
                 let mut states = States::default();
-                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, false, next);
-                self.lan_hook_states(&host.play, &host.hub, &mut states);
+                self.lan_entities(&mut states, false, next);
+                self.lan_hook_states(&mut states);
                 self.lan_entity_uuids(&mut states);
-                host.hub.note_joined(states.as_slice());
+                if let Some(host) = self.lan.as_mut() {
+                    host.hub.note_joined(states.as_slice());
+                }
             }
         }
-        self.lan = Some(host);
     }
 
     /// Run the hub for this tick and apply what the guests did. While the
@@ -2269,25 +2291,28 @@ impl Game<'_> {
         if !paused {
             self.tick_lan_packets();
         }
-        let Some(mut host) = self.lan.take() else {
+        if self.lan.is_none() {
             if self.level_pass.running.is_none() {
                 self.level_pass.packets_drained = false;
             }
             return;
-        };
+        }
         // What the tick sends a guest goes to its connection at the end.
         let holding = lan::Holding::start();
-        self.register_native_commands(&mut host);
+        self.register_native_commands();
         // The host's own commands' (and command blocks') players moving
         // to another level, and their broadcastToAdmins lines.
         if !self.level_teleports.is_empty() {
-            self.run_level_teleports(&mut host);
+            self.run_level_teleports();
         }
         if !self.admin_feedback.is_empty() {
-            self.send_admin_feedback(&mut host, None);
+            self.send_admin_feedback(None);
         }
         // An animal whose rider left the game (or the level) stops taking
         // its input.
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         for m in &mut self.mobs {
             if m.rider.is_some()
                 && self.riding != Some(m.id)
@@ -2297,33 +2322,53 @@ impl Game<'_> {
             }
         }
         // A guest whose file names the vehicle it rode rides it again.
-        self.restore_guest_vehicles(&mut host);
+        self.restore_guest_vehicles();
         // Finish the players' mining, item use and pickups before describing
         // this tick to their clients. Otherwise a newly broken block and its
         // drops remain absent from the snapshot until the following tick.
         if !paused {
-            self.tick_guests(&mut host);
+            self.tick_guests();
             // The vehicles the guests just moved enter their portals now.
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let ridden: Vec<u32> = host.hub.guests.iter().filter_map(|g| g.vehicle).collect();
             self.find_ridden_vehicle_portals(&ridden);
         }
         {
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             let has_guests = !host.hub.guests.is_empty();
             let mut states = std::mem::take(&mut host.states);
             if has_guests {
                 self.lan_assign_ids();
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
                 let guests: Vec<(u32, i32)> = host
                     .hub
                     .guests
                     .iter()
                     .filter_map(|g| Some((g.vehicle?, g.entity_id)))
                     .collect();
-                self.lan_riding(&guests, &mut host.hub.riding);
-                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true, 0);
-                self.lan_hook_states(&host.play, &host.hub, &mut states);
+                let mut riding = std::mem::take(&mut host.hub.riding);
+                self.lan_riding(&guests, &mut riding);
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
+                host.hub.riding = riding;
+                self.lan_entities(&mut states, true, 0);
+                self.lan_hook_states(&mut states);
                 self.lan_entity_uuids(&mut states);
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
                 host.states_next_entity = Some(self.next_entity);
             } else {
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
                 host.states_next_entity = None;
                 states.clear();
                 // Nobody can receive past movement. A returning viewer pairs
@@ -2344,6 +2389,9 @@ impl Game<'_> {
             }
             // The step command reaches clients before the events its tick
             // generated, as ServerTickRateManager.updateStepTicks does.
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             host.hub.sync_ticking(
                 self.clock.rate(),
                 self.clock.frozen(),
@@ -2371,6 +2419,9 @@ impl Game<'_> {
             let spawn = self.spawn.map_or([0.5, 80.0, 0.5], |s| [s.x, s.y, s.z]);
             let events = {
                 let clock_rate = self.network_clock_rate();
+                let Some(host) = self.lan.as_mut() else {
+                    return;
+                };
                 let mut ctx = TickCtx {
                     world: &mut self.world,
                     entities,
@@ -2419,55 +2470,43 @@ impl Game<'_> {
                 }
                 events
             };
-            self.wake_woken_guests(&mut host);
-            let Some(back) = self.lan_process_events(host, events, entities, spawn) else {
+            self.wake_woken_guests();
+            self.lan_process_events(events, entities, spawn);
+            let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            host = back;
             host.states = states;
         }
-        if !host.quiet.is_empty() {
-            self.lan = Some(host);
+        if self.lan.as_ref().is_some_and(|host| !host.quiet.is_empty()) {
             self.run_quiet_commands();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the quiet commands");
         }
         if self.native_net_waiting() {
-            self.lan = Some(host);
             self.run_native_net();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the mod messages");
         }
-        if !host.hub.native_advancement_grants.is_empty() {
-            self.lan = Some(host);
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.native_advancement_grants.is_empty())
+        {
             self.run_native_advancement_grants();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the advancement grants");
         }
-        if !host.hub.native_menu_events.is_empty() {
-            self.lan = Some(host);
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.native_menu_events.is_empty())
+        {
             self.run_native_menu_events();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the menu events");
         }
-        host.hub.collect_tracking();
-        if !host.hub.native_tracking.is_empty() {
-            self.lan = Some(host);
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.collect_tracking();
+        }
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.native_tracking.is_empty())
+        {
             self.run_native_tracking();
-            host = self
-                .lan
-                .take()
-                .expect("the hub is back after the tracking events");
         }
-        self.lan = Some(host);
         // A blast from a guest's attack, and a mace's wind burst.
         self.flush_lan_explosions();
         let _ = self.flush_wind_bursts();
@@ -2477,27 +2516,26 @@ impl Game<'_> {
         self.flush_hook_pulls();
         // Particles a guest's turn sent (sweep attack, damage indicator, a hook's splashes).
         self.flush_lan_particles();
-        let mut host = self
-            .lan
-            .take()
-            .expect("the hub is back after the guest flushes");
-        self.lan_flush_effects(&mut host);
-        self.lan_living_flags(&mut host);
-        self.lan_stuck(&mut host, paused);
-        self.tick_server_travel(&mut host);
-        self.lan_swings(&mut host);
-        self.lan_update_streaming(&host);
-        self.lan_guest_poses(&mut host);
-        self.lan_update_waypoints(&mut host);
-        self.lan_sync_scoreboard(&mut host);
-        self.lan_sync_border(&mut host);
-        host.hub.anticheat_ping();
+        self.lan_flush_effects();
+        self.lan_living_flags();
+        self.lan_stuck(paused);
+        self.tick_server_travel();
+        self.lan_swings();
+        self.lan_update_streaming();
+        self.lan_guest_poses();
+        self.lan_update_waypoints();
+        self.lan_sync_scoreboard();
+        self.lan_sync_border();
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.anticheat_ping();
+        }
         drop(holding);
-        self.flush_attachment_sync(&mut host);
-        self.flush_native_net(&mut host);
-        self.flush_far_terrain(&mut host);
-        lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));
-        self.lan = Some(host);
+        self.flush_attachment_sync();
+        self.flush_native_net();
+        self.flush_far_terrain();
+        if let Some(host) = self.lan.as_ref() {
+            lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));
+        }
         self.flush_native_sounds();
         // `tick_server` resets the pass after all dimensions; outside a pass
         // the packet gate is per-tick.
@@ -2787,7 +2825,10 @@ impl Game<'_> {
         }
     }
     /// Send the tick's level events, sounds and mob animations.
-    fn lan_flush_effects(&mut self, host: &mut LanHost) {
+    fn lan_flush_effects(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let critical_hits = std::mem::take(&mut self.lan_critical_hits);
         let kinetic_hits = std::mem::take(&mut self.lan_kinetic_hits);
         for (state, at) in std::mem::take(&mut self.lan_cushion_breaks) {
@@ -2843,7 +2884,10 @@ impl Game<'_> {
         for (kind, pos, data) in std::mem::take(&mut self.lan_global_events) {
             host.hub.global_level_event(kind, pos, data);
         }
-        self.lan_broadcast_effects(host);
+        self.lan_broadcast_effects();
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         if host.hub.guests.is_empty() {
             host.mob_state.clear();
             return;
@@ -2939,7 +2983,10 @@ impl Game<'_> {
     }
 
     /// Keep the chunks around every guest loaded.
-    pub(super) fn lan_update_streaming(&mut self, host: &LanHost) {
+    pub(super) fn lan_update_streaming(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         // DistanceManager.PlayerTicketTracker: every chunk within the server's
         // view distance (Chebyshev) of a player holds a PLAYER_LOADING ticket
         // at the entity-ticking level (31), whatever the player asked for;
@@ -2977,7 +3024,10 @@ impl Game<'_> {
     /// `villager::sleep_pose`): its `facing`.
     /// `Entity.setPose` for the server's players: the mods hear each placed
     /// guest's change of pose. Nothing is kept while no mod is loaded.
-    fn lan_guest_poses(&mut self, host: &mut LanHost) {
+    fn lan_guest_poses(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         if horizon_client::mod_api::mods().is_empty() {
             host.poses.clear();
             return;
