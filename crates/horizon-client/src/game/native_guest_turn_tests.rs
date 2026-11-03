@@ -165,6 +165,7 @@ fn another_guests_services_work_during_a_turn() {
     use horizon_client::{advancements as adv, command::args::Selector, items::ItemStack};
 
     with_guests(|game| {
+        game.build_registries();
         let mut tree = adv::Tree::default();
         tree.list.push(adv::Advancement {
             id: "turns:probe".into(),
