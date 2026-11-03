@@ -438,6 +438,17 @@ capabilities = ["registries"]
                 .success()
         );
         std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::write(root.join(".git/hooks/pre-commit"), b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                root.join(".git/hooks/pre-commit"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
         std::fs::create_dir_all(root.join("assets/ruby")).unwrap();
         std::fs::write(root.join("assets/ruby/icon.png"), b"image").unwrap();
         assert_eq!(Package::read(&root).unwrap().manifest.id, "ruby");
