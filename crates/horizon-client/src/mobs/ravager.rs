@@ -354,6 +354,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    #[ignore = "needs prepared resources"]
     fn modded_collision_without_leaves_jumps_without_if_broke() {
         assert!(super::super::world::with_test_world(&[], |world, types| {
             let mut world = world.clone();
@@ -374,6 +375,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources"]
     fn modded_collision_with_leaves_defers_jump() {
         let build = |world: &mut crate::world::World,
                      registry: &horizon_world::registry::BlockRegistry| {
