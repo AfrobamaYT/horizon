@@ -520,6 +520,27 @@ pub enum NativeBlockShapeKind {
     Collision,
 }
 
+/// A block face for a level support query.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockFace {
+    Down,
+    Up,
+    North,
+    South,
+    West,
+    East,
+}
+
+/// The support area tested on a block face.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSupportType {
+    Full,
+    Center,
+    Rigid,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
