@@ -1307,19 +1307,22 @@ impl LevelAccess for GameLevel<'_> {
         !cancel
     }
     fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
-        use horizon_world::level::data::INSTRUMENTS;
+        use horizon_client::mod_api::NativeNoteInstrument;
         if !self.native_authoritative || crate::mod_api::mods().is_empty() {
             return true;
         }
-        let mut name = INSTRUMENTS[usize::from(*instrument)].to_owned();
+        let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
         let mut played = *note;
         let mut cancel = false;
-        self.native_note_block_play(self.dimension, pos, &mut name, &mut played, &mut cancel);
-        // A name that isn't an instrument, or a note out of 0 to 24, keeps
-        // the block's own.
-        if let Some(i) = INSTRUMENTS.iter().position(|n| *n == name) {
-            *instrument = i as u8;
-        }
+        self.native_note_block_play(
+            self.dimension,
+            pos,
+            &mut played_instrument,
+            &mut played,
+            &mut cancel,
+        );
+        *instrument = played_instrument as u8;
+        // A note out of 0 to 24 keeps the block's own.
         if (0..=24).contains(&played) {
             *note = played;
         }

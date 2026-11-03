@@ -891,8 +891,8 @@ use horizon_client::mod_api::{
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
-    NativeMinimap, NativeMod, NativePanelEvent, NativePortalShape, NativeScreen, NativeScreenView,
-    NativeStack, NativeZoom,
+    NativeMinimap, NativeMod, NativeNoteInstrument, NativePanelEvent, NativePortalShape,
+    NativeScreen, NativeScreenView, NativeStack, NativeZoom,
 };
 use horizon_client::{
     atlas_sources::qualified,
@@ -1345,18 +1345,17 @@ impl GameLevel<'_> {
 
     /// The note block at `pos` is about to play (NeoForge's
     /// `NoteBlockEvent.Play`, in `NoteBlock.playNote`), after `note_play` and
-    /// once a block above no longer mutes it. `instrument` is its
-    /// `instrument` property's value (`harp` ... `custom_head`) and `note` its
-    /// note, 0 to 24; change either to play another (a name that is not an
-    /// instrument, or a note out of range, keeps the block's own). Set
-    /// `cancel` and it doesn't play: no sound, no particle, no
+    /// once a block above no longer mutes it; a `note_play` cancel skips it.
+    /// `instrument` is its instrument and `note` its note, 0 to 24; change
+    /// either to play another (a note out of range keeps the block's own).
+    /// Set `cancel` and it doesn't play: no sound, no particle, no
     /// `note_block_play` game event. Server-side. @API:note_block_play@.
     #[inline(always)]
     pub(super) fn native_note_block_play(
         &self,
         dimension: LevelDimension,
         pos: BlockPos,
-        instrument: &mut String,
+        instrument: &mut NativeNoteInstrument,
         note: &mut i32,
         cancel: &mut bool,
     ) {
@@ -1373,6 +1372,8 @@ impl GameLevel<'_> {
 
     /// On an authoritative server, a note block at `pos` is about to sound.
     /// `player` is the acting server player when there is one. Set `cancel` to silence it.
+    /// A near match of NeoForge's `NoteBlockEvent.Play` (cancel only), asked
+    /// first: `note_block_play` is the counterpart, and this cancel skips it.
     /// 248.
     #[inline(always)]
     pub(super) fn native_note_play(

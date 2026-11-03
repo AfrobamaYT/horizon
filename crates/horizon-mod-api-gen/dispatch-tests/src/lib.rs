@@ -40,6 +40,7 @@ mod tests {
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
         pub(super) struct NativePortalShape;
+        pub(super) struct NativeNoteInstrument;
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
