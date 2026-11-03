@@ -2509,7 +2509,12 @@ the server entity and level reads available on a client.
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
   slot as `LivingEntity.setItemSlot` does (None or air empties it). Mobs store all eight slots (`Mob::equipment_stacks` reads them as a `horizon_items::equipment::Equipment`); players (the host and guests) hold an `Equipment` for body and saddle beside their own hand and armor fields, and save through its `read` / `write`. A player's
   `body` and `saddle` are kept and saved in the `equipment` compound as vanilla does, and dropped on death, but nothing
-  renders or sends them. Armor stands store the six armor and hand slots, and the dragon none yet.
+  renders or sends them. Armor stands and the dragon hold all eight slots in the same `Equipment`, saved in `equipment`
+  (omitted when empty). A stand keeps a body or saddle a mod writes (`setItemSlot` stores it; `ArmorStand.canUseSlot`
+  only stops a player equipping it), shows it to `/item ... armor.body` and `saddle`, and pops it with the rest, after the
+  other six slots, when it breaks. Stand and dragon writes make no equip sound or game event, and
+  `native_living_equipment_change` hears a stand's six hand and armor slots only. The dragon keeps its equipment for
+  mods and saves; it does not drop it on death (the death drops are built on `Mob`, which the dragon is not).
 - `living.swing(host, hand, send_to_self)` (`LivingEntity.swing`) starts an arm swing, shortened by haste and lengthened
   by mining fatigue, unless one is under way and past its first half (it returns whether one started). The players around
   see it at the end of the tick, the swinger too with `send_to_self`; clients see a mob swing the hand asked for. Mobs and
