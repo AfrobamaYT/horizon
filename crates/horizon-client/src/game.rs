@@ -15534,7 +15534,6 @@ impl Game<'_> {
         self.native_proto_snapshots(&protos);
         self.streaming.finish_save(protos, wait);
         let keys: Vec<_> = self.world.modified.iter().copied().collect();
-        self.native_full_chunk_saves(&keys);
         self.save.save_attachments(&self.world.attachments)?;
         for key in &keys {
             self.world.modified.remove(key);
@@ -16899,7 +16898,6 @@ impl Game<'_> {
         let plan = horizon_client::spans::time("streaming_plan", || {
             self.streaming.plan_update(&mut self.world)
         });
-        self.native_full_chunk_saves(plan.unloading());
         let (commit, protos) = self.streaming.prepare_commit(&mut self.world, plan);
         self.native_proto_snapshots(&protos);
         self.streaming.submit_protos(protos);

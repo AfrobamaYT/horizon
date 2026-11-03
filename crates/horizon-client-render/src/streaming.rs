@@ -498,13 +498,6 @@ pub struct StreamingCommit {
     paused: bool,
 }
 
-impl StreamingUpdate {
-    /// Chunks the update plans to unload, still present in the world.
-    pub fn unloading(&self) -> &[(i32, i32)] {
-        &self.far
-    }
-}
-
 pub struct Streaming {
     shared: Arc<Shared>,
     /// Columns generated and saved as they were left behind: new when they
@@ -3233,18 +3226,10 @@ mod tests {
         world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         world.modified.insert((10, 0));
         let plan = plan_unloads(&world, |x, _| x > 5);
-        let mut dispatched = Vec::new();
-        for &key in &plan {
-            if world.modified.contains(&key) {
-                let live = world.chunks.get_mut(&key).unwrap();
-                Arc::make_mut(live).set(0, 0, 0, 7);
-                dispatched.push(key);
-            }
-        }
-        assert_eq!(dispatched, [(10, 0)]);
+        assert!(world.chunks.contains_key(&(10, 0)));
         let saved = world.chunks.get(&(10, 0)).unwrap().clone();
         let unloaded = commit_unloads(&mut world, &plan);
-        assert_eq!(saved.get(0, 0, 0), 7);
+        assert_eq!((saved.x, saved.z), (10, 0));
         assert_eq!(unloaded.len(), 2);
         assert!(!world.chunks.contains_key(&(10, 0)));
         assert!(!world.chunks.contains_key(&(11, 0)));

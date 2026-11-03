@@ -5,20 +5,6 @@ use horizon_client::streaming::{ProtoSave, ProtoSnapshot};
 use std::sync::Arc;
 
 impl Game<'_> {
-    /// Dispatch while the selected dirty chunks are still live, before snapshotting.
-    pub(super) fn native_full_chunk_saves(&mut self, keys: &[(i32, i32)]) {
-        if self.remote.is_some() {
-            return;
-        }
-        for &(x, z) in keys {
-            if self.world.modified.contains(&(x, z)) && self.world.chunks.contains_key(&(x, z)) {
-                self.native_full_chunk_save([x, z]);
-            }
-        }
-    }
-
-    fn native_full_chunk_save(&mut self, _pos: [i32; 2]) {}
-
     /// Dispatch on the server thread with the exact full-chunk save copies.
     pub(super) fn native_full_chunk_snapshots(&mut self, chunks: &[Arc<Chunk>]) {
         if self.remote.is_some() || horizon_client::mod_api::mods().is_empty() {
