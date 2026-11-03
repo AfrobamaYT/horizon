@@ -712,6 +712,28 @@ impl From<LivingRef> for EntityRef {
     }
 }
 
+/// A living entity's active effect (vanilla's `MobEffectInstance`), as
+/// [`LivingRef`] reads its effects and as `add_effect` gives one: the
+/// effect's id namespaced as the registry has it (`minecraft:speed`, a
+/// content mod's `mod:custom`; a bare vanilla id reads as `minecraft:`'s),
+/// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
+/// beacon-style effect carries: `ambient` (an ambient one gives no
+/// particles) and `visible` (whether its particles show). Horizon keeps no
+/// separate show-icon flag: the icon always shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeActiveEffect {
+    /// The effect's namespaced id.
+    pub id: &'static str,
+    /// The ticks left; -1 is infinite.
+    pub duration: i32,
+    /// The amplifier, from 0.
+    pub amplifier: i32,
+    /// `MobEffectInstance.isAmbient`: an ambient effect shows no particles.
+    pub ambient: bool,
+    /// `MobEffectInstance.isVisible`: whether its particles show.
+    pub visible: bool,
+}
+
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MobRef(EntityRef);

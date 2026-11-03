@@ -2424,6 +2424,19 @@ a dimension.
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
   which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
+- `living.effects(host)` lists a living entity's active effects (vanilla's `activeEffects`) as `NativeActiveEffect`s — the
+  namespaced id, the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
+  show-icon flag, the icon always shows. `living.effect(host, id)` reads one (`getEffect`) and `living.potion_affected(host,
+  id)` answers `hasEffect`; a bare vanilla id reads as `minecraft:`'s. `living.add_effect(host, &effect)` is
+  `LivingEntity.addEffect` by the game's own path: a player's or a guest's goes through the potion machinery (its attribute
+  modifiers, absorption, and the added-effect hooks for a content mod's effect), a mob's past `canBeAffected` (a spider
+  shrugs off poison) and with the same hooks. It returns true when accepted — whether it replaced one already there or only
+  extended it is `MobEffectInstance.update`'s business (a stronger one replaces with its own duration, an equal one extends,
+  a weaker one changes nothing). `living.remove_effect(host, id)` and `living.remove_all_effects(host)` take effects away
+  the way their running out does: the attribute modifiers they gave recompute and absorption's hearts go with theirs. The
+  added-effect hooks hear a player's add without an entity id, so a guest's reaches them as the acting player (`None`) — a
+  limitation of the hooks themselves, unchanged here. Armor stands and the dragon keep no effects, as `/effect` skips them:
+  `effects` and `effect` read `None` for them and their writes return false.
 - `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
   trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types), a trident a player
   threw or a firework rocket; `projectile.entity()` goes back. A player's trident and a rocket have an owner and a
