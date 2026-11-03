@@ -324,7 +324,7 @@ impl Game<'_> {
             _ => None,
         }
     }
-    /// Sets the mob's persistent glowing tag (`Entity.setGlowingTag`).
+    /// Sets the mob's persistent glowing tag (`Entity.setGlowingTag`). Returns false for players and guests.
     pub(super) fn native_entity_set_glowing(&mut self, entity: EntityRef, glowing: bool) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
             return false;
@@ -335,7 +335,7 @@ impl Game<'_> {
             true
         })
     }
-    /// Sets the mob's no-gravity flag (`Entity.setNoGravity`).
+    /// Sets the mob's no-gravity flag (`Entity.setNoGravity`). Returns false for players and guests.
     pub(super) fn native_entity_set_no_gravity(
         &mut self,
         entity: EntityRef,
@@ -350,7 +350,7 @@ impl Game<'_> {
             true
         })
     }
-    /// Sets the entity's shared invisibility flag (`Entity.setInvisible`).
+    /// Sets the entity's shared invisibility flag (`Entity.setInvisible`). Returns false for players and guests.
     pub(super) fn native_entity_set_invisible(
         &mut self,
         entity: EntityRef,
@@ -421,22 +421,22 @@ mod tests {
                 .clone();
             game.mobs.push(Mob::new(42, kind, Vec3::ZERO, 0.0));
             let entity = game.native_entity(42).unwrap();
-            assert!(game.native_entity_set_air_supply(entity, -7));
+            assert!(entity.set_air_supply(game, -7));
             assert_eq!(game.mobs[0].air, -7);
-            assert!(game.native_entity_set_remaining_fire_ticks(entity, 37));
+            assert!(entity.set_remaining_fire_ticks(game, 37));
             assert_eq!(game.mobs[0].fire_ticks, 37);
-            assert!(game.native_entity_clear_fire(entity));
+            assert!(entity.clear_fire(game));
             assert_eq!(game.mobs[0].fire_ticks, 0);
             assert!(game.native_entity_set_remaining_fire_ticks(entity, -12));
             assert!(game.native_entity_clear_fire(entity));
             assert_eq!(game.mobs[0].fire_ticks, -12);
-            assert!(game.native_entity_set_ticks_frozen(entity, 31));
+            assert!(entity.set_ticks_frozen(game, 31));
             assert_eq!(game.mobs[0].ticks_frozen, 31);
-            assert!(game.native_entity_set_invisible(entity, true));
+            assert!(entity.set_invisible(game, true));
             assert!(game.mobs[0].invisible);
-            assert!(game.native_entity_set_glowing(entity, true));
+            assert!(entity.set_glowing(game, true));
             assert!(game.mobs[0].glowing);
-            assert!(game.native_entity_set_no_gravity(entity, true));
+            assert!(entity.set_no_gravity(game, true));
             assert!(game.mobs[0].no_gravity);
             assert!(game.mobs[0].needs_sync);
         });
