@@ -4555,11 +4555,74 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// `CanContinueSleepingEvent`: a sleeping living entity's check that it may go on
+    /// sleeping, run each tick for a server player the dead and health checks would not
+    /// already wake, and for a sleeping villager or wandering trader. `entity` is its UUID,
+    /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
+    /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
+    /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
+    /// none when nothing is wrong. `may_continue` starts empty, meaning `problem.is_none()` (`mayContinueSleeping`);
+    /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
+    /// on a guest tick. @API:can_continue_sleeping@.
+    ///
+    /// Return `Some` to set `may_continue`; the first mod returning `Some` wins.
+    fn can_continue_sleeping(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CanContinueSleepingEvent<'_>,
+    ) -> Option<bool> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// After the client replaces its player on respawn or dimension change
+    /// (NeoForge's `ClientPlayerNetworkEvent.Clone`). Client-side.
+    /// @API:client_player_clone@.
+    fn client_player_clone(&self, host: &mut dyn Host, event: &mut ClientPlayerCloneEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The client accepted a play login and initialized its level and player
+    /// identity (NeoForge's `ClientPlayerNetworkEvent.LoggingIn`). `player_id`
+    /// is the server's entity ID. Client-side,
+    /// once per connection, including single player. @API:client_player_logging_in@.
+    fn client_player_logging_in(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerLoggingInEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before client disconnect teardown (NeoForge's
+    /// `ClientPlayerNetworkEvent.LoggingOut`). The player may be absent.
+    /// Client-side. @API:client_player_logging_out@.
+    fn client_player_logging_out(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientPlayerLoggingOutEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn create_spawn_position(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CreateSpawnPositionEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
     /// `entity` (None for a player, whom `native_acting_player` names):
@@ -4599,12 +4662,36 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    fn item_model_property(&self, host: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
     /// @API:item_stacked_on_other@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn item_stacked_on_other(&self, event_: &mut ItemStackedOnOtherEvent<'_, '_>) -> Flow {
         let _ = event_;
+        Flow::Continue
+    }
+    /// A dying mob or player `entity` of `kind` is about to drop `original`
+    /// points of experience; the vanilla conditions have been checked.
+    /// `attacking_player` is the player who last hurt it, if any. Change
+    /// `amount` (0 or less drops nothing), or set `cancel` to drop none. A
+    /// sculk catalyst that takes the experience does not call this.
+    /// Server-side. @API:living_experience_drop@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_experience_drop(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingExperienceDropEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
         Flow::Continue
     }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
@@ -4624,10 +4711,27 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's destroy speed for the block at `pos` may be changed or canceled.
+    /// @API:player_break_speed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn player_break_speed(&self, host: &mut dyn Host, event: &mut PlayerBreakSpeedEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A server player took `stack` from a brewing stand bottle slot
     /// (`BrewingStandMenu.PotionSlot.onTake`): `player` is their UUID and
     /// `player_entity_id` their network id. @API:player_brewed_potion@.
     fn player_brewed_potion(&self, host: &mut dyn Host, event: &mut PlayerBrewedPotionEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player's ability to harvest the block at `pos` may be changed.
+    /// @API:player_harvest_check@.
+    ///
+    /// Every mod gets `event.can_harvest` in order and may add, change or remove can_harvest.
+    fn player_harvest_check(&self, host: &mut dyn Host, event: &mut PlayerHarvestCheckEvent) {
         let _ = host;
         let _ = event;
     }
@@ -4638,6 +4742,23 @@ pub trait Hooks: Send + Sync {
     fn player_name_format(&self, event: &mut PlayerNameFormatEvent<'_>) {
         let _ = event;
     }
+    /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
+    /// spawn near a non-spectator server player, before its difficulty and rest rolls.
+    /// `result` starts empty, meaning `Default` (skylight and sea level check); `Allow` skips
+    /// that check and `Deny` stops the attempt. `phantoms` starts with a randomly drawn
+    /// group size; set it to override the count. Without mods the original draw order is kept.
+    /// @API:player_spawn_phantoms@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn player_spawn_phantoms(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerSpawnPhantomsEvent<'_>,
+    ) -> Option<PhantomSpawnResult> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
     /// `player`, None to let the client choose it. Replace `display_name` to
     /// change it. @API:player_tab_list_name_format@.
@@ -4645,6 +4766,24 @@ pub trait Hooks: Send + Sync {
     /// Every mod gets `event.display_name` in order and may add, change or remove display_name.
     fn player_tab_list_name_format(&self, event: &mut PlayerTabListNameFormatEvent<'_>) {
         let _ = event;
+    }
+    /// A server player's level is about to change through
+    /// `Player.giveExperienceLevels`: once per level gained or lost by points,
+    /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
+    /// Change `levels`, or set `cancel` to leave the level unchanged. The
+    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// and the item helpers reach them. Server-side.
+    /// @API:player_xp_level_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_xp_level_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerXpLevelChangeEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
@@ -14996,6 +15135,105 @@ pub fn dispatch_block_grow_feature(
         }
     }
 }
+/// What [`Hooks::can_continue_sleeping`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CanContinueSleepingEvent<'a> {
+    pub entity: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub problem: Option<SleepProblem>,
+}
+pub fn dispatch_can_continue_sleeping(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u128,
+    name: &str,
+    kind: &str,
+    pos: [i32; 3],
+    problem: Option<SleepProblem>,
+    may_continue: &mut Option<bool>,
+) {
+    if may_continue.is_some() {
+        return;
+    }
+    let mut event = CanContinueSleepingEvent {
+        entity,
+        name,
+        kind,
+        pos,
+        problem,
+    };
+    for mod_hook in super::entered(mods, "can_continue_sleeping") {
+        if let Some(replacement) = mod_hook.can_continue_sleeping(host, &mut event) {
+            *may_continue = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::client_player_clone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerCloneEvent {
+    pub old_id: i32,
+    pub new_id: i32,
+    pub uuid: u128,
+    pub died: bool,
+    pub dimension_changed: bool,
+}
+pub fn dispatch_client_player_clone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    old_id: i32,
+    new_id: i32,
+    uuid: u128,
+    died: bool,
+    dimension_changed: bool,
+) {
+    let mut event = ClientPlayerCloneEvent {
+        old_id,
+        new_id,
+        uuid,
+        died,
+        dimension_changed,
+    };
+    for mod_hook in super::entered(mods, "client_player_clone") {
+        mod_hook.client_player_clone(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_logging_in`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerLoggingInEvent {
+    pub player_id: i32,
+    pub uuid: u128,
+}
+pub fn dispatch_client_player_logging_in(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: i32,
+    uuid: u128,
+) {
+    let mut event = ClientPlayerLoggingInEvent { player_id, uuid };
+    for mod_hook in super::entered(mods, "client_player_logging_in") {
+        mod_hook.client_player_logging_in(host, &mut event);
+    }
+}
+/// What [`Hooks::client_player_logging_out`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientPlayerLoggingOutEvent {
+    pub player_id: Option<i32>,
+    pub uuid: Option<u128>,
+}
+pub fn dispatch_client_player_logging_out(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player_id: Option<i32>,
+    uuid: Option<u128>,
+) {
+    let mut event = ClientPlayerLoggingOutEvent { player_id, uuid };
+    for mod_hook in super::entered(mods, "client_player_logging_out") {
+        mod_hook.client_player_logging_out(host, &mut event);
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -15019,6 +15257,33 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::create_spawn_position`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreateSpawnPositionEvent<'a> {
+    pub position: &'a mut [i32; 3],
+    pub rotation: &'a mut [f32; 2],
+}
+pub fn dispatch_create_spawn_position(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    position: &mut [i32; 3],
+    rotation: &mut [f32; 2],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CreateSpawnPositionEvent { position, rotation };
+    for mod_hook in super::entered(mods, "create_spawn_position") {
+        if matches!(
+            mod_hook.create_spawn_position(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -15097,6 +15362,30 @@ pub fn dispatch_item_container(
         }
     }
 }
+/// What [`Hooks::item_model_property`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemModelPropertyEvent<'a> {
+    pub property: &'a str,
+    pub stack: &'a StackView,
+    pub value: bool,
+}
+pub fn dispatch_item_model_property(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    property: &str,
+    stack: &StackView,
+    value: &mut bool,
+) {
+    let mut event = ItemModelPropertyEvent {
+        property,
+        stack,
+        value: *value,
+    };
+    for mod_hook in super::entered(mods, "item_model_property") {
+        mod_hook.item_model_property(host, &mut event);
+    }
+    *value = event.value;
+}
 /// What [`Hooks::item_stacked_on_other`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemStackedOnOtherEvent<'a, 'b> {
@@ -15117,6 +15406,46 @@ pub fn dispatch_item_stacked_on_other(
             break;
         }
     }
+}
+/// What [`Hooks::living_experience_drop`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingExperienceDropEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub attacking_player: Option<u128>,
+    pub original: i32,
+    pub amount: i32,
+}
+pub fn dispatch_living_experience_drop(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    attacking_player: Option<u128>,
+    original: i32,
+    amount: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingExperienceDropEvent {
+        entity,
+        kind,
+        attacking_player,
+        original,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "living_experience_drop") {
+        if matches!(
+            mod_hook.living_experience_drop(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
 }
 /// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -15180,6 +15509,43 @@ pub fn dispatch_movement_input(
     *jump = event.jump;
     *sneak = event.sneak;
 }
+/// What [`Hooks::player_break_speed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerBreakSpeedEvent {
+    pub player: u32,
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub original_speed: f32,
+    pub new_speed: f32,
+}
+pub fn dispatch_player_break_speed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u32,
+    pos: [i32; 3],
+    state: u32,
+    original_speed: f32,
+    new_speed: &mut f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = PlayerBreakSpeedEvent {
+        player,
+        pos,
+        state,
+        original_speed,
+        new_speed: *new_speed,
+    };
+    for mod_hook in super::entered(mods, "player_break_speed") {
+        if matches!(mod_hook.player_break_speed(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *new_speed = event.new_speed;
+}
 /// What [`Hooks::player_brewed_potion`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerBrewedPotionEvent<'a> {
@@ -15203,6 +15569,33 @@ pub fn dispatch_player_brewed_potion(
         mod_hook.player_brewed_potion(host, &mut event);
     }
 }
+/// What [`Hooks::player_harvest_check`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerHarvestCheckEvent {
+    pub player: u32,
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub can_harvest: bool,
+}
+pub fn dispatch_player_harvest_check(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u32,
+    pos: [i32; 3],
+    state: u32,
+    can_harvest: &mut bool,
+) {
+    let mut event = PlayerHarvestCheckEvent {
+        player,
+        pos,
+        state,
+        can_harvest: *can_harvest,
+    };
+    for mod_hook in super::entered(mods, "player_harvest_check") {
+        mod_hook.player_harvest_check(host, &mut event);
+    }
+    *can_harvest = event.can_harvest;
+}
 /// What [`Hooks::player_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerNameFormatEvent<'a> {
@@ -15220,6 +15613,39 @@ pub fn dispatch_player_name_format(
     };
     for mod_hook in super::entered(mods, "player_name_format") {
         mod_hook.player_name_format(&mut event);
+    }
+}
+/// What [`Hooks::player_spawn_phantoms`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSpawnPhantomsEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub phantoms: &'a mut Option<i32>,
+}
+pub fn dispatch_player_spawn_phantoms(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    phantoms: &mut Option<i32>,
+    result: &mut Option<PhantomSpawnResult>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PlayerSpawnPhantomsEvent {
+        player,
+        name,
+        pos,
+        phantoms,
+    };
+    for mod_hook in super::entered(mods, "player_spawn_phantoms") {
+        if let Some(replacement) = mod_hook.player_spawn_phantoms(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
     }
 }
 /// What [`Hooks::player_tab_list_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -15243,6 +15669,40 @@ pub fn dispatch_player_tab_list_name_format(
     for mod_hook in super::entered(mods, "player_tab_list_name_format") {
         mod_hook.player_tab_list_name_format(&mut event);
     }
+}
+/// What [`Hooks::player_xp_level_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerXpLevelChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub levels: i32,
+}
+pub fn dispatch_player_xp_level_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    levels: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerXpLevelChangeEvent {
+        player,
+        name,
+        levels: *levels,
+    };
+    for mod_hook in super::entered(mods, "player_xp_level_change") {
+        if matches!(
+            mod_hook.player_xp_level_change(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *levels = event.levels;
 }
 /// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

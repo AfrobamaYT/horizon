@@ -19,7 +19,7 @@ pub use crate::game::{
     ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
     NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
     NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
-    NativePlayerRender, NativeShake,
+    NativePlayerRender, NativeShake, PhantomSpawnResult, SleepProblem,
 };
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
@@ -33,7 +33,7 @@ pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
 pub use crate::text::Text;
-pub use horizon_assets::item_model::DisplayContext;
+pub use horizon_assets::item_model::{DisplayContext, StackView};
 pub use horizon_core::{
     geometry::Direction,
     position::BlockPos,
@@ -444,6 +444,15 @@ impl LevelRef {
     }
 }
 
+/// The empty-context block shape requested from a level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBlockShapeKind {
+    /// Selection outline (`BlockState.getShape`).
+    Outline,
+    /// Collision shape (`BlockState.getCollisionShape`).
+    Collision,
+}
+
 /// An online player in one open server world, keyed by UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerRef {
@@ -732,8 +741,10 @@ macro_rules! level_attachment_host {
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
+mod capability;
+pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar};
+pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
 
 mod generated;
@@ -799,6 +810,41 @@ mod tests {
                 Flow::Continue
             }
         }
+    }
+
+    struct MorePhantoms;
+
+    impl Hooks for MorePhantoms {
+        fn player_spawn_phantoms(
+            &self,
+            _host: &mut dyn Host,
+            event: &mut PlayerSpawnPhantomsEvent<'_>,
+        ) -> Option<PhantomSpawnResult> {
+            *event.phantoms = event.phantoms.map(|count| count + 2);
+            None
+        }
+    }
+
+    #[test]
+    fn phantom_listener_can_increase_the_default_count() {
+        let mods = [Box::new(MorePhantoms) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        let mut count = Some(3);
+        let mut result = None;
+        dispatch_player_spawn_phantoms(
+            &mut host,
+            &mods,
+            7,
+            "Probe",
+            [0; 3],
+            &mut count,
+            &mut result,
+        );
+        assert_eq!(count, Some(5));
+        assert!(result.is_none());
     }
 
     /// Asks the host to tell a player without anyone having implemented it.
@@ -868,6 +914,54 @@ mod tests {
             let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
             assert_eq!(told, [block], "{block}");
         }
+    }
+
+    #[test]
+    fn mining_events_identify_the_player_and_keep_mod_decisions() {
+        struct MiningProbe(Arc<Mutex<Vec<u32>>>);
+        impl Hooks for MiningProbe {
+            fn player_harvest_check(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerHarvestCheckEvent,
+            ) {
+                self.0.lock().unwrap().push(event.player);
+                event.can_harvest = false;
+            }
+            fn player_break_speed(
+                &self,
+                _host: &mut dyn Host,
+                event: &mut PlayerBreakSpeedEvent,
+            ) -> Flow {
+                self.0.lock().unwrap().push(event.player);
+                event.new_speed = 2.0;
+                Flow::Continue
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods = [Box::new(MiningProbe(seen.clone())) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut harvest = true;
+        let mut speed = 1.0;
+        let mut canceled = false;
+        dispatch_player_harvest_check(&mut host, &mods, 42, [1, 2, 3], 7, &mut harvest);
+        dispatch_player_break_speed(
+            &mut host,
+            &mods,
+            42,
+            [1, 2, 3],
+            7,
+            1.0,
+            &mut speed,
+            &mut canceled,
+        );
+        assert_eq!(*seen.lock().unwrap(), [42, 42]);
+        assert!(!harvest);
+        assert_eq!(speed, 2.0);
+        assert!(!canceled);
     }
 
     #[test]
