@@ -985,7 +985,17 @@ listeners run after vanilla by default, in registration order; an explicit depen
 `functions()` works without a false cycle. Use these anchors rather than their string values. The read-only `get_registry`,
 `get_graph`, `get_name_lookup(listener)` and `get_last_vanilla_listener` expose the registered
 objects, dependencies and vanilla anchor. Horizon does not expose NeoForge's condition
-context or retained-listener lookup here.
+context here.
+
+`event.listeners.add_retained_listener(id, converter, listener)` also keeps the listener object
+for other hooks, the counterpart of NeoForge's `addRetainedListener`: it returns a typed
+`ListenerKey<T>` that reads the object back from any server hook through
+`host.reload_resources().listener(&key)` — an `Arc<T>` of the live object the last successful
+reload installed, as NeoForge's `ReloadableServerResources.getListener`. Registration rules and
+prepare/apply semantics are `add_listener`'s. Retention follows the reload: a new reload
+registers fresh objects and the store is replaced whole by the first successful apply, so a key
+held across a reload keeps addressing the new object. Before the first successful reload, or
+for a key whose id or type does not match a registration, `listener` gives `None`.
 
 ```rust,ignore
 use std::sync::{Arc, RwLock};
