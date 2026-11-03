@@ -684,8 +684,6 @@
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
 //!
-//! API 51 adds `native_menu_button_v2`: a mod container's menu button with the clicking player's cursor stack (`clickMenuButton(Player, int)`).
-//!
 //! API 50 adds damage a mod can change or cancel (`native_living_incoming_damage`).
 //!
 //! API 49 adds, in `native_server.rs`, a sidebar and Tab list lines for one
@@ -2537,12 +2535,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_health_hud(self, mod_api::mods(), inputs, wi, hi, draws);
     }
-    /// A key or mouse button went down or up, by its vanilla name
-    /// (`key.keyboard.z`, `key.mouse.left`): keys on any screen (check
-    /// `native_playing`), mouse buttons while playing. Repeats are left out.
-    pub(super) fn native_key(&mut self, key: &str, pressed: bool) {
-        mod_api::dispatch_key(self, mod_api::mods(), key, pressed);
-    }
     /// A real window key event after handling, including repeats and consumed shortcuts.
     /// Receives the original physical/logical key, text, location, state and repeat flag.
     /// Modifier bits use the screen hooks' GLFW encoding. Not cancellable.
@@ -3411,13 +3403,13 @@ impl Game<'_> {
     }
     /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
     /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
-    /// vanilla's name for the key (`key.keyboard.e`, the name `native_key`
-    /// hands over) — a key with no name fires nothing — `repeat` whether it is
+    /// vanilla's name for the key (`key.keyboard.e`) — a key with no name
+    /// fires nothing — `repeat` whether it is
     /// the keyboard's auto-repeat of a held press (Horizon's extra; NeoForge
     /// folds repeats into the event), and `modifiers` GLFW's bits (shift 1,
     /// control 2, alt 4, super 8). Set `canceled` and the press goes no
     /// further: no focus move, no Escape-close, no inventory or hotbar key, no
-    /// typing by the key itself, no `native_key`.
+    /// typing by the key itself.
     ///
     /// It fires for the window's presses and their repeats, and for the
     /// control socket's `key` (a release fires nothing), after the window's
@@ -3428,9 +3420,8 @@ impl Game<'_> {
     /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
-    /// game's own. A cancelled press's release still runs, so a `native_key`
-    /// listener sees that release without its press, and its characters are
-    /// GLFW's separate char callback and still come; see
+    /// game's own. A cancelled press's release still runs, and its characters
+    /// are GLFW's separate char callback and still come; see
     /// `native_screen_char_typed_pre`.
     /// API 104.
     pub(super) fn native_screen_key_pressed_pre(
@@ -3726,31 +3717,16 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_screen_tooltip(self, mod_api::mods(), block, data, at, lines);
     }
-    /// A player pressed menu button `id` on the menu of the mod block entity
-    /// at `pos` (`AbstractContainerMenu.clickMenuButton`), on the server:
-    /// change `entity` when its id is yours. It is out of the world during
-    /// the call, as in `native_block_entity_tick`. API 20.
+    /// A player pressed a mod container's button (`clickMenuButton`), on
+    /// the server. The block entity is out of the world during the call;
+    /// mods may change it and the clicking player's carried stack.
     pub(super) fn native_menu_button(
         &mut self,
-        pos: [i32; 3],
+        context: &horizon_client::menu::MenuButtonContext,
         entity: &mut ModBlockEntity,
-        id: i32,
-    ) {
-        mod_api::dispatch_menu_button(self, mod_api::mods(), pos, entity, id);
-    }
-    /// `AbstractContainerMenu.clickMenuButton(Player, int)`'s other half:
-    /// the acting player's cursor stack, `getCarried()`/`setCarried()`,
-    /// which `native_menu_button` cannot reach. Fires right after it, same
-    /// moment, same `pos`/`entity`/`id`; change `carried` when its id is
-    /// yours. On the server. API 51.
-    pub(super) fn native_menu_button_v2(
-        &mut self,
-        pos: [i32; 3],
-        entity: &mut ModBlockEntity,
-        id: i32,
         carried: &mut Option<ItemStack>,
     ) {
-        mod_api::dispatch_menu_button_v2(self, mod_api::mods(), pos, entity, id, carried);
+        mod_api::dispatch_menu_button(self, mod_api::mods(), context, entity, carried);
     }
     /// A player shift-clicked slot `slot` of the menu of the mod block
     /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
@@ -10502,7 +10478,12 @@ impl Game<'_> {
     }
     /// Menu button `id` on the mod container at `pos` (`clickMenuButton`),
     /// with the acting player's cursor stack (`carried`, read and written).
-    pub(super) fn mod_menu_button(&mut self, pos: Pos, id: i32, carried: &mut Option<ItemStack>) {
+    pub(super) fn mod_menu_button(
+        &mut self,
+        context: horizon_client::menu::MenuButtonContext,
+        carried: &mut Option<ItemStack>,
+    ) {
+        let pos = (context.pos[0], context.pos[1], context.pos[2]);
         if self.mod_menu_at(pos).is_none() {
             return;
         }
@@ -10514,8 +10495,7 @@ impl Game<'_> {
         }
         let mut taken = std::mem::take(&mut **m);
         let items = taken.items.clone();
-        self.native_menu_button([pos.0, pos.1, pos.2], &mut taken, id);
-        self.native_menu_button_v2([pos.0, pos.1, pos.2], &mut taken, id, carried);
+        self.native_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
     /// The cursor from the open mod screen's top left, with its block and
@@ -10624,16 +10604,13 @@ impl Game<'_> {
             page.buttons = buttons;
         }
     }
-    /// A key event for `native_key`.
-    pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
-        if repeat {
-            return;
-        }
-        if let Some(name) = keybinds::key_name(key) {
-            if pressed {
-                self.native_panel_key(name);
-            }
-            self.native_key(name, pressed);
+    /// Deliver a non-repeat key press to the native panel.
+    pub(super) fn native_panel_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
+        if pressed
+            && !repeat
+            && let Some(name) = keybinds::key_name(key)
+        {
+            self.native_panel_key(name);
         }
     }
     /// `ClientHooks.onClickInput`: tells `native_interaction_key` that `button`
@@ -10652,11 +10629,6 @@ impl Game<'_> {
         let (mut swing_hand, mut canceled) = (true, false);
         self.native_interaction_key(button, key_mapping, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
-    }
-    /// A mouse button while playing, for `native_key`.
-    pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
-        let name = keybinds::mouse_name(button);
-        self.native_key(&name, pressed);
     }
     /// A native mod's command.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {

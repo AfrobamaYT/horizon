@@ -622,10 +622,16 @@ impl Game<'_> {
                 // its own host too (`lan.rs:165`), so this one path covers
                 // both single player and a LAN guest.
                 let mut carried = g.carried.clone();
+                let context = horizon_client::menu::MenuButtonContext {
+                    player: g.uuid,
+                    player_entity_id: g.entity_id,
+                    pos: [pos.0, pos.1, pos.2],
+                    id,
+                };
                 // As that player: `native_acting_player`, `native_acting_id`
                 // and `native_give_stack` answer for the one who pressed.
                 self.as_guest(host, conn, |game| {
-                    game.mod_menu_button(pos, id, &mut carried)
+                    game.mod_menu_button(context, &mut carried)
                 });
                 if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
                     let net = host.hub.stack(&carried);

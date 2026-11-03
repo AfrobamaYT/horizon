@@ -17581,7 +17581,7 @@ impl Game<'_> {
         // ScreenEvent.KeyPressed.Pre: the open screen hears of the key before
         // it acts on it, and a cancelled press goes no further — no focus
         // move, no Escape-close, no inventory or hotbar key, no typing by the
-        // key itself, no `native_key`. It fires after the window's own
+        // key itself. It fires after the window's own
         // shortcuts (fullscreen, screenshot, the debug keys, the narrator) so
         // those keep working with a mod that cancels; the key's release still
         // comes through.
@@ -18396,7 +18396,7 @@ impl Game<'_> {
                         && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                 {
                     if let PhysicalKey::Code(key) = event.physical_key {
-                        self.native_key_event(key, true, event.repeat);
+                        self.native_panel_key_event(key, true, event.repeat);
                     }
                     if let PhysicalKey::Code(key) = event.physical_key {
                         self.pause_key(key)?;
@@ -18406,7 +18406,7 @@ impl Game<'_> {
                     if self.screen == Screen::Dead && event.state == ElementState::Pressed =>
                 {
                     if let PhysicalKey::Code(key) = event.physical_key {
-                        self.native_key_event(key, true, event.repeat);
+                        self.native_panel_key_event(key, true, event.repeat);
                     }
                     if let PhysicalKey::Code(key) = event.physical_key {
                         self.death_key(key)?;
@@ -18507,7 +18507,11 @@ impl Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
-                    self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
+                    self.native_panel_key_event(
+                        key,
+                        event.state == ElementState::Pressed,
+                        event.repeat,
+                    );
                     // Screen.keyPressed sees the physical key, repeats included.
                     if event.state == ElementState::Pressed
                         && self.screen == Screen::Inventory
