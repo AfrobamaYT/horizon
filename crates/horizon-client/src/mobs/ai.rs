@@ -1140,10 +1140,16 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    ![&m.extra.head, &m.extra.chest, &m.extra.legs, &m.extra.feet]
-        .into_iter()
-        .flatten()
-        .any(|item| immune.is_some_and(|t| t.contains(&**item)))
+    ![
+        &m.extra.head,
+        &m.extra.chest,
+        &m.extra.legs,
+        &m.extra.feet,
+        &m.extra.body,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|item| immune.is_some_and(|t| t.contains(&**item)))
 }
 /// `Mob.playAmbientSound` on demand: a spawn egg or a mob bucket just placed `m`.
 pub fn ambient_sound(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
@@ -3117,6 +3123,23 @@ mod hit_effect_tests {
 mod same_vehicle_push_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
+
+    #[test]
+    fn leather_body_armor_prevents_freezing() {
+        assert!(with_test_world(&[], |w, types| {
+            let mut horse = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:horse"].clone()),
+                Vec3::ZERO,
+                0.0,
+            );
+            assert!(can_freeze(&horse, w));
+            horse.extra.body = Some("minecraft:leather_horse_armor".into());
+            assert!(!can_freeze(&horse, w));
+            horse.extra.body = Some("minecraft:iron_horse_armor".into());
+            assert!(can_freeze(&horse, w));
+        }));
+    }
 
     /// What a mob holds and wears, by `EquipmentSlot`: the hand's item, the
     /// worn armour's stack (a dyed piece keeps its colour), a horse's
