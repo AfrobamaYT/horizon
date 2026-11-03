@@ -91,7 +91,8 @@ Hook and helper authors use [API fragments](../tools/native-hook-fragments/READM
 API 2 adds the item panel beside container screens and its recipe pages (`native_panel_items`,
 `native_panel_recipes`, and the hook `native_panel_event` for the player's clicks, searches and keys over items), and
 the game's items and recipes (`native_recipes`, `native_known_recipes`, `native_place_recipe`, `native_give`): what a
-recipe viewer needs.
+recipe viewer needs. `native_give` was removed with the Parts core work (#41): a server mod gives through the player's
+[`ENTITY_ITEMS`](#an-entitys-items) handler.
 
 API 11 adds `GameLevel::native_send_particles` on authoritative servers. It sends supported
 vanilla particles to nearby players. Block particles require a valid block state. Item, trail and
@@ -109,12 +110,15 @@ API 8 adds server commands and players: `native_register_commands` (the commands
 command tree) and `native_perform_command` (a player's command on the server), with helpers to answer
 ([Server commands and players](#server-commands-and-players)). Bundles that use them need `"hooks": 8`.
 
-API 9 adds the acting player's plain items for server mods (count, take, give; [Server commands and
-players](#server-commands-and-players)). Bundles that use them need `"hooks": 9`.
+API 9 adds the acting player's plain items for server mods (count, take, give). Bundles that use them need `"hooks": 9`.
+These helpers were removed with the Parts core work (#41): a player's [`ENTITY_ITEMS`](#an-entitys-items) handler
+replaces them.
 
 API 10 adds server menus: a vanilla chest menu a server mod opens and fills, whose clicks and closing reach the mod
 (`native_menu_clicked`, `native_menu_closed`), and `native_exchange_items`, two players' stacks swapped in one checked
-step ([Server menus](#server-menus)). Bundles that use them need `"hooks": 10`.
+step ([Server menus](#server-menus)). Bundles that use them need `"hooks": 10`. `native_player_stacks` (since added) and
+`native_exchange_items` were removed with the Parts core work (#41): two `move_resources` between the players'
+[`ENTITY_ITEMS`](#an-entitys-items) handlers in one transaction replace them.
 
 API 12 adds item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
 lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip. Bundles that use it
@@ -271,7 +275,8 @@ it read it again; it acts on the level in place and is refused for another dimen
 API 39 adds item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
 held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
 `native_carried_stack` reads and changes that stack, and `native_on_equip` hears an equipment slot take a different item. The helpers read the acting player. Bundles
-that use them need `"hooks": 39`.
+that use them need `"hooks": 39`. `native_carried_stack` was removed with the Parts core work (#41): the stack is the
+place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place.
 
 API 40 adds [mod messages](#mod-messages) between a mod's server and client halves, and hearing players and mobs on the
 server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
@@ -908,7 +913,8 @@ API 96 adds `native_neighbor_signal(dimension, pos)`, the strongest redstone sig
 
 API 97 adds `native_light(pos)` (block and sky light, 0 to 15, both 0 where the chunk isn't loaded), `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `native_world_height()` (min y and height) and `native_max_stack_size(item)`: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals. Bundles that use them need "hooks": 97.
 
-API 98 adds `native_give_stack(uuid, stack)`: gives a whole stack (damage, name, enchantments kept) to any player from a server hook, as `Inventory.add` places it, and returns what did not fit. Bundles need "hooks": 98.
+API 98 adds `native_give_stack(uuid, stack)`: gives a whole stack (damage, name, enchantments kept) to any player from a server hook, as `Inventory.add` places it, and returns what did not fit. Bundles need "hooks": 98. It was removed with the Parts core work (#41): `insert_any`
+into the player's [`ENTITY_ITEMS`](#an-entitys-items) handler places a stack as `Inventory.add` does.
 
 API 99 adds a mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `native_acting_player` is None), and a mod sets `ran`. `native_feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher as before; the single player owner's console is not covered. Bundles that use it need `"hooks": 99`.
 
@@ -2008,7 +2014,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_respawned(player, name)`**: a dead player came back, once per respawn, on a server: after
   `PlayerList.respawn` reset their health, food and experience and placed them at their bed, anchor or the world spawn
   (NeoForge's `PlayerRespawnEvent`). The player's state is swapped in for the call, as for their other actions, so
-  `native_player`, `native_give_items` and the other helpers reach them. A respawn at an anchor in another dimension, or
+  `native_player` and the other helpers reach them. A respawn at an anchor in another dimension, or
   at the world spawn's free column, may still move them on a later tick, once that level has loaded round them; the
   End-exit respawn (after the credits) does not fire it.
 - **`native_player_login(player, name, cancel, reason)`**: a player the server has accepted (their name, the whitelist,
@@ -2267,17 +2273,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `amount` (0 leaves the item whole) or set `cancel` for no wear. Not heard for a creative player or when Unbreaking
   saved the item, nor for a mob's armour, a dispenser's tool or the host of a LAN world. The player's state is swapped
   in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- Items (API 9), of the acting player (inside `native_perform_command`, whose player is swapped in): `native_held()`
-  (the main hand's item, count, and whether it is plain), `native_count_items(item)`, `native_carried_items()`,
-  `native_take_items(item, count)` (the main hand first, then as `Inventory.add` orders slots),
-  `native_room_for(item)` and `native_give_items(item, count)` (only where it fits: nothing is dropped). They look at
-  the 36 inventory slots and the off hand, never the armour, and only at **plain** stacks: no damage and no
-  component (name, enchantment...), so a shop never takes a worn or enchanted item for a new one. Each returns how
-  many it counted, took or gave; the player's screen follows as for any change to their inventory.
-- `native_give_stack(uuid, stack)`, a whole stack (damage, name, enchantments... kept) to any player from any server
-  hook, as `Inventory.add` places it (onto equal stacks, then empty inventory slots); what did not fit comes back, all
-  of it for a player not here, dead, or swapped out by another player's hook. Nothing is dropped: an auto-pickup
-  leaves the rest on the ground, a machine keeps it.
+- Items: a player's inventory is their [`ENTITY_ITEMS`](#an-entitys-items) handler, from any server hook.
 - Experience: `native_experience_orbs(dimension, min, max)`, the orbs in a box (id, position, `value`, and `count`
   for merged orbs), read before a mod cancels an orb in `native_entity_join_level`; and `native_give_experience(uuid,
   points)`, points given to any player as touching an orb gives them: Mending repairs their damaged items first, the
@@ -2690,15 +2686,9 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
   is sent the menu, its inventory and its cursor as they were. `slot` counts the menu's own slots first, then the
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
 - `native_menu_closed(uuid, window)`: the player closed it, another menu opened, or the player left.
-- `native_player_stacks(uuid)`: the player's 36 inventory slots, to show copies or offer them.
-- `native_exchange_items(a, a_offer, b, b_offer)`: each offer is inventory slots, each with the exact stack it must
-  still hold. Both offers leave their slots and go to the other player where they fit whole (onto matching stacks,
-  then empty slots), or nothing moves and the error says why (an offer that changed, no room, a player gone or
-  dead). A trade on these menus leaves the offered stacks in their owners' inventories until this one step, so
-  closing the menu, leaving or dying moves nothing.
-
-The menu hooks run with no player's state swapped in; `native_player_stacks` and `native_exchange_items` refuse a
-player whose state is (inside `native_perform_command`): call them from a menu hook or `native_server_tick`.
+- A trade on these menus leaves the offered stacks in their owners' inventories until both sides are settled, then
+  moves them with two `move_resources` between the players' [`ENTITY_ITEMS`](#an-entitys-items) handlers in one
+  `host.transaction`: when the second move falls short, the closure returns an error and the first is put back.
 
 ### Render hook points
 
@@ -3161,6 +3151,9 @@ host.transaction(|host, tx| {
     if paid == 5 && sold == 1 { Ok(()) } else { Err(()) }
 })
 ```
+
+The API 9 item helpers, `native_give_stack`, `native_carried_stack`, `native_player_stacks`, `native_exchange_items`
+and the client's `native_give` were removed for it (#41). Diverges from upstream.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
