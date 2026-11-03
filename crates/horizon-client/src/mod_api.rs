@@ -5,7 +5,7 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
-pub use crate::biome::BiomeColors;
+pub use crate::biome::{BiomeColors, SpawnEntry};
 pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
@@ -83,6 +83,16 @@ pub struct NativeCamera {
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
+
+/// Context for a player tuning a note block.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeNoteBlockChange<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub instrument: &'a str,
+    /// The note before tuning, in the range 0 through 24.
+    pub old_note: i32,
+}
 
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
@@ -594,6 +604,26 @@ impl From<LivingRef> for EntityRef {
     }
 }
 
+/// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MobRef(EntityRef);
+
+impl MobRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an entity handle.
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The same entity as a living handle.
+    pub fn living(self) -> LivingRef {
+        LivingRef::new(self.0)
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1080,7 +1110,7 @@ macro_rules! level_attachment_host {
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod capability;
-pub use capability::{CapabilityKey, ITEMS, ItemHandler};
+pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
@@ -1088,10 +1118,12 @@ mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
 pub use transaction::TransactionSeal;
 mod part_table;
-pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{
-    KnownIds, capability_mod, install_parts, item_capability, mark_game_thread, parts,
-    place_provider, resolve_parts,
+    Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
+    providers, resolve_parts,
+};
+pub use part_table::{
+    Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,
 };
 
 mod generated {
@@ -1100,6 +1132,9 @@ mod generated {
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+#[cfg(test)]
+pub(crate) use part_table::tests as part_tests;
 
 #[cfg(test)]
 mod tests {
