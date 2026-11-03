@@ -17,7 +17,9 @@
 //! whole on its first write, from wherever the player's state lives then: the local player's or
 //! a guest's, swapped in by `native_as_player`. An item a write drops from a player waits for
 //! the root commit too. An item entity's stack is kept on its first write; one emptied stays,
-//! empty, until the root commit removes it.
+//! empty, until the root commit removes it. A guest's menu storage (ender chest, crafting grid,
+//! a mod's chest menu) is kept whole on its first write through a menu slot; a crafting grid
+//! changed by the transaction has its result made again at the root commit.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::items::ItemStack;
 use horizon_client::mod_api::TransactionSeal;
@@ -42,6 +44,8 @@ pub(super) struct Level {
     mob_lengths: HashMap<u32, usize>,
     /// Each item entity's stack before this transaction first wrote it.
     item_entities: HashMap<u32, ItemStack>,
+    /// Each guest's menu storage before this transaction first wrote it, by UUID.
+    menus: HashMap<u128, KeptMenus>,
     /// What the root commit does, in order.
     after: Vec<After>,
 }
@@ -59,6 +63,13 @@ struct KeptPlayer {
     armor: [Option<ItemStack>; 4],
     offhand: Option<ItemStack>,
     carried: Option<ItemStack>,
+}
+
+#[derive(Clone)]
+struct KeptMenus {
+    ender_items: Vec<Option<ItemStack>>,
+    craft_grid: [Option<ItemStack>; 4],
+    native_menu: Vec<Option<ItemStack>>,
 }
 
 /// What a write tells the world, at the root commit.
@@ -131,6 +142,9 @@ impl Game<'_> {
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
                 }
+                for (uuid, kept) in level.menus {
+                    outer.menus.entry(uuid).or_insert(kept);
+                }
                 outer.after.extend(level.after);
             }
             (true, None) => self.root_commit(level),
@@ -168,6 +182,21 @@ impl Game<'_> {
             armor: self.armor.clone(),
             offhand: self.offhand.clone(),
             carried: self.carried.clone(),
+        });
+    }
+    /// Keeps the menu storage of guest `uuid` as it is, if a transaction is open and hasn't yet.
+    pub(super) fn journal_menus(&mut self, uuid: u128) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        let mut guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
+        let Some(g) = guests.find(|g| g.placed && g.uuid == uuid) else {
+            return;
+        };
+        level.menus.entry(uuid).or_insert_with(|| KeptMenus {
+            ender_items: g.ender_items.clone(),
+            craft_grid: g.craft_grid.clone(),
+            native_menu: g.native_menu.clone(),
         });
     }
     /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
@@ -277,6 +306,16 @@ impl Game<'_> {
                 after => self.run_after(after),
             }
         }
+        // A crafting grid the transaction changed has its result made again, once for each
+        // player however many writes it took (`InventoryMenu.slotsChanged`).
+        for (uuid, kept) in &level.menus {
+            let mut guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
+            let changed =
+                guests.any(|g| g.placed && g.uuid == *uuid && g.craft_grid != kept.craft_grid);
+            if changed {
+                self.guest_craft_result(*uuid);
+            }
+        }
         for (pos, kept) in level.block_entities {
             let record = |entity: Option<&BlockEntity>| match entity {
                 Some(BlockEntity::Jukebox(j)) => j.record().cloned(),
@@ -330,6 +369,17 @@ impl Game<'_> {
         for (id, kept) in level.item_entities {
             if let Some(e) = self.dropped.iter_mut().find(|e| e.id == id) {
                 e.stack = kept;
+            }
+        }
+        let guests = self
+            .lan
+            .iter_mut()
+            .flat_map(|host| host.hub.guests.iter_mut());
+        for g in guests {
+            if let Some(kept) = level.menus.get(&g.uuid).filter(|_| g.placed) {
+                g.ender_items.clone_from(&kept.ender_items);
+                g.craft_grid.clone_from(&kept.craft_grid);
+                g.native_menu.clone_from(&kept.native_menu);
             }
         }
         for (uuid, kept) in level.players {
@@ -551,9 +601,8 @@ mod tests {
         assert_eq!(j.ticks, 0, "the new disc's song starts from its beginning");
 
         // A player's place: one of three buckets in the hand is exchanged for a filled one; the
-        // hand keeps two and the filled one goes to the inventory, the cursor changes too, and
-        // what doesn't fit would be thrown. Aborted, the hand, the inventory and the cursor are as
-        // they were, and nothing was thrown.
+        // hand keeps two and the filled one goes to the inventory, and what doesn't fit would be
+        // thrown. Aborted, the hand and the inventory are as they were, and nothing was thrown.
         game.player = Some(
             super::super::PlayerMotion::new(
                 game.motion,
@@ -579,12 +628,10 @@ mod tests {
             player: me,
             hand: horizon_client::first_person::Hand::Main,
         };
-        let cursor = horizon_client::mod_api::ItemPlace::PlayerCursor { player: me };
         let water = ItemResource::of(&bucket("minecraft:water_bucket", 1));
         let host: &mut dyn Host = &mut game;
         let _ = host.transaction(|host, tx| {
             assert_eq!(hand.exchange(host, tx, &water, 1), 1);
-            assert_eq!(cursor.insert(host, tx, &stick, 4), 4);
             Err::<(), ()>(())
         });
         assert_eq!(
