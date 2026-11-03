@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Pick the ignored-tests shards a pull request needs, and print the shard matrix.
+"""Print the ignored-tests shard matrix: every shard, or the ones a pull request needs.
 
 Usage:
-  ignored_shards.py --matrix        `matrix=`, the strategy.matrix of the shard job, every shard
-  ignored_shards.py BASE HEAD       `ignored_shards=`, the shards this pull request must run
+  ignored_shards.py --matrix --all      `matrix=`, every shard (main's pushes)
+  ignored_shards.py --matrix BASE HEAD  `matrix=`, the shards this pull request must run
 
 The ignored-tests check is a matrix with one package per shard; this file is the single
-place that names them, for both the matrix and the selection. A shard runs when a changed
-crate is its package or a transitive dependency of it. Workspace-wide files, and any path
-no crate owns, select every shard; pushes to main always run everything (the workflow's
-`if` decides that). crates/horizon-client holds horizon-client-lib's sources too (its
-[lib] path reaches into that tree), so that directory counts for both packages; the
-launcher is its own workspace (launcher/Cargo.lock) and selects nothing.
+place that names them. A shard is selected when a changed crate is its package or a
+transitive dependency of it. Workspace-wide files, and any path no crate owns, select
+every shard; pushes to main always run everything (the `changes` job passes --all).
+crates/horizon-client holds horizon-client-lib's sources too (its [lib] path reaches
+into that tree), so that directory counts for both packages; the launcher is its own
+workspace (launcher/Cargo.lock) and selects nothing.
 """
 
 import json
@@ -51,7 +51,7 @@ def workspace_dependencies():
 
 
 def depends_on(start, target, dependencies):
-    """Whether `start` is `target` or a transitive dependency of it."""
+    """Whether `target` is `start` itself or a transitive dependency of `start`."""
     seen, todo = {start}, [start]
     while todo:
         current = todo.pop()
@@ -87,11 +87,13 @@ def select(paths, dependencies):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--matrix"]:
-        print("matrix=" + json.dumps({"shard": list(SHARDS)}))
-    elif len(sys.argv) == 3:
-        print("ignored_shards=" + ",".join(select(
-            rust_changes.changed_paths(sys.argv[1], sys.argv[2]), workspace_dependencies(),
-        )))
+    arguments = sys.argv[1:]
+    every = arguments[:2] == ["--matrix", "--all"]
+    selected = len(arguments) == 3 and arguments[0] == "--matrix"
+    if every:
+        shards = list(SHARDS)
+    elif selected:
+        shards = select(rust_changes.changed_paths(arguments[1], arguments[2]), workspace_dependencies())
     else:
         sys.exit(__doc__)
+    print("matrix=" + json.dumps({"shard": shards}))

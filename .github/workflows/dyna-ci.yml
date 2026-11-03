@@ -42,9 +42,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
-      # The ignored-tests shard matrix, and which shards a pull request needs (empty: none).
+      # The ignored-tests shard matrix: every shard on main, the affected ones on a pull request (empty: none).
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
-      ignored_shards: ${{ steps.ignored.outputs.ignored_shards }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,14 +58,16 @@ jobs:
         run: bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
         id: matrix
-        run: python3 tools/ci/ignored_shards.py --matrix >> "$GITHUB_OUTPUT"
-      - name: Which ignored-tests shards does this pull request need?
-        if: github.event_name == 'pull_request'
-        id: ignored
         env:
+          EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/ignored_shards.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "$EVENT" = push ]; then
+            python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
+          else
+            python3 tools/ci/ignored_shards.py --matrix "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          fi
 
   pool-watch:
     needs: changes
@@ -219,11 +220,12 @@ jobs:
   # prints only test names and results: the data is Mojang's.
   ignored-tests-shards:
     needs: changes
+    # The matrix holds only the shards to run, so an empty one (a pull request that needs
+    # none) skips the job instead of expanding to nothing, which GitHub refuses.
     if: >-
       needs.changes.outputs.self_hosted == 'true' &&
       (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) &&
-      (github.event_name == 'push' || needs.changes.outputs.ignored_shards == 'all' ||
-       contains(format(',{0},', needs.changes.outputs.ignored_shards), format(',{0},', matrix.shard)))
+      fromJSON(needs.changes.outputs.ignored_matrix).shard[0] != null
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.ignored_matrix) }}
