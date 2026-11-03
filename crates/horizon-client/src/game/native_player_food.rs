@@ -176,24 +176,34 @@ impl Game<'_> {
     /// items with `points` first (`ExperienceOrb.repairPlayerItems`), then
     /// only the rest goes to their experience
     /// (`Player.giveExperiencePoints`), with the level-up sound. No orb
-    /// pickup sound. False, and nothing given, as the other writes.
+    /// pickup sound. False, and nothing given, as the other writes; `points`
+    /// above `i32::MAX` is refused before Mending repairs anything.
     /// API @API:player_xp_give@.
     pub(super) fn native_player_give_experience_points(
         &mut self,
         player: PlayerRef,
         points: u32,
     ) -> bool {
+        // `Player.giveExperiencePoints` takes an int.
+        let Ok(points) = i32::try_from(points) else {
+            return false;
+        };
         self.native_player_write(player, |game| {
-            let rest = if points > 0 { game.mending(points) } else { 0 };
+            let rest = if points > 0 {
+                game.mending(points as u32)
+            } else {
+                0
+            };
             if rest > 0 {
+                // `rest` is at most `points`, which fits an int.
                 game.give_experience_points(rest as i32);
             }
         })
     }
     /// `Player.giveExperienceLevels`: adds `levels`, or takes them off when
     /// negative, as the anvil and the enchanting table charge with. Below 0
-    /// the level and the points are 0, and the progress toward the next
-    /// level is kept. API @API:player_xp_give@.
+    /// the level, the total and the progress toward the next level are all 0.
+    /// API @API:player_xp_give@.
     pub(super) fn native_player_give_levels(&mut self, player: PlayerRef, levels: i32) -> bool {
         self.native_player_write(player, |game| game.give_levels(levels))
     }
@@ -251,9 +261,42 @@ mod tests {
             game.experience.progress = 0.25;
             assert!(game.native_player_give_levels(player, 3));
             assert_eq!(game.experience.level, 3);
-            assert_eq!(game.experience.progress, 0.25, "progress is kept");
+            assert_eq!(
+                game.experience.progress, 0.25,
+                "a level add keeps the progress"
+            );
+            game.experience.total = 40;
             assert!(game.native_player_give_levels(player, -5));
             assert_eq!(game.experience.level, 0, "below zero clamps to zero");
+            assert_eq!(game.experience.total, 0, "the clamp clears the total");
+            assert_eq!(
+                game.experience.progress, 0.0,
+                "the clamp clears the progress"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn more_points_than_an_int_are_refused_untouched() {
+        with_game(|game| {
+            let player = acting_player(game);
+            // `Player.giveExperiencePoints` takes an int: `i32::MAX` is
+            // given, one more is refused.
+            assert!(game.native_player_give_experience_points(player, i32::MAX as u32));
+            assert_eq!(game.experience.total, i32::MAX);
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.damage = 1000;
+            sword.enchant("minecraft:mending", 1);
+            game.inventory[game.selected] = Some(sword);
+            assert!(!game.native_player_give_experience_points(player, i32::MAX as u32 + 1));
+            let sword = game.inventory[game.selected].as_ref().unwrap();
+            assert_eq!(sword.damage, 1000, "a refused give repairs nothing");
+            assert_eq!(
+                game.experience.total,
+                i32::MAX,
+                "a refused give gives nothing"
+            );
         });
     }
 
