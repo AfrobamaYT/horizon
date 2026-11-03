@@ -318,9 +318,7 @@ impl Game<'_> {
             {
                 self.native_player_trade(uuid, &name, entity_id);
             }
-            self.as_guest(conn, |g| {
-                g.merchant_traded(gm.merchant.mob, &traded)
-            });
+            self.as_guest(conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
         }
         self.drop_guest_items(gi, dropped);
         self.lan_send_offers(conn, &mut gm, false);

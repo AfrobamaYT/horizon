@@ -86,12 +86,10 @@ impl Game<'_> {
     /// player. True when a mod took it: the slot keeps what the mod left and
     /// the guest's client gets the whole menu again. False for every other
     /// click, and for one no mod took, so the game's own routing runs.
-    pub(super) fn lan_mod_quick_move(
-        &mut self,
-        conn: u32,
-        p: &play::ContainerClick,
-    ) -> bool {
-        let Some(host) = self.lan.as_ref() else { return false; };
+    pub(super) fn lan_mod_quick_move(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
         let Some(g) = host.hub.guest(conn) else {
             return false;
         };
@@ -152,7 +150,9 @@ impl Game<'_> {
             return false;
         }
         // The mod menu type's engine starts over from the block entity next click.
-        let Some(host) = self.lan.as_mut() else { return false; };
+        let Some(host) = self.lan.as_mut() else {
+            return false;
+        };
         if let Some(play) = host.play.get_mut(&conn)
             && play
                 .crafting

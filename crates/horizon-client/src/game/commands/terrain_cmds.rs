@@ -275,7 +275,9 @@ impl Game<'_> {
     /// `BorderChangeListener.DelegateBorderChangeListener`'s packets: what
     /// changed on the border since the guests were last told of it.
     pub(in crate::game) fn lan_sync_border(&mut self) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let now = horizon_client::lan::border::Sent::of(&self.border);
         if let Some(sent) = host.border_sent.replace(now) {
             for packet in sent.changes(&self.border) {

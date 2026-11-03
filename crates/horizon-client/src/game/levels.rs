@@ -477,8 +477,7 @@ impl Game<'_> {
             if running == Some(true) {
                 let mut moved = false;
                 for &earlier in &order[..k] {
-                    if !self.arrival_chunks(earlier).is_empty()
-                        && self.enter_level(earlier).is_ok()
+                    if !self.arrival_chunks(earlier).is_empty() && self.enter_level(earlier).is_ok()
                     {
                         self.land_portal_arrivals();
                         moved = true;

@@ -147,11 +147,13 @@ impl Game<'_> {
         // The cartography table reads and makes the host level's maps.
         let held = if menu.kind() == Kind::Cartography {
             let g = &self.lan.as_ref()?.hub.guests[gi];
-            Some((0..menu.slot_count())
-                .filter_map(|s| menu.slot(s).cloned())
-                .chain(g.inventory.iter().flatten().cloned())
-                .chain(g.carried.clone())
-                .collect::<Vec<ItemStack>>())
+            Some(
+                (0..menu.slot_count())
+                    .filter_map(|s| menu.slot(s).cloned())
+                    .chain(g.inventory.iter().flatten().cloned())
+                    .chain(g.carried.clone())
+                    .collect::<Vec<ItemStack>>(),
+            )
         } else {
             None
         };
@@ -229,13 +231,18 @@ impl Game<'_> {
     /// `native_prepare_item_craft` as a click has it, kept by the guest and their menu. The
     /// client hears it with the tick's inventory sync.
     pub(super) fn guest_craft_result(&mut self, uuid: u128) {
-        let Some(g) = self.lan.as_ref().and_then(|host| {
-            host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid)
-        }) else {
+        let Some(g) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid))
+        else {
             return;
         };
         let (conn, name) = (g.conn, g.name.clone());
-        let mut result = self.recipes().find(&g.craft_grid, 2).map(|(_, stack)| stack);
+        let mut result = self
+            .recipes()
+            .find(&g.craft_grid, 2)
+            .map(|(_, stack)| stack);
         self.native_prepare_item_craft(uuid, &name, None, &mut result);
         let Some(host) = self.lan.as_mut() else {
             return;
@@ -244,7 +251,10 @@ impl Game<'_> {
             return;
         };
         g.craft_result.clone_from(&result);
-        let menu = host.play.get_mut(&conn).and_then(|p| p.crafting.inventory.take());
+        let menu = host
+            .play
+            .get_mut(&conn)
+            .and_then(|p| p.crafting.inventory.take());
         if let Some(mut menu) = menu {
             menu.set_slot(&self.menu_env(), 0, result);
             if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
@@ -255,15 +265,13 @@ impl Game<'_> {
 
     /// A click on the guest's inventory menu (window 0): `InventoryMenu`,
     /// crafting grid included. False for other windows.
-    pub(super) fn lan_inventory_click(
-        &mut self,
-        conn: u32,
-        p: &play::ContainerClick,
-    ) -> bool {
+    pub(super) fn lan_inventory_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
         if p.container != 0 {
             return false;
         }
-        let Some(host) = self.lan.as_mut() else { return true; };
+        let Some(host) = self.lan.as_mut() else {
+            return true;
+        };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return true;
         };
@@ -288,15 +296,21 @@ impl Game<'_> {
             (0..menu.slot_count())
                 .filter(|&s| menu.slot(s) != before[s].as_ref())
                 .collect::<Vec<_>>()
-        }) else { return true; };
-        let Some(host) = self.lan.as_ref() else { return true; };
+        }) else {
+            return true;
+        };
+        let Some(host) = self.lan.as_ref() else {
+            return true;
+        };
         let guest = &host.hub.guests[gi];
         let (uuid, name) = (guest.uuid, guest.name.clone());
         let mut result = menu.slot(0).cloned();
         self.native_prepare_item_craft(uuid, &name, None, &mut result);
         let env = self.menu_env();
         menu.set_slot(&env, 0, result);
-        let Some(host) = self.lan.as_mut() else { return true; };
+        let Some(host) = self.lan.as_mut() else {
+            return true;
+        };
         let g = &mut host.hub.guests[gi];
         for k in 0..4 {
             g.craft_grid[k] = menu.slot(1 + k).cloned();
@@ -312,12 +326,10 @@ impl Game<'_> {
     /// recipe and fuel), `BrewingStandMenu` (one bottle per slot, ingredient and
     /// blaze powder slots) or a content mod's menu type (`Kind::Mod`) over the
     /// block entity's slots. False for other windows.
-    pub(super) fn lan_machine_click(
-        &mut self,
-        conn: u32,
-        p: &play::ContainerClick,
-    ) -> bool {
-        let Some(host) = self.lan.as_mut() else { return false; };
+    pub(super) fn lan_machine_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
+        let Some(host) = self.lan.as_mut() else {
+            return false;
+        };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return false;
         };
@@ -382,7 +394,9 @@ impl Game<'_> {
             (0..menu.slot_count())
                 .filter(|&s| menu.slot(s) != before[s].as_ref())
                 .collect::<Vec<_>>()
-        }) else { return true; };
+        }) else {
+            return true;
+        };
         match self.world.block_entities.get_mut(&pos) {
             Some(BlockEntity::Furnace(f)) => {
                 for k in 0..3 {
@@ -417,8 +431,15 @@ impl Game<'_> {
             _ => {}
         }
         // FurnaceResultSlot.checkTakeAchievements, each as the click made it.
-        let Some(guest) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else { return true; };
-        let (uuid, entity_id, name, at) = (guest.uuid, guest.entity_id, guest.name.clone(), guest.position);
+        let Some(guest) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else {
+            return true;
+        };
+        let (uuid, entity_id, name, at) = (
+            guest.uuid,
+            guest.entity_id,
+            guest.name.clone(),
+            guest.position,
+        );
         for (stack, removed) in std::mem::take(&mut menu.item_smelted) {
             self.native_item_smelted(uuid, entity_id, stack.as_ref(), removed);
         }
@@ -460,7 +481,9 @@ impl Game<'_> {
         slot: i32,
         enabled: bool,
     ) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let Some(pos) = host
             .hub
             .guest(conn)
@@ -493,7 +516,9 @@ impl Game<'_> {
         p: &horizon_protocol::packets::recipes::PlaceRecipe,
     ) {
         use horizon_client::menu::place::PostPlace;
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
@@ -521,7 +546,9 @@ impl Game<'_> {
         }
         let (player, name, creative) = (g.uuid, g.name.clone(), g.creative());
         self.native_player_recipe_book_click(player, &name, &id, p.use_max);
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let placed = if p.container == 0 {
             let crafting = host.play.entry(conn).or_default();
             let mut menu = crafting
@@ -535,8 +562,12 @@ impl Game<'_> {
                     menu.set_slot(env, 1 + k, s);
                 }
                 menu.place_recipe(env, &id, p.use_max, creative, None)
-            }) else { return; };
-            let Some(host) = self.lan.as_mut() else { return; };
+            }) else {
+                return;
+            };
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             let g = &mut host.hub.guests[gi];
             for k in 0..4 {
                 g.craft_grid[k] = menu.slot(1 + k).cloned();
@@ -555,13 +586,19 @@ impl Game<'_> {
             };
             let Some(placed) = self.guest_menu_op(gi, &mut menu, |menu, env| {
                 menu.place_recipe(env, &id, p.use_max, creative, None)
-            }) else { return; };
-            let Some(host) = self.lan.as_mut() else { return; };
+            }) else {
+                return;
+            };
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             host.play.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
             self.lan_send_table_content(conn);
             placed
         };
-        if placed == PostPlace::Ghost && let Some(host) = self.lan.as_mut() {
+        if placed == PostPlace::Ghost
+            && let Some(host) = self.lan.as_mut()
+        {
             host.hub.send_ghost_recipe(conn, p.container, &id);
         }
     }
@@ -573,7 +610,9 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let title = horizon_protocol::text::translatable("container.crafting", &[]);
         let Some(window) = host.hub.open_window(conn, "minecraft:crafting", title) else {
             return;
@@ -584,12 +623,10 @@ impl Game<'_> {
     }
 
     /// A click on the guest's crafting table window; false for other windows.
-    pub(super) fn lan_crafting_click(
-        &mut self,
-        conn: u32,
-        p: &play::ContainerClick,
-    ) -> bool {
-        let Some(host) = self.lan.as_mut() else { return false; };
+    pub(super) fn lan_crafting_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
+        let Some(host) = self.lan.as_mut() else {
+            return false;
+        };
         let Some(play) = host.play.get_mut(&conn) else {
             return false;
         };
@@ -606,7 +643,9 @@ impl Game<'_> {
         let mut agreed = false;
         // A table that is no longer valid takes no clicks (handleContainerClick).
         let gi = host.hub.guests.iter().position(|g| g.conn == conn);
-        let Some(host) = self.lan.as_ref() else { return false; };
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
         if let Some(gi) = gi
             && !host.hub.guests[gi].spectator()
             && self.lan_table_valid(&host.hub.guests[gi], pos)
@@ -619,8 +658,12 @@ impl Game<'_> {
                 (0..menu.slot_count())
                     .filter(|&s| menu.slot(s) != before[s].as_ref())
                     .collect::<Vec<_>>()
-            }) else { return true; };
-            let Some(guest) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else { return true; };
+            }) else {
+                return true;
+            };
+            let Some(guest) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else {
+                return true;
+            };
             let (uuid, name) = (guest.uuid, guest.name.clone());
             let mut result = menu.slot(0).cloned();
             let vanilla = result.clone();
@@ -630,7 +673,9 @@ impl Game<'_> {
             }
             let env = self.menu_env();
             menu.set_slot(&env, 0, result);
-            let Some(host) = self.lan.as_mut() else { return true; };
+            let Some(host) = self.lan.as_mut() else {
+                return true;
+            };
             agreed = p.state == state
                 && host.hub.click_agreed(
                     gi,
@@ -647,7 +692,9 @@ impl Game<'_> {
                 }
             }
         }
-        let Some(host) = self.lan.as_mut() else { return true; };
+        let Some(host) = self.lan.as_mut() else {
+            return true;
+        };
         host.play.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
         if !agreed {
             self.lan_send_table_content(conn);
@@ -669,7 +716,9 @@ impl Game<'_> {
     /// `ServerPlayer.tick`'s `stillValid`: a guest's crafting table closes
     /// once it is gone or out of reach, giving its grid back.
     pub(super) fn lan_tables_tick(&mut self) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let invalid: Vec<(u32, i32)> = host
             .play
             .iter()
@@ -685,7 +734,9 @@ impl Game<'_> {
             .collect();
         for (conn, window) in invalid {
             self.lan_crafting_closed(conn, Some(window));
-            let Some(host) = self.lan.as_mut() else { return; };
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             host.hub.send_to(
                 conn,
                 &C::ContainerClose(play::ContainerClose { container: window }),
@@ -698,7 +749,9 @@ impl Game<'_> {
 
     /// The whole crafting table menu for the client (`sendAllDataToRemote`).
     fn lan_send_table_content(&mut self, conn: u32) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
@@ -736,7 +789,14 @@ impl Game<'_> {
     /// The open crafting table's own slots (result and grid) before the
     /// player's inventory, if the guest has one open.
     pub(super) fn lan_crafting_table_own_slots(&self, conn: u32) -> Option<usize> {
-        let (_, _, menu, _) = self.lan.as_ref()?.play.get(&conn)?.crafting.table.as_ref()?;
+        let (_, _, menu, _) = self
+            .lan
+            .as_ref()?
+            .play
+            .get(&conn)?
+            .crafting
+            .table
+            .as_ref()?;
         Some(menu.slot_count() - 36)
     }
 
@@ -772,9 +832,7 @@ impl Game<'_> {
     /// doesn't fit dropped (`clearContainer`).
     pub(super) fn lan_place_back(&mut self, gi: usize, stacks: Vec<ItemStack>) {
         let mut menu = Menu::new(Kind::Inventory);
-        self.guest_menu_op(gi, &mut menu, |menu, env| {
-            place_back(menu, env, stacks)
-        });
+        self.guest_menu_op(gi, &mut menu, |menu, env| place_back(menu, env, stacks));
     }
 
     /// A guest left: what their crafting grids and workstation held goes back into their
@@ -782,7 +840,9 @@ impl Game<'_> {
     pub(super) fn lan_crafting_left(&mut self, g: &mut Guest) {
         // The guest's play state stays: their statistics are awarded and saved
         // after this (`HostEvent::Left`), which removes it.
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let play = host.play.get_mut(&g.conn);
         let mut grid: Vec<ItemStack> = g.craft_grid.iter_mut().filter_map(Option::take).collect();
         g.craft_result = None;

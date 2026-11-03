@@ -777,9 +777,8 @@ impl Game<'_> {
                     }
                 }
             } else if trip.end {
-                let guest_arrival = self.as_guest(trip.conn, |g| {
-                    g.end_arrival(trip.target, &mut trip.finder)
-                });
+                let guest_arrival =
+                    self.as_guest(trip.conn, |g| g.end_arrival(trip.target, &mut trip.finder));
                 let arrival = match guest_arrival {
                     Some(arrival) => arrival,
                     None => self.end_arrival(trip.target, &mut trip.finder),

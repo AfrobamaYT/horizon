@@ -996,7 +996,13 @@ pub(super) mod tests {
             .unwrap();
             assert_eq!(game.guest_packets.len(), 1);
             assert!(game.guest_entity_events.is_empty() && game.guest_cooldowns.is_empty());
-            assert_eq!(game.lan.as_ref().unwrap().hub.guests[1].sender.pending.load(Ordering::Relaxed), 0);
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[1]
+                    .sender
+                    .pending
+                    .load(Ordering::Relaxed),
+                0
+            );
             assert!(rx.try_recv().is_err());
             let outer = game.enter_guest(real_id).unwrap();
             assert!(!game.lan_acting_fake);
@@ -1087,7 +1093,10 @@ pub(super) mod tests {
                 .push(("real_outer".into(), [0.0; 3], 1.0, 1.0));
             game.as_guest(3, |game| {
                 assert_eq!(game.lan_acting, Some(3));
-                assert!(game.as_guest(real_id, |_| panic!("active guest re-entered")).is_none());
+                assert!(
+                    game.as_guest(real_id, |_| panic!("active guest re-entered"))
+                        .is_none()
+                );
                 assert_eq!(game.lan_acting, Some(3));
                 game.guest_cooldowns
                     .push(("minecraft:real_second".into(), 11))

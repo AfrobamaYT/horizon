@@ -43,7 +43,12 @@ impl Game<'_> {
     /// A `horizon:mod_net` payload from `conn`: queued for
     /// `run_native_net`. Past the caps it is dropped in silence.
     pub(super) fn guest_native_net(&mut self, conn: u32, data: &[u8]) {
-        let Some(player) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)).map(|g| g.uuid) else {
+        let Some(player) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .map(|g| g.uuid)
+        else {
             return;
         };
         let count = self.native_net.from_counts.entry(player).or_default();
@@ -70,7 +75,9 @@ impl Game<'_> {
 
     /// What the mods sent this tick leaves; the tick's allowances start over.
     pub(super) fn flush_native_net(&mut self) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         for (player, data) in std::mem::take(&mut self.native_net.to_players) {
             if let Some(g) = host
                 .hub

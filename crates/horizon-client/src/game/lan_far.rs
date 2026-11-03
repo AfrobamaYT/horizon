@@ -29,7 +29,9 @@ fn send(sender: &PlayerSender, data: Vec<u8>) {
 impl Game<'_> {
     /// A `horizon:lod` payload from `conn`.
     pub(super) fn guest_far_terrain(&mut self, conn: u32, data: &[u8]) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(far) = host.far.as_mut() else {
             return;
         };
@@ -45,9 +47,15 @@ impl Game<'_> {
         let dim = Dim::from_id(&guest.dimension);
         let position = guest.position;
         let source = self.lod_source_in(dim);
-        let Some(host) = self.lan.as_mut() else { return; };
-        let Some(far) = host.far.as_mut() else { return; };
-        let Some(guest) = host.hub.guest(conn) else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let Some(far) = host.far.as_mut() else {
+            return;
+        };
+        let Some(guest) = host.hub.guest(conn) else {
+            return;
+        };
         let now = std::time::Instant::now();
         match far.request(conn, data, position, source.is_some(), now) {
             Verdict::Serve(request) => far.push(Job {
@@ -68,7 +76,9 @@ impl Game<'_> {
     /// The tiles the far terrain thread finished go to their players, once
     /// their connections have room.
     pub(super) fn flush_far_terrain(&mut self) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(far) = host.far.as_mut() else {
             return;
         };

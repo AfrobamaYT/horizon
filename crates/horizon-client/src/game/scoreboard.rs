@@ -394,11 +394,17 @@ impl Game<'_> {
     /// what changed on the board since it was last sent it (all of it on
     /// joining), lan/scoreboard.rs.
     pub(super) fn lan_sync_scoreboard(&mut self) {
-        if self.lan.as_ref().is_none_or(|host| host.hub.guests.iter().all(|g| !g.placed)) {
+        if self
+            .lan
+            .as_ref()
+            .is_none_or(|host| host.hub.guests.iter().all(|g| !g.placed))
+        {
             return;
         }
         self.load_scoreboard();
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         host.hub.teams.clone_from(&self.score.board.teams);
         let view = horizon_client::lan::scoreboard::View::of(&self.score.board);
         for g in host.hub.guests.iter_mut().filter(|g| g.placed) {

@@ -53,10 +53,7 @@ impl Game<'_> {
         attachments: &std::collections::HashMap<u128, horizon_world::attachments::Attachments>,
         guest: &mut horizon_client::lan::guest::Guest,
     ) {
-        guest.attachments = attachments
-            .get(&guest.uuid)
-            .cloned()
-            .unwrap_or_default();
+        guest.attachments = attachments.get(&guest.uuid).cloned().unwrap_or_default();
     }
 
     /// Whether entity `id` is in the level, as a holder of attachments: one walk

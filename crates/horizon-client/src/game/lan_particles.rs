@@ -239,13 +239,7 @@ impl Game<'_> {
     /// `LivingEntity.checkFallDamage`'s `ServerLevel.sendParticles` of the
     /// landing block's crumbs: drawn in this window, when it has one, and
     /// sent to each player within 32 blocks.
-    pub(super) fn landing_dust(
-        &mut self,
-        state: BlockStateId,
-        at: Vec3,
-        count: i32,
-        speed: f64,
-    ) {
+    pub(super) fn landing_dust(&mut self, state: BlockStateId, at: Vec3, count: i32, speed: f64) {
         let at = [at.x, at.y, at.z];
         if self.serving.is_none() && self.options.dedicated.is_none() {
             let block = [

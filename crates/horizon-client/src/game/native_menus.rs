@@ -174,7 +174,9 @@ impl Game<'_> {
     /// replaced: what each player has open is compared with what the mods last
     /// heard. A menu opened and closed again inside one tick is not heard.
     pub(super) fn tick_player_menus(&mut self) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let conns: Vec<u32> = host
             .hub
             .guests
@@ -183,7 +185,9 @@ impl Game<'_> {
             .map(|g| g.conn)
             .collect();
         for conn in conns {
-            let Some(host) = self.lan.as_ref() else { return; };
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             // `AbstractContainerScreen.tick` closes the container once the player is no longer
             // alive, so a death closes the menu now (the lid falls, the mods hear Close), not at
             // the respawn.
@@ -194,7 +198,9 @@ impl Game<'_> {
                     host.hub.close_container(conn);
                 }
             }
-            let Some(host) = self.lan.as_mut() else { return; };
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             // Compared as borrowed: nothing is built each tick while it stays open.
             let now = if dead { None } else { open_menu_of(host, conn) };
             let heard = host.play.get(&conn).and_then(|p| p.menu_heard.as_ref());
@@ -224,14 +230,23 @@ impl Game<'_> {
     /// (`ServerPlayer.doCloseContainer`): the mods hear it, if they heard it
     /// open.
     pub(super) fn player_menu_closing(&mut self, conn: u32) {
-        let heard = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)).and_then(|p| p.menu_heard.take());
+        let heard = self
+            .lan
+            .as_mut()
+            .and_then(|host| host.play.get_mut(&conn))
+            .and_then(|p| p.menu_heard.take());
         if let Some(old) = heard {
             self.player_menu_closed(conn, old);
         }
     }
 
     fn player_menu_opened(&mut self, conn: u32, menu: HeardMenu) {
-        let Some((uuid, name)) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)).map(|g| (g.uuid, g.name.clone())) else {
+        let Some((uuid, name)) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .map(|g| (g.uuid, g.name.clone()))
+        else {
             return;
         };
         let dimension = self.dim.id();
@@ -241,7 +256,12 @@ impl Game<'_> {
     }
 
     fn player_menu_closed(&mut self, conn: u32, menu: HeardMenu) {
-        let Some((uuid, name)) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)).map(|g| (g.uuid, g.name.clone())) else {
+        let Some((uuid, name)) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .map(|g| (g.uuid, g.name.clone()))
+        else {
             return;
         };
         let dimension = self.dim.id();

@@ -30,7 +30,9 @@ impl Game<'_> {
     /// A `horizon:quiet_commands` payload from `conn`: queued (or logged as
     /// refused when it breaks the payload's caps).
     pub(super) fn guest_quiet_commands(&mut self, conn: u32, data: &[u8]) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(name) = host.hub.guest(conn).map(|g| g.name.clone()) else {
             return;
         };

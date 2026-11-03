@@ -104,7 +104,9 @@ impl Strike {
 impl Game<'_> {
     /// Whether the player a hit landed on stands on the ground.
     pub(super) fn pvp_victim_on_ground(&self, victim: Victim) -> bool {
-        let Some(host) = self.lan.as_ref() else { return false; };
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
         match victim {
             Victim::Guest(conn) => host
                 .hub
@@ -258,7 +260,9 @@ impl Game<'_> {
     /// The hit landing on the victim with its extra knockback, then the
     /// attacker's attack sound. Whether the victim was hurt.
     pub(super) fn pvp_land(&mut self, victim: Victim, s: &Strike) -> bool {
-        let Some(host) = self.lan.as_ref() else { return false };
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
         // ServerPlayer.canHarmPlayer: the pvp game rule, then the victim's
         // team (Player.canHarmPlayer: allies only with friendly fire on).
         let team = match victim {
@@ -316,7 +320,9 @@ impl Game<'_> {
             let died = match victim {
                 // A totem that fired is applied on the next tick_totem, so the
                 // victim is still at zero health but is not dying.
-                Victim::Guest(conn) => self.lan.as_ref()
+                Victim::Guest(conn) => self
+                    .lan
+                    .as_ref()
                     .and_then(|host| host.hub.guest(conn))
                     .and_then(|g| g.motion.as_deref())
                     .is_some_and(|p| p.health.dead_or_dying() && !p.health.totem_used),
@@ -332,7 +338,9 @@ impl Game<'_> {
         }
         if hurt && (s.crit || s.magic) {
             let target = match victim {
-                Victim::Guest(conn) => self.lan.as_ref()
+                Victim::Guest(conn) => self
+                    .lan
+                    .as_ref()
                     .and_then(|host| host.hub.guest(conn))
                     .and_then(|g| g.motion.as_deref().map(|p| (g.entity_id, p))),
             };
@@ -396,9 +404,7 @@ impl Game<'_> {
                     }
                 }
                 Some(conn) => {
-                    self.as_guest(conn, |g| {
-                        g.sweep_attack(at, Some(s.from), target, s.scale)
-                    });
+                    self.as_guest(conn, |g| g.sweep_attack(at, Some(s.from), target, s.scale));
                 }
             }
         }
@@ -455,7 +461,9 @@ impl Game<'_> {
     /// (`isAlliedTo`), is hurt (`ServerPlayer.canHarmPlayer`: the `pvp` rule)
     /// and pushed 0.4 along the attacker's yaw.
     pub(super) fn sweep_players(&mut self, sweep: &Sweep) {
-        let Some(host) = self.lan.as_ref() else { return };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let from = Vec3::new(sweep.from[0], sweep.from[1], sweep.from[2]);
         let mut victims = Vec::new();
         for g in &host.hub.guests {

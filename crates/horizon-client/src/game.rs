@@ -216,14 +216,14 @@ mod native_entity_invulnerable;
 mod native_entity_motion;
 mod native_entity_moves;
 mod native_entity_refs;
-#[cfg(test)]
-mod native_guest_turn_tests;
 mod native_entity_remove;
 mod native_entity_riding;
 mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
+#[cfg(test)]
+mod native_guest_turn_tests;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;

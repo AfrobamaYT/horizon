@@ -11,7 +11,9 @@ impl Game<'_> {
     /// Guest `conn`'s client ticks since the server's last tick, played again, before the server
     /// moves the guest's own body.
     pub(super) fn guest_replay(&mut self, conn: u32) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         if !host.hub.recording() {
             return;
         }

@@ -1437,8 +1437,12 @@ impl Game<'_> {
                         id: f.id as i32,
                     };
                     let id = map_id(item)?;
-                    let carries = g.inventory.iter().chain(std::iter::once(&g.offhand))
-                        .flatten().any(|s| s.item == item.item && map_id(s) == Some(id));
+                    let carries = g
+                        .inventory
+                        .iter()
+                        .chain(std::iter::once(&g.offhand))
+                        .flatten()
+                        .any(|s| s.item == item.item && map_id(s) == Some(id));
                     Some((id, frame, carries))
                 })
                 .collect();

@@ -42,7 +42,9 @@ impl Game<'_> {
     /// ServerGamePacketListenerImpl.detectRateSpam: a chat message or command adds 20 to the
     /// guest's throttler; over the threshold, a guest who is not an operator is kicked.
     pub(super) fn detect_rate_spam(&mut self, conn: u32, command: bool) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
@@ -72,7 +74,9 @@ impl Game<'_> {
     /// handleChatCommand (performUnsignedChatCommand): refused when the
     /// server enforces secure chat and the command has a message to sign.
     pub(super) fn guest_chat_command(&mut self, conn: u32, command: &str) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
@@ -82,7 +86,9 @@ impl Game<'_> {
         let permission = host.hub.guests[i].permission;
         let secure = host.hub.enforces_secure_chat();
         if secure && !self.signable_arguments(permission, command).is_empty() {
-            let Some(host) = self.lan.as_ref() else { return; };
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let name = host.hub.guests[i].name.clone();
             self.lan_log_event(HostEvent::Error(format!(
                 "Received unsigned command packet from {name}, but the command requires signable arguments: {command}"
@@ -106,12 +112,10 @@ impl Game<'_> {
 
     /// handleSignedChatCommand: the acknowledgements, then each message
     /// argument through the sender's chain, then the command with them.
-    pub(super) fn guest_signed_command(
-        &mut self,
-        conn: u32,
-        p: play::ChatCommandSigned,
-    ) {
-        let Some(host) = self.lan.as_mut() else { return; };
+    pub(super) fn guest_signed_command(&mut self, conn: u32, p: play::ChatCommandSigned) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
@@ -124,7 +128,9 @@ impl Game<'_> {
             ran = true;
             let permission = host.hub.guests[i].permission;
             let parsed = self.signable_arguments(permission, &p.command);
-            let Some(host) = self.lan.as_mut() else { return; };
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             match host
                 .hub
                 .signed_arguments(i, &p, &parsed, &last_seen, &mut events)
@@ -158,7 +164,9 @@ impl Game<'_> {
         command: &str,
         signed: Option<&Signed>,
     ) -> bool {
-        let Some(host) = self.lan.as_ref() else { return false; };
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return false;
         };
@@ -179,7 +187,9 @@ impl Game<'_> {
                 .map(|(_, m)| m.clone())
         });
         let mut events = Vec::new();
-        let Some(host) = self.lan.as_mut() else { return false; };
+        let Some(host) = self.lan.as_mut() else {
+            return false;
+        };
         if id == "msg" {
             let Some(Arg::Entity(selector)) = context.get("targets") else {
                 return false;

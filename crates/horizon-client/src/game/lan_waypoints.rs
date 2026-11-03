@@ -22,7 +22,9 @@ impl Game<'_> {
     /// (`ServerLevel.removePlayerImmediately`: untracked for everyone there)
     /// and joins the new one's (`addDuringTeleport`).
     pub(super) fn lan_update_waypoints(&mut self) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let mut players: Vec<(&str, waypoints::Player)> = Vec::new();
         let mut respawned = Vec::new();
         for g in host.hub.guests.iter().filter(|g| g.placed) {
@@ -50,7 +52,10 @@ impl Game<'_> {
                     first_tick: g.ticks == 0,
                     view_distance: g.view_distance,
                     team: self.score.board.players_team(&g.name).map(|team| {
-                        (team.name.clone(), team.color.as_deref().and_then(waypoints::team_rgb))
+                        (
+                            team.name.clone(),
+                            team.color.as_deref().and_then(waypoints::team_rgb),
+                        )
                     }),
                     icon: Icon::default(),
                 },

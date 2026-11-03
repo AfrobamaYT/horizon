@@ -36,7 +36,9 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(conn);
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(window) = host.hub.open_mount_window(conn, columns as i32, mob as i32) else {
             return;
         };
@@ -68,7 +70,9 @@ impl Game<'_> {
     /// The menu's slots (the mount's, then the inventory and the hotbar)
     /// and the carried stack, sent when they changed since the last time.
     fn lan_send_mount(&mut self, conn: u32) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let Some(gm) = host.play.get(&conn).and_then(|p| p.mount_window.as_ref()) else {
             return;
         };
@@ -85,7 +89,9 @@ impl Game<'_> {
         slots.extend((9..36).chain(0..9).map(|i| g.inventory[i].clone()));
         let carried = g.carried.clone();
         let now = Some((slots, carried));
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(gm) = host
             .play
             .get_mut(&conn)
@@ -110,12 +116,10 @@ impl Game<'_> {
     }
 
     /// A click on the guest's mount window; false for other windows.
-    pub(super) fn lan_mount_click(
-        &mut self,
-        conn: u32,
-        p: &play::ContainerClick,
-    ) -> bool {
-        let Some(host) = self.lan.as_ref() else { return false; };
+    pub(super) fn lan_mount_click(&mut self, conn: u32, p: &play::ContainerClick) -> bool {
+        let Some(host) = self.lan.as_ref() else {
+            return false;
+        };
         let Some((mob, columns)) = host
             .play
             .get(&conn)
@@ -136,7 +140,9 @@ impl Game<'_> {
             self.lan_mount_store(index, columns, &menu);
         }
         // The client is told what the server has, whatever it predicted.
-        let Some(host) = self.lan.as_mut() else { return true; };
+        let Some(host) = self.lan.as_mut() else {
+            return true;
+        };
         if let Some(gm) = host
             .play
             .get_mut(&conn)
@@ -208,14 +214,18 @@ impl Game<'_> {
     /// checks its menu (`ServerPlayer.tick`): another level ticking has
     /// none of its mobs (#5331).
     pub(super) fn tick_lan_mount_menus(&mut self) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let open: Vec<(u32, u32, i32)> = host
             .play
             .iter()
             .filter_map(|(c, p)| p.mount_window.as_ref().map(|m| (*c, m.mob, m.window)))
             .collect();
         for (conn, mob, window) in open {
-            let Some(host) = self.lan.as_ref() else { return; };
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };

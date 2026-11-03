@@ -59,7 +59,11 @@ impl Game<'_> {
         }
         // The text only goes to the filter's own log, for operators: never to the console or the stream.
         dedicated::log("INFO", &summary);
-        if let Some(path) = self.lan.as_ref().and_then(|host| host.hub.chat_filter_log()) {
+        if let Some(path) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.chat_filter_log())
+        {
             let line =
                 horizon_chat_filter::log_line(now, name, uuid, place.name(), count, action, text);
             if let Err(e) = horizon_chat_filter::append_log(std::path::Path::new(path), &line) {
@@ -139,7 +143,8 @@ impl Game<'_> {
         let texts: Vec<&str> = arguments.iter().map(|(_, t)| t.as_str()).collect();
         let mut events = Vec::new();
         let Some(allowed) = self.lan.as_mut().map(|host| {
-            host.hub.chat_allowed(i, &texts, Place::Command, &mut events)
+            host.hub
+                .chat_allowed(i, &texts, Place::Command, &mut events)
         }) else {
             return true;
         };
@@ -246,13 +251,7 @@ impl Game<'_> {
     }
 
     /// Mutes `name` for `time` milliseconds (`None`: until `/unmute`), logged; what to answer.
-    fn mute(
-        &mut self,
-        name: &str,
-        time: Option<i64>,
-        reason: Option<String>,
-        by: &str,
-    ) -> String {
+    fn mute(&mut self, name: &str, time: Option<i64>, reason: Option<String>, by: &str) -> String {
         // A player here, else one the server has seen (the user cache).
         let user = self
             .lan

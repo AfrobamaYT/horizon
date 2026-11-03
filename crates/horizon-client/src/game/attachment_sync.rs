@@ -81,11 +81,15 @@ impl Game<'_> {
     /// changes of the holders lent to mods since the last pass to the players
     /// who see them.
     pub(super) fn flush_attachment_sync(&mut self) {
-        let Some(host) = self.lan.as_mut() else { return; };
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let snapshots = std::mem::take(&mut host.hub.attachment_snapshots);
         for snapshot in snapshots {
             let AttachmentSnapshot { player, holder } = snapshot;
-            let Some(host) = self.lan.as_mut() else { return; };
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             let hub = &mut host.hub;
             let Some(guest) = hub.guests.iter().find(|g| g.uuid == player) else {
                 continue;
@@ -107,7 +111,11 @@ impl Game<'_> {
                 _ => holder,
             };
             let messages = self.attachment_snapshot(holder);
-            if let Some(guest) = self.lan.as_ref().and_then(|host| host.hub.guests.iter().find(|g| g.uuid == player)) {
+            if let Some(guest) = self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.guests.iter().find(|g| g.uuid == player))
+            {
                 for message in messages {
                     guest.send_attachment_sync(&message);
                 }

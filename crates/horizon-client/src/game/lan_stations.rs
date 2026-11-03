@@ -141,9 +141,13 @@ impl Game<'_> {
             .lan
             .as_ref()
             .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn))
-            .filter(|&gi| !self.lan.as_ref().is_some_and(|h| h.hub.guests[gi].spectator()));
-        if let Some(gi) = guest
-        {
+            .filter(|&gi| {
+                !self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|h| h.hub.guests[gi].spectator())
+            });
+        if let Some(gi) = guest {
             // createResult runs when the inputs change (or a rename): a click
             // elsewhere must not hand the hooks their own result again.
             let result_slot = match gs.kind {
@@ -279,13 +283,7 @@ impl Game<'_> {
     /// How many slots of its own the guest's open station menu has before the
     /// player's inventory (`slot_count - 36`), if one is open.
     pub(super) fn lan_station_own_slots(&self, conn: u32) -> Option<usize> {
-        let gs = self
-            .lan
-            .as_ref()?
-            .play
-            .get(&conn)?
-            .station
-            .as_ref()?;
+        let gs = self.lan.as_ref()?.play.get(&conn)?.station.as_ref()?;
         Some(gs.menu.slot_count() - 36)
     }
 
@@ -396,7 +394,12 @@ impl Game<'_> {
             .lan
             .as_ref()
             .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn))
-            .filter(|&gi| !self.lan.as_ref().is_some_and(|h| h.hub.guests[gi].spectator()));
+            .filter(|&gi| {
+                !self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|h| h.hub.guests[gi].spectator())
+            });
         if let Some(gi) = guest
             && let Some(mut menu) = self.lectern_menu(key)
         {
@@ -426,7 +429,12 @@ impl Game<'_> {
     /// pays the levels, the anvil wears (level event 1030 or 1029), the
     /// smithing table sounds (1044). An anvil's `craft` is then reported to
     /// the mods (`AnvilCraftEvent.Post`).
-    fn lan_station_combined(&mut self, conn: u32, gs: &mut GuestStation, craft: Option<&AnvilCraft>) {
+    fn lan_station_combined(
+        &mut self,
+        conn: u32,
+        gs: &mut GuestStation,
+        craft: Option<&AnvilCraft>,
+    ) {
         let change = std::mem::take(&mut gs.menu.level_change);
         if change != 0 {
             self.as_guest(conn, |g| g.give_levels(change));
@@ -703,9 +711,7 @@ impl Game<'_> {
                 };
                 // As that player: `native_acting_player` and `native_acting_id`
                 // answer for the one who pressed.
-                self.as_guest(conn, |game| {
-                    game.mod_menu_button(context, &mut carried)
-                });
+                self.as_guest(conn, |game| game.mod_menu_button(context, &mut carried));
                 if let Some(host) = self.lan.as_mut() {
                     if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
                         let net = host.hub.stack(&carried);

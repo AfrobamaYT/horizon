@@ -185,7 +185,11 @@ impl Game<'_> {
             _ => return None,
         };
         let back = self.dim;
-        let theirs = self.lan.as_ref()?.hub.guest(conn)
+        let theirs = self
+            .lan
+            .as_ref()?
+            .hub
+            .guest(conn)
             .map(|g| super::super::Dim::from_id(&g.dimension));
         if let Some(dim) = theirs.filter(|d| *d != back)
             && let Err(e) = self.enter_level(dim)

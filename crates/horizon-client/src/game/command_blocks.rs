@@ -899,11 +899,7 @@ impl Game<'_> {
     }
     /// `ServerGamePacketListenerImpl.handleSetCommandBlock` for a guest: the
     /// block is edited only by a creative player with game master commands.
-    pub(super) fn lan_set_command_block(
-        &mut self,
-        conn: u32,
-        p: play::SetCommandBlock,
-    ) {
+    pub(super) fn lan_set_command_block(&mut self, conn: u32, p: play::SetCommandBlock) {
         let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };
@@ -931,7 +927,9 @@ impl Game<'_> {
     /// (`saveCustomOnly`) goes to the guest whose use opened it, as the
     /// chunk's update tag leaves it out and the edit screen shows it.
     pub(super) fn lan_open_command_block(&mut self, conn: u32, pos: Pos) {
-        let Some(host) = self.lan.as_ref() else { return; };
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         if !host
             .hub
             .guest(conn)

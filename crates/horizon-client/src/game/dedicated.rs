@@ -1979,12 +1979,7 @@ impl Game<'_> {
 
     /// The anticheat bans a player (`HostEvent::Ban`): `banned-players.json` gets it as `/ban` adds it,
     /// with the anticheat as its source, and the player is sent away with the ban's message.
-    pub(super) fn anticheat_ban(
-        &mut self,
-        uuid: u128,
-        name: &str,
-        reason: &str,
-    ) {
+    pub(super) fn anticheat_ban(&mut self, uuid: u128, name: &str, reason: &str) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };

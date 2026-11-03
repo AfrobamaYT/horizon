@@ -330,11 +330,7 @@ impl Game<'_> {
     /// `ServerGamePacketListenerImpl.handleTestInstanceBlockAction` for a
     /// guest: only a creative player with game master commands. A query or
     /// the screen's first look answers with a status packet.
-    pub(super) fn lan_test_instance_action(
-        &mut self,
-        conn: u32,
-        p: play::TestInstanceBlockAction,
-    ) {
+    pub(super) fn lan_test_instance_action(&mut self, conn: u32, p: play::TestInstanceBlockAction) {
         let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) else {
             return;
         };

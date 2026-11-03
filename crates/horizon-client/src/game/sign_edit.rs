@@ -400,12 +400,10 @@ impl Game<'_> {
     /// codes stripped, go on the sign the guest may write on unless it is
     /// waxed (`SignBlockEntity.updateSignText`); a guest gone out of reach
     /// may no longer write (`playerIsTooFarAwayToEdit`).
-    pub(super) fn lan_sign_update(
-        &mut self,
-        conn: u32,
-        mut p: play::SignUpdate,
-    ) {
-        let Some(host) = self.lan.as_mut() else { return; };
+    pub(super) fn lan_sign_update(&mut self, conn: u32, mut p: play::SignUpdate) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         let Some(g) = host.hub.guest(conn) else {
             return;
         };
@@ -466,11 +464,7 @@ impl Game<'_> {
             if cancel {
                 // The sign keeps its text: the editor closes, and the player's
                 // client, which shows what it sent, gets the sign as it is.
-                if let Some(play) = self
-                    .lan
-                    .as_mut()
-                    .and_then(|host| host.play.get_mut(&conn))
-                {
+                if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
                     play.sign_editing = None;
                 }
                 self.mark_block_entity_updated(key);
@@ -504,11 +498,7 @@ impl Game<'_> {
         for (line, new) in side.lines.iter_mut().zip(&p.lines) {
             *line = horizon_client::clipboard::strip_formatting(new);
         }
-        if let Some(play) = self
-            .lan
-            .as_mut()
-            .and_then(|host| host.play.get_mut(&conn))
-        {
+        if let Some(play) = self.lan.as_mut().and_then(|host| host.play.get_mut(&conn)) {
             play.sign_editing = None;
         }
         self.mark_block_entity_updated(key);
