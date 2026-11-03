@@ -118,7 +118,8 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 pub struct Polygon {
     pub normal: [f32; 3],
     pub vertices: [[f32; 5]; 4],
-    /// The model's render type culls back faces (`entityCutoutCull`: the bat).
+    /// The model's render type culls back faces (`entityCutoutCull`: the bat,
+    /// the baby turtle).
     pub cull_back: bool,
 }
 impl Polygon {
@@ -253,7 +254,7 @@ impl Part {
         for (i, x) in pose.iter().enumerate().take(9) {
             p[i] = *x;
         }
-        let polygons = v["polygons"]
+        let polygons: Vec<Polygon> = v["polygons"]
             .as_array()
             .into_iter()
             .flatten()
@@ -430,6 +431,12 @@ pub(crate) fn exact_attributes(bytes: &[u8]) -> HashMap<String, HashMap<String, 
         })
         .collect()
 }
+
+/// The models that draw with `RenderTypes::entityCutoutCull`.
+fn culls_back_faces(key: &str) -> bool {
+    matches!(key, "minecraft:bat#main" | "minecraft:turtle_baby#main")
+}
+
 pub struct MobTypes {
     pub types: HashMap<String, MobType>,
 }
@@ -490,9 +497,13 @@ impl MobTypes {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
+                        let mut part = Part::parse("root", v);
+                        if culls_back_faces(k) {
+                            part.set_cull_back();
+                        }
                         layers.insert(
                             k.trim_start_matches("minecraft:").to_owned(),
-                            Arc::new(Part::parse("root", v)),
+                            Arc::new(part),
                         );
                     }
                 }
@@ -536,8 +547,7 @@ impl MobTypes {
                         |model| {
                             Arc::new({
                                 let mut part = Part::parse("root", model);
-                                // BatModel: `RenderTypes::entityCutoutCull`.
-                                if def.name == "bat" {
+                                if culls_back_faces(&model_key) {
                                     part.set_cull_back();
                                 }
                                 part
@@ -855,6 +865,8 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
+    /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
+    pub from_bucket: bool,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
@@ -870,9 +882,10 @@ pub struct Extra {
     pub immovable: bool,
     /// `Mannequin.DATA_DESCRIPTION`: the text under its name.
     pub description: MannequinDescription,
-    /// A player's or mannequin's `minecraft:scale`, which scales the whole model
-    /// (`LivingEntityRenderState.scale`): the local player's own, and on a
-    /// server the others' from their attribute updates; 0 is the default, 1.
+    /// `LivingEntity`'s `minecraft:scale` (`getScale`), which scales its box
+    /// (`getDimensions`), eye height and model (`LivingEntityRenderState.scale`):
+    /// the local player's own, and on a server every living entity's from its
+    /// attribute updates; 0 is the default, 1 (`Mob::model_scale`).
     pub model_scale: f32,
     /// Players: crouching and riding (HumanoidModel's poses).
     pub crouching: bool,
@@ -2712,9 +2725,11 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
-    /// The game asks `AnimalTameEvent` before a horse is tamed (a server
-    /// with mods): `RunAroundLikeCrazyGoal` then leaves `tame` to the game.
-    pub ask_taming: bool,
+    /// A server with native mods, which the game asks before a tame or a
+    /// baby (`AnimalTameEvent`, `BabyEntitySpawnEvent`): the goals then
+    /// leave what a cancel would undo to the game (a horse's `tame`, a
+    /// llama's breeding experience).
+    pub ask_mods: bool,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
