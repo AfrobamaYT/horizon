@@ -94,6 +94,11 @@ pub struct State {
     pub discard_friction: bool,
 }
 
+/// The frog brain's attack target, while its tongue behavior is active.
+pub fn attack_target(m: &Mob) -> Option<Who> {
+    m.extra.frog.target.map(Who::Mob)
+}
+
 pub fn register(m: &mut Mob) {
     let food = m.kind.food.clone();
     // `Frog()`: SmoothSwimmingMoveControl(85, 10, 0.02, 0.1, true). The
