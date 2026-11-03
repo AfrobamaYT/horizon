@@ -539,7 +539,7 @@
 //!
 //! API 99 adds a mod's command typed on the dedicated server's console (`native_perform_console_command`).
 //!
-//! API 98 adds giving a whole stack to any player from a server hook (`native_give_stack`).
+//! API 98 adds giving a whole stack to any player from a server hook (`ENTITY_ITEMS`).
 //!
 //! API 97 adds reading the world's light, weather, time of day, height and item stack sizes from a native mod (`native_light`, `native_weather`, `native_day_time`, `native_world_height`, `native_max_stack_size`).
 //!
@@ -815,11 +815,9 @@
 //! API 11 adds server particle emission (`native_send_particles`).
 //!
 //! API 10 adds server menus (`native_menu_clicked`, `native_menu_closed`,
-//! and `native_open_menu`, `native_exchange_items`... in `native_server.rs`).
+//! and `native_open_menu`... in `native_menus.rs`).
 //!
-//! API 9 adds the acting player's plain items (`native_held`,
-//! `native_count_items`, `native_take_items`, `native_give_items`... in
-//! `native_server.rs`).
+//! API 9 adds a player's items (`ENTITY_ITEMS`).
 //!
 //! API 8 adds server commands and players (`native_register_commands`,
 //! `native_perform_command`, and the helpers in `native_server.rs`).
@@ -8078,8 +8076,8 @@ impl Game<'_> {
     /// `/tick freeze` included (it stops the world, not the player). `slot` is
     /// as `Inventory` saves it (0 to 35; the armour 100 feet to 103 head; -106
     /// the off hand), and `selected` says it is the held slot.
-    /// `native_carried_stack` reads and changes the stack, which stays in its
-    /// slot, so the item helpers see it: a count of 0 empties the slot, and the
+    /// `ItemPlace::PlayerSlot { player, slot }` reads and changes the stack,
+    /// which stays in its slot: an emptied one empties the slot, and the
     /// player's client gets the change. This runs often, so check the item
     /// first. Server-side, for every living player of the world (the helpers
     /// read the acting one). API 39.
@@ -8858,6 +8856,7 @@ impl GameLevel<'_> {
             source: source as i32,
             volume,
             pitch,
+            except: None,
         });
         true
     }
@@ -9052,14 +9051,6 @@ impl Game<'_> {
         };
         self.particles
             .add(&ParticleOptions::simple(kind), at, [0.0, 0.01, 0.0]);
-    }
-    /// The stack the acting player carries in `slot`, by
-    /// `native_inventory_tick`'s numbers: none for an empty slot or another
-    /// number. Change it as you like: a count of 0 empties the slot at the end
-    /// of `native_inventory_tick`, and the player's client gets the change.
-    /// API 39.
-    pub(super) fn native_carried_stack(&mut self, slot: i32) -> Option<&mut ItemStack> {
-        self.native_carried_slot(slot)?.as_mut()
     }
     /// Whether the player left mod `mod_id` on in Options > Mods. A mod
     /// turned off does nothing (check this first in each hook) until the
