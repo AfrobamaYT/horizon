@@ -45,9 +45,13 @@ impl PackageInfo {
             horizon_mods::Side::Both => PackageSide::Both,
         })
     }
-    /// Additional namespaces declared by this package.
-    pub fn namespaces(&self) -> &[String] {
-        self.manifest.as_ref().map_or(&[], |m| &m.namespaces)
+    /// The package's own namespace followed by any additional namespaces.
+    pub fn namespaces(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.id()).chain(
+            self.manifest
+                .iter()
+                .flat_map(|m| m.namespaces.iter().map(String::as_str)),
+        )
     }
     /// Whether this package declares a dependency on `id`.
     pub fn depends_on(&self, id: &str) -> bool {
@@ -81,10 +85,10 @@ pub(crate) fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     result
 }
 
-pub(crate) fn install_packages(
+fn inventory(
     mods: &[super::ModEntry],
     content: &[horizon_mods::selection::SelectedPackage],
-) {
+) -> Vec<PackageInfo> {
     let mut packages: Vec<_> = mods
         .iter()
         .map(|m| PackageInfo {
@@ -103,8 +107,15 @@ pub(crate) fn install_packages(
             });
         }
     }
+    packages
+}
+
+pub(crate) fn install_packages(
+    mods: &[super::ModEntry],
+    content: &[horizon_mods::selection::SelectedPackage],
+) {
     assert!(
-        PACKAGES.set(packages).is_ok(),
+        PACKAGES.set(inventory(mods, content)).is_ok(),
         "package inventory already installed"
     );
 }
@@ -193,5 +204,42 @@ impl RegistrationContext<'_> {
     /// The loaded-mod view, independent of this phase's event or registrar.
     pub fn mods(&self) -> &LoadedMods<'_> {
         &self.mods
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mod_api;
+
+    #[test]
+    fn inventory_keeps_first_content_package_after_code_mods() {
+        struct Code;
+        #[crate::mod_api::__subscriptions]
+        impl crate::mod_api::Hooks for Code {}
+        let mods = vec![super::super::ModEntry::new("runtime", Box::new(Code))];
+        let package = |version: &str| {
+            let manifest = horizon_mods::Manifest::parse(&format!(
+                "id='plain'\nname='Plain'\nversion='{version}'\napi='0.2'\ncapabilities=['registries']\n"
+            )).unwrap();
+            horizon_mods::selection::SelectedPackage {
+                path: Default::default(),
+                package: horizon_mods::Package {
+                    manifest,
+                    icon: None,
+                },
+            }
+        };
+        let entries = inventory(&mods, &[package("1"), package("2")]);
+        let view = LoadedMods { entries: &entries };
+        assert_eq!(view.ids().collect::<Vec<_>>(), ["runtime", "plain"]);
+        assert_eq!(view.get("runtime").unwrap().kind(), PackageKind::Code);
+        let plain = view.get("plain").unwrap();
+        assert_eq!(plain.kind(), PackageKind::Content);
+        assert_eq!(plain.version(), Some("1"));
+        assert_eq!(plain.side(), Some(PackageSide::Client));
+        assert_eq!(plain.namespaces().collect::<Vec<_>>(), ["plain"]);
+        assert!(!plain.depends_on("runtime"));
+        assert!(view.get("missing").is_none());
     }
 }
