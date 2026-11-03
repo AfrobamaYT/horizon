@@ -74,31 +74,23 @@ impl Game<'_> {
             None => Vec3::ZERO,
         })
     }
-    /// `Entity.getControllingPassenger` when it is a player: a boat's first
-    /// passenger, or the first passenger of a mount a player steers (horses,
-    /// camels, pigs, striders, happy ghasts, nautiluses).
-    fn native_controlling_player(&self, t: Target, entity: EntityRef) -> Option<EntityRef> {
-        let steered = match t {
+    /// Whether `Entity.getControllingPassenger` can be a player: a boat's
+    /// first passenger, or a mount's rider as `equine::controlled` decides
+    /// (saddled; a pig or strider's rider holding the stick; a harnessed
+    /// happy ghast), the rule the mount code steers by.
+    fn native_steered(&self, t: Target) -> bool {
+        match t {
             Target::Boat(_) => true,
-            Target::Mob(id) => self.mobs.iter().any(|m| {
-                m.id == id
-                    && matches!(
-                        m.kind.id.trim_start_matches("minecraft:"),
-                        "horse"
-                            | "donkey"
-                            | "mule"
-                            | "skeleton_horse"
-                            | "zombie_horse"
-                            | "camel"
-                            | "pig"
-                            | "strider"
-                            | "happy_ghast"
-                            | "nautilus"
-                            | "zombie_nautilus"
-                    )
-            }),
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .any(|m| m.id == id && horizon_client::mobs::equine::controlled(m)),
             _ => false,
-        };
+        }
+    }
+    /// `Entity.getControllingPassenger` when it is a player.
+    fn native_controlling_player(&self, t: Target, entity: EntityRef) -> Option<EntityRef> {
+        let steered = self.native_steered(t);
         let first = *self
             .native_entity_passengers(entity)
             .ok_or(())
@@ -201,5 +193,29 @@ mod tests {
     fn corners_are_lowest_then_highest() {
         let b = Aabb::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
         assert_eq!(super::corners(b), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn only_a_mount_its_rider_controls_takes_the_riders_speed() {
+        use super::super::commands::Target;
+        use horizon_client::mobs::{Mob, equine::Rider};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for (id, name) in [(30, "minecraft:horse"), (31, "minecraft:pig")] {
+                let kind = game.res.mob_types().get(name).unwrap().clone();
+                let mut m = Mob::new(id, kind, Vec3::ZERO, 0.0);
+                m.rider = Some(Rider::default());
+                game.mobs.push(m);
+            }
+            // A horse being broken in, unsaddled: its own speed (AbstractHorse.java:962).
+            assert!(!game.native_steered(Target::Mob(30)));
+            game.mobs[0].extra.saddled = true;
+            assert!(game.native_steered(Target::Mob(30)));
+            // A saddled pig whose rider holds no stick (Pig.java:97-100).
+            game.mobs[1].extra.saddled = true;
+            assert!(!game.native_steered(Target::Mob(31)));
+            game.mobs[1].rider.as_mut().unwrap().steer = true;
+            assert!(game.native_steered(Target::Mob(31)));
+        });
     }
 }
