@@ -1,7 +1,18 @@
 //! Derive hook subscriptions from a trait implementation.
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{ImplItem, ItemImpl, parse_macro_input};
+use syn::{ImplItem, ImplItemFn, ItemImpl, parse_macro_input};
+
+/// A method's `#[cfg]` attributes: they gate the method body, so the same
+/// conditions gate its derived subscription entry. `cfg_attr` is left out —
+/// it expands to other attributes, not a condition of its own.
+fn cfg_attributes(method: &ImplItemFn) -> Vec<&syn::Attribute> {
+    method
+        .attrs
+        .iter()
+        .filter(|attribute| attribute.path().is_ident("cfg"))
+        .collect()
+}
 
 fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let Some((_, trait_path, _)) = &implementation.trait_ else {
@@ -22,14 +33,14 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
             .into_compile_error()
             .into();
     };
-    let methods: Vec<_> = implementation
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            ImplItem::Fn(method) => Some(&method.sig.ident),
-            _ => None,
-        })
-        .collect();
+    let mut methods = Vec::new();
+    let mut cfgs = Vec::new();
+    for item in &implementation.items {
+        if let ImplItem::Fn(method) = item {
+            methods.push(&method.sig.ident);
+            cfgs.push(cfg_attributes(method));
+        }
+    }
     let id = if render {
         format_ident!("RenderHookId")
     } else {
@@ -42,7 +53,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     };
     let subscribed = syn::parse_quote! {
         fn subscribed(&self) -> &'static [Option<mod_api::#id>] {
-            &[#(mod_api::#ids::#methods),*]
+            &[#(#(#cfgs)* mod_api::#ids::#methods),*]
         }
     };
     implementation.items.push(subscribed);

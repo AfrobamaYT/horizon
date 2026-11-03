@@ -15,6 +15,7 @@ use super::{
     execution_role::ExecutionRole,
     maps::{NativeMapDecoration, NativeMapInfo},
     native_block_entity_draw::BlockEntityDraw,
+    native_configs::{NativeConfig, NativeConfigFile},
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
 };
@@ -23,7 +24,8 @@ use horizon_client::mod_api::{
     self, EffectTickChange, EquipmentSlot, GameRuleActor, LivingRef, NativeCamera, NativeCommand,
     NativeDispensed, NativeHandRender, NativeItemDrop, NativeLifecycleContext,
     NativeNoteBlockChange, NativePlayerFood, NativeProgressType, NativeServerPlayer,
-    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, ToolUse, WorldPhase,
+    RecipeBookCategory, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse,
+    WorldPhase,
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LogicalSide, NativeBlockClick,
@@ -552,6 +554,22 @@ impl GameLevel<'_> {
     #[inline(always)]
     pub(super) fn native_is_signal_source(&self, state: BlockStateId, source: &mut bool) {
         mod_api::dispatch_is_signal_source(self, state, source);
+    }
+
+    /// `IBlockExtension.shouldCheckWeakPower`: set `check` to decide whether
+    /// indirect power is read through this block. `check` starts with vanilla's
+    /// conductor answer. `direction` is the input side of the block being powered,
+    /// opposite the queried block's output side. Authoritative servers only.
+    #[inline(always)]
+    pub(super) fn native_should_check_weak_power(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Direction,
+        check: &mut bool,
+    ) {
+        mod_api::dispatch_should_check_weak_power(self, dimension, pos, state, direction, check);
     }
 
     /// `BlockBehaviour.shouldRedstoneWireConnectTo`: set `connected` to say
@@ -1503,6 +1521,40 @@ impl Game<'_> {
     /// fails stops without this (`WorldCloseFailed` reports it).
     pub(super) fn native_server_stopping(&mut self, dedicated: bool) {
         mod_api::dispatch_server_stopping(self, dedicated);
+    }
+    /// The config files native mods keep (NeoForge's `registerConfig`):
+    /// push yours, each of a kind, with the text written to `config/` when
+    /// the file is missing. Asked by the window when the game starts (its
+    /// `Client` and `Common` configs), by a dedicated server when it starts
+    /// (`Common` and `Server`) and by a server before each world it opens
+    /// (`Server`); a game reads only its own kinds, so push them all every
+    /// time. A file outside `config/`, or one already registered, is skipped.
+    ///
+    pub(super) fn native_register_configs(&mut self, configs: &mut Vec<NativeConfig>) {
+        mod_api::dispatch_register_configs(mod_api::HostSide::of(self), configs);
+    }
+    /// A registered config was read (`ModConfigEvent.Loading`): `config`
+    /// says whose, which file and its text, which the mod parses (TOML by
+    /// convention). Every mod hears every config, so check `mod_id`. Fired
+    /// where the config's kind loads (`native_register_configs`), a `Server`
+    /// one before `native_server_about_to_start`.
+    pub(super) fn native_config_loading(&mut self, config: &NativeConfigFile) {
+        mod_api::dispatch_config_loading(mod_api::HostSide::of(self), config);
+    }
+    /// A loaded config's file changed on disk (`ModConfigEvent.Reloading`):
+    /// its new text. The game looks at the files' modification times once a
+    /// second, on the window and on the server's tick; a file saved with the
+    /// same text, removed or unreadable fires nothing and keeps its last
+    /// text.
+    pub(super) fn native_config_reloading(&mut self, config: &NativeConfigFile) {
+        mod_api::dispatch_config_reloading(mod_api::HostSide::of(self), config);
+    }
+    /// A `Server` config is dropped as its server stops
+    /// (`ModConfigEvent.Unloading`), after `native_server_stopping`; the next
+    /// world reads it again. `Client` and `Common` configs stay until the
+    /// game quits.
+    pub(super) fn native_config_unloading(&mut self, config: &NativeConfigFile) {
+        mod_api::dispatch_config_unloading(self, config);
     }
     /// The authoritative server tick's phases: `ServerTickStart` before any
     /// level is ticked (NeoForge's `ServerTickEvent.Pre`), `ServerTickEnd`
@@ -5338,6 +5390,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_dispense_item(self, dimension, pos, facing, stack, answer);
     }
+    /// `BlockBehaviour.useItemOn`: the block's own behaviour, with the
+    /// held item, on the server for each player. An answer replaces the
+    /// template's behaviour; `TryWithEmptyHand` tries `useWithoutItem` on
+    /// the main hand, and `Pass` goes on to the item's `useOn`.
+    pub(super) fn native_use_item_on(
+        &mut self,
+        state: BlockStateId,
+        click: &NativeBlockClick<'_>,
+        answer: &mut Option<NativeInteractionResult>,
+    ) {
+        mod_api::dispatch_use_item_on(self, state, click, answer);
+    }
     /// A player uses `stack` (right click) with `self.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
@@ -5770,19 +5834,21 @@ impl Game<'_> {
     pub(super) fn native_level_load(&mut self, dimension: &str) {
         mod_api::dispatch_level_load(self, dimension);
     }
-    /// `dimension`'s level has loaded its saved chunk tickets (NeoForge's
-    /// `LoadingValidationCallback.validateTickets`), before its first tick and
-    /// after `native_level_load`, once for each open. `validation` holds the
-    /// calling mod's tickets, block owners and entity owners apart; a mod
-    /// removes the ones that no longer hold (a machine that is gone), and
-    /// they stop forcing their chunks. Asked only while a mod holds tickets
-    /// in the level. Server-side.
-    pub(super) fn native_chunk_tickets_validate(
+    /// `dimension`'s level has loaded the saved chunk tickets of `controller`
+    /// (NeoForge's `LoadingValidationCallback.validateTickets`), before its
+    /// first tick and after `native_level_load`, once for each open and each
+    /// controller registered with a validator that has tickets in the level.
+    /// `validation` holds that controller's tickets, block owners and entity
+    /// owners apart; the mod that owns the controller removes the ones that no
+    /// longer hold (a machine that is gone), and they stop forcing their
+    /// chunks. Server-side.
+    pub(super) fn native_validate_tickets(
         &mut self,
         dimension: &str,
+        controller: TicketController,
         validation: &mut horizon_client::mod_chunk_tickets::TicketValidation,
     ) {
-        mod_api::dispatch_chunk_tickets_validate(self, dimension, validation);
+        mod_api::dispatch_validate_tickets(self, dimension, controller, validation);
     }
     /// `dimension`'s level closed (NeoForge's `LevelEvent.Unload`, posted after
     /// `level.close()` in `MinecraftServer.stopServer`), after its last save:
@@ -7667,6 +7733,10 @@ impl Game<'_> {
             log.push((pos[0], pos[1], pos[2]));
         }
     }
+    /// The applied client pause state, not whether a pause screen is open.
+    pub(super) fn native_is_paused(&self) -> bool {
+        self.pause
+    }
     /// Playing, with nothing over the world: keys and zoom apply.
     pub(super) fn native_playing(&self) -> bool {
         self.screen == Screen::Playing
@@ -8264,6 +8334,23 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// The level behaviour's answer, or `None` to try `useWithoutItem`.
+/// `ServerPlayerGameMode.useItemOn` lets both FAIL and PASS go to the item.
+/// Both success swing sources swing on this server path.
+pub(super) fn block_use_result(
+    answer: NativeInteractionResult,
+) -> Option<horizon_world::level::InteractionResult> {
+    use horizon_world::level::InteractionResult;
+    match answer {
+        NativeInteractionResult::Success | NativeInteractionResult::SuccessServer => {
+            Some(InteractionResult::Success)
+        }
+        NativeInteractionResult::Consume => Some(InteractionResult::Consume),
+        NativeInteractionResult::TryWithEmptyHand => None,
+        _ => Some(InteractionResult::Pass),
+    }
+}
+
 /// What the mods answered a right click on a block (`right_click_block`).
 pub(super) enum BlockClickAnswer {
     /// Cancelled: this answers the click instead of the block and the item.
@@ -8304,22 +8391,7 @@ impl Game<'_> {
                 use_item,
             };
         }
-        let (player, player_entity_id) = self.native_clicker();
-        let side = if self.remote.is_some() {
-            LogicalSide::Client
-        } else {
-            LogicalSide::Server
-        };
-        let click = NativeBlockClick {
-            side,
-            dimension: self.dim.level(),
-            pos: hit.pos,
-            hit: hit.native(),
-            hand,
-            stack,
-            player,
-            player_entity_id,
-        };
+        let click = self.block_click(hit, hand, stack);
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_block(
             &click,
@@ -8335,6 +8407,29 @@ impl Game<'_> {
                 use_block,
                 use_item,
             }
+        }
+    }
+    /// The shared context for a block's behaviour and the click event.
+    pub(super) fn block_click<'a>(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&'a ItemStack>,
+    ) -> NativeBlockClick<'a> {
+        let (player, player_entity_id) = self.native_clicker();
+        NativeBlockClick {
+            side: if self.remote.is_some() {
+                LogicalSide::Client
+            } else {
+                LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos: hit.pos,
+            hit: hit.native(),
+            hand,
+            stack,
+            player,
+            player_entity_id,
         }
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
@@ -9343,6 +9438,22 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_host_reads_current_pause_state() {
+        use super::super::execution_role::ExecutionRole;
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mod_api::ClientHost;
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            game.pause = false;
+            assert!(!ClientHost::is_paused(game));
+            game.pause = true;
+            assert!(ClientHost::is_paused(game));
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {

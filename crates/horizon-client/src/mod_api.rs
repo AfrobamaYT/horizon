@@ -28,10 +28,11 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
-    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
-    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
-    NativeShake, PhantomSpawnResult, SleepProblem,
+    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeConfig,
+    NativeConfigFile, NativeConfigKind, NativeDataMapType, NativeExperienceOrb, NativeFalling,
+    NativeHeightmap, NativeHeldItem, NativeHit, NativeMapDecoration, NativeMapInfo,
+    NativeMobRender, NativeModEvent, NativePlayerRender, NativeShake, PhantomSpawnResult,
+    SleepProblem,
 };
 pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::native_render::{
@@ -1123,6 +1124,39 @@ pub enum NativeMinecartKind {
     Spawner,
 }
 
+/// A block in a dimension, vanilla's `GlobalPos`: the dimension's key
+/// (`minecraft:the_nether`) and the block. The dimension is data, so it need
+/// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlobalPos {
+    dimension: Identifier,
+    pos: BlockPos,
+}
+
+impl GlobalPos {
+    /// A block in the dimension with key `dimension`.
+    pub fn new(dimension: Identifier, pos: BlockPos) -> Self {
+        Self { dimension, pos }
+    }
+    /// The dimension's key (`minecraft:overworld`).
+    pub fn dimension(&self) -> &Identifier {
+        &self.dimension
+    }
+    /// The block.
+    pub fn pos(&self) -> BlockPos {
+        self.pos
+    }
+}
+
+impl std::hash::Hash for GlobalPos {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(
+            &(self.dimension.namespace(), self.dimension.path(), self.pos),
+            state,
+        );
+    }
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1888,7 +1922,8 @@ fn installed() -> Option<&'static Installed> {
 /// Scoped trait-mod installation for tests, enabled by the `testing` feature.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
-    use super::{Installed, Mods, TEST_MODS};
+    use super::ticket_controller::TEST_CONTROLLERS;
+    use super::{Installed, Mods, TEST_MODS, TicketController};
 
     /// Run a closure with these owned mods on this thread, restoring the previous list on exit.
     ///
@@ -1901,9 +1936,24 @@ pub mod testing {
                 TEST_MODS.set(self.0);
             }
         }
+        let controllers: &'static [_] =
+            Box::leak(super::part_table::registered_controllers(&mods).into_boxed_slice());
         let installed = Box::leak(Box::new(Installed::new(mods)));
         let _restore = Restore(TEST_MODS.replace(Some(installed)));
+        let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
         f()
+    }
+
+    /// The ticket controller with this id that the mods of the enclosing `with_mods` registered.
+    pub fn ticket_controller(id: &str) -> Option<TicketController> {
+        TicketController::from_id(id)
+    }
+
+    struct RestoreControllers(Option<&'static [super::ticket_controller::ControllerInfo]>);
+    impl Drop for RestoreControllers {
+        fn drop(&mut self) {
+            TEST_CONTROLLERS.set(self.0);
+        }
     }
 }
 
@@ -2212,9 +2262,9 @@ pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&m
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
-/// A player's right click on a block, for `right_click_block`
-/// (`PlayerInteractEvent.RightClickBlock`): once per hand, where
-/// `useItemOn` starts, on the clicking client and on the server.
+/// A player's right click on a block, shared by the block's use behaviours
+/// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
+/// event hears it once per hand on the clicking client and on the server.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct NativeBlockClick<'a> {
@@ -2250,7 +2300,8 @@ pub enum NativeInteractionResult {
     /// `PASS`: nothing happens and the click goes on.
     #[default]
     Pass,
-    /// `TRY_WITH_EMPTY_HAND`: passes, as `PASS` does here.
+    /// `TRY_WITH_EMPTY_HAND`: for a block's `use_item_on`, try its
+    /// `use_without_item` next, on the main hand only.
     TryWithEmptyHand,
 }
 impl NativeInteractionResult {
@@ -2263,6 +2314,7 @@ impl NativeInteractionResult {
 /// NeoForge's `TriState`: force a part of an action off or on, or leave it
 /// to vanilla.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeTriState {
     False,
     #[default]
@@ -2416,6 +2468,8 @@ pub use resource::{
     ResourceHandler, move_resources,
 };
 pub use transaction::{HostTransaction, Transaction, TransactionSeal, run_transaction};
+mod ticket_controller;
+pub use ticket_controller::TicketController;
 mod part_table;
 pub use part_table::{
     Attached, BlockEntityProviders, BlockProvider, EntityProvider, ItemProvider, Parts, Registrar,

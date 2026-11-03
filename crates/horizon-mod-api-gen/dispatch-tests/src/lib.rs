@@ -26,6 +26,7 @@ mod tests {
         pub(super) struct Direction;
         #[derive(Clone, Copy)]
         pub(super) struct LevelDimension;
+        pub(super) struct GlobalPos;
         pub(super) struct Ticks;
         pub(super) trait LevelHost {
             fn state_block(&self, _: BlockStateId) -> Option<&str> {
@@ -118,6 +119,8 @@ mod tests {
         pub(super) struct LootStack;
         pub(super) struct NativeLootContext<'a>(pub &'a ());
         pub(super) struct NativeDataMapType;
+        pub(super) struct NativeConfig;
+        pub(super) struct NativeConfigFile;
         pub(super) struct RecipeBookCategory;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
@@ -140,6 +143,8 @@ mod tests {
         pub(super) struct NativePlayerFood;
         #[derive(Clone, Copy)]
         pub(super) struct LivingRef;
+        #[derive(Clone, Copy)]
+        pub(super) struct TicketController;
         #[derive(Clone, Copy)]
         pub(super) struct MinecartRef;
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,7 +197,13 @@ mod tests {
             }
         }
     }
-    trait RenderHooks {}
+    trait RenderHooks {
+        fn subscribed(&self) -> &'static [Option<mod_api::RenderHookId>];
+        #[allow(dead_code)]
+        fn mob_render(&self, _: &dyn Host, _: &mut NativeMobRender<'_>) {}
+        #[allow(dead_code)]
+        fn block_entity_draw(&self, _: &dyn Host, _: &mut BlockEntityDraw) {}
+    }
     struct TestHost;
     impl Host for TestHost {}
     impl ServerHost for TestHost {}
@@ -250,6 +261,17 @@ mod tests {
                 pub struct HealthInputs;
                 pub struct GuiDraw;
             }
+        }
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum RenderHookId {
+            MobRender,
+            BlockEntityDraw,
+        }
+        #[allow(non_upper_case_globals)]
+        pub mod render_hook_ids {
+            use super::RenderHookId;
+            pub const mob_render: Option<RenderHookId> = Some(RenderHookId::MobRender);
+            pub const block_entity_draw: Option<RenderHookId> = Some(RenderHookId::BlockEntityDraw);
         }
         include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
         pub use horizon_mod_api_macros::__subscriptions;
@@ -348,6 +370,51 @@ mod tests {
     ) -> impl Iterator<Item = &'a P> {
         parts.iter().copied()
     }
+    #[test]
+    fn cfg_disabled_hooks_are_not_subscribed_and_cfg_attr_stays() {
+        struct Gated;
+        #[mod_api::__subscriptions]
+        impl Hooks for Gated {
+            #[cfg(any())]
+            fn loot_table_load(&self, _: &mut LootTableLoadEvent<'_>) {
+                unreachable!()
+            }
+            #[cfg(not(any()))]
+            fn player_logged_in(&self, _: &mut dyn ServerHost, _: &mut PlayerLoggedInEvent<'_>) {}
+            #[cfg_attr(test, inline)]
+            fn player_logged_out(&self, _: &mut dyn ServerHost, _: &mut PlayerLoggedOutEvent<'_>) {}
+        }
+        install(vec![ModEntry::new("gated", Box::new(Gated))].into());
+        assert!(
+            !listened(HookId::LootTableLoad),
+            "a cfg-disabled hook was subscribed"
+        );
+        assert!(
+            listened(HookId::PlayerLoggedIn),
+            "a cfg-enabled hook was not subscribed"
+        );
+        assert!(
+            listened(HookId::PlayerLoggedOut),
+            "cfg_attr never unsubscribes"
+        );
+    }
+
+    #[test]
+    fn cfg_disabled_render_hooks_are_not_subscribed_and_cfg_attr_stays() {
+        struct Renderer;
+        #[mod_api::__subscriptions]
+        impl RenderHooks for Renderer {
+            #[cfg(any())]
+            fn mob_render(&self, _: &dyn Host, _: &mut NativeMobRender<'_>) {}
+            #[cfg_attr(test, inline)]
+            fn block_entity_draw(&self, _: &dyn Host, _: &mut BlockEntityDraw) {}
+        }
+        assert_eq!(
+            Renderer.subscribed(),
+            &[mod_api::render_hook_ids::block_entity_draw]
+        );
+    }
+
     #[test]
     fn only_overrides_are_dispatched_from_the_first_call_across_words() {
         struct Quiet;

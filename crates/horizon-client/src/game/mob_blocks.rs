@@ -226,8 +226,7 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
-        if mob.species() != Species::CopperGolem || horizon_client::mobs::trader::is_invisible(mob)
-        {
+        if mob.species() != Species::CopperGolem || mob.is_invisible() {
             return;
         }
         let Some(stack) = mob.saddle_item() else {
@@ -282,10 +281,7 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         use glam::{Mat4, Vec3};
-        if mob.species() != Species::IronGolem
-            || mob.extra.counter <= 0
-            || horizon_client::mobs::trader::is_invisible(mob)
-        {
+        if mob.species() != Species::IronGolem || mob.extra.counter <= 0 || mob.is_invisible() {
             return;
         }
         let Some(state) = self.pack.assets.registry.default_state("minecraft:poppy") else {
@@ -323,7 +319,7 @@ impl Game<'_> {
             _ => false,
         };
         // The layers draw nothing on an invisible mob (the glow outline is not drawn).
-        if !on_head || horizon_client::mobs::trader::is_invisible(mob) {
+        if !on_head || mob.is_invisible() {
             return;
         }
         let registry = &self.pack.assets.registry;
