@@ -105,15 +105,15 @@ the catalog, not a global API number, source comments or documentation histories
 - Item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
   lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip.
 
-- Using an item, on the server for every player: `native_use_item_on` hears a right click with an item on a
+- Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
   block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
-  after `native_use_item_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
+  after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
   instead of the item's use.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims
-  `native_use_item_on`, which runs before it.
+  `native_use_on`, which runs before it.
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
   `native_block_entity_tick`): made when the block is placed, ticked on the server and saved with the chunk.
@@ -2220,7 +2220,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `native_acting_player`, `native_tell` and the
   item helpers reach them. Not heard: the host of a LAN world.
 - `native_acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
-  `native_right_click_block`, `native_use_item_on`, `native_destroy_block`...; None elsewhere);
+  `native_right_click_block`, `native_use_on`, `native_destroy_block`...; None elsewhere);
   `native_run_command(line)`, a command run as the server's console (level 4, no output), only where no player is
   swapped in (`native_tick`, a menu hook): a teleport to another level (`execute in minecraft:the_nether run tp Alex 0
   70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
@@ -3474,3 +3474,14 @@ The client `tooltip_color` hook changes the background and top and bottom border
 # Camera and collision reads
 
 The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
+
+`ClientHost::crosshair_target()` returns the ordinary interaction-range target as
+`NativeCrosshairTarget::Block { pos, state, hit }` or
+`NativeCrosshairTarget::Entity { id, point }`. The block hit contains its world-space
+location, face and inside flag; the entity point is also in world coordinates.
+It uses the game's current targeting ray and block/entity reach, respects blocks
+occluding entities, and returns `None` on a miss or without a client world.
+It can be read with a screen open. The entity id is a network id in the current
+world, including dragon-part ids, not a persistent handle; use the planned client
+handles for entity data. Unlike `view_hit` and `raycast`, this does not find blocks
+in distant terrain or return a block behind a targeted entity.

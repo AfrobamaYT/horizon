@@ -6789,7 +6789,7 @@ impl Game<'_> {
         if let Some(hit) = block_hit {
             let (player, player_entity_id) = self.native_clicker();
             let (hand, at) = (self.hand, hit.native());
-            self.native_use_item_on(
+            self.native_use_on(
                 &stack,
                 hit.pos,
                 hit.face,
@@ -12417,8 +12417,8 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         self.fns = Default::default();
-        self.reload_datapacks(false, &level.enabled_features);
-        self.world_tables = self.build_world_tables();
+        let stack = self.reload_datapacks(false, &level.enabled_features);
+        self.world_tables = self.build_world_tables(&stack);
         self.resolve_parts()?;
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
@@ -12446,7 +12446,7 @@ impl Game<'_> {
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
-        self.prefetch_advancement_tree();
+        self.prefetch_advancement_tree(&stack);
         self.restore_player_state = true;
         self.rand_sequences = rand_sequences;
         self.border = Default::default();
@@ -19961,18 +19961,12 @@ impl Game<'_> {
     /// Load the world's data packs' content tables (`None`: the world has no
     /// packs, and `Resources.rest` stays in use). This re-reads the tables,
     /// so it runs once per world open and on `/reload`.
-    fn build_world_tables(&self) -> Option<WorldTables> {
+    fn build_world_tables(&self, stack: &functions::PackStack) -> Option<WorldTables> {
         // The ask of this load, both here and on `/reload`: a native mod
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
-        let files = functions::overlay_files(
-            &self.world_root,
-            &self.options.resources,
-            self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
-            contributed,
-        );
+        let files = functions::overlay_files(stack, contributed);
         if files.is_empty() {
             return None;
         }
@@ -20059,11 +20053,11 @@ impl Game<'_> {
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self) {
+    pub(super) fn reload_world_tables(&mut self, stack: &functions::PackStack) {
         if self.remote.is_some() {
             return;
         }
-        self.world_tables = self.build_world_tables();
+        self.world_tables = self.build_world_tables(stack);
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
@@ -22287,7 +22281,13 @@ mod tests {
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.load_server_loot();
-            game.reload_world_tables();
+            let stack = super::functions::pack_stack(
+                &game.world_root,
+                &game.options.resources,
+                game.cmds.vanilla_disabled,
+                &game.level.enabled_features,
+            );
+            game.reload_world_tables(&stack);
             let stone = game
                 .pack
                 .assets
