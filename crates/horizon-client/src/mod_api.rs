@@ -931,6 +931,7 @@ pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod item_place;
 mod transaction;
 pub use item_place::{ITEM_ITEMS, ItemCapabilityKey, ItemPlace, PlaceProvider, StackItemHandler};
+pub use transaction::TransactionSeal;
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};
 pub(crate) use part_table::{

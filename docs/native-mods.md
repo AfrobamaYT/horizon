@@ -3158,13 +3158,20 @@ the mod; a broken handler can't make a move overflow, duplicate items or panic t
 `host.transaction(|host| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose `Err`
 aborts, nested in the open transaction if any. Inside, a capability write applies at once, so later steps see it,
 and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
-compound and attachments, a hopper's cooldown, and a cauldron's block state. A nested commit hands its changes to
+compound and attachments, a hopper's cooldown, a cauldron's block state, a player's inventory (slots, armour, off
+hand and cursor, whether the player is the host or a guest), and an entity's inventory (a chest or hopper minecart,
+a chest boat, a chested donkey, mule or llama). A nested commit hands its changes to
 the transaction around it, and only the outermost commit makes them final. Then the world is told of each change
 once, as `SnapshotJournal.onRootCommit`: `setChanged` and comparators, a jukebox starting or stopping, a cauldron's
-block update and an item dropped at a block. An abort puts every storage back quietly, so nothing outside saw the
-change. A panic inside aborts every open transaction before the next tick. A handler keeps no journal of its own:
-its state is the game's, so the game's journal covers it. A player's or an entity's inventory isn't covered yet:
-what changes there inside a transaction is final at once.
+block update, and an item dropped at a block, thrown by a player (what a filled bucket's split no longer fits) or
+by an entity. An abort puts every storage back quietly, so nothing outside saw the
+change. A panic unwinding out of the closure aborts that transaction as it passes, and the one around it stays open. `host.transaction` is the only way to open one: the raw `transaction_open` and `transaction_close` helpers take a `TransactionSeal` that only it makes. A handler keeps no journal of its own:
+its state is the game's, so the game's journal covers it. An item entity's stack isn't covered: what a transaction
+changes there is final at once.
+
+`ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
+`Capabilities.Item.ENTITY`), read and written through `place_stack` and `set_place_stack` like any other place.
+Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
 
 ### Testing a trait mod
 

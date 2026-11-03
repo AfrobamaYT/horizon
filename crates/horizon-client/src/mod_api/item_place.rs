@@ -38,6 +38,10 @@ pub enum ItemPlace {
     },
     /// The stack of item entity `id` in the level in place.
     ItemEntity { id: u32 },
+    /// Slot `slot` of the inventory of entity `entity` in the level in place: a chest or hopper
+    /// minecart's, a chest boat's, or a chested donkey's, mule's or llama's
+    /// (`Capabilities.Item.ENTITY` through `forHandlerIndex`).
+    EntitySlot { entity: u32, slot: usize },
     /// Slot `slot` of the item at `parent`, through its [`ITEM_ITEMS`] handler: a backpack in a
     /// backpack.
     Nested { parent: Box<ItemPlace>, slot: usize },
