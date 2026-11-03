@@ -1302,98 +1302,12 @@ impl Game<'_> {
             }
             up = self.ride_vehicle(v);
         }
-        let rider = match target {
-            Target::Mob(id) => Some(id),
-            _ => None,
-        };
-        let generic = || {
-            err(
+        if !self.start_riding_target(target, vehicle, true) {
+            return Err(err(
                 "commands.ride.mount.failure.generic",
                 &[&name.plain(), &vehicle_name.plain()],
-            )
-        };
-        // Only players and mobs ride.
-        if !(target == Target::Player || rider.is_some()) {
-            return Err(generic());
-        }
-        // `RideCommand.mount` forces the ride (`startRiding(vehicle, true, true)`),
-        // which skips `canRide` and `canAddPassenger`: a boat under water still
-        // takes the rider. Horizon's boats seat at most `max_passengers`, so a
-        // full boat still refuses. Minecarts carry only players here: Horizon's
-        // carts have no mob passengers yet.
-        match vehicle {
-            Target::Boat(id) => {
-                let Some(i) = self.boats.iter().position(|b| b.id == id) else {
-                    return Err(generic());
-                };
-                if self.boat_passengers(id) >= self.boats[i].max_passengers() {
-                    return Err(generic());
-                }
-                if let Some(rider) = rider {
-                    if !self.try_mount_mob(rider, id) {
-                        return Err(generic());
-                    }
-                } else {
-                    if !self.native_may_board(id) {
-                        return Err(generic());
-                    }
-                    self.riding = Some(id);
-                    self.yaw = self.boats[i].yaw;
-                    // sendEventAndTriggers: START_RIDING_TRIGGER.
-                    self.trigger_player("minecraft:started_riding");
-                }
-                self.feedback(Text::translate(
-                    "commands.ride.mount.success",
-                    &[name, vehicle_name],
-                ));
-                return Ok(1);
-            }
-            Target::Cart(id) => {
-                if target != Target::Player
-                    || self.ridden_by_guest(id)
-                    || !self.native_may_board(id)
-                {
-                    return Err(generic());
-                }
-                self.riding = Some(id);
-                self.trigger_player("minecraft:started_riding");
-                self.feedback(Text::translate(
-                    "commands.ride.mount.success",
-                    &[name, vehicle_name],
-                ));
-                return Ok(1);
-            }
-            _ => {}
-        }
-        // Mobs carry players and mobs.
-        let Target::Mob(mob_id) = vehicle else {
-            return Err(generic());
-        };
-        if !self.mobs.iter().any(|m| m.id == mob_id && m.alive()) {
-            return Err(generic());
-        }
-        if let Some(rider) = rider {
-            // Entity.startRiding.
-            if !self.try_mount_mob(rider, mob_id) {
-                return Err(generic());
-            }
-            self.feedback(Text::translate(
-                "commands.ride.mount.success",
-                &[name, vehicle_name],
             ));
-            return Ok(1);
         }
-        if !self.native_may_board(mob_id) {
-            return Err(generic());
-        }
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) {
-            m.extra.flag = false;
-            m.extra.counter = 0;
-            self.yaw = m.yaw;
-        }
-        self.riding = Some(mob_id);
-        self.mount.jump_ticks = 0;
-        self.mount.jump_scale = 0.0;
         self.feedback(Text::translate(
             "commands.ride.mount.success",
             &[name, vehicle_name],
@@ -1405,6 +1319,7 @@ impl Game<'_> {
     pub(super) fn ride_vehicle(&self, t: Target) -> Option<Target> {
         let id = match t {
             Target::Player => self.riding?,
+            Target::Guest(conn) => self.command_guest(conn)?.vehicle?,
             Target::Mob(id) => self.mobs.iter().find(|m| m.id == id)?.extra.mount?,
             _ => return None,
         };

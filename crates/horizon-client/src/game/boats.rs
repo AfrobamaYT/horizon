@@ -1283,13 +1283,12 @@ impl Game<'_> {
         {
             return false;
         }
-        if !self.native_may_board(self.boats[i].id) {
-            return true;
-        }
-        self.riding = Some(self.boats[i].id);
-        self.yaw = self.boats[i].yaw;
-        // ServerPlayer.startRiding.
-        self.trigger_player("minecraft:started_riding");
+        let id = self.boats[i].id;
+        self.start_riding_target(
+            super::commands::Target::Player,
+            super::commands::Target::Boat(id),
+            false,
+        );
         true
     }
     /// `ContainerEntity.interactWithContainerVehicle` (`AbstractChestBoat`):

@@ -98,6 +98,169 @@ impl Game<'_> {
     pub(super) fn native_entity_is_vehicle(&self, entity: EntityRef) -> Option<bool> {
         Some(!self.native_entity_passengers(entity)?.is_empty())
     }
+    /// Attempts one mount, shared by handle writes and the ride command.
+    pub(super) fn start_riding_target(
+        &mut self,
+        rider: Target,
+        vehicle: Target,
+        force: bool,
+    ) -> bool {
+        if let Target::Guest(conn) = rider {
+            if self
+                .command_guest(conn)
+                .is_none_or(|guest| guest.dimension != self.dim.id())
+            {
+                return false;
+            }
+            return self
+                .for_player(rider, |game| {
+                    game.start_riding_target(Target::Player, vehicle, force)
+                })
+                .unwrap_or(false);
+        }
+        let vehicle_id = match vehicle {
+            Target::Mob(id) | Target::Boat(id) | Target::Cart(id) => id,
+            _ => return false,
+        };
+        if !matches!(rider, Target::Player | Target::Mob(_))
+            || rider == vehicle
+            || self.native_vehicle_id(rider) == Some(vehicle_id)
+        {
+            return false;
+        }
+        let mut current = Some(vehicle);
+        for _ in 0..64 {
+            let Some(target) = current else { break };
+            if target == rider {
+                return false;
+            }
+            current = self
+                .native_vehicle_id(target)
+                .and_then(|id| self.native_entity(id))
+                .and_then(|e| self.native_entity_target(e));
+        }
+        if current.is_some() {
+            return false;
+        }
+        let allowed = match rider {
+            Target::Player => self.native_may_board(vehicle_id),
+            Target::Mob(id) => self.native_mob_may_ride(id, vehicle_id, true),
+            _ => false,
+        };
+        if !allowed {
+            return false;
+        }
+        if !force {
+            match rider {
+                Target::Player if self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft) => {
+                    return false;
+                }
+                Target::Mob(id)
+                    if self.mobs.iter().find(|m| m.id == id).is_none_or(|m| {
+                        m.extra.boarding_cooldown > 0
+                            || matches!(
+                                m.species(),
+                                horizon_client::mobs::Species::Warden
+                                    | horizon_client::mobs::Species::Wither
+                            )
+                    }) =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        match vehicle {
+            Target::Boat(id) => {
+                let Some(index) = self.boats.iter().position(|b| b.id == id) else {
+                    return false;
+                };
+                if self.boat_passengers(id) >= self.boats[index].max_passengers()
+                    || (!force && !self.boat_has_room(index))
+                {
+                    return false;
+                }
+            }
+            Target::Cart(id) => {
+                if !self.carts.iter().any(|cart| cart.id == id)
+                    || self.riding == Some(id)
+                    || self.ridden_by_guest(id)
+                    || self
+                        .mobs
+                        .iter()
+                        .any(|m| !m.removed && m.extra.mount == Some(id))
+                {
+                    return false;
+                }
+            }
+            Target::Mob(id) => {
+                if !self.mobs.iter().any(|m| m.id == id && m.alive())
+                    || self.riding == Some(id)
+                    || self.ridden_by_guest(id)
+                    || self
+                        .mobs
+                        .iter()
+                        .any(|m| !m.removed && m.extra.mount == Some(id))
+                {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+        if self.native_vehicle_id(rider).is_some() {
+            match rider {
+                Target::Player => self.stop_riding(),
+                Target::Mob(id) => self.dismount_mob(id),
+                _ => return false,
+            }
+            if self.native_vehicle_id(rider).is_some() {
+                return false;
+            }
+        }
+        match rider {
+            Target::Player => {
+                match vehicle {
+                    Target::Boat(id) => {
+                        if let Some(boat) = self.boats.iter().find(|b| b.id == id) {
+                            self.yaw = boat.yaw;
+                        }
+                    }
+                    Target::Mob(id) => {
+                        if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                            mob.extra.flag = false;
+                            mob.extra.counter = 0;
+                            self.yaw = mob.yaw;
+                        }
+                        self.mount.jump_ticks = 0;
+                        self.mount.jump_scale = 0.0;
+                    }
+                    _ => {}
+                }
+                self.riding = Some(vehicle_id);
+                self.trigger_player("minecraft:started_riding");
+            }
+            Target::Mob(id) => horizon_client::mobs::riders::link(&mut self.mobs, id, vehicle_id),
+            _ => return false,
+        }
+        self.native_vehicle_id(rider) == Some(vehicle_id)
+    }
+
+    /// Attempts to board a vehicle through the shared server mount path.
+    pub(super) fn native_entity_start_riding(
+        &mut self,
+        entity: EntityRef,
+        vehicle: EntityRef,
+        force: bool,
+    ) -> bool {
+        let Some(rider) = self.native_entity_target(entity) else {
+            return false;
+        };
+        let Some(vehicle) = self.native_entity_target(vehicle) else {
+            return false;
+        };
+        self.start_riding_target(rider, vehicle, force)
+    }
+
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the
     /// vehicle lets it out, as `/ride ... dismount` does. False when it rode
     /// nothing, a mod's `mob_ride` hook kept it on, or for a stale handle.
