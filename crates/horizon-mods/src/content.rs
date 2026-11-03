@@ -2018,14 +2018,15 @@ capabilities = ["registries"]
                 },
             ]
         );
-        let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", br#"{"sprite":"steam"}"#)];
-        let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
-        assert!(e.contains("sprite"), "{e}");
-        for sprite in ["ruby:has space", "Ruby:steam", "ruby:"] {
-            let json = format!(r#"{{"sprite":"{sprite}"}}"#);
-            let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", json.as_bytes())];
+        for sprite in [
+            &br#"{"sprite":"steam"}"#[..],
+            br#"{"sprite":"ruby:has space"}"#,
+            br#"{"sprite":"Ruby:steam"}"#,
+            br#"{"sprite":"ruby:"}"#,
+        ] {
+            let bad: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/x.json", sprite)];
             let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
-            assert!(e.contains("sprite"), "{sprite}: {e}");
+            assert!(e.contains("sprite"), "{e}");
         }
     }
 
