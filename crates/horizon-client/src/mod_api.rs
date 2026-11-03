@@ -795,6 +795,149 @@ impl MobRef {
     }
 }
 
+/// The player, or mobs of the given species: the class filter of a
+/// [`NativeGoal::NearestTarget`] and of a [`NativeGoal::AvoidEntity`]. The
+/// species ids are namespaced (`minecraft:zombie`); a bare id reads as
+/// `minecraft:`'s, like the effects' ids.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum NativeMobFilter {
+    /// The nearest player.
+    Player,
+    /// Mobs of these species (`Vec` of namespaced ids).
+    Species(Vec<String>),
+}
+
+/// A vanilla AI goal, as a mob's `add_goal` and `add_target_goal` give one:
+/// only the kinds Horizon's own species code runs, with the vanilla
+/// constructor's parameters (`MeleeAttackGoal(speed, followUnseen)`). Goals
+/// with behavior of their own (a `MoveToBlockGoal` subclass's block test)
+/// stay out: they take code, not parameters.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum NativeGoal {
+    /// `FloatGoal`: swim up in water or lava. Vanilla parameters: none.
+    Float,
+    /// `ClimbOnTopOfPowderSnowGoal`: jump onto powder snow. Parameters: none.
+    ClimbOnTopOfPowderSnow,
+    /// `PanicGoal(speed)`, or `TurtlePanicGoal(speed)` with `water_range`
+    /// set: always head for water this far away, not only when on fire.
+    Panic {
+        speed: f64,
+        water_range: Option<i32>,
+    },
+    /// `RandomStrollGoal(speed, interval)`; `water_avoiding` set to its
+    /// probability makes `WaterAvoidingRandomStrollGoal`, `swim`
+    /// `RandomSwimmingGoal`, `flying` `WaterAvoidingRandomFlyingGoal`.
+    Stroll {
+        speed: f64,
+        interval: i32,
+        water_avoiding: Option<f32>,
+        swim: bool,
+        flying: bool,
+    },
+    /// `LookAtPlayerGoal(range, probability, onlyHorizontal)`: the nearest
+    /// player, the nearest mob with `mobs`, or only mobs of `only`'s
+    /// species.
+    LookAtPlayer {
+        range: f32,
+        probability: f32,
+        only_horizontal: bool,
+        mobs: bool,
+        only: Option<String>,
+    },
+    /// `RandomLookAroundGoal`. Vanilla parameters: none.
+    RandomLookAround,
+    /// `MeleeAttackGoal(speed, followUnseen)`.
+    MeleeAttack { speed: f64, follow_unseen: bool },
+    /// `LeapAtTargetGoal(leapMotion)`.
+    LeapAtTarget { yd: f32 },
+    /// `AvoidEntityGoal(what, maxDist, walk, sprint)`: sprint away from
+    /// `what` once it is closer than `max_dist`.
+    AvoidEntity {
+        what: NativeMobFilter,
+        max_dist: f32,
+        walk: f64,
+        sprint: f64,
+    },
+    /// `TemptGoal(speed, items, canScare)`: `items` are item ids
+    /// (`minecraft:wheat`; a bare id reads as `minecraft:`'s).
+    Tempt {
+        speed: f64,
+        items: Vec<String>,
+        can_scare: bool,
+    },
+    /// `BreedGoal(speed)`. An animal keeps it; other mobs refuse it.
+    Breed { speed: f64 },
+    /// `FollowParentGoal(speed)`. An animal keeps it; other mobs refuse it.
+    FollowParent { speed: f64 },
+    /// `FollowMobGoal(speed, stopDistance, areaSize)`.
+    FollowMob { speed: f64, stop: f32, area: f32 },
+    /// `RestrictSunGoal`. Vanilla parameters: none.
+    RestrictSun,
+    /// `FleeSunGoal(speed)`.
+    FleeSun { speed: f64 },
+    /// `EatBlockGoal`. Vanilla parameters: none.
+    EatBlock,
+    /// `BreathAirGoal`. Vanilla parameters: none.
+    BreathAir,
+    /// `TryFindWaterGoal`. Vanilla parameters: none.
+    TryFindWater,
+    /// `NearestAttackableTargetGoal` (the target selector): hunt `prey`,
+    /// checking every `interval` ticks, `must_see` (`mustSee`) and
+    /// `must_reach` (`mustReach`).
+    NearestTarget {
+        prey: NativeMobFilter,
+        must_see: bool,
+        must_reach: bool,
+        interval: i32,
+    },
+    /// `HurtByTargetGoal`, `alert` as its `setAlert()`.
+    HurtByTarget { alert: bool },
+}
+
+impl NativeGoal {
+    /// The goal's kind id: the same snake_case spelling `goals` and
+    /// `target_goals` read and `remove_goal` and `remove_target_goal` take
+    /// (`melee_attack`). A species variant of a vanilla goal (a bee's
+    /// `BeeHurtByOtherGoal`) keeps its own vanilla name instead.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Float => "float",
+            Self::ClimbOnTopOfPowderSnow => "climb_on_top_of_powder_snow",
+            Self::Panic { .. } => "panic",
+            Self::Stroll { .. } => "stroll",
+            Self::LookAtPlayer { .. } => "look_at_player",
+            Self::RandomLookAround => "random_look_around",
+            Self::MeleeAttack { .. } => "melee_attack",
+            Self::LeapAtTarget { .. } => "leap_at_target",
+            Self::AvoidEntity { .. } => "avoid_entity",
+            Self::Tempt { .. } => "tempt",
+            Self::Breed { .. } => "breed",
+            Self::FollowParent { .. } => "follow_parent",
+            Self::FollowMob { .. } => "follow_mob",
+            Self::RestrictSun => "restrict_sun",
+            Self::FleeSun { .. } => "flee_sun",
+            Self::EatBlock => "eat_block",
+            Self::BreathAir => "breath_air",
+            Self::TryFindWater => "try_find_water",
+            Self::NearestTarget { .. } => "nearest_target",
+            Self::HurtByTarget { .. } => "hurt_by_target",
+        }
+    }
+}
+
+/// One goal of a mob's selector, as `goals` and `target_goals` read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeMobGoalEntry {
+    /// The goal's priority: a lower number preempts a higher one.
+    pub priority: i32,
+    /// The goal's kind id (see [`NativeGoal::id`]).
+    pub id: &'static str,
+    /// Whether the goal is running now.
+    pub running: bool,
+}
+
 /// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
 /// It is also a [`MobRef`] and a [`LivingRef`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2576,8 +2719,9 @@ pub use part_table::{
     block_entity_providers,
 };
 pub(crate) use part_table::{
-    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, install_parts,
-    mark_game_thread, parts, place_provider, providers, resolve_parts,
+    KnownIds, ProvidedBy, answered, ask_providers, block_entity_types, has_part_hook,
+    has_scoped_hook, install_parts, mark_game_thread, parts, place_provider, providers,
+    resolve_parts,
 };
 
 mod generated {
@@ -2619,7 +2763,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::horizon_mod;
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
 
 #[cfg(test)]
 pub(crate) use part_table::tests as part_tests;
@@ -2799,6 +2943,7 @@ mod tests {
     #[derive(Clone)]
     struct Probe;
 
+    #[mod_api::horizon_part]
     impl ItemPart for Probe {
         fn use_on(&self, host: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             let player = host.acting_player().expect("a player acts");
@@ -2923,6 +3068,7 @@ mod tests {
     #[derive(Clone)]
     struct Chatty;
 
+    #[mod_api::horizon_part]
     impl ItemPart for Chatty {
         fn use_on(&self, host: &mut dyn ServerHost, _event: &mut UseOnEvent<'_>) -> Flow {
             host.tell(7, Text::literal("hello"));
@@ -3217,6 +3363,7 @@ mod tests {
     #[derive(Clone)]
     struct HeardStick;
 
+    #[mod_api::horizon_part]
     impl ItemPart for HeardStick {
         fn use_on(&self, _: &mut dyn ServerHost, event: &mut UseOnEvent<'_>) -> Flow {
             assert_eq!((event.player, event.player_entity_id), (7, 41));
