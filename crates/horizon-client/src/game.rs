@@ -3227,6 +3227,9 @@ struct Game<'a> {
     save_after_guest_turn: bool,
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
+    /// The trade a guest's click just made, for the mods' trade hooks while
+    /// the hub is out of the game (`merchant` handle reads).
+    trade_view: Option<lan_trading::TradeView>,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -19504,6 +19507,7 @@ impl<'a> Game<'a> {
             lan_acting: None,
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
+            trade_view: None,
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,

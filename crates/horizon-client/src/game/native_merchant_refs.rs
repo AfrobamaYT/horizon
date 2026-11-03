@@ -20,18 +20,23 @@ fn registry_index(id: &str, names: &[&str]) -> Option<u8> {
     names.iter().position(|n| *n == id.path()).map(|i| i as u8)
 }
 
-/// An item stack a trade can hold: a known, nonempty item.
-fn real(stack: &horizon_client::items::ItemStack) -> bool {
-    stack.count > 0 && &*stack.item != "minecraft:air"
-}
-
-fn valid_offer(offer: &MerchantOffer) -> bool {
-    real(&offer.base_cost_a.stack)
-        && offer.cost_b.as_ref().is_none_or(|b| real(&b.stack))
-        && real(&offer.result)
-}
-
 impl Game<'_> {
+    /// An item stack a trade can hold: a nonempty stack of an item the game
+    /// has (a client would otherwise be sent air for it).
+    fn merchant_real(&self, stack: &horizon_client::items::ItemStack) -> bool {
+        stack.count > 0
+            && &*stack.item != "minecraft:air"
+            && self.items().get(&stack.item).is_some()
+    }
+
+    fn merchant_valid_offer(&self, offer: &MerchantOffer) -> bool {
+        self.merchant_real(&offer.base_cost_a.stack)
+            && offer
+                .cost_b
+                .as_ref()
+                .is_none_or(|b| self.merchant_real(&b.stack))
+            && self.merchant_real(&offer.result)
+    }
     fn native_merchant_index(&self, merchant: MerchantRef) -> Option<usize> {
         let Target::Mob(id) = self.native_entity_target(merchant.entity())? else {
             return None;
@@ -57,6 +62,9 @@ impl Game<'_> {
         read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
     ) -> T {
         let mob = &self.mobs[index];
+        if let Some(view) = self.trade_view.as_ref().filter(|v| v.mob == mob.id) {
+            return read(&view.offers, view.xp, view.level);
+        }
         if let Some(session) = self
             .lan_trade_conn(mob.id)
             .and_then(|conn| self.lan_trade_session(conn))
@@ -101,7 +109,7 @@ impl Game<'_> {
         let mut level = i32::from(mob.extra.variant3.max(1));
         let done = edit(&mut trader.offers, &mut trader.xp, &mut level);
         if done && mob.species() == Species::Villager {
-            mob.extra.variant3 = level.clamp(1, 5) as u8;
+            mob.extra.variant3 = level.clamp(1, i32::from(u8::MAX)) as u8;
         }
         done
     }
@@ -136,7 +144,7 @@ impl Game<'_> {
         let Some(mob) = self.native_merchant_index(merchant) else {
             return false;
         };
-        if !valid_offer(&offer) {
+        if !self.merchant_valid_offer(&offer) {
             return false;
         }
         self.merchant_write(mob, |offers, _, _| {
@@ -160,7 +168,7 @@ impl Game<'_> {
         let Some(mob) = self.native_merchant_index(merchant) else {
             return false;
         };
-        if !valid_offer(&offer) {
+        if !self.merchant_valid_offer(&offer) {
             return false;
         }
         if self.lan_trade_conn(self.mobs[mob].id).is_none() && !self.mobs[mob].extra.flag2 {
@@ -198,6 +206,16 @@ impl Game<'_> {
         merchant: MerchantRef,
     ) -> Option<PlayerRef> {
         let index = self.native_merchant_index(merchant)?;
+        if let Some(view) = self
+            .trade_view
+            .as_ref()
+            .filter(|v| v.mob == self.mobs[index].id)
+        {
+            return Some(PlayerRef {
+                entity: EntityRef::new(self.native_lifecycle.epoch()?, view.player_entity),
+                uuid: view.player,
+            });
+        }
         let conn = self.lan_trade_conn(self.mobs[index].id)?;
         self.native_player_ref(self.lan_trade_player(conn)?)
     }
@@ -236,18 +254,19 @@ impl Game<'_> {
     /// `VillagerData.level`, 1 to 5.
     pub(super) fn native_villager_level(&self, merchant: MerchantRef) -> Option<i32> {
         let index = self.native_villager_index(merchant)?;
-        Some(self.merchant_read(index, |_, _, level| level.clamp(1, 5)))
+        Some(self.merchant_read(index, |_, _, level| level.max(1)))
     }
 
-    /// `VillagerData.withLevel`: the offers stay as they are; the next level-up
-    /// adds its trades. False outside 1 to 5.
+    /// `VillagerData.withLevel`: `Math.max(1, level)`, with no upper limit in
+    /// vanilla. Horizon stores a level in a byte, so one above 255 is kept
+    /// as 255. The offers stay as they are; the next level-up adds its trades
+    /// (a level past 5 can't level up). A trading guest's session follows,
+    /// and gets the sequences a level-up from the new level needs.
     pub(super) fn native_villager_set_level(&mut self, merchant: MerchantRef, level: i32) -> bool {
         let Some(index) = self.native_villager_index(merchant) else {
             return false;
         };
-        if !(1..=5).contains(&level) {
-            return false;
-        }
+        let level = level.clamp(1, i32::from(u8::MAX));
         self.merchant_write(index, |_, _, current| {
             *current = level;
             true
@@ -261,7 +280,9 @@ impl Game<'_> {
         Some(format!("minecraft:{name}"))
     }
 
-    /// `VillagerData.withType`. False for an unknown id or a wandering trader.
+    /// `VillagerData.withType`: also the type a trading guest's session
+    /// rolls its next level-up offers with. False for an unknown id, a
+    /// wandering trader, or a trade open where this can't reach.
     pub(super) fn native_villager_set_type(&mut self, merchant: MerchantRef, kind: &str) -> bool {
         let Some(index) = self.native_villager_index(merchant) else {
             return false;
@@ -269,6 +290,15 @@ impl Game<'_> {
         let Some(kind) = registry_index(kind, &VILLAGER_TYPES) else {
             return false;
         };
+        let id = self.mobs[index].id;
+        if let Some(conn) = self.lan_trade_conn(id) {
+            let variant = format!("minecraft:{}", VILLAGER_TYPES[kind as usize]);
+            if !self.lan_trade_edit(conn, |session| session.variant = variant) {
+                return false;
+            }
+        } else if self.mobs[index].extra.flag2 {
+            return false;
+        }
         self.mobs[index].extra.variant = kind;
         true
     }
@@ -279,14 +309,11 @@ impl Game<'_> {
         Some(self.merchant_read(index, |_, xp, _| xp))
     }
 
-    /// `Villager.setVillagerXp`. False when negative.
+    /// `Villager.setVillagerXp`: assigned as given, as vanilla does.
     pub(super) fn native_villager_set_xp(&mut self, merchant: MerchantRef, xp: i32) -> bool {
         let Some(index) = self.native_villager_index(merchant) else {
             return false;
         };
-        if xp < 0 {
-            return false;
-        }
         self.merchant_write(index, |_, current, _| {
             *current = xp;
             true
@@ -376,6 +403,24 @@ pub(super) mod tests {
             let mut bad = changed.clone();
             bad.result.count = 0;
             assert!(!villager.set_offer(game, 0, bad));
+            for (a, b, r) in [
+                ("minecraft:not_an_item", None, "minecraft:emerald"),
+                (
+                    "minecraft:wheat",
+                    Some("minecraft:not_an_item"),
+                    "minecraft:emerald",
+                ),
+                ("minecraft:wheat", None, "minecraft:not_an_item"),
+            ] {
+                let mut bad = changed.clone();
+                bad.base_cost_a.stack = ItemStack::new(a, 1);
+                bad.cost_b = b.map(|b| ItemCost {
+                    stack: ItemStack::new(b, 1),
+                });
+                bad.result = ItemStack::new(r, 1);
+                assert!(!villager.set_offer(game, 0, bad.clone()));
+                assert!(!villager.add_offer(game, bad));
+            }
             assert!(villager.add_offer(game, changed.clone()));
             assert_eq!(villager.offers(game).unwrap().len(), 3);
             assert!(villager.remove_offer(game, 0));
@@ -406,8 +451,14 @@ pub(super) mod tests {
             assert!(villager.set_level(game, 4));
             assert_eq!(villager.level(game), Some(4));
             assert_eq!(game.mobs[0].extra.variant3, 4);
-            assert!(!villager.set_level(game, 0));
-            assert!(!villager.set_level(game, 6));
+            // Vanilla: `Math.max(1, level)`, no upper limit; a byte holds 255.
+            assert!(villager.set_level(game, 0));
+            assert_eq!(villager.level(game), Some(1));
+            assert!(villager.set_level(game, 6));
+            assert_eq!(villager.level(game), Some(6));
+            assert!(villager.set_level(game, 1000));
+            assert_eq!(villager.level(game), Some(255));
+            assert!(villager.set_level(game, 4));
             assert_eq!(
                 villager.villager_type(game).as_deref(),
                 Some("minecraft:plains")
@@ -421,7 +472,8 @@ pub(super) mod tests {
             assert_eq!(villager.xp(game), Some(0));
             assert!(villager.set_xp(game, 80));
             assert_eq!(villager.xp(game), Some(80));
-            assert!(!villager.set_xp(game, -1));
+            assert!(villager.set_xp(game, -1));
+            assert_eq!(villager.xp(game), Some(-1));
             assert_eq!(villager.offers(game).unwrap().len(), 1);
 
             // Saved with the entity (`Offers`) and read back unchanged.
