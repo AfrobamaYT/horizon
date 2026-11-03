@@ -9,13 +9,8 @@
 //! one go in whole, or it refuses before anything moves and hands the stack back. That holds
 //! while every handler's `simulate` answers as its real call does; one that doesn't is a mod bug,
 //! and what it leaves out is put back, else dropped where it was, never lost or made.
-use super::{Direction, Hand, Host, ITEMS, ItemHandler, ItemStack};
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    marker::PhantomData,
-    sync::{Arc, LazyLock, Mutex},
-};
+use super::{Capability, Direction, Hand, Host, ITEMS, ItemHandler, ItemStack};
+use std::{cell::RefCell, collections::HashSet, marker::PhantomData, sync::Mutex};
 
 /// Where a stack lives.
 #[non_exhaustive]
@@ -76,8 +71,8 @@ pub trait PlaceProvider: Send + Sync + 'static {
 /// answer for a stack where no part is registered for its item, if the game has one.
 pub struct ItemCapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    default: Option<fn(&mut dyn Host, &ItemStack) -> Option<Arc<T>>>,
-    handler: PhantomData<fn() -> Arc<T>>,
+    default: Option<fn(&mut dyn Host, &ItemStack) -> Option<Box<T>>>,
+    handler: PhantomData<fn() -> Box<T>>,
 }
 
 impl<T: ?Sized + 'static> ItemCapabilityKey<T> {
@@ -96,9 +91,8 @@ impl<T: ?Sized + 'static> ItemCapabilityKey<T> {
 pub const ITEM_ITEMS: ItemCapabilityKey<dyn StackItemHandler> = ItemCapabilityKey {
     name: "horizon:item_items",
     default: Some(|host, stack| {
-        static GAME: LazyLock<Arc<dyn StackItemHandler>> =
-            LazyLock::new(|| Arc::new(GameItemItems));
-        host.item_container_slots(stack).map(|_| GAME.clone())
+        host.item_container_slots(stack)
+            .map(|_| Box::new(GameItemItems) as Box<dyn StackItemHandler>)
     }),
     handler: PhantomData,
 };
@@ -230,8 +224,8 @@ pub(super) fn warned_about(owner: &str) -> bool {
 /// The slots a place sits in: a block entity's, through [`ITEMS`], or an item's, through
 /// [`ITEM_ITEMS`] (whose writes are staged).
 enum Container<'p> {
-    Block(Arc<dyn ItemHandler>, [i32; 3], Option<Direction>),
-    Item(Arc<dyn StackItemHandler>, &'p ItemPlace),
+    Block(Capability<dyn ItemHandler>, [i32; 3], Option<Direction>),
+    Item(Capability<dyn StackItemHandler>, &'p ItemPlace),
 }
 
 /// Whether `out` is exactly `count` of `old`.
@@ -243,8 +237,8 @@ impl Container<'_> {
     /// The mod that registered the handler; none for the game's own.
     fn owner(&self) -> Option<usize> {
         match self {
-            Self::Block(h, ..) => super::capability_mod(h),
-            Self::Item(h, _) => super::capability_mod(h),
+            Self::Block(h, ..) => h.owner,
+            Self::Item(h, _) => h.owner,
         }
     }
     fn slots(&self, host: &mut dyn Host) -> usize {
@@ -468,16 +462,35 @@ impl Container<'_> {
 }
 
 impl dyn Host + '_ {
-    /// `key`'s handler for the item at `place`: the part a mod registered for its item, else
-    /// the game's own answer, if the game has one.
+    /// `key`'s handler for the item at `place`: the first provider to answer, of those mods
+    /// registered for its item `before_game`, the game's own, and the mods' others, each in
+    /// registration order.
     pub fn item_capability<T: ?Sized + 'static>(
         &mut self,
         key: &ItemCapabilityKey<T>,
         place: &ItemPlace,
-    ) -> Option<Arc<T>> {
+    ) -> Option<Capability<T>> {
         let stack = self.place_stack(place)?;
-        super::item_capability(key, || Some(&*stack.item))
-            .or_else(|| key.default.and_then(|default| default(self, &stack)))
+        let mut game = None;
+        let answer = super::ask_providers::<super::ItemProvider<T>, T>(
+            true,
+            key.name,
+            self,
+            |_| Some(stack.item.to_string()),
+            |provider, host| provider(host, place),
+            |host| {
+                game = key.default.and_then(|default| default(host, &stack));
+                game.is_some()
+            },
+        );
+        match answer {
+            super::Answer::Mod(found) => Some(found),
+            super::Answer::Game => game.map(|handler| Capability {
+                handler,
+                owner: None,
+            }),
+            super::Answer::Nobody => None,
+        }
     }
 
     /// The stack at `place`, if any: the one place every item handler reads.
@@ -492,7 +505,7 @@ impl dyn Host + '_ {
         match (staged, place) {
             (Some(stack), _) => Some(stack),
             (None, ItemPlace::BlockEntity { pos, side, slot }) => self
-                .capability(&ITEMS, *pos)?
+                .capability(&ITEMS, *pos, *side)?
                 .stack(self, *pos, *side, *slot),
             (None, ItemPlace::Nested { parent, slot }) => self
                 .item_capability(&ITEM_ITEMS, parent)?
@@ -537,7 +550,7 @@ impl dyn Host + '_ {
         let done = staged
             || match place {
                 ItemPlace::BlockEntity { pos, side, slot } => {
-                    self.capability(&ITEMS, *pos).is_some_and(|handler| {
+                    self.capability(&ITEMS, *pos, *side).is_some_and(|handler| {
                         let container = Container::Block(handler, *pos, *side);
                         container.set(self, place, *slot, stack.clone(), one_by_one, simulate)
                     })

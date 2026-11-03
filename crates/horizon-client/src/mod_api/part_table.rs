@@ -3,8 +3,8 @@
 //! after every mod's `Hooks` method. Parts attached by tag are resolved by each game against its
 //! own tags, at world open and on `/reload`, into a table kept by that game's thread.
 use super::{
-    BlockEntityPart, BlockPart, CapabilityKey, Hooks, ItemCapabilityKey, ItemPart, MenuPart,
-    PlaceProvider,
+    BlockEntityPart, BlockPart, BlockSide, Capability, CapabilityKey, Hooks, Host,
+    ItemCapabilityKey, ItemPart, ItemPlace, MenuPart, PlaceProvider,
 };
 use std::{
     any::{Any, TypeId, type_name},
@@ -54,22 +54,33 @@ pub struct Parts {
     block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
-    /// Capability handlers by capability name, then by block entity type: one each.
+    /// Capability providers by capability name, then by block entity type, in registration
+    /// order.
     capabilities: Capabilities,
-    /// Item capability handlers by capability name, then by item: one each.
+    /// Item capability providers by capability name, then by item, in registration order.
     item_capabilities: Capabilities,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
     place_providers: HashMap<&'static str, (usize, Arc<dyn PlaceProvider>)>,
 }
 
-type Capabilities = HashMap<&'static str, HashMap<Box<str>, CapabilityPart>>;
+type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>>;
 
-/// A capability handler a mod registered: an `Arc` of the capability's handler trait.
+/// A capability provider a mod registered: an `Arc` of [`BlockProvider`] or [`ItemProvider`]
+/// of the capability's handler trait.
 #[derive(Clone)]
 struct CapabilityPart {
     mod_index: usize,
-    handler: Arc<dyn Any + Send + Sync>,
+    /// Asked ahead of the game's own provider.
+    before_game: bool,
+    provider: Arc<dyn Any + Send + Sync>,
 }
+
+/// What answers a capability for a block entity of one type: given the block entity and the
+/// side asked about, its handler, or none to leave it to the next provider.
+pub type BlockProvider<T> = dyn Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync;
+/// What answers an item capability for one item: given where the stack lives, its handler, or
+/// none to leave it to the next provider.
+pub type ItemProvider<T> = dyn Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync;
 
 /// The parts attached by tag, by tag name, in registration order.
 #[derive(Default)]
@@ -276,54 +287,84 @@ impl Parts {
     }
 }
 
-/// The handler for `key` a mod registered for the block entity type `kind`. With none registered
-/// for any type, `kind` is never worked out.
-pub fn block_entity_capability<'k, T: ?Sized + 'static>(
-    key: &CapabilityKey<T>,
-    kind: impl FnOnce() -> Option<&'k str>,
-) -> Option<Arc<T>> {
-    capability_part(&INSTALLED.get()?.keys.capabilities, key.name, kind)
+/// Who answers a capability: a mod's provider, the game's own, or nobody.
+pub(crate) enum Answer<T: ?Sized> {
+    Mod(Capability<T>),
+    Game,
+    Nobody,
 }
 
-/// The handler for `key` a mod registered for item `item`.
-pub(crate) fn item_capability<'k, T: ?Sized + 'static>(
-    key: &ItemCapabilityKey<T>,
-    item: impl FnOnce() -> Option<&'k str>,
-) -> Option<Arc<T>> {
-    capability_part(&INSTALLED.get()?.keys.item_capabilities, key.name, item)
+/// Asks the providers mods registered for capability `name` and the id `id` works out, as
+/// NeoForge asks a capability's providers: those registered `before_game` in registration
+/// order, then the game's own (`game`: whether it answers), then the others in registration
+/// order; the first to answer wins. With no provider registered for `name`, neither `id` nor
+/// any provider is asked.
+pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
+    items: bool,
+    name: &str,
+    host: &mut dyn Host,
+    id: impl FnOnce(&mut dyn Host) -> Option<String>,
+    call: impl Fn(&P, &mut dyn Host) -> Option<Box<T>>,
+    game: impl FnOnce(&mut dyn Host) -> bool,
+) -> Answer<T> {
+    let table = INSTALLED.get().map(|installed| match items {
+        true => &installed.keys.item_capabilities,
+        false => &installed.keys.capabilities,
+    });
+    let by_id = table
+        .and_then(|table| table.get(name))
+        .filter(|by_id| !by_id.is_empty());
+    let parts = by_id
+        .and_then(|by_id| by_id.get(id(host)?.as_str()))
+        .map_or(&[][..], Vec::as_slice);
+    let ask = |before_game: bool, host: &mut dyn Host| {
+        parts
+            .iter()
+            .filter(|part| part.before_game == before_game)
+            .find_map(|part| {
+                let provider = part.provider.downcast_ref::<Arc<P>>()?;
+                Some(Capability {
+                    handler: call(provider, host)?,
+                    owner: Some(part.mod_index),
+                })
+            })
+    };
+    if let Some(found) = ask(true, host) {
+        return Answer::Mod(found);
+    }
+    if game(host) {
+        return Answer::Game;
+    }
+    ask(false, host).map_or(Answer::Nobody, Answer::Mod)
+}
+
+/// A mod's handler for capability `key` at `at`, where the game would answer with its own
+/// unless a mod comes first: one registered `before_game`, else, where the game has no answer
+/// (`game`), the first mod's. With no provider registered for `key`, one table check.
+pub fn block_entity_capability<T: ?Sized + 'static>(
+    key: &CapabilityKey<T>,
+    host: &mut dyn Host,
+    at: BlockSide,
+    game: impl FnOnce(&mut dyn Host) -> bool,
+) -> Option<Capability<T>> {
+    let answer = ask_providers::<BlockProvider<T>, T>(
+        false,
+        key.name,
+        host,
+        |host| host.block_entity_type(at.pos),
+        |provider, host| provider(host, at),
+        game,
+    );
+    match answer {
+        Answer::Mod(found) => Some(found),
+        Answer::Game | Answer::Nobody => None,
+    }
 }
 
 /// The mod's provider of the item places named `provider`.
 pub(crate) fn place_provider(provider: &str) -> Option<Arc<dyn PlaceProvider>> {
     let (_, provider) = INSTALLED.get()?.keys.place_providers.get(provider)?;
     Some(provider.clone())
-}
-
-/// The mod that registered `handler` for a capability; none for the game's own.
-pub(crate) fn capability_mod<T: ?Sized + 'static>(handler: &Arc<T>) -> Option<usize> {
-    let keys = &INSTALLED.get()?.keys;
-    let tables = [&keys.capabilities, &keys.item_capabilities];
-    let parts = tables
-        .into_iter()
-        .flat_map(HashMap::values)
-        .flat_map(HashMap::values);
-    parts
-        .into_iter()
-        .find(|part| {
-            part.handler
-                .downcast_ref::<Arc<T>>()
-                .is_some_and(|h| std::ptr::addr_eq(Arc::as_ptr(h), Arc::as_ptr(handler)))
-        })
-        .map(|part| part.mod_index)
-}
-
-fn capability_part<'k, T: ?Sized + 'static>(
-    table: &Capabilities,
-    name: &str,
-    id: impl FnOnce() -> Option<&'k str>,
-) -> Option<Arc<T>> {
-    let part = table.get(name)?.get(id()?)?;
-    part.handler.downcast_ref::<Arc<T>>().cloned()
 }
 
 fn attached<'a, 'k, P: ?Sized>(
@@ -390,26 +431,59 @@ impl Registrar {
         self.attach::<P, dyn ItemPart>(|p| &mut p.items, item, Arc::new(part));
     }
     /// Answer capability `key` for the mod block entity type `kind` (`mymod:press`) with
-    /// `handler`, in place of the game's own answer: `r.block_entity_capability(&ITEMS,
-    /// "mymod:press", Arc::new(PressItems))`. One handler a capability and type.
-    pub fn block_entity_capability<T: ?Sized + Send + Sync + 'static>(
+    /// `provider`, which gives a handler for one block entity and side, or none:
+    /// `r.block_entity_capability(&ITEMS, "mymod:press", |_, _| Some(Box::new(PressItems)))`.
+    /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: the game's own is asked
+    /// first, then the mods' in registration order, and the first to answer wins.
+    pub fn block_entity_capability<T: ?Sized + 'static>(
         &mut self,
         key: &CapabilityKey<T>,
         kind: &str,
-        handler: Arc<T>,
+        provider: impl Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.capability(|p| &mut p.capabilities, key.name, kind, handler);
+        let provider: Arc<BlockProvider<T>> = Arc::new(provider);
+        self.capability(|p| &mut p.capabilities, key.name, kind, false, provider);
     }
-    /// Answer item capability `key` for item `item` (`mymod:backpack`) with `handler`, in place
-    /// of the game's own answer: `r.item_capability(&ITEM_ITEMS, "mymod:backpack",
-    /// Arc::new(Backpack))`. One handler a capability and item.
-    pub fn item_capability<T: ?Sized + Send + Sync + 'static>(
+    /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
+    /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
+    /// reached.
+    pub fn block_entity_capability_before_game<T: ?Sized + 'static>(
+        &mut self,
+        key: &CapabilityKey<T>,
+        kind: &str,
+        provider: impl Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        let provider: Arc<BlockProvider<T>> = Arc::new(provider);
+        self.capability(|p| &mut p.capabilities, key.name, kind, true, provider);
+    }
+    /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
+    /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
+    /// "mymod:backpack", |_, _| Some(Box::new(Backpack)))`. Asked as
+    /// [`block_entity_capability`](Self::block_entity_capability)'s are.
+    pub fn item_capability<T: ?Sized + 'static>(
         &mut self,
         key: &ItemCapabilityKey<T>,
         item: &str,
-        handler: Arc<T>,
+        provider: impl Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
-        self.capability(|p| &mut p.item_capabilities, key.name, item, handler);
+        let provider: Arc<ItemProvider<T>> = Arc::new(provider);
+        self.capability(
+            |p| &mut p.item_capabilities,
+            key.name,
+            item,
+            false,
+            provider,
+        );
+    }
+    /// [`item_capability`](Self::item_capability), asked ahead of the game's own provider.
+    pub fn item_capability_before_game<T: ?Sized + 'static>(
+        &mut self,
+        key: &ItemCapabilityKey<T>,
+        item: &str,
+        provider: impl Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
+    ) {
+        let provider: Arc<ItemProvider<T>> = Arc::new(provider);
+        self.capability(|p| &mut p.item_capabilities, key.name, item, true, provider);
     }
     /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
     /// as an accessory mod exposes its slots. One provider a name.
@@ -434,14 +508,15 @@ impl Registrar {
             .insert(name, (self.mod_index, provider));
     }
 
-    /// Answer capability `name` for `id` in `table` with `handler`; refused twice or for an id
-    /// with no namespace.
-    fn capability<T: ?Sized + Send + Sync + 'static>(
+    /// Adds `provider` for capability `name` and `id` to `table`; refused for an id with no
+    /// namespace.
+    fn capability<P: ?Sized + Send + Sync + 'static>(
         &mut self,
         table: fn(&mut Parts) -> &mut Capabilities,
         name: &'static str,
         id: &str,
-        handler: Arc<T>,
+        before_game: bool,
+        provider: Arc<P>,
     ) {
         if !namespaced(id) {
             self.refused.push(format!(
@@ -450,22 +525,15 @@ impl Registrar {
             ));
             return;
         }
-        let handlers = table(&mut self.parts).entry(name).or_default();
-        if let Some(other) = handlers.get(id) {
-            self.refused.push(format!(
-                "{name} is answered for {id} twice, by {} and {}",
-                super::mod_name(other.mod_index),
-                super::mod_name(self.mod_index)
-            ));
-            return;
-        }
-        handlers.insert(
-            id.into(),
-            CapabilityPart {
+        let providers = table(&mut self.parts).entry(name).or_default();
+        providers
+            .entry(id.into())
+            .or_default()
+            .push(CapabilityPart {
                 mod_index: self.mod_index,
-                handler: Arc::new(handler),
-            },
-        );
+                before_game,
+                provider: Arc::new(provider),
+            });
     }
     /// Attach `part` to the mod menu type `menu`.
     pub fn menu_part<P: MenuPart>(&mut self, menu: &str, part: P) {
@@ -608,21 +676,41 @@ mod tests {
             r.block_part("test:gauge", Gauge);
             r.block_part_tag("test:gauged", TagGauge);
             r.block_entity_part("test:press_entity", &["test:press"], Press);
-            r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
-            r.block_entity_capability(&ITEMS, "test:liar", Arc::new(Liar));
-            r.block_entity_capability(&ITEMS, "test:item_overstates", Arc::new(ItemOverstates));
-            r.block_entity_capability(&ITEMS, "test:item_swaps", Arc::new(ItemSwaps));
-            r.item_capability(&ITEM_ITEMS, "test:pouch", Arc::new(Pouch));
-            r.item_capability(&ITEM_ITEMS, "test:bag", Arc::new(Bag));
+            // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
+            // block entity's are reached does: ahead of the game's.
+            r.block_entity_capability_before_game(&ITEMS, "test:pipe", |_, _| Some(Box::new(Pipe)));
+            r.block_entity_capability_before_game(&ITEMS, "test:liar", |_, _| Some(Box::new(Liar)));
+            r.block_entity_capability_before_game(&ITEMS, "test:item_overstates", |_, _| {
+                Some(Box::new(ItemOverstates))
+            });
+            r.block_entity_capability_before_game(&ITEMS, "test:item_swaps", |_, _| {
+                Some(Box::new(ItemSwaps))
+            });
+            r.item_capability_before_game(&ITEM_ITEMS, "test:pouch", |_, _| Some(Box::new(Pouch)));
+            r.item_capability_before_game(&ITEM_ITEMS, "test:bag", |_, _| Some(Box::new(Bag)));
             r.place_provider("test:charms", Arc::new(Charms));
-            r.block_entity_capability(&FLUIDS, "test:tank", Arc::new(Tank));
-            r.block_entity_capability(&FLUIDS, "test:fluid_liar", Arc::new(FluidLiar));
+            // `test:ordered`: one provider that declines, two that answer, and one ahead of the
+            // game that answers only at x = 9.
+            r.block_entity_capability(&ITEMS, "test:ordered", |_, _| None);
+            r.block_entity_capability(&ITEMS, "test:ordered", |_, _| Some(Box::new(Marked(1))));
+            r.block_entity_capability(&ITEMS, "test:ordered", |_, _| Some(Box::new(Marked(2))));
+            r.block_entity_capability_before_game(&ITEMS, "test:ordered", |_, at| {
+                (at.pos[0] == 9).then(|| Box::new(Marked(3)) as _)
+            });
+            r.block_entity_capability_before_game(&FLUIDS, "test:tank", |_, _| {
+                Some(Box::new(Tank))
+            });
+            r.block_entity_capability_before_game(&FLUIDS, "test:fluid_liar", |_, _| {
+                Some(Box::new(FluidLiar))
+            });
             for (id, overstates) in [
                 ("test:gives_more", Overstates::GivesMore),
                 ("test:refuses_more", Overstates::RefusesMore),
                 ("test:gives_lava", Overstates::GivesLava),
             ] {
-                r.block_entity_capability(&FLUIDS, id, Arc::new(overstates));
+                r.block_entity_capability_before_game(&FLUIDS, id, move |_, _| {
+                    Some(Box::new(overstates))
+                });
             }
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
@@ -656,7 +744,7 @@ mod tests {
             simulate: bool,
         ) -> Option<ItemStack> {
             let east = [at[0] + 1, at[1], at[2]];
-            let Some(next) = host.capability(&ITEMS, east) else {
+            let Some(next) = host.capability(&ITEMS, east, Some(Direction::West)) else {
                 return Some(stack);
             };
             next.insert(host, east, Some(Direction::West), 0, stack, simulate)
@@ -1384,7 +1472,9 @@ mod tests {
         game_thread();
         let mut world = PipeWorld::default();
         let host: &mut dyn Host = &mut world;
-        let pipe = host.capability(&ITEMS, PIPE).expect("the pipe's part");
+        let pipe = host
+            .capability(&ITEMS, PIPE, None)
+            .expect("the pipe's part");
         assert_eq!(pipe.slots(host, PIPE, Some(Direction::Up)), 0);
         assert_eq!(pipe.slots(host, PIPE, Some(Direction::North)), 1);
         // Simulated, it would fit, and nothing moves.
@@ -1404,9 +1494,9 @@ mod tests {
             Some(stick())
         );
         // No block entity with slots: no answer. A mod's own capability has no game answer.
-        assert!(host.capability(&ITEMS, [5, 64, 0]).is_none());
+        assert!(host.capability(&ITEMS, [5, 64, 0], None).is_none());
         const CHEMICALS: CapabilityKey<dyn ItemHandler> = CapabilityKey::new("test:chemicals");
-        assert!(host.capability(&CHEMICALS, CHEST).is_none());
+        assert!(host.capability(&CHEMICALS, CHEST, None).is_none());
     }
 
     #[test]
@@ -1676,7 +1766,7 @@ mod tests {
         shelf_.whole_extract = true;
         shelf_.overstates = true;
         let host: &mut dyn Host = &mut shelf_;
-        let handler = host.capability(&ITEMS, SHELF).unwrap();
+        let handler = host.capability(&ITEMS, SHELF, None).unwrap();
         // Asked for 3, it gives 8: 3 come out, and the 5 more, which its insert won't keep, are
         // dropped at the shelf.
         let out = host.extract_checked(&handler, SHELF, None, 0, &apples(3));
@@ -1706,7 +1796,7 @@ mod tests {
         shelf_.whole_extract = true;
         shelf_.swaps = true;
         let host: &mut dyn Host = &mut shelf_;
-        let handler = host.capability(&ITEMS, SHELF).unwrap();
+        let handler = host.capability(&ITEMS, SHELF, None).unwrap();
         // Simulated, 3 apples; really, 3 dirt: none comes out, and the dirt, which its insert
         // won't keep, is dropped at the shelf.
         let simulated = handler.extract(host, SHELF, None, 0, 3, true).unwrap();
@@ -1758,30 +1848,107 @@ mod tests {
     }
 
     #[test]
-    fn an_item_capability_or_place_provider_given_twice_is_refused() {
+    fn a_place_provider_given_twice_is_refused() {
         let mut r = Registrar::default();
-        r.item_capability(&ITEM_ITEMS, "test:pouch", Arc::new(Pouch));
         r.place_provider("test:charms", Arc::new(Charms));
         r.mod_index = 1;
-        r.item_capability(&ITEM_ITEMS, "test:pouch", Arc::new(Bag));
         r.place_provider("test:charms", Arc::new(Charms));
         r.place_provider("charms", Arc::new(Charms));
+        r.block_entity_capability(&ITEMS, "pipe", |_, _| Some(Box::new(Pipe)));
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
-        assert!(r.refused[0].contains("horizon:item_items is answered for test:pouch twice"));
-        assert!(r.refused[1].contains("item places test:charms are provided twice"));
-        assert!(r.refused[2].contains("not a namespaced name"));
+        assert!(r.refused[0].contains("item places test:charms are provided twice"));
+        assert!(r.refused[1].contains("not a namespaced name"));
+        assert!(r.refused[2].contains("not a namespaced id"));
+    }
+
+    /// A handler that only tells which provider made it, by its slot count.
+    struct Marked(usize);
+    impl ItemHandler for Marked {
+        fn slots(&self, _: &dyn Host, _: [i32; 3], _: Option<Direction>) -> usize {
+            self.0
+        }
+        fn stack(
+            &self,
+            _: &dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+        ) -> Option<ItemStack> {
+            None
+        }
+        fn insert(
+            &self,
+            _: &mut dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            stack: ItemStack,
+            _: bool,
+        ) -> Option<ItemStack> {
+            Some(stack)
+        }
+        fn extract(
+            &self,
+            _: &mut dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: u32,
+            _: bool,
+        ) -> Option<ItemStack> {
+            None
+        }
+        fn capacity(
+            &self,
+            _: &dyn Host,
+            _: [i32; 3],
+            _: Option<Direction>,
+            _: usize,
+            _: &ItemStack,
+        ) -> u32 {
+            0
+        }
+    }
+
+    /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
+    struct Ordered;
+    impl Host for Ordered {
+        fn block_entity_type(&self, _: [i32; 3]) -> Option<String> {
+            Some("test:ordered".into())
+        }
+        fn container_size(&self, pos: [i32; 3], _: Option<Direction>) -> Option<usize> {
+            (pos[0] >= 8).then_some(27)
+        }
     }
 
     #[test]
-    fn a_capability_answered_twice_for_one_type_is_refused() {
-        let mut r = Registrar::default();
-        r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
-        r.mod_index = 1;
-        r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
-        r.block_entity_capability(&ITEMS, "pipe", Arc::new(Pipe));
-        assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
-        assert!(r.refused[0].contains("horizon:items is answered for test:pipe twice"));
-        assert!(r.refused[1].contains("not a namespaced id"));
+    fn providers_are_asked_ahead_of_the_game_then_the_game_then_the_mods_in_order() {
+        game_thread();
+        let host: &mut dyn Host = &mut Ordered;
+        let answer = |host: &mut dyn Host, x| {
+            let found = host.capability(&ITEMS, [x, 64, 0], None).unwrap();
+            (found.owner.is_some(), found.slots(host, [x, 64, 0], None))
+        };
+        // No game slots: the first mod provider that answers; the one before it declined.
+        assert_eq!(answer(host, 7), (true, 1));
+        // The game's slots come before the mods' providers.
+        assert_eq!(answer(host, 8), (false, 27));
+        // A provider registered before the game comes first where it answers.
+        assert_eq!(answer(host, 9), (true, 3));
+        // The game's own lookup takes a mod's handler only where the game has none or a mod
+        // comes first.
+        let mod_only = |host: &mut dyn Host, x| {
+            let at = BlockSide {
+                pos: [x, 64, 0],
+                side: None,
+            };
+            let game_slots = |host: &mut dyn Host| host.container_size(at.pos, None).is_some();
+            block_entity_capability(&ITEMS, host, at, game_slots)
+                .map(|found| found.slots(host, at.pos, None))
+        };
+        assert_eq!(mod_only(host, 7), Some(1));
+        assert_eq!(mod_only(host, 8), None);
+        assert_eq!(mod_only(host, 9), Some(3));
     }
 
     /// A mod's tank: the game's tank at its position, reached from every side but its top.
@@ -1888,7 +2055,7 @@ mod tests {
     /// The game's tank under it, but its real calls misanswer: an extract gives 100 mB more than
     /// asked (`GivesMore`) or its amount as lava (`GivesLava`), or an insert keeps nothing and
     /// answers 100 mB more than offered (`RefusesMore`).
-    #[derive(PartialEq)]
+    #[derive(Clone, Copy, PartialEq)]
     enum Overstates {
         GivesMore,
         RefusesMore,
@@ -2263,7 +2430,7 @@ mod tests {
         // The API 54 drain's excess goes back into the tank it came from.
         world.tanks.get_mut(&SOURCE).unwrap().fills = true;
         let host: &mut dyn Host = &mut world;
-        let handler = host.capability(&FLUIDS, SOURCE).unwrap();
+        let handler = host.capability(&FLUIDS, SOURCE, None).unwrap();
         assert_eq!(
             host.drain_one_named_fluid(&handler, SOURCE, None, 100),
             Some(water(100))
@@ -2274,7 +2441,7 @@ mod tests {
         world.tank(SOURCE, Some(water(1000)), true);
         world.types.insert(SOURCE, "test:gives_lava");
         let host: &mut dyn Host = &mut world;
-        let handler = host.capability(&FLUIDS, SOURCE).unwrap();
+        let handler = host.capability(&FLUIDS, SOURCE, None).unwrap();
         assert_eq!(
             host.drain_one_named_fluid(&handler, SOURCE, None, 300),
             None

@@ -3101,10 +3101,14 @@ doesn't exist warns. Opening a world fails, naming the mod, when a part is attac
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
 
-A capability is answered by block entity type: `r.block_entity_capability(&ITEMS, "mymod:pipe",
-Arc::new(PipeItems))` gives the type an `ItemHandler` in place of the game's answer, and
-`host.capability(&ITEMS, pos)` finds the handler at `pos`, the mod's or the game's own (a block entity's slots
-by side, by the rules hoppers follow). A handler holds no borrow: each call is given the host, so it may call a
+A capability is answered by providers, registered by block entity type as NeoForge's
+`RegisterCapabilitiesEvent` registers them: `r.block_entity_capability(&ITEMS, "mymod:pipe", |host, at|
+Some(Box::new(PipeItems)))` gives a handler for the block entity and side `at` (a `BlockSide`), or none to
+leave it to the next provider. Providers add up: `host.capability(&ITEMS, pos, side)` asks those registered
+with `r.block_entity_capability_before_game` first, then the game's own (a block entity's slots by side, by the
+rules hoppers follow, and a mod block entity's `block_entity_container`), then the others, each in registration
+order, and the first to answer wins. It returns a `Capability`, the handler and who answered. A handler holds
+no borrow: each call is given the host, so it may call a
 neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
 `insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
 mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
@@ -3112,9 +3116,9 @@ mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only
 An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
 block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
 (`ItemPlace::Mod`, read and written by the `PlaceProvider` it registers with `r.place_provider`).
-`r.item_capability(&ITEM_ITEMS, "mymod:backpack", Arc::new(Backpack))` answers `ITEM_ITEMS` for an item with a
-`StackItemHandler`; `host.item_capability(&ITEM_ITEMS, &place)` finds it, else the game's own over
-`item_container`. A handler keeps its contents in the stack, and reads and writes it only with
+`r.item_capability(&ITEM_ITEMS, "mymod:backpack", |host, place| Some(Box::new(Backpack)))` answers
+`ITEM_ITEMS` for an item with a `StackItemHandler`, and `r.item_capability_before_game` ahead of the game's
+own over `item_container`; `host.item_capability(&ITEM_ITEMS, &place)` asks them in the same order. A handler keeps its contents in the stack, and reads and writes it only with
 `host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one, simulate)`. A write plans with
 `simulate` first, then commits: the old stack must come out whole and the new one go in whole, or it refuses and
 hands the stack back with nothing moved. An occupied slot can't be asked whether the new stack fits until it is

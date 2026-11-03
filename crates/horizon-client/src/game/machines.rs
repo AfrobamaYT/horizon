@@ -12,7 +12,7 @@ use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
-    mod_api::{self, Host, ItemHandler},
+    mod_api::{self, BlockSide, Capability, Host, ItemHandler},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
@@ -903,14 +903,21 @@ impl Game<'_> {
         }
         taken
     }
-    /// The item capability part a mod registered for the type of the mod block entity at `pos`.
-    /// With no capability part registered, one empty-table check.
-    fn item_part_at(&self, pos: Pos) -> Option<Arc<dyn ItemHandler>> {
-        mod_api::block_entity_capability(&mod_api::ITEMS, || {
-            match self.world.block_entities.get(&pos) {
-                Some(BlockEntity::Mod(m)) => Some(m.id.as_str()),
-                _ => None,
-            }
+    /// The item handler a mod's provider gives for the mod block entity at `pos` through
+    /// `side`, where it comes before the game's own slots or the game has none there. With no
+    /// item provider registered, one table check.
+    pub(super) fn item_part_at(
+        &mut self,
+        pos: Pos,
+        side: Direction,
+    ) -> Option<Capability<dyn ItemHandler>> {
+        let at = BlockSide {
+            pos: [pos.0, pos.1, pos.2],
+            side: Some(side),
+        };
+        let host: &mut dyn Host = self;
+        mod_api::block_entity_capability(&mod_api::ITEMS, host, at, |host| {
+            host.container_size(at.pos, None).is_some()
         })
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
@@ -925,7 +932,7 @@ impl Game<'_> {
     fn eject_into_part(
         &mut self,
         hopper: &View,
-        part: &Arc<dyn ItemHandler>,
+        part: &Capability<dyn ItemHandler>,
         at: [i32; 3],
         face: Direction,
     ) -> bool {
@@ -958,7 +965,12 @@ impl Game<'_> {
     }
     /// `suckInItems` from a capability part through its bottom: one item from the first of its
     /// slots that gives one the hopper has room for.
-    fn suck_from_part(&mut self, part: &Arc<dyn ItemHandler>, at: [i32; 3], hopper: &View) -> bool {
+    fn suck_from_part(
+        &mut self,
+        part: &Capability<dyn ItemHandler>,
+        at: [i32; 3],
+        hopper: &View,
+    ) -> bool {
         let into = self.container_world_pos(hopper);
         for slot in 0..part.slots(self, at, Some(Direction::Down)) {
             let Some(one) = part.extract(self, at, Some(Direction::Down), slot, 1, true) else {
@@ -1000,12 +1012,12 @@ impl Game<'_> {
         };
         let front = offset(pos, facing);
         let face = facing.opposite();
-        if let Some(part) = self.item_part_at(front) {
+        if let Some(part) = self.item_part_at(front, face) {
             let at = [front.0, front.1, front.2];
             self.native_hopper_inventory_search([pos.0, pos.1, pos.2], Some(at), None);
             return self.eject_into_part(hopper, &part, at, face);
         }
-        if let Some(target) = c.view(front, false) {
+        if let Some(target) = self.containers().view(front, false) {
             self.native_hopper_inventory_search(
                 [pos.0, pos.1, pos.2],
                 Some([front.0, front.1, front.2]),
@@ -1136,7 +1148,7 @@ impl Game<'_> {
     /// (`getSourceContainerOrHandler`). `None` when there is no container. A capability part
     /// above takes the container's place.
     fn suck_from_container(&mut self, above: Pos, at: [f64; 3], hopper: &View) -> Option<bool> {
-        if let Some(part) = self.item_part_at(above) {
+        if let Some(part) = self.item_part_at(above, Direction::Down) {
             let (x, y, z) = hopper.parts[0].0;
             let above = [above.0, above.1, above.2];
             self.native_hopper_inventory_search([x, y, z], Some(above), None);

@@ -83,7 +83,7 @@ impl Game<'_> {
         if !self.native_simulates() {
             return Some(stack);
         }
-        if let Some(part) = self.item_part_at((pos[0], pos[1], pos[2])) {
+        if let Some(part) = self.item_part_at((pos[0], pos[1], pos[2]), face) {
             let host: &mut dyn Host = self;
             let slots = part.slots(host, pos, Some(face));
             let mut rest = Some(stack);

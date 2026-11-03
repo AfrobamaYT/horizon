@@ -1,21 +1,48 @@
-//! Capability parts (arismoko/horizon#41 §7): code a mod registers for its block entity type to
-//! answer a capability, such as [`ITEMS`], in place of the game's own answer. A handler holds no
-//! borrow of the game: each call is given the host, so a handler may look up and call a
-//! neighbour's capability (a pipe), and it keeps its state where the game keeps the block
-//! entity's (its slots, its saved compound, its attachments).
+//! Capability parts (arismoko/horizon#41 §7): providers a mod registers for its block entity
+//! type to answer a capability, such as [`ITEMS`], beside the game's own (NeoForge's
+//! `RegisterCapabilitiesEvent`). A handler holds no borrow of the game: each call is given the
+//! host, so a handler may look up and call a neighbour's capability (a pipe), and it keeps its
+//! state where the game keeps the block entity's (its slots, its saved compound, its
+//! attachments).
 use super::{Direction, Host, ItemStack};
-use std::{
-    cell::OnceCell,
-    marker::PhantomData,
-    sync::{Arc, LazyLock},
-};
+use std::{marker::PhantomData, ops::Deref};
 
 /// A capability: its name (`horizon:items`, `mymod:chemicals`), the handler trait `T` it answers
-/// with, and the game's own answer where no part is registered, if the game has one.
+/// with, and the game's own provider, if the game has one.
 pub struct CapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    pub(super) default: Option<fn(&dyn Host, [i32; 3]) -> Option<Arc<T>>>,
-    pub(super) handler: PhantomData<fn() -> Arc<T>>,
+    pub(super) default: Option<fn(&mut dyn Host, BlockSide) -> Option<Box<T>>>,
+    pub(super) handler: PhantomData<fn() -> Box<T>>,
+}
+
+/// A block entity a capability is asked of, and the side it is reached through (none: from no
+/// particular side): NeoForge's block capability context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockSide {
+    pub pos: [i32; 3],
+    pub side: Option<Direction>,
+}
+
+/// A capability's handler, with who answered: a mod's provider or the game's own.
+pub struct Capability<T: ?Sized> {
+    pub(super) handler: Box<T>,
+    /// The mod whose provider answered; none for the game.
+    pub(super) owner: Option<usize>,
+}
+
+impl<T: ?Sized> Deref for Capability<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.handler
+    }
+}
+
+impl<T: ?Sized> Capability<T> {
+    /// The id of the mod whose provider answered, or "the game", for warnings.
+    pub fn owner(&self) -> String {
+        self.owner
+            .map_or_else(|| "the game".to_owned(), super::mod_name)
+    }
 }
 
 impl<T: ?Sized + 'static> CapabilityKey<T> {
@@ -35,9 +62,9 @@ impl<T: ?Sized + 'static> CapabilityKey<T> {
 /// and a mod block entity's `block_entity_container`.
 pub const ITEMS: CapabilityKey<dyn ItemHandler> = CapabilityKey {
     name: "horizon:items",
-    default: Some(|host, pos| {
-        static GAME_ITEMS: LazyLock<Arc<dyn ItemHandler>> = LazyLock::new(|| Arc::new(GameItems));
-        host.container_size(pos, None).map(|_| GAME_ITEMS.clone())
+    default: Some(|host, at| {
+        host.container_size(at.pos, None)
+            .map(|_| Box::new(GameItems) as Box<dyn ItemHandler>)
     }),
     handler: PhantomData,
 };
@@ -144,18 +171,36 @@ impl ItemHandler for GameItems {
 }
 
 impl dyn Host + '_ {
-    /// `key`'s handler for the block entity at `pos`: the part a mod registered for its type,
-    /// else the game's own answer, if the game has one there.
+    /// `key`'s handler for the block entity at `pos`, reached through `side`: the first provider
+    /// to answer, of those mods registered for its type `before_game`, the game's own, and the
+    /// mods' others, each in registration order.
     pub fn capability<T: ?Sized + 'static>(
-        &self,
+        &mut self,
         key: &CapabilityKey<T>,
         pos: [i32; 3],
-    ) -> Option<Arc<T>> {
-        let kind = OnceCell::new();
-        super::block_entity_capability(key, || {
-            kind.get_or_init(|| self.block_entity_type(pos)).as_deref()
-        })
-        .or_else(|| key.default.and_then(|default| default(self, pos)))
+        side: Option<Direction>,
+    ) -> Option<Capability<T>> {
+        let at = BlockSide { pos, side };
+        let mut game = None;
+        let answer = super::ask_providers::<super::BlockProvider<T>, T>(
+            false,
+            key.name,
+            self,
+            |host| host.block_entity_type(pos),
+            |provider, host| provider(host, at),
+            |host| {
+                game = key.default.and_then(|default| default(host, at));
+                game.is_some()
+            },
+        );
+        match answer {
+            super::Answer::Mod(found) => Some(found),
+            super::Answer::Game => game.map(|handler| Capability {
+                handler,
+                owner: None,
+            }),
+            super::Answer::Nobody => None,
+        }
     }
 
     /// `handler`'s real insert of `stack` into `slot` of the block entity at `at`, through
@@ -163,7 +208,7 @@ impl dyn Host + '_ {
     /// answering more, or another item, is a mod bug, warned once naming its mod.
     pub(crate) fn insert_checked(
         &mut self,
-        handler: &Arc<dyn ItemHandler>,
+        handler: &Capability<dyn ItemHandler>,
         at: [i32; 3],
         side: Option<Direction>,
         slot: usize,
@@ -173,7 +218,7 @@ impl dyn Host + '_ {
             .insert(self, at, side, slot, stack.clone(), false)
             .filter(|rest| rest.count > 0)?;
         if rest.count > stack.count || !rest.same_item_same_components(&stack) {
-            super::item_place::warn_broken(super::capability_mod(handler), &at);
+            super::item_place::warn_broken(handler.owner, &at);
         }
         Some(ItemStack {
             count: rest.count.min(stack.count),
@@ -188,7 +233,7 @@ impl dyn Host + '_ {
     /// beyond `simulated`'s count, which goes back the same way.
     pub(crate) fn extract_checked(
         &mut self,
-        handler: &Arc<dyn ItemHandler>,
+        handler: &Capability<dyn ItemHandler>,
         at: [i32; 3],
         side: Option<Direction>,
         slot: usize,
@@ -199,14 +244,14 @@ impl dyn Host + '_ {
             .extract(self, at, side, slot, max, false)
             .filter(|out| out.count > 0)?;
         if !out.same_item_same_components(simulated) {
-            super::item_place::warn_broken(super::capability_mod(handler), &at);
+            super::item_place::warn_broken(handler.owner, &at);
             if let Some(rest) = self.insert_checked(handler, at, side, slot, out) {
                 self.drop_at(at, rest);
             }
             return None;
         }
         if out.count > max {
-            super::item_place::warn_broken(super::capability_mod(handler), &at);
+            super::item_place::warn_broken(handler.owner, &at);
             let excess = ItemStack {
                 count: out.count - max,
                 ..out.clone()
