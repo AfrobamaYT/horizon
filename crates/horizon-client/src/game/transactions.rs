@@ -9,7 +9,7 @@
 //! work to the transaction around it; an abort puts every storage back quietly and drops the
 //! waiting work, which nothing outside had seen.
 //!
-//! Covered here: block entities (slots, saved compound, attachments), a hopper's cooldown and
+//! Covered here: block entities (slots, saved compound, custom name, attachments), a hopper's cooldown and
 //! cauldron block states. A block's tentative state is stored only (`World::set_stored`): the
 //! one real write, with its remesh, relight and logs, is at the root commit. A jukebox is
 //! told at the root commit from its record before and after, so a disc swapped in one
@@ -31,6 +31,9 @@ type Pos = (i32, i32, i32);
 pub(super) struct Level {
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
+    /// Each block entity's custom name (`World::block_names`) before this transaction first
+    /// wrote it.
+    names: HashMap<Pos, Option<String>>,
     /// Each block's state before this transaction first wrote it.
     blocks: HashMap<Pos, BlockStateId>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
@@ -65,6 +68,8 @@ struct KeptPlayer {
 pub(super) enum After {
     /// `BlockEntity.setChanged`.
     Changed(Pos),
+    /// `BlockEntity.setChanged` and `Level.sendBlockUpdated` after its data was loaded.
+    Updated(Pos),
     /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
     Block(Pos),
     /// `Block.popResource`.
@@ -116,6 +121,9 @@ impl Game<'_> {
                 for (pos, kept) in level.block_entities {
                     outer.block_entities.entry(pos).or_insert(kept);
                 }
+                for (pos, name) in level.names {
+                    outer.names.entry(pos).or_insert(name);
+                }
                 for (pos, state) in level.blocks {
                     outer.blocks.entry(pos).or_insert(state);
                 }
@@ -156,6 +164,17 @@ impl Game<'_> {
             attachments: self.world.block_entities.attachments(pos).cloned(),
             hopper: self.hoppers.get(&pos).copied(),
         });
+    }
+    /// Keeps the custom name of the block entity at `pos` as it is, if a transaction is open
+    /// and hasn't yet.
+    pub(super) fn journal_block_name(&mut self, pos: Pos) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        level
+            .names
+            .entry(pos)
+            .or_insert_with(|| self.world.block_names.get(&pos).cloned());
     }
     /// Keeps the inventory of the player whose state is in `Game` now, `uuid`, as it is, if a
     /// transaction is open and hasn't yet. Called inside `native_as_player`.
@@ -235,6 +254,7 @@ impl Game<'_> {
     fn run_after(&mut self, after: After) {
         match after {
             After::Changed(pos) => self.container_changed(pos),
+            After::Updated(pos) => self.block_entity_updated(pos),
             // Only reached through a root commit, which sets the block itself.
             After::Block(_) => {}
             After::Drop(pos, stack) => {
@@ -310,6 +330,12 @@ impl Game<'_> {
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
+            };
+        }
+        for (pos, name) in level.names {
+            match name {
+                Some(name) => self.world.block_names.insert(pos, name),
+                None => self.world.block_names.remove(&pos),
             };
         }
         for (pos, state) in level.blocks {
