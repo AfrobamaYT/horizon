@@ -406,8 +406,12 @@ impl ItemPlace {
                     MenuSlotBacking::CraftResult => return Ok(0),
                     _ => {
                         return Ok(match insert {
-                            true => host.game_insert(self, resource.to_stack(amount), tx),
-                            false => host.game_extract(self, resource.to_stack(amount), tx),
+                            true => backend_mut_of(host).map_or(0, |backend| {
+                                backend.game_insert(self, resource.to_stack(amount), tx)
+                            }),
+                            false => backend_mut_of(host).map_or(0, |backend| {
+                                backend.game_extract(self, resource.to_stack(amount), tx)
+                            }),
                         });
                     }
                 };
