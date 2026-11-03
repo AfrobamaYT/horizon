@@ -74,6 +74,8 @@ type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>
 #[derive(Clone)]
 pub(crate) struct CapabilityPart {
     mod_index: usize,
+    /// The handler type it gives, for refusing a capability name answered with two.
+    type_name: &'static str,
     /// Asked ahead of the game's own provider.
     before_game: bool,
     provider: Arc<dyn Any + Send + Sync>,
@@ -502,7 +504,7 @@ impl Registrar {
         provider: impl Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability(|p| &mut p.capabilities, key.name, kind, false, provider);
+        self.capability::<T, _>(|p| &mut p.capabilities, key.name, kind, false, provider);
     }
     /// [`block_entity_capability`](Self::block_entity_capability), asked ahead of the game's own
     /// provider (NeoForge's priority), as a mod that replaces how a block entity's slots are
@@ -514,7 +516,7 @@ impl Registrar {
         provider: impl Fn(&mut dyn Host, BlockSide) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<BlockProvider<T>> = Arc::new(provider);
-        self.capability(|p| &mut p.capabilities, key.name, kind, true, provider);
+        self.capability::<T, _>(|p| &mut p.capabilities, key.name, kind, true, provider);
     }
     /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
     /// gives a handler for the stack at one place, or none: `r.item_capability(&ITEM_ITEMS,
@@ -527,7 +529,7 @@ impl Registrar {
         provider: impl Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability(
+        self.capability::<T, _>(
             |p| &mut p.item_capabilities,
             key.name,
             item,
@@ -543,7 +545,7 @@ impl Registrar {
         provider: impl Fn(&mut dyn Host, &ItemPlace) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<ItemProvider<T>> = Arc::new(provider);
-        self.capability(|p| &mut p.item_capabilities, key.name, item, true, provider);
+        self.capability::<T, _>(|p| &mut p.item_capabilities, key.name, item, true, provider);
     }
     /// Answer entity capability `key` for entity type `kind` (`mymod:robot`,
     /// `minecraft:player`) with `provider`, which gives a handler for one entity, or none:
@@ -556,7 +558,7 @@ impl Registrar {
         provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<EntityProvider<T>> = Arc::new(provider);
-        self.capability(
+        self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
             kind,
@@ -573,7 +575,7 @@ impl Registrar {
         provider: impl Fn(&mut dyn Host, EntityRef) -> Option<Box<T>> + Send + Sync + 'static,
     ) {
         let provider: Arc<EntityProvider<T>> = Arc::new(provider);
-        self.capability(
+        self.capability::<T, _>(
             |p| &mut p.entity_capabilities,
             key.name,
             kind,
@@ -604,9 +606,12 @@ impl Registrar {
             .insert(name, (self.mod_index, provider));
     }
 
-    /// Adds `provider` for capability `name` and `id` to `table`; refused for an id with no
-    /// namespace.
-    fn capability<P: ?Sized + Send + Sync + 'static>(
+    /// Adds `provider` for capability `name` and `id` to `table`. Refused for a capability name
+    /// or an id with no namespace, and for a capability name another provider answers with
+    /// another handler type (two mods each declaring their own key under one name, rather than
+    /// sharing the one the defining mod's `[api]` crate publishes): asked by one type, the other's
+    /// providers would never answer.
+    fn capability<T: ?Sized + 'static, P: ?Sized + Send + Sync + 'static>(
         &mut self,
         table: fn(&mut Parts) -> &mut Capabilities,
         name: &'static str,
@@ -614,19 +619,37 @@ impl Registrar {
         before_game: bool,
         provider: Arc<P>,
     ) {
+        let me = super::mod_name(self.mod_index);
+        if !namespaced(name) {
+            self.refused.push(format!(
+                "{me} answered capability {name:?}, which is not a namespaced name"
+            ));
+            return;
+        }
         if !namespaced(id) {
             self.refused.push(format!(
-                "{} answered {name} for {id:?}, which is not a namespaced id",
-                super::mod_name(self.mod_index)
+                "{me} answered {name} for {id:?}, which is not a namespaced id"
             ));
             return;
         }
         let providers = table(&mut self.parts).entry(name).or_default();
+        if let Some(other) = providers.values().flatten().next()
+            && !other.provider.is::<Arc<P>>()
+        {
+            self.refused.push(format!(
+                "capability {name} is answered with two handler types, {} by {} and {} by {me}",
+                other.type_name,
+                super::mod_name(other.mod_index),
+                type_name::<T>(),
+            ));
+            return;
+        }
         providers
             .entry(id.into())
             .or_default()
             .push(CapabilityPart {
                 mod_index: self.mod_index,
+                type_name: type_name::<T>(),
                 before_game,
                 provider: Arc::new(provider),
             });
@@ -844,6 +867,9 @@ pub(crate) mod tests {
                     Some(Box::new(ModTank { at, lie }))
                 });
             }
+            r.block_entity_capability(&CHEMICALS, "test:chem_tank", |_, at| {
+                Some(Box::new(ChemTank(at)))
+            });
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output *= 2;
@@ -1691,9 +1717,107 @@ pub(crate) mod tests {
         }
     }
 
+    /// A chemical, as Mekanism's: the test mods' own resource, which the game knows nothing of.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) struct Chemical(pub(crate) String);
+
+    /// The test mods' own capability, as Mekanism's `Capabilities.CHEMICAL`: the game has no
+    /// answer for it, so only their providers do.
+    pub(crate) const CHEMICALS: CapabilityKey<dyn ResourceHandler<Chemical>> =
+        CapabilityKey::new("test:chemical");
+
+    /// A mod block entity's one tank of 1000 of a chemical, kept in its saved data (`chemical`
+    /// and `amount`), whose writes the game's journal keeps for a transaction.
+    pub(crate) struct ChemTank(pub(crate) BlockSide);
+    impl ChemTank {
+        fn entity(&self, host: &dyn Host) -> Option<BlockEntityRef> {
+            host.block_entity(self.0.level, self.0.pos)
+        }
+        fn held(&self, host: &dyn Host) -> Option<(Chemical, u32)> {
+            let data = self.entity(host)?.data(host)?;
+            let Some(Tag::String(chemical)) = data.get(&"chemical".into()) else {
+                return None;
+            };
+            let Some(&Tag::Int(amount)) = data.get(&"amount".into()) else {
+                return None;
+            };
+            let amount = u32::try_from(amount).ok().filter(|&a| a > 0)?;
+            Some((Chemical(chemical.to_string_lossy()), amount))
+        }
+        fn set(&self, host: &mut dyn Host, chemical: &Chemical, amount: u32) {
+            let Some(entity) = self.entity(host) else {
+                return;
+            };
+            let mut data = Compound::new();
+            data.insert("chemical".into(), Tag::String(chemical.0.as_str().into()));
+            data.insert("amount".into(), Tag::Int(amount as i32));
+            entity.merge_data(host, data);
+        }
+    }
+    impl ResourceHandler<Chemical> for ChemTank {
+        fn size(&self, _: &mut dyn Host) -> usize {
+            1
+        }
+        fn resource(&self, host: &mut dyn Host, _: usize) -> Option<Chemical> {
+            self.held(host).map(|(chemical, _)| chemical)
+        }
+        fn amount(&self, host: &mut dyn Host, _: usize) -> u32 {
+            self.held(host).map_or(0, |(_, amount)| amount)
+        }
+        fn capacity(&self, _: &mut dyn Host, _: usize, _: &Chemical) -> u32 {
+            1000
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            _: &Transaction,
+            _: usize,
+            chemical: &Chemical,
+            amount: u32,
+        ) -> u32 {
+            let held = match self.held(host) {
+                Some((other, _)) if other != *chemical => return 0,
+                Some((_, held)) => held,
+                None => 0,
+            };
+            let went = amount.min(1000 - held);
+            if went > 0 {
+                self.set(host, chemical, held + went);
+            }
+            went
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            _: &Transaction,
+            _: usize,
+            chemical: &Chemical,
+            amount: u32,
+        ) -> u32 {
+            let Some((held_chemical, held)) = self.held(host).filter(|(c, _)| c == chemical) else {
+                return 0;
+            };
+            let came = amount.min(held);
+            self.set(host, &held_chemical, held - came);
+            came
+        }
+    }
+
+    /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending
+    /// on another's `[api]` crate does: its vats answer the same capability.
+    struct Chemist;
+    impl Hooks for Chemist {
+        fn register(&self, r: &mut Registrar) {
+            r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
+                Some(Box::new(ChemTank(at)))
+            });
+        }
+    }
+
     /// The test mods, their parts installed, on a thread that runs a game.
     pub(crate) fn game_thread() -> super::super::Mods {
-        let mods: super::super::Mods = vec![Box::new(Doubler) as Box<dyn Hooks>].into();
+        let mods: super::super::Mods =
+            vec![Box::new(Doubler) as Box<dyn Hooks>, Box::new(Chemist)].into();
         super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
@@ -2691,6 +2815,48 @@ pub(crate) mod tests {
         assert!(r.refused[0].contains("item places test:charms are provided twice"));
         assert!(r.refused[1].contains("not a namespaced name"));
         assert!(r.refused[2].contains("not a namespaced id"));
+    }
+
+    /// A mod declaring its own key under a name another mod's providers answer with another
+    /// handler type is refused at load, naming both mods and both types, as is a key whose name
+    /// has no namespace; the same name with the same type, from another mod, is not.
+    #[test]
+    fn a_capability_name_answered_with_two_handler_types_is_refused() {
+        const NOT_CHEMICALS: CapabilityKey<dyn ResourceHandler<FluidResource>> =
+            CapabilityKey::new("test:chemical");
+        const UNNAMESPACED: CapabilityKey<dyn ResourceHandler<Chemical>> =
+            CapabilityKey::new("chemical");
+        let mut r = Registrar::default();
+        r.block_entity_capability(&CHEMICALS, "test:chem_tank", |_, at| {
+            Some(Box::new(ChemTank(at)))
+        });
+        r.mod_index = 1;
+        r.block_entity_capability(&CHEMICALS, "test:chem_vat", |_, at| {
+            Some(Box::new(ChemTank(at)))
+        });
+        r.block_entity_capability(&NOT_CHEMICALS, "test:chem_vat", |_, at| {
+            Some(Box::new(ModTank { at, lie: None }))
+        });
+        r.block_entity_capability(&UNNAMESPACED, "test:chem_vat", |_, at| {
+            Some(Box::new(ChemTank(at)))
+        });
+        assert_eq!(r.refused.len(), 2, "{:?}", r.refused);
+        let (zero, one) = (mod_name(0), mod_name(1));
+        let two_types = &r.refused[0];
+        assert!(
+            two_types.starts_with("capability test:chemical is answered with two handler types")
+        );
+        let chemicals = type_name::<dyn ResourceHandler<Chemical>>();
+        let fluids = type_name::<dyn ResourceHandler<FluidResource>>();
+        assert!(
+            two_types.contains(&format!("{chemicals} by {zero}")),
+            "{two_types}"
+        );
+        assert!(
+            two_types.contains(&format!("{fluids} by {one}")),
+            "{two_types}"
+        );
+        assert!(r.refused[1].contains("capability \"chemical\", which is not a namespaced name"));
     }
 
     /// A handler that only tells which provider made it, by its slot count.

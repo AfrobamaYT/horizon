@@ -843,3 +843,85 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod mod_capability_tests {
+    use super::super::native_entity_refs::tests::with_game;
+    use horizon_client::chunk::Chunk;
+    use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use horizon_client::mod_api::part_tests::{CHEMICALS, ChemTank, Chemical, game_thread};
+    use horizon_client::mod_api::{BlockSide, Host, ResourceHandler, move_resources};
+    use horizon_world::nbt::{Compound, Tag};
+    use std::sync::Arc;
+
+    /// Two mods sharing a capability one of them defines, as Mekanism's chemicals are shared
+    /// through its API: the first's tank and the second's vat each answer `CHEMICALS`, and a
+    /// move between them in a committed transaction moves the chemical, kept in their saved
+    /// data; in an aborted one, both are put back.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_chemical_moves_between_two_mods_parts_and_an_abort_puts_it_back() {
+        with_game(|game| {
+            let _mods = game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let hydrogen = Chemical("test:hydrogen".into());
+            let mut nbt = Compound::new();
+            nbt.insert("chemical".into(), Tag::String("test:hydrogen".into()));
+            nbt.insert("amount".into(), Tag::Int(600));
+            for (x, id, nbt) in [
+                (0, "test:chem_tank", nbt),
+                (1, "test:chem_vat", Compound::new()),
+            ] {
+                let fields = ModBlockEntityFields {
+                    id: id.into(),
+                    nbt,
+                    ..Default::default()
+                };
+                let entity = BlockEntity::Mod(Box::new(ModBlockEntity::new(fields)));
+                game.world.block_entities.insert((x, 64, 0), entity);
+            }
+            let host: &mut dyn Host = game;
+            let tank = level
+                .capability(host, &CHEMICALS, [0, 64, 0], None)
+                .unwrap();
+            let vat = level
+                .capability(host, &CHEMICALS, [1, 64, 0], None)
+                .unwrap();
+            // Each answered by its own mod.
+            assert_ne!(tank.owner(), vat.owner());
+            assert!(![tank.owner(), vat.owner()].contains(&"the game".to_owned()));
+            let amounts = |host: &mut dyn Host| {
+                let side = |x| BlockSide {
+                    level,
+                    pos: [x, 64, 0],
+                    side: None,
+                };
+                (
+                    ChemTank(side(0)).amount(host, 0),
+                    ChemTank(side(1)).amount(host, 0),
+                )
+            };
+
+            let moved = host.transaction(|host, tx| {
+                move_resources(host, &tank, &vat, |c| *c == hydrogen, 250, tx).map_err(drop)
+            });
+            assert_eq!(moved, Ok(250));
+            assert_eq!(amounts(host), (350, 250));
+            assert_eq!(vat.resource(host, 0), Some(hydrogen.clone()));
+
+            let aborted = host.transaction(|host, tx| {
+                let moved = move_resources(host, &tank, &vat, |_| true, 100, tx);
+                assert_eq!(moved.ok(), Some(100));
+                assert_eq!(amounts(host), (250, 350));
+                Err::<(), ()>(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(amounts(host), (350, 250));
+            assert!(game.transactions.is_empty());
+        });
+    }
+}
