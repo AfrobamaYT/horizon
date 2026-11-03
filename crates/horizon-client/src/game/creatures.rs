@@ -4440,9 +4440,10 @@ impl Game<'_> {
         let result = self.as_guest(conn, |g| g.projectile_hit(p, hit));
         // The mob hit now answers to the guest (LivingEntity.lastHurtByPlayer).
         if result.is_some()
-            && host
-                .hub
-                .guest(conn)
+            && self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.guest(conn))
                 .is_some_and(|guest| guest.participates_online())
             && let Hit::Entity {
                 who: Who::Mob(id), ..

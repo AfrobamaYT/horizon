@@ -2002,7 +2002,11 @@ impl Game<'_> {
                 }
                 HostEvent::Left(mut guest) => {
                     if !guest.participates_online() {
+                        let Some(mut host) = self.lan.take() else {
+                            return;
+                        };
                         self.cleanup_fake_player(&mut host, &guest);
+                        self.lan = Some(host);
                         continue;
                     }
                     // The menu they had open closes, in the level they were in
@@ -3108,18 +3112,19 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        if let Some(g) = host.hub.online_players().find(|g| g.uuid == sender) {
-            if self.options.dedicated.is_some() {
-                super::dedicated::events::record(
-                    "chat",
-                    &g.name,
-                    sender,
-                    serde_json::json!({ "message": text }),
-                );
-            }
-            let conn = g.conn;
-            self.detect_rate_spam(conn, false);
+        let Some(g) = host.hub.online_players().find(|g| g.uuid == sender) else {
+            return;
+        };
+        if self.options.dedicated.is_some() {
+            super::dedicated::events::record(
+                "chat",
+                &g.name,
+                sender,
+                serde_json::json!({ "message": text }),
+            );
         }
+        let conn = g.conn;
+        self.detect_rate_spam(conn, false);
     }
     /// A hub's chat and log lines: a dedicated server logs them
     /// (MinecraftServer.logChatMessage, `[Not Secure]` for unsigned or

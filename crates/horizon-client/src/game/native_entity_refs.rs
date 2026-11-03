@@ -1473,7 +1473,6 @@ pub(super) mod tests {
                 assert_eq!(cooldown.group, expected);
                 assert!(receiver.try_recv().is_err());
             }
-            game.lan = Some(host);
             let fake = game.native_fake_player(level, 5678, "joiner").unwrap();
             game.enter_command_level(super::super::Dim::Nether).unwrap();
             let nether = game.native_level("minecraft:the_nether").unwrap();
@@ -1559,13 +1558,12 @@ pub(super) mod tests {
                 .count();
             crate::mod_api::testing::with_mods(mods, || game.native_players_leaving());
             assert_eq!(logouts.load(Ordering::Relaxed), real_count);
-            let mut host = game.lan.take().unwrap();
-            host.play.entry(fake_id).or_default();
-            game.award_leave_game_to_all(&mut host);
+            game.lan.as_mut().unwrap().play.entry(fake_id).or_default();
+            game.award_leave_game_to_all();
+            let host = game.lan.as_mut().unwrap();
             assert!(!host.play.get(&fake_id).unwrap().left_game);
             assert!(host.play.get(&real_id).unwrap().left_game);
             host.hub.ticks = 2401;
-            game.lan = Some(host);
             assert_eq!(game.ban_ip_target("fake"), None);
             assert_eq!(game.ban_ip_target("real").as_deref(), Some("127.0.0.1"));
             game.kick_idle(1);
