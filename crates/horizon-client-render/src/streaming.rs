@@ -136,6 +136,16 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
         Vec::new()
     }
+    /// Resolve all neighbouring final chunks in one decoration job.
+    fn final_block_entities_batch(
+        &self,
+        entries: &[(&Proto, Vec<([i32; 3], u32)>)],
+    ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
+        entries
+            .iter()
+            .flat_map(|(proto, writes)| self.final_block_entities(proto, writes))
+            .collect()
+    }
     fn finish(&self, proto: Proto) -> Chunk;
     /// Whether `proto` has been decorated (a saved one can come back decorated).
     fn is_decorated(&self, _proto: &Proto) -> bool {
@@ -918,12 +928,17 @@ impl<G: ChunkGenerator> Jobs<G> {
                 }
                 generator.decorate(&mut *worker, &mut region);
                 let mut writes = FinalWrites::default();
-                for (i, snapshot) in &finals {
-                    let blocks = generator.final_writes(snapshot, &region[*i]);
-                    writes
-                        .block_entities
-                        .extend(generator.final_block_entities(&region[*i], &blocks));
-                    writes.blocks.extend(blocks);
+                let entries: Vec<_> = finals
+                    .iter()
+                    .map(|(i, snapshot)| {
+                        (&region[*i], generator.final_writes(snapshot, &region[*i]))
+                    })
+                    .collect();
+                writes.block_entities = generator.final_block_entities_batch(&entries);
+                writes
+                    .blocks
+                    .extend(entries.into_iter().flat_map(|(_, blocks)| blocks));
+                for (i, _) in &finals {
                     region[*i] = Box::new(());
                 }
                 let finals = finals.into_iter().map(|(i, _)| i).collect();

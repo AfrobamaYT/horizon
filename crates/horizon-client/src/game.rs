@@ -19837,12 +19837,12 @@ impl Game<'_> {
             return;
         }
         self.world_tables = self.build_world_tables();
-        if let Err(e) = self.resolve_parts() {
-            log::warn!("Horizon: {e}");
-        }
         self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         self.load_server_loot();
+        if let Err(e) = self.resolve_parts() {
+            log::warn!("Horizon: {e}");
+        }
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players
@@ -21978,6 +21978,37 @@ fn debug_crosshair_drawn(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn reload_resolves_parts_against_reloaded_tags() {
+        use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Host, Registrar};
+        struct TagPart;
+        impl BlockPart for TagPart {}
+        struct ReloadMod;
+        impl Hooks for ReloadMod {
+            fn register(&self, registrar: &mut Registrar) {
+                registrar.block_part_tag("test:reload", TagPart);
+            }
+            fn data_pack_files(&self, _: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+                event.files.push((
+                    "tags/test:block/reload".into(),
+                    br#"{"values":["minecraft:stone"]}"#.to_vec(),
+                ));
+            }
+        }
+        let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
+        mod_api::install_parts(&mods).unwrap();
+        assert!(mod_api::MODS.set(mods).is_ok());
+        super::native_entity_refs::tests::with_game(|game| {
+            game.load_server_loot();
+            game.reload_world_tables();
+            assert!(
+                !mod_api::parts("test")
+                    .block(|| Some("minecraft:stone"))
+                    .is_empty()
+            );
+        });
+    }
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
 
