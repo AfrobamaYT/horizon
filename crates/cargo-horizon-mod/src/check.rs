@@ -87,11 +87,11 @@ impl Report {
     }
 }
 
-/// The kind a file's extension says.
+/// The kind of a package, inspecting mod archives for their native manifest.
 pub fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
+        "hmod" if index::native::holds(path) => Some(Kind::NativeMod),
         "hmod" => Some(Kind::Mod),
-        "hnmod" => Some(Kind::NativeMod),
         "hpack" => Some(Kind::Modpack),
         "zip" => Some(Kind::ResourcePack),
         "hshader" => Some(Kind::Shader),
@@ -136,7 +136,7 @@ pub fn check(
 }
 
 /// A mod is content only: WebAssembly code mods don't run any more, code mods are native
-/// (`.hnmod`, docs/native-mods.md). `inspect` already read its content as the game does.
+/// (docs/native-mods.md). `inspect` already read its content as the game does.
 fn content_only(path: &Path) -> Result<(), String> {
     match Package::read(path)?.wasm {
         Some(_) => Err(

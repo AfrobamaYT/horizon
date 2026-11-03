@@ -344,7 +344,7 @@ fn native_mods_detail(built: &str) -> Option<String> {
     (!list.is_empty()).then_some(list)
 }
 
-/// A row for each native mod the launcher installed in `dir` (`<id>.hnmod`) that this game wasn't
+/// A row for each native mod the launcher installed in `dir` (`<id>.hmod`) that this game wasn't
 /// built with (`built`: its [`BUILD_INFO`], empty for a release or Nightly) and that has no row
 /// yet. The page said "No mods" before, and players copied the files into `horizon-mods` (#4770).
 /// Its toggle is the `mod.<id>` line the launcher's next build follows.
@@ -353,7 +353,7 @@ fn not_built(dir: &std::path::Path, built: &str, rows: &[Installed]) -> Vec<Inst
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|d| d.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hmod"));
     paths.sort();
     let mut out: Vec<Installed> = Vec::new();
     for path in paths {
@@ -507,8 +507,8 @@ mod tests {
         assert!(build_lists_mods(r#"{"mods":[{"id":"worldmap"}]}"#));
     }
 
-    /// A minimal `.hnmod` the registry accepts: its manifest and its mixin's.
-    fn hnmod(dir: &std::path::Path, id: &str) {
+    /// A minimal `.hmod` the registry accepts: its manifest and its mixin's.
+    fn hmod(dir: &std::path::Path, id: &str) {
         let horizon = "a".repeat(40);
         let manifest = serde_json::json!({
             "schema": 1, "id": id, "version": "0.3.0", "game": "26.3",
@@ -517,7 +517,7 @@ mod tests {
         let mixin = format!(
             "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
         );
-        let file = std::fs::File::create(dir.join(format!("{id}.hnmod"))).unwrap();
+        let file = std::fs::File::create(dir.join(format!("{id}.hmod"))).unwrap();
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file("horizon-native.json", options).unwrap();
@@ -546,10 +546,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for id in ["veinminer", "zoom", "minimap"] {
-            hnmod(&dir, id);
+            hmod(&dir, id);
         }
         std::fs::write(dir.join("notes.txt"), "not a mod").unwrap();
-        std::fs::write(dir.join("broken.hnmod"), "not a zip").unwrap();
+        std::fs::write(dir.join("broken.hmod"), "not a zip").unwrap();
         // A release: none is built in; the page lists them, sorted, instead of "No mods".
         let rows = not_built(&dir, "", &[]);
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();

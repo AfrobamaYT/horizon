@@ -651,7 +651,7 @@ fn install_version(
     }
     let native = p.kind == index::Kind::NativeMod;
     let relative = match native {
-        true => format!("{}/{}.hnmod", crate::native_mods::INSTALLED, p.id),
+        true => format!("{}/{}.hmod", crate::native_mods::INSTALLED, p.id),
         false => relative(project.kind, &p.id, &v.file.name)?,
     };
     let mut list = installed::Installed::load(home);
@@ -733,10 +733,10 @@ fn install_version(
 }
 
 /// The mod id of an installed mod (`horizon-mods/<id>`, `horizon-mods/<id>.hmod` or
-/// `horizon-native-mods/<id>.hnmod`).
+/// `horizon-native-mods/<id>.hmod`).
 pub fn mod_id(entry: &installed::Entry) -> Option<&str> {
     if let Some(rest) = entry.file.strip_prefix(crate::native_mods::INSTALLED) {
-        return rest.strip_prefix('/')?.strip_suffix(".hnmod");
+        return rest.strip_prefix('/')?.strip_suffix(".hmod");
     }
     let rest = entry.file.strip_prefix(java::MODS_DIR)?.strip_prefix('/')?;
     Some(rest.strip_suffix(".hmod").unwrap_or(rest))

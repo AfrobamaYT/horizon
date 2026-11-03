@@ -1,6 +1,6 @@
 # Mod files
 
-The rules a `.hmod` or `.hnmod` follows, in one place, for tools that make or read them. The readers are
+The rules a `.hmod` follows, in one place, for tools that make or read them. The readers are
 `horizon_mods::Package` and `horizon_mods::Content` (content), and `horizon_mods::index::native::Bundle` (native
 code). Level: content is preview, native code experimental ([data-formats.md](data-formats.md)).
 
@@ -27,10 +27,6 @@ What a file holds decides what it is (#5865):
 - **Native code:** `horizon-native.json` and `mixins/<id>/`. The launcher builds it into the game.
 - **Both, in one `.hmod`:** the two manifests name the same mod id. Content entries are checked as content and left
   out of the build. Any other top-level entry refuses the file.
-- **`.hnmod`:** native code only, read exactly as before.
-
-The registry still publishes native mods as `.hnmod`. It switches to `.hmod` once launchers and the game read native
-`.hmod`s, so no launcher in use gets a file it can't read.
 
 ## `horizon-native.json`
 

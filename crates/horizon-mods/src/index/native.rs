@@ -8,15 +8,12 @@ pub const MANIFEST: &str = "horizon-native.json";
 /// Why a native mod may not carry `mod.wasm`: WebAssembly mods don't run any more.
 pub const WASM_GONE: &str = "mod.wasm: WebAssembly mods don't run any more, port the code to a native mod (docs/native-mods.md)";
 
-/// Whether `path` names a native mod's file: an `.hnmod`, or a `.hmod` holding native code
-/// (one file for content and code, docs/native-mods.md).
+/// Whether `path` names a mod package.
 pub fn is_file(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| e == "hnmod" || e == "hmod")
+    path.extension().is_some_and(|e| e == "hmod")
 }
 
-/// Whether the mod file at `path` carries native code ([`MANIFEST`]): every `.hnmod`, and a
-/// `.hmod` with code beside or instead of its content.
+/// Whether the mod file at `path` carries native code ([`MANIFEST`]).
 pub fn holds(path: &Path) -> bool {
     std::fs::File::open(path)
         .ok()
@@ -244,7 +241,7 @@ mod tests {
     }
     fn read(name: &str, extras: &[(&str, &[u8])], mixin: &str) -> Result<Bundle, String> {
         let path =
-            std::env::temp_dir().join(format!("native-bundle-{name}-{}.hnmod", std::process::id()));
+            std::env::temp_dir().join(format!("native-bundle-{name}-{}.hmod", std::process::id()));
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file(MANIFEST, options).unwrap();

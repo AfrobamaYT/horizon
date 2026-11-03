@@ -903,8 +903,8 @@ async fn a_retry_takes_up_its_own_branch() {
     assert_eq!(mock.lock().unwrap().resets, [branch.as_str()]);
 }
 
-/// A native rewrite (`.hnmod`) of `coords_hud` at `version`.
-fn hnmod(version: &str) -> Vec<u8> {
+/// A native rewrite (`.hmod`) of `coords_hud` at `version`.
+fn hmod(version: &str) -> Vec<u8> {
     use std::io::Write;
     let revision = "a".repeat(40);
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
@@ -938,7 +938,7 @@ async fn a_mod_cannot_turn_native() {
     native["version"] = json!("0.2.0");
     native["key"] = Value::Null;
     native["signature"] = Value::Null;
-    let (status, json) = client.submit(&csrf, &native, &hnmod("0.2.0")).await;
+    let (status, json) = client.submit(&csrf, &native, &hmod("0.2.0")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{json}");
     assert_eq!(
         json["error"],
