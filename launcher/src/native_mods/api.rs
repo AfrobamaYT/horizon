@@ -349,13 +349,21 @@ mod tests {
             "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n",
         )
         .unwrap();
+        let resolution = super::super::dependencies::Resolution { order: vec![0] };
+        let err = stage(
+            &stage_dir,
+            std::slice::from_ref(&bundle),
+            &[vec![]],
+            &resolution,
+        )
+        .unwrap_err();
+        assert!(err.contains("update the game"), "{err}");
         fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
         fs::write(
             stage_dir.join(MAIN_TEMPLATE),
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
         )
         .unwrap();
-        let resolution = super::super::dependencies::Resolution { order: vec![0] };
         assert!(stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap());
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
         let members = root["workspace"]["members"].as_array().unwrap();
