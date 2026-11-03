@@ -1035,7 +1035,7 @@ impl Game<'_> {
         if levels == 0 {
             return;
         }
-        if !horizon_client::mod_api::mods().is_empty()
+        if crate::mod_api::listened(crate::mod_api::HookId::PlayerXpLevelChange)
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             let mut cancel = false;
