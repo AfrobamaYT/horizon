@@ -3179,6 +3179,12 @@ extract; a side that reaches neither finds no handler. `move_energy(host, &from,
 (`EnergyHandlerUtil.move`) as one step of `move_resources`: all or nothing, a move the target takes only part of
 tried again with that part.
 
+Energy held by an item is `ITEM_ENERGY` (NeoForge's `Capabilities.Energy.ITEM`), found where its stack lives with
+`place.capability(host, &ITEM_ENERGY)`, as `ITEM_FLUIDS` is, and moved by `move_energy` as a block's is. A mod
+answers it for its item with `r.item_capability(&ITEM_ENERGY, "mymod:cell", …)`, keeping the energy in the item's
+own stack and rewriting it by an exchange of one, so from a stack of more than one the charged item splits off.
+Vanilla has no energy items, so the game answers it for none.
+
 The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
 move undone, in its transaction, and is warned once naming the mod, and `move_resources` or `move_energy` returns
 `Overanswered` naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so
