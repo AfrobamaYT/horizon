@@ -17,10 +17,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let text = fs::read_to_string(manifest_path).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let manifest = Manifest::parse(&text)?;
     let path = Path::new(path);
-    let identity = horizon_port_pack::jar::read_identity(path)?;
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let hash = horizon_port_pack::fetch::hash_reader::<sha2::Sha512>(file, io::sink())
         .map_err(|e| format!("{}: {e}", path.display()))?;
+    let identity = horizon_port_pack::jar::read_identity(path)?;
     let jar = JarRef::new(identity.id, identity.version, format!("{hash:x}"))?;
     let mut listed = false;
     for existing in manifest
