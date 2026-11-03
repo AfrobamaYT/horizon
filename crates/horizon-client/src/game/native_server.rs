@@ -1054,7 +1054,8 @@ impl Game<'_> {
         };
         let conn = match read {
             PlayerRead::Acting { .. } => None,
-            PlayerRead::Guest(g) => Some(g.conn),
+            PlayerRead::Guest(g) if !g.dead => Some(g.conn),
+            PlayerRead::Guest(_) => return false,
         };
         let Some(conn) = conn else {
             if self
