@@ -74,7 +74,7 @@ impl Game<'_> {
     /// `LivingEntity.stopSleeping` for the players who got up: the beds of
     /// this level nobody sleeps in any more are free again. Runs in each
     /// level's tick, after the players' packets and sleep ticks, never inside
-    /// a guest's turn (where the hub is taken out of `Game`).
+    /// a guest's turn.
     pub(super) fn free_left_beds(&mut self) {
         let dim = self.dim;
         let left: Vec<[i32; 3]> = self
