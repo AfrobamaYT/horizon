@@ -3154,7 +3154,7 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `raw_brightness(pos, sky_darken)` (`getRawBrightness`, which `CropBlock.randomTick` asks with 0)
 and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk),
 `is_raining_at(pos)` (`Level.isRainingAt`, false where `pos` is not loaded) and `enabled_features()`
-(`LevelReader.enabledFeatures`, a `FeatureFlags`).
+(`LevelReader.enabledFeatures`, a borrowed `FeatureFlags<'_>`). Neither allocates.
 None of them loads a chunk. Light above the build height reads as full sky and below it as
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
 so check `is_loaded` first. `LevelRandomHost` provides vanilla's `Level.random` so

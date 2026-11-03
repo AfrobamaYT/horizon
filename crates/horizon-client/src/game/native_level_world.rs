@@ -154,9 +154,12 @@ impl Game<'_> {
     }
     /// `LevelReader.enabledFeatures` of the level a handle names. Every level of a world shares
     /// the world's flags. None for a stale handle and on a client.
-    pub(super) fn native_level_enabled_features(&self, level: LevelRef) -> Option<FeatureFlags> {
+    pub(super) fn native_level_enabled_features(
+        &self,
+        level: LevelRef,
+    ) -> Option<FeatureFlags<'_>> {
         self.native_level_world(level)?;
-        Some(FeatureFlags::from_ids(self.enabled_feature_ids()))
+        Some(FeatureFlags::new(self.enabled_feature_ids()))
     }
     /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
     pub(super) fn native_level_is_thundering(&self, level: LevelRef) -> Option<bool> {
@@ -168,7 +171,7 @@ impl Game<'_> {
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
-    use horizon_client::mod_api::LevelHost;
+    use horizon_client::mod_api::{FeatureFlags, LevelHost};
     use std::sync::Arc;
 
     /// A chunk of air with `biome` in every cell: full sky light everywhere.
@@ -257,7 +260,14 @@ mod tests {
             let flags = game.native_level_enabled_features(level).unwrap();
             assert!(flags.contains("minecraft:redstone_experiments"));
             assert_eq!(flags.iter().count(), 2);
-            game.with_level(|_, host, _| assert_eq!(host.enabled_features(), flags));
+            assert_eq!(
+                FeatureFlags::new(&[]).iter().collect::<Vec<_>>(),
+                ["minecraft:vanilla"]
+            );
+            let ids: Vec<String> = flags.iter().map(str::to_owned).collect();
+            game.with_level(|_, host, _| {
+                assert_eq!(host.enabled_features().iter().collect::<Vec<_>>(), ids);
+            });
         });
     }
     #[test]

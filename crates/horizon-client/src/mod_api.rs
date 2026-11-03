@@ -1417,33 +1417,30 @@ pub enum LightLayer {
 }
 
 /// The feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`), each
-/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`). A world that names none
-/// enables `minecraft:vanilla` alone, as vanilla's default does.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FeatureFlags(Vec<Identifier>);
+/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), borrowed from the world.
+/// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
+/// Reading it allocates nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeatureFlags<'a>(&'a [String]);
 
-impl FeatureFlags {
+impl<'a> FeatureFlags<'a> {
     /// The flags of a world's `enabled_features` list; an empty list is vanilla's default.
-    pub fn from_ids(ids: &[String]) -> Self {
-        if ids.is_empty() {
-            return Self(vec![
-                Identifier::parse("minecraft:vanilla").expect("a valid id"),
-            ]);
-        }
-        Self(
-            ids.iter()
-                .filter_map(|id| Identifier::parse(id).ok())
-                .collect(),
-        )
+    pub fn new(ids: &'a [String]) -> Self {
+        Self(ids)
     }
     /// `FeatureFlagSet.contains`: whether the flag `flag` (`minecraft:redstone_experiments`, or
-    /// `redstone_experiments`) is enabled. False for text that is not an id.
+    /// `redstone_experiments`) is enabled.
     pub fn contains(&self, flag: &str) -> bool {
-        Identifier::parse(flag).is_ok_and(|flag| self.0.contains(&flag))
+        let bare = !flag.contains(':');
+        self.iter()
+            .any(|id| id == flag || (bare && id.strip_prefix("minecraft:") == Some(flag)))
     }
-    /// The enabled flags.
-    pub fn iter(&self) -> impl Iterator<Item = &Identifier> {
-        self.0.iter()
+    /// The enabled flag ids.
+    pub fn iter(&self) -> impl Iterator<Item = &'a str> + use<'a> {
+        let ids = self.0;
+        ids.iter()
+            .map(String::as_str)
+            .chain(ids.is_empty().then_some("minecraft:vanilla"))
     }
 }
 
@@ -2622,7 +2619,7 @@ pub trait LevelHost {
         unimplemented!("LevelHost::is_raining_at")
     }
     /// `LevelReader.enabledFeatures`: the feature flags the world enables.
-    fn enabled_features(&self) -> FeatureFlags {
+    fn enabled_features(&self) -> FeatureFlags<'_> {
         unimplemented!("LevelHost::enabled_features")
     }
 }
