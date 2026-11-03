@@ -1309,26 +1309,16 @@ impl LevelAccess for GameLevel<'_> {
             let context = horizon_client::mod_api::NativeNoteBlockChange {
                 dimension: self.dimension,
                 pos,
-                instrument,
+                instrument: horizon_client::mod_api::NativeNoteInstrument::ALL
+                    [horizon_world::level::data::INSTRUMENTS
+                        .iter()
+                        .position(|name| *name == instrument)
+                        .unwrap_or(0)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);
         }
         (!cancel).then_some(new)
-    }
-    fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
-        let mut cancel = false;
-        if self.native_authoritative {
-            self.native_note_play(
-                self.dimension,
-                self.native_player,
-                pos,
-                instrument,
-                note,
-                &mut cancel,
-            );
-        }
-        !cancel
     }
     fn note_block_play(&self, pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
         use horizon_client::mod_api::NativeNoteInstrument;

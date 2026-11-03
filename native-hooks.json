@@ -3516,18 +3516,6 @@
       }
     },
     {
-      "name": "note_play",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_play",
-      "neoforge": "near match of NeoForge NoteBlockEvent.Play (cancel only; Bukkit's NotePlayEvent); note_block_play is the counterpart",
-      "side": "server",
-      "cancellable": true,
-      "mod_api": {
-        "contract": "cancel",
-        "out": "cancel"
-      }
-    },
-    {
       "name": "player_advancement_criterion_grant",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_criterion_grant",

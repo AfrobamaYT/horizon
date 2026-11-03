@@ -1262,18 +1262,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `NoteBlock.playNote`: queues the block event and emits the game event.
     pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId) {
-        if !self.note_play_allowed(pos, state) {
-            return;
-        }
-        self.note_play_unchecked(pos, state);
-    }
-    pub(crate) fn note_play_allowed(&self, pos: BlockPos, state: BlockStateId) -> bool {
-        let b = self.b;
-        let instrument = b.table.text(state, b.props.instrument);
-        let note = b.table.int(state, b.props.note);
-        self.level.allow_note_play(pos, instrument, note)
-    }
-    pub(crate) fn note_play_unchecked(&mut self, pos: BlockPos, state: BlockStateId) {
         let b = self.b;
         let instrument = b.table.text(state, b.props.instrument);
         let index = super::data::INSTRUMENTS
@@ -1303,7 +1291,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `NoteBlock.triggerEvent`: the note's particle (tunable instruments)
     /// and sound. `a` and `b` are the block event's parameters: a note the
-    /// mods changed (see `note_play_unchecked`) plays in place of the block's.
+    /// mods changed (see `note_play`) plays in place of the block's.
     pub(crate) fn note_trigger_event(
         &mut self,
         pos: BlockPos,

@@ -229,7 +229,6 @@
 //!
 //! API 249 adds A player completed an advancement (`native_player_advancement_done`).
 //!
-//! API 248 adds Note block about to sound (`native_note_play`).
 //!
 //! API 247 adds A server game rule changes (`native_world_game_rule_change`).
 //!
@@ -1344,8 +1343,8 @@ impl GameLevel<'_> {
     }
 
     /// The note block at `pos` is about to play (NeoForge's
-    /// `NoteBlockEvent.Play`, in `NoteBlock.playNote`), after `note_play` and
-    /// once a block above no longer mutes it; a `note_play` cancel skips it.
+    /// `NoteBlockEvent.Play`, in `NoteBlock.playNote`), once a block above
+    /// no longer mutes it.
     /// `instrument` is its instrument and `note` its note, 0 to 24; change
     /// either to play another (a note out of range keeps the block's own).
     /// Set `cancel` and it doesn't play: no sound, no particle, no
@@ -1378,38 +1377,11 @@ impl GameLevel<'_> {
     #[inline(always)]
     pub(super) fn native_note_block_change(
         &self,
-        context: &NativeNoteBlockChange<'_>,
+        context: &NativeNoteBlockChange,
         new_note: &mut i32,
         cancel: &mut bool,
     ) {
         mod_api::dispatch_note_block_change(self, mod_api::mods(), context, new_note, cancel);
-    }
-
-    /// On an authoritative server, a note block at `pos` is about to sound.
-    /// `player` is the acting server player when there is one. Set `cancel` to silence it.
-    /// A near match of NeoForge's `NoteBlockEvent.Play` (cancel only), asked
-    /// first: `note_block_play` is the counterpart, and this cancel skips it.
-    /// 248.
-    #[inline(always)]
-    pub(super) fn native_note_play(
-        &self,
-        dimension: LevelDimension,
-        player: Option<u128>,
-        pos: BlockPos,
-        instrument: &str,
-        note: i32,
-        cancel: &mut bool,
-    ) {
-        mod_api::dispatch_note_play(
-            self,
-            mod_api::mods(),
-            dimension,
-            player,
-            pos,
-            instrument,
-            note,
-            cancel,
-        );
     }
 
     /// On an authoritative server, a bell at `pos` is about to ring. Set

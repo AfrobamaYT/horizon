@@ -73,10 +73,6 @@ pub(crate) struct TestLevel {
     pub note_answer: Option<Option<(u8, i32)>>,
     /// `allow_portal_spawn` refuses every portal.
     pub refuse_portals: bool,
-    /// `allow_note_play` refuses every note.
-    pub refuse_notes: bool,
-    /// How many times `note_block_play` was asked.
-    pub note_block_asks: std::cell::Cell<usize>,
 }
 impl TestLevel {
     fn new(b: &Behaviours) -> Self {
@@ -99,8 +95,6 @@ impl TestLevel {
             opener_rechecks: Vec::new(),
             note_answer: None,
             refuse_portals: false,
-            refuse_notes: false,
-            note_block_asks: std::cell::Cell::new(0),
         }
     }
 }
@@ -194,11 +188,7 @@ impl LevelAccess for TestLevel {
             *smoke = Some(answer);
         }
     }
-    fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
-        !self.refuse_notes
-    }
     fn note_block_play(&self, _pos: BlockPos, instrument: &mut u8, note: &mut i32) -> bool {
-        self.note_block_asks.set(self.note_block_asks.get() + 1);
         match self.note_answer {
             None => true,
             Some(None) => false,
@@ -3783,16 +3773,25 @@ fn a_note_plays_the_instrument_and_note_the_level_chose() {
 }
 
 #[test]
-fn a_note_play_cancel_comes_first_and_skips_note_block_play() {
+fn a_stopped_note_still_tunes_the_block() {
     let mut w = world!();
-    let (sounds, _, game_event) = play_note(&mut w);
-    assert!(!sounds.is_empty() && game_event);
-    assert_eq!(w.level.note_block_asks.get(), 1);
-    let mut w = world!();
-    w.level.refuse_notes = true;
-    let (sounds, particles, game_event) = play_note(&mut w);
-    assert!(sounds.is_empty() && particles.is_empty() && !game_event);
-    assert_eq!(w.level.note_block_asks.get(), 0);
+    let pos = BlockPos::new(0, 1, 0);
+    let harp = w.id(
+        "note_block",
+        &[("instrument", "harp"), ("note", "0"), ("powered", "false")],
+    );
+    w.put(pos, harp);
+    w.level.note_answer = Some(None);
+    assert_eq!(w.use_block(pos), InteractionResult::Success);
+    assert_eq!(w.prop(pos, "note"), "1");
+    w.full_tick();
+    assert!(!w.level.events.iter().any(|event| matches!(
+        event,
+        LevelEvent::GameEvent {
+            event: "minecraft:note_block_play",
+            ..
+        } | LevelEvent::Sound { .. }
+    )));
 }
 
 #[test]

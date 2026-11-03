@@ -385,9 +385,6 @@ pub trait LevelAccess {
     ) -> Option<i32> {
         Some(new)
     }
-    fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
-        true
-    }
     /// `NoteBlock.playNote`: the note block at `pos` is about to play
     /// `instrument` (an index into `data::INSTRUMENTS`) at `note` (0 to 24).
     /// The level may change either; false stops the note.

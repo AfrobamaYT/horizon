@@ -86,10 +86,11 @@ pub type NativeDispensed = (Option<ItemStack>, i32);
 
 /// Context for a player tuning a note block.
 #[derive(Clone, Copy, Debug)]
-pub struct NativeNoteBlockChange<'a> {
+pub struct NativeNoteBlockChange {
     pub dimension: LevelDimension,
     pub pos: BlockPos,
-    pub instrument: &'a str,
+    /// The block's instrument before tuning.
+    pub instrument: NativeNoteInstrument,
     /// The note before tuning, in the range 0 through 24.
     pub old_note: i32,
 }
