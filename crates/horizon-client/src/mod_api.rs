@@ -1678,13 +1678,13 @@ mod tests {
         }
         let observed = Arc::new(Mutex::new(Vec::new()));
         let mods = [Box::new(Observer(observed.clone())) as Box<dyn Hooks>];
+        install(mods.into());
         let mut host = Reader {
             block: "minecraft:air",
             lines: Vec::new(),
         };
         dispatch_living_conversion_post(
             &mut host,
-            &mods,
             12,
             "minecraft:pig",
             13,
