@@ -52,7 +52,7 @@ impl Game<'_> {
         });
         // The block entity is out of the world while it ticks.
         match self.world.block_entities.get(&(x, y, z)) {
-            Some(BlockEntity::Mod(m)) if reached && !m.id.is_empty() => {
+            Some(BlockEntity::Mod(m)) if reached && !m.id().is_empty() => {
                 Some((Arc::clone(buffer), read_energy(&m.nbt)))
             }
             _ => None,
@@ -133,6 +133,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
 
     fn buffer(capacity: i32, max_insert: i32, max_extract: i32) -> ModEnergyBuffer {
         ModEnergyBuffer {
@@ -155,10 +157,10 @@ mod tests {
         use horizon_client::mobs::Mob;
         use horizon_client::mod_api::part_tests::{ROBOT_FLUID, game_thread};
         use horizon_client::mod_api::{
-            ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, Host, NativeBlockUpdateFlags,
-            move_energy, move_resources,
+            ENERGY, ENTITY_ENERGY, ENTITY_FLUIDS, Holder, NativeBlockUpdateFlags, move_energy,
+            move_resources,
         };
-        use horizon_core::geometry::Vec3;
+        use horizon_core::geometry::{Direction, Vec3};
         with_game(|game| {
             let _mods = game_thread();
             game.options.dedicated = Some(Vec::new());
@@ -204,7 +206,7 @@ mod tests {
                 game.native_entity(14).unwrap(),
                 game.native_entity(15).unwrap(),
             );
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             assert!(pig.capability(host, &ENTITY_ENERGY, None).is_none());
             assert!(pig.capability(host, &ENTITY_FLUIDS, None).is_none());
             let source = level.capability(host, &ENERGY, pos, None).unwrap();
@@ -299,7 +301,7 @@ mod tests {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
         use horizon_client::fast_hash::FxHashMap;
-        use horizon_client::mod_api::{ENERGY, Host, NativeBlockUpdateFlags, move_energy};
+        use horizon_client::mod_api::{ENERGY, NativeBlockUpdateFlags, move_energy};
         use horizon_core::geometry::Direction;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -327,20 +329,18 @@ mod tests {
             for (pos, energy) in [(from, 800), (to, 0)] {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS;
                 assert!(game.native_level_set_block(level, pos, block, flags));
-                let mut fields = ModBlockEntityFields {
-                    id: "test:battery".into(),
-                    ..Default::default()
-                };
+                let mut fields = ModBlockEntityFields::default();
                 fields
                     .nbt
                     .insert(JavaString::from("energy"), Tag::Int(energy));
-                let entity = BlockEntity::Mod(Box::new(ModBlockEntity::new(fields)));
+                let entity =
+                    BlockEntity::Mod(Box::new(ModBlockEntity::new("test:battery".into(), fields)));
                 game.world
                     .block_entities
                     .insert((pos[0], pos[1], pos[2]), entity);
             }
             let moved = |game: &mut Game<'_>, side, max, commit: bool| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 let source = level.capability(host, &ENERGY, from, None).unwrap();
                 let target = level.capability(host, &ENERGY, to, side).unwrap();
                 host.transaction(|host, tx| {
@@ -349,7 +349,7 @@ mod tests {
                 })
             };
             let held = |game: &mut Game<'_>| {
-                let host: &mut dyn Host = game;
+                let host: &mut dyn ServerHost = game;
                 [from, to].map(|pos| {
                     let buffer = level.capability(host, &ENERGY, pos, None).unwrap();
                     buffer.amount(host)

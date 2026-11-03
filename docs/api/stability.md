@@ -67,7 +67,7 @@ Every preview and stable API has tests that run old users against the current co
 
 | API | The test |
 | --- | --- |
-| Content mods | the content template builds and checks with `cargo horizon-mod`, and `mod_content`'s tests load content mods; a line is served as long as they pass |
+| Content mods | the content template builds and checks with `cargo horizon-mod`, and `mod_content`'s tests load content mods; a manifest's `api` must exactly match the content format this build supports |
 | Native mods | a mod builds against one exact Horizon source revision, named by its pin, and the launcher rebuilds it for that revision; no compatibility across revisions is promised |
 | Agent control | a transcript per protocol version: commands and the reply keys each must have |
 | Server | `api::ROUTES` against `route()` (generated reference); a `server.toml` from each release line parses to the same settings; golden replies per endpoint |
