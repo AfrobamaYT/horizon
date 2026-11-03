@@ -249,6 +249,8 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mod_api::HostTransaction;
+    use crate::mod_api::ServerHost;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
     use std::sync::Arc;
@@ -302,7 +304,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn writes_merge_data_name_and_roll_back_with_a_transaction() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -350,7 +352,7 @@ mod tests {
             assert_eq!(chest.name(game), None);
 
             // An abort puts back data and name; a commit keeps them.
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, compound(stick)));
                 assert!(chest.set_name(host, Some("Gone")));
@@ -360,7 +362,7 @@ mod tests {
             assert_eq!(aborted, Err(()));
             assert_eq!((slot3(game), chest.name(game)), (None, None));
             assert!(game.transactions.is_empty());
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let committed: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, compound(stick)));
                 assert!(chest.set_name(host, Some("Kept")));
@@ -395,7 +397,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_abort_puts_back_the_lock_and_the_loot_table_roll() {
         use super::super::native_entity_refs::tests::with_game;
-        use horizon_client::mod_api::{Host, NativeBlockUpdateFlags};
+        use horizon_client::mod_api::NativeBlockUpdateFlags;
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -411,7 +413,7 @@ mod tests {
             let table = compound("{LootTable:\"minecraft:chests/simple_dungeon\"}");
             let before = game.world.block_entity_extras(key);
 
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, lock.clone()));
                 assert!(chest.merge_data(host, table.clone()));
@@ -421,7 +423,7 @@ mod tests {
             assert_eq!(game.world.block_entity_extras(key), before);
             assert!(game.world.block_lock(key).is_none());
 
-            let host: &mut dyn Host = game;
+            let host: &mut dyn ServerHost = game;
             let committed: Result<(), ()> = host.transaction(|host, _| {
                 assert!(chest.merge_data(host, lock.clone()));
                 assert!(chest.merge_data(host, table.clone()));

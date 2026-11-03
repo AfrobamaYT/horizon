@@ -26,7 +26,7 @@ once no loaded mod overrides it. Vanilla properties do not enter the hook.
 ```rust,ignore
 fn item_model_property(
     &self,
-    _host: &dyn Host,
+    _host: &dyn ClientHost,
     event: &mut ItemModelPropertyEvent<'_>,
 ) {
     if event.property == "example:charged" {
@@ -36,7 +36,7 @@ fn item_model_property(
 }
 ```
 
-`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`ClientHost`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
@@ -117,6 +117,8 @@ the catalog, not a global API number, source comments or documentation histories
 
 - Block entities for a mod's blocks (`native_block_entity`, `native_block_entity_ticks`,
   `native_block_entity_tick`): made when the block is placed, ticked on the server and saved with the chunk.
+  `entity.id()` reads its type identity, fixed at construction; mutable events give a `ModBlockEntityView` whose
+  payload contains `nbt`, `items` and `data`. A mod cannot replace the view or access its private entity handle.
 
 - Item slots for those block entities (`native_block_entity_container`): hoppers, comparators and breaking the
   block use them as they use vanilla's containers, and `native_block_entity_tick` also gets the slots.
@@ -2373,6 +2375,12 @@ client, so a call a tick looks smooth.
 several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
 a dimension.
 
+The client also owns a world epoch, separate from the server's. It begins when a play login creates the
+client level, changes when a dimension change or later login replaces that level, and retires after the
+client logout hook or when reconfiguration clears the level. A same-level respawn keeps the epoch.
+Client epochs do not fire server world lifecycle or server tick hooks. This bookkeeping does not make
+the server entity and level reads available on a client.
+
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
 - `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
@@ -3244,7 +3252,7 @@ move undone, in its transaction, and is warned once naming the mod, and `move_re
 neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
 panic the game.
 
-`host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
+On a `ServerHost`, import `HostTransaction` to call `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`). It runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
 what every handler and place write takes, so none happens outside one. Inside, a capability write applies at once, so later steps see it,
 and the game keeps each storage as it was before the transaction first wrote it: a block entity's item slots, saved
@@ -3302,14 +3310,15 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{Hooks, Host, ServerHost, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
 impl Host for HostDouble {}
+impl ServerHost for HostDouble {}
 struct Counter(Arc<AtomicUsize>);
 impl Hooks for Counter {
-    fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
+    fn tick(&self, _: &mut dyn ServerHost, _: &mut TickEvent) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -3377,7 +3386,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
     sync: false,
 };
-// Inside a server hook, or mixin code, with `host: &mut dyn Host`:
+// Inside a server hook, or mixin code, with `host: &mut dyn ServerHost`:
 if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
@@ -3468,11 +3477,13 @@ The `native_camera()` helper returns the most recently extracted world frame's c
 
 `ClientHost::crosshair_target()` returns the ordinary interaction-range target as
 `NativeCrosshairTarget::Block { pos, state, hit }` or
-`NativeCrosshairTarget::Entity { id, point }`. The block hit contains its world-space
+`NativeCrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
 It uses the game's current targeting ray and block/entity reach, respects blocks
 occluding entities, and returns `None` on a miss or without a client world.
-It can be read with a screen open. The entity id is a network id in the current
-world, including dragon-part ids, not a persistent handle; use the planned client
-handles for entity data. Unlike `view_hit` and `raycast`, this does not find blocks
+It can be read with a screen open. `entity` is an `EntityRef` carrying the current
+client level's epoch and network entity ID, including dragon parts. It becomes stale
+when the client level is replaced or the client disconnects; a same-level respawn
+keeps its epoch. This supplies identity, not client entity reads: the server-only
+entity data methods still reject client handles. Unlike `view_hit` and `raycast`, this does not find blocks
 in distant terrain or return a block behind a targeted entity.

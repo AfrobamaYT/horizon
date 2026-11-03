@@ -141,6 +141,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::mod_api::ServerHost;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_level_pops_spawns_and_awards_as_vanilla() {
@@ -280,7 +281,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn an_orb_awarded_in_a_merge_hook_is_merged_by_a_later_scan() {
-        use crate::mod_api::{self, ExperienceOrbMergeEvent, Flow, Hooks, Host};
+        use crate::mod_api::{self, ExperienceOrbMergeEvent, Flow, Hooks};
         use horizon_client::entities::ExperienceOrb;
         use horizon_core::geometry::Vec3;
 
@@ -290,7 +291,7 @@ mod tests {
         impl Hooks for Award {
             fn experience_orb_merge(
                 &self,
-                host: &mut dyn Host,
+                host: &mut dyn ServerHost,
                 event: &mut ExperienceOrbMergeEvent<'_>,
             ) -> Flow {
                 if event.from == 80 {
