@@ -6164,7 +6164,7 @@ mod tests {
     fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
         use crate::mod_api::{
-            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemStack,
+            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemPart, ItemStack,
             NativeInteractionResult as Answer, Registrar, ServerHost, UseItemOnEvent, UseOnEvent,
         };
         use horizon_client::{
@@ -6209,6 +6209,14 @@ mod tests {
                 *self.answer.lock().unwrap()
             }
         }
+        // The held stick's and water bucket's own `Item.useOn`, counted, taking the click.
+        impl ItemPart for User {
+            fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
+                self.item_uses
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Flow::Cancel
+            }
+        }
         struct Mod {
             picks: Arc<Mutex<Vec<bool>>>,
             user: User,
@@ -6222,12 +6230,8 @@ mod tests {
                 r.block_part("minecraft:lever", self.user.clone());
                 r.block_part("minecraft:cauldron", self.user.clone());
                 r.block_part("minecraft:jukebox", self.user.clone());
-            }
-            fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
-                self.user
-                    .item_uses
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Flow::Cancel
+                r.item_part("minecraft:stick", self.user.clone());
+                r.item_part("minecraft:water_bucket", self.user.clone());
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
