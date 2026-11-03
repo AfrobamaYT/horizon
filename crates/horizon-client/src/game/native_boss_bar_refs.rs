@@ -45,8 +45,7 @@ impl Game<'_> {
     /// None. Saved bars are there from the world's start, as vanilla's
     /// `CustomBossEvents`. Boss bars of mobs and raids are not custom boss
     /// events.
-    pub(super) fn native_boss_bar(&mut self, id: &str) -> Option<BossBarRef> {
-        self.load_bossbars();
+    pub(super) fn native_boss_bar(&self, id: &str) -> Option<BossBarRef> {
         let id = Identifier::parse(id).ok()?;
         let id = format!("{}:{}", id.namespace(), id.path());
         self.boss_bar_handle(self.boss_bar_state_by_id(&id)?)
@@ -60,8 +59,7 @@ impl Game<'_> {
     }
 
     /// Every custom boss bar, in the order `/bossbar list` shows them.
-    pub(super) fn native_boss_bars(&mut self) -> Vec<BossBarRef> {
-        self.load_bossbars();
+    pub(super) fn native_boss_bars(&self) -> Vec<BossBarRef> {
         if self.remote.is_some() {
             return Vec::new();
         }
@@ -483,11 +481,11 @@ mod tests {
                 .unwrap();
             assert!(bar.set_value(game, 7));
             game.save_bossbars();
-            // The world opens again: nothing has loaded the bars yet.
+            // The world opens again and loads the bars, as `finish_open_world` does.
             game.bosses = Default::default();
+            game.load_bossbars();
             let found = game.native_boss_bar("mod:saved").unwrap();
             assert_eq!(found.value(game), Some(7));
-            game.bosses = Default::default();
             assert_eq!(game.native_boss_bars().len(), 1);
             let _ = std::fs::remove_dir_all(dir);
         });

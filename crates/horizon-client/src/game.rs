@@ -12396,9 +12396,12 @@ impl Game<'_> {
         self.load_server_loot();
         // TagsUpdatedEvent (SERVER_DATA_LOAD): the world's data is in, before
         // its chunks and players are.
+        // MinecraftServer's constructor reads CustomBossEvents before any
+        // server event.
+        self.bosses = Default::default();
+        self.load_bossbars();
         self.native_server_data_loaded(false);
         self.sync_recipe_content();
-        self.bosses = Default::default();
         reset_world_progress(&mut self.adv, &mut self.stats);
         self.prefetch_advancement_tree();
         self.restore_player_state = true;
