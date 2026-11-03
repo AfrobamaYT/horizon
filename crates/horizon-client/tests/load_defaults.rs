@@ -71,7 +71,6 @@ fn default_components_reader_baseline() -> client::Result<()> {
             loot_table_load: |_, _| {},
             modify_default_components: |context, item, _| {
                 assert_eq!(context.origin(), DataLoadOrigin::ClientPreload);
-                assert_eq!(context.mods(), ["probe"]);
                 assert_eq!(context.registry("minecraft:item").unwrap(), ["probe:token"]);
                 if item == "probe:token" {
                     CALLS.fetch_add(1, Ordering::Relaxed);
@@ -89,7 +88,6 @@ fn default_components_reader_baseline() -> client::Result<()> {
         Arc::new(LoadInputs::new(
             BTreeMap::from([("minecraft:item".into(), vec!["probe:token".into()])]),
             root.join("settings"),
-            vec!["probe".into()],
         )),
     );
     let mut defaults = horizon_world::item_defaults::read(&root)?;

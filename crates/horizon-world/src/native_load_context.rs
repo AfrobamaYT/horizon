@@ -15,23 +15,17 @@ pub enum DataLoadOrigin {
 }
 
 /// Immutable metadata captured with the loaded item data. Later data loads
-/// borrow the same registry and mod views instead of scanning them again.
+/// borrow the same registry snapshot instead of scanning it again.
 pub struct LoadInputs {
     registries: BTreeMap<String, Vec<String>>,
     settings_root: PathBuf,
-    mods: Vec<String>,
 }
 
 impl LoadInputs {
-    pub fn new(
-        registries: BTreeMap<String, Vec<String>>,
-        settings_root: PathBuf,
-        mods: Vec<String>,
-    ) -> Self {
+    pub fn new(registries: BTreeMap<String, Vec<String>>, settings_root: PathBuf) -> Self {
         Self {
             registries,
             settings_root,
-            mods,
         }
     }
 }
@@ -67,11 +61,6 @@ impl LoadContext {
     /// A mod's setting, read only when the load hook requests that key.
     pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         read_setting(&self.inputs.settings_root.join(mod_id), key)
-    }
-
-    /// Native mod IDs in dispatch order, captured with the loaded inputs.
-    pub fn mods(&self) -> &[String] {
-        &self.inputs.mods
     }
 }
 

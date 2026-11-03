@@ -42,6 +42,28 @@ pub fn native_modify_default_components(
     crate::native_load_hooks::modify_default_components(context, item, components);
 }
 
+/// One owning load's published defaults and metadata, shared across loader workers.
+pub struct ItemData {
+    context: LoadContext,
+    defaults: ItemDefaults,
+}
+
+impl ItemData {
+    pub fn load(root: &Path, context: LoadContext) -> io::Result<Self> {
+        let mut defaults = read(root)?;
+        defaults.apply_native(&context);
+        Ok(Self { context, defaults })
+    }
+
+    pub fn defaults(&self) -> &ItemDefaults {
+        &self.defaults
+    }
+
+    pub fn context(&self) -> &LoadContext {
+        &self.context
+    }
+}
+
 /// One resource generation's default components. The owning loader applies
 /// native changes before publishing this; consumers only borrow its entries.
 pub struct ItemDefaults {
@@ -60,7 +82,7 @@ impl ItemDefaults {
     }
 
     /// Apply the registration-time event before the snapshot is shared.
-    pub fn apply_native(&mut self, context: &LoadContext) {
+    pub(crate) fn apply_native(&mut self, context: &LoadContext) {
         for (item, components) in &mut self.entries {
             let Value::Object(components) = components else {
                 continue;
@@ -175,11 +197,8 @@ mod tests {
             "a:string": {"minecraft:max_stack_size": 16},
             "a:removed": {"minecraft:max_stack_size": 64}}"#;
         fs::write(root.join("items.json"), items).unwrap();
-        let inputs = crate::native_load_context::LoadInputs::new(
-            Default::default(),
-            root.join("settings"),
-            vec!["a".into()],
-        );
+        let inputs =
+            crate::native_load_context::LoadInputs::new(Default::default(), root.join("settings"));
         let context = crate::native_load_context::LoadContext::new(
             crate::native_load_context::DataLoadOrigin::ServerDataLoad,
             std::sync::Arc::new(inputs),

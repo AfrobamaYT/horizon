@@ -2088,7 +2088,7 @@ pub struct Resources {
 }
 
 struct WorldCore {
-    item_data: Arc<mods::ItemData>,
+    item_data: Arc<horizon_world::item_defaults::ItemData>,
     facts: BlockFacts,
     biomes: Arc<Biomes>,
     environment: Environment,
@@ -2148,10 +2148,10 @@ impl Resources {
         &self.core.facts
     }
     fn item_defaults(&self) -> &horizon_world::item_defaults::ItemDefaults {
-        &self.core.item_data.defaults
+        self.core.item_data.defaults()
     }
     fn load_context(&self) -> &horizon_world::native_load_context::LoadContext {
-        &self.core.item_data.context
+        self.core.item_data.context()
     }
     fn items(&self) -> &Items {
         &self.rest().items
@@ -20439,7 +20439,7 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
 /// The world bundle's core tables from one resource root, before
 /// `load_resources` binds them into the pack tables and `WorldCore`.
 struct CoreTables {
-    item_data: Arc<mods::ItemData>,
+    item_data: Arc<horizon_world::item_defaults::ItemData>,
     assets: Assets,
     render: RenderAssets,
     item_renderer: horizon_client::item_render::ItemRenderer,
@@ -20476,7 +20476,7 @@ fn load_core(
         Err(e) => return Ok(Err(e.to_string())),
     };
     progress.set(1);
-    let item_data = Arc::new(mods::ItemData::load(root, role).map_err(|e| e.to_string())?);
+    let item_data = Arc::new(mods::load_item_data(root, role).map_err(|e| e.to_string())?);
     let headless = !role.is_client();
     let registry = assets.registry;
     let (render, gameplay, visibility, biomes, environment, collision) =
@@ -20500,13 +20500,13 @@ fn load_core(
                         horizon_client::item_render::ItemRenderer::load_for_server(
                             root,
                             library,
-                            &item_data.defaults,
+                            item_data.defaults(),
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
                             root,
                             library,
-                            &item_data.defaults,
+                            item_data.defaults(),
                         )
                     }
                 })

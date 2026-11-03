@@ -96,11 +96,15 @@ impl RegistrationContext<'_> {
 /// ```
 pub struct DataLoadContext<'a> {
     source: &'a horizon_world::native_load_context::LoadContext,
+    mods: LoadedMods<'a>,
 }
 
 impl<'a> DataLoadContext<'a> {
     pub(crate) fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
-        Self { source }
+        Self {
+            source,
+            mods: LoadedMods::new(),
+        }
     }
 
     /// The phase selected at the owning load boundary.
@@ -118,8 +122,8 @@ impl<'a> DataLoadContext<'a> {
         self.source.setting(mod_id, key)
     }
 
-    /// Loaded native mod IDs, in dispatch order.
-    pub fn mods(&self) -> impl Iterator<Item = &str> {
-        self.source.mods().iter().map(String::as_str)
+    /// The same loaded-mod view available during registration.
+    pub fn mods(&self) -> &LoadedMods<'_> {
+        &self.mods
     }
 }

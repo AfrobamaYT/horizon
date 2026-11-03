@@ -10,11 +10,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     let root = std::env::temp_dir().join(format!("horizon-load-hooks-{}", std::process::id()));
     let context = LoadContext::new(
         DataLoadOrigin::ServerDataLoad,
-        std::sync::Arc::new(LoadInputs::new(
-            Default::default(),
-            root.join("settings"),
-            vec!["mymod".into()],
-        )),
+        std::sync::Arc::new(LoadInputs::new(Default::default(), root.join("settings"))),
     );
     let mut table = json!([]);
     let mut components = Map::new();

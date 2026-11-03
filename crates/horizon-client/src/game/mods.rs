@@ -5,7 +5,7 @@ use super::{Game, execution_role::ExecutionRole};
 use crate::mod_api::{RegistrationContext, RegistrationPhase};
 use horizon_client::mod_list::{self, Installed};
 use horizon_world::{
-    item_defaults::ItemDefaults,
+    item_defaults::ItemData,
     native_load_context::{LoadContext, LoadInputs},
 };
 use std::{
@@ -20,36 +20,19 @@ pub(super) struct ModsState {
     pub(super) dev: Vec<PathBuf>,
 }
 
-/// Immutable metadata and defaults shared by this resource generation's loads.
-pub(super) struct ItemData {
-    pub(super) context: LoadContext,
-    pub(super) defaults: ItemDefaults,
-}
-
-impl ItemData {
-    pub(super) fn load(root: &Path, role: ExecutionRole) -> horizon_client::Result<Self> {
-        let mut registries: BTreeMap<_, _> = builtin_registries(root)?
-            .registries
-            .into_iter()
-            .map(|(name, ids)| (name, ids.names))
-            .collect();
-        if let Some(types) = registries.get_mut("minecraft:data_component_type") {
-            types
-                .extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
-        }
-        let inputs = LoadInputs::new(
-            registries,
-            Game::mod_data_root(),
-            crate::mod_api::LoadedMods::new()
-                .ids()
-                .map(str::to_owned)
-                .collect(),
-        );
-        let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs));
-        let mut defaults = horizon_world::item_defaults::read(root)?;
-        defaults.apply_native(&context);
-        Ok(Self { context, defaults })
+/// Capture load inputs at the resource-generation boundary, before workers share them.
+pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client::Result<ItemData> {
+    let mut registries: BTreeMap<_, _> = builtin_registries(root)?
+        .registries
+        .into_iter()
+        .map(|(name, ids)| (name, ids.names))
+        .collect();
+    if let Some(types) = registries.get_mut("minecraft:data_component_type") {
+        types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
     }
+    let inputs = LoadInputs::new(registries, Game::mod_data_root());
+    let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs));
+    Ok(ItemData::load(root, context)?)
 }
 
 fn builtin_registries(root: &Path) -> horizon_client::Result<horizon_protocol::registry::Builtin> {
