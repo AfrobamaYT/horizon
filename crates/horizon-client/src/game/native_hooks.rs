@@ -2577,12 +2577,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_health_hud(self, mod_api::mods(), inputs, wi, hi, draws);
     }
-    /// A key or mouse button went down or up, by its vanilla name
-    /// (`key.keyboard.z`, `key.mouse.left`): keys on any screen (check
-    /// `native_playing`), mouse buttons while playing. Repeats are left out.
-    pub(super) fn native_key(&mut self, key: &str, pressed: bool) {
-        mod_api::dispatch_key(self, mod_api::mods(), key, pressed);
-    }
     /// A real window key event after handling, including repeats and consumed shortcuts.
     /// Receives the original physical/logical key, text, location, state and repeat flag.
     /// Modifier bits use the screen hooks' GLFW encoding. Not cancellable.
@@ -3503,13 +3497,13 @@ impl Game<'_> {
     }
     /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
     /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
-    /// vanilla's name for the key (`key.keyboard.e`, the name `native_key`
-    /// hands over) — a key with no name fires nothing — `repeat` whether it is
+    /// vanilla's name for the key (`key.keyboard.e`) — a key with no name
+    /// fires nothing — `repeat` whether it is
     /// the keyboard's auto-repeat of a held press (Horizon's extra; NeoForge
     /// folds repeats into the event), and `modifiers` GLFW's bits (shift 1,
     /// control 2, alt 4, super 8). Set `canceled` and the press goes no
     /// further: no focus move, no Escape-close, no inventory or hotbar key, no
-    /// typing by the key itself, no `native_key`.
+    /// typing by the key itself.
     ///
     /// It fires for the window's presses and their repeats, and for the
     /// control socket's `key` (a release fires nothing), after the window's
@@ -3520,9 +3514,8 @@ impl Game<'_> {
     /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
-    /// game's own. A cancelled press's release still runs, so a `native_key`
-    /// listener sees that release without its press, and its characters are
-    /// GLFW's separate char callback and still come; see
+    /// game's own. A cancelled press's release still runs, and its characters
+    /// are GLFW's separate char callback and still come; see
     /// `native_screen_char_typed_pre`.
     /// API 104.
     pub(super) fn native_screen_key_pressed_pre(
@@ -10662,16 +10655,13 @@ impl Game<'_> {
             page.buttons = buttons;
         }
     }
-    /// A key event for `native_key`.
-    pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
-        if repeat {
-            return;
-        }
-        if let Some(name) = keybinds::key_name(key) {
-            if pressed {
-                self.native_panel_key(name);
-            }
-            self.native_key(name, pressed);
+    /// Deliver a non-repeat key press to the native panel.
+    pub(super) fn native_panel_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
+        if pressed
+            && !repeat
+            && let Some(name) = keybinds::key_name(key)
+        {
+            self.native_panel_key(name);
         }
     }
     /// `ClientHooks.onClickInput`: tells `native_interaction_key` that `button`
@@ -10690,11 +10680,6 @@ impl Game<'_> {
         let (mut swing_hand, mut canceled) = (true, false);
         self.native_interaction_key(button, key_mapping, hand, &mut swing_hand, &mut canceled);
         canceled.then_some(swing_hand)
-    }
-    /// A mouse button while playing, for `native_key`.
-    pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
-        let name = keybinds::mouse_name(button);
-        self.native_key(&name, pressed);
     }
     /// Wheel steps while playing: whether a native mod took them.
     pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {

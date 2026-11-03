@@ -605,14 +605,6 @@
       }
     },
     {
-      "name": "key",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_key",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "wheel",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_wheel",

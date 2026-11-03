@@ -12,6 +12,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class InputKeyHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
+    def test_panel_receives_named_nonrepeat_presses(self):
+        source = (ROOT / "crates/horizon-client/src/game/native_hooks.rs").read_text(encoding="utf-8")
+        actual = method(source.replace("    pub(super) fn native_panel_key_event(", "    fn native_panel_key_event("), "native_panel_key_event")
+        fixture = r"""
+type KeyCode = i32;
+mod keybinds {
+    pub fn key_name(key: i32) -> Option<&'static str> {
+        (key == 1).then_some("key.keyboard.a")
+    }
+}
+#[derive(Default)]
+struct Game { calls: Vec<&'static str> }
+impl Game {
+    fn native_panel_key(&mut self, name: &'static str) { self.calls.push(name); }
+    METHOD
+}
+#[test]
+fn panel_receives_only_named_nonrepeat_presses() {
+    let mut game = Game::default();
+    game.native_panel_key_event(1, true, false);
+    game.native_panel_key_event(1, true, true);
+    game.native_panel_key_event(1, false, false);
+    game.native_panel_key_event(2, true, false);
+    assert_eq!(game.calls, ["key.keyboard.a"]);
+}
+""".replace("METHOD", actual)
+        with tempfile.TemporaryDirectory() as folder:
+            src, exe = Path(folder) / "panel.rs", Path(folder) / "panel.exe"
+            src.write_text(fixture, encoding="utf-8")
+            subprocess.run(["rustc", "--edition=2024", "--test", str(src), "-o", str(exe)], check=True)
+            subprocess.run([str(exe)], check=True)
+
+    @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_original_event_after_handling_and_source_gates(self):
         source = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
         actual = method(source, "window_event")
