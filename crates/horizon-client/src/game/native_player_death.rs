@@ -1,11 +1,12 @@
 //! A server player's last death location for native mods, through a
 //! `PlayerRef` (docs/native-mods.md): `Player.getLastDeathLocation` and
-//! `setLastDeathLocation`. It is kept in the player's record, saved as
-//! `LastDeathLocation`, and sent with their next respawn packet, which is what
-//! the recovery compass follows. Reads return None for a stale handle, for a
-//! player who isn't online here, and when the player never died. A death in a
-//! level that is not loaded reads as None too, and so does any call made while the
-//! server has the player list out for a step (the record is not reachable then).
+//! `setLastDeathLocation`. It is kept in the player's record (swapped into
+//! `level.last_death` for the player's turn), saved as `LastDeathLocation`, and
+//! sent with their next respawn packet, which is what the recovery compass
+//! follows. Players resolve through the shared player-handle path
+//! (`native_server.rs`), so reads return None for a stale handle, for a player
+//! who isn't online here or whose record is swapped out, and when the player
+//! never died. A death in a level that is not loaded reads as None too.
 use super::Game;
 use horizon_client::mod_api::{LevelRef, PlayerRef};
 
@@ -16,39 +17,36 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<(LevelRef, [i32; 3])> {
-        if self.native_player_ref(player.uuid()) != Some(player) {
-            return None;
-        }
-        let guest = self
-            .lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .find(|g| g.placed && g.uuid == player.uuid())?;
-        let (dimension, pos) = guest.last_death.as_ref()?;
-        Some((self.native_level(dimension)?, *pos))
+        let (dimension, pos) = self.native_player_last_death_record(player)?;
+        Some((self.native_level(&dimension)?, pos))
     }
 
     /// `Player.setLastDeathLocation`: stores where the player died, or
     /// forgets it for None. The client hears of it with the player's next
-    /// respawn, as in vanilla. False in the cases a read gives None.
+    /// respawn, as in vanilla. False in the cases a read gives None, and for
+    /// a stale `LevelRef`.
     pub(super) fn native_player_set_last_death_location(
         &mut self,
         player: PlayerRef,
         location: Option<(LevelRef, [i32; 3])>,
     ) -> bool {
+        let stored = match location {
+            Some((level, pos)) => {
+                if self.native_lifecycle.epoch() != Some(level.epoch()) {
+                    return false;
+                }
+                Some((level.dimension().to_owned(), pos))
+            }
+            None => None,
+        };
         if self.native_player_ref(player.uuid()) != Some(player) {
             return false;
         }
-        let Some(guest) = self.lan.as_mut().and_then(|h| {
-            h.hub
-                .guests
-                .iter_mut()
-                .find(|g| g.placed && g.uuid == player.uuid())
-        }) else {
-            return false;
-        };
-        guest.last_death = location.map(|(level, pos)| (level.dimension().to_owned(), pos));
-        true
+        let mut done = false;
+        self.native_as_player(player.uuid(), |game| {
+            game.level.last_death = stored;
+            done = true;
+        }) && done
     }
 }
 
@@ -150,6 +148,24 @@ mod tests {
             assert!(!game.native_player_set_last_death_location(stale, None));
             game.lan.as_mut().unwrap().hub.guests[0].placed = false;
             assert_eq!(game.native_player_last_death_location(player), None);
+            game.lan.as_mut().unwrap().hub.guests[0].placed = true;
+
+            // A level handle of an earlier open is refused, and nothing is
+            // stored.
+            game.native_lifecycle
+                .begin_open(horizon_client::mod_api::NativeAuthority::IntegratedServer);
+            let player = game.native_player_ref(123).unwrap();
+            let fresh = game.native_level("minecraft:overworld").unwrap();
+            game.lan.as_mut().unwrap().hub.guests[0].last_death = None;
+            assert!(
+                !game.native_player_set_last_death_location(player, Some((overworld, [7, 8, 9])))
+            );
+            assert_eq!(game.lan.as_ref().unwrap().hub.guests[0].last_death, None);
+            assert!(game.native_player_set_last_death_location(player, Some((fresh, [7, 8, 9]))));
+            assert_eq!(
+                game.native_player_last_death_location(player),
+                Some((fresh, [7, 8, 9]))
+            );
         });
     }
 }

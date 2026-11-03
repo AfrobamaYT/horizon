@@ -280,11 +280,21 @@ enum PlayerRead<'a> {
         body: Option<&'a PlayerMotion>,
         /// The player's stored abilities, when it is a server player's turn.
         abilities: Option<PlayerAbilities>,
+        /// Where the player last died: the acting guest's record, swapped
+        /// into the level for their turn.
+        last_death: Option<&'a (String, [i32; 3])>,
     },
     Guest(&'a Guest),
 }
 
 impl PlayerRead<'_> {
+    fn last_death(&self) -> Option<&(String, [i32; 3])> {
+        match self {
+            Self::Acting { last_death, .. } => *last_death,
+            Self::Guest(guest) => guest.last_death.as_ref(),
+        }
+    }
+
     fn mode(&self) -> i32 {
         match self {
             Self::Acting { mode, .. } => *mode,
@@ -379,6 +389,7 @@ impl Game<'_> {
                     mode: self.mode_id(),
                     body: self.player.as_ref(),
                     abilities: self.acting_abilities,
+                    last_death: self.level.last_death.as_ref(),
                 },
                 self.lan_acting_entity?,
             ));
@@ -404,11 +415,21 @@ impl Game<'_> {
                     mode: self.mode_id(),
                     body: Some(body),
                     abilities: self.acting_abilities,
+                    last_death: self.level.last_death.as_ref(),
                 },
                 body.entity_id as u32,
             ));
         }
         None
+    }
+
+    /// The dimension id and block of the player's last death, through the
+    /// shared player resolver. None for a stale or unavailable player.
+    pub(super) fn native_player_last_death_record(
+        &self,
+        player: PlayerRef,
+    ) -> Option<(String, [i32; 3])> {
+        self.player_handle_read(player)?.last_death().cloned()
     }
 
     fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
