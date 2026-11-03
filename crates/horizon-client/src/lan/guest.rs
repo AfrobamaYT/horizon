@@ -18,8 +18,33 @@ use horizon_protocol::{
 };
 use std::{
     collections::VecDeque,
-    sync::{Arc, atomic::AtomicI32},
+    sync::{
+        Arc,
+        atomic::{AtomicI32, AtomicU64, Ordering},
+    },
 };
+
+/// Unique across reconnects and server instances in this process, even when
+/// the protocol's container id wraps back to the same number.
+static NEXT_MENU_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn menu_generation() -> u64 {
+    let mut generation = NEXT_MENU_GENERATION.load(Ordering::Relaxed);
+    loop {
+        let next = generation
+            .checked_add(1)
+            .expect("menu generation exhausted");
+        match NEXT_MENU_GENERATION.compare_exchange_weak(
+            generation,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return generation,
+            Err(current) => generation = current,
+        }
+    }
+}
 
 /// GameType ids.
 pub const SURVIVAL: i32 = 0;
@@ -320,6 +345,8 @@ pub struct Guest {
     /// The open block container, if any.
     pub menu: Option<super::menu::Menu>,
     pub next_window: i32,
+    /// Identity of the current menu, distinct even when a window id is reused.
+    pub menu_generation: u64,
     /// An unfinished drag in the inventory menu.
     pub drag: Option<(u8, Vec<usize>)>,
     /// The compound this player was loaded from, for fields Horizon does not model.
@@ -349,6 +376,13 @@ pub struct Guest {
 }
 
 impl Guest {
+    /// Allocate the next protocol window and a non-reusable menu identity.
+    pub fn next_menu_window(&mut self) -> i32 {
+        self.next_window = self.next_window % 100 + 1;
+        self.menu_generation = menu_generation();
+        self.next_window
+    }
+
     pub fn new(j: Joined, entity_id: i32, position: [f64; 3], view_distance: i32) -> Self {
         Self {
             conn: j.conn,
@@ -479,6 +513,7 @@ impl Guest {
             dimension: "minecraft:overworld".into(),
             menu: None,
             next_window: 0,
+            menu_generation: menu_generation(),
             drag: None,
             saved: None,
             attachments: Default::default(),

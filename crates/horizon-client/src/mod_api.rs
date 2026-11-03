@@ -612,6 +612,14 @@ impl From<PlayerRef> for EntityRef {
     }
 }
 
+/// One player's open menu, invalidated on close, replacement or reconnect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MenuRef {
+    pub(crate) player: PlayerRef,
+    pub(crate) window: i32,
+    pub(crate) generation: u64,
+}
+
 /// A player's food data.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
