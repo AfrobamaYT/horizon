@@ -17,6 +17,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource, XoroshiroRandom},
 };
 use horizon_world::{
+    item_defaults::{ItemData, ItemDefaults},
     nbt::{Compound, Tag},
     worldgen::{generator::StructureMobs, structure::legacy::PieceRandom},
 };
@@ -37,7 +38,7 @@ struct Data {
     items: Items,
     camel_husk: (f32, f32),
 }
-fn load(root: &std::path::Path) -> Option<Data> {
+fn load(root: &std::path::Path, defaults: &ItemDefaults) -> Option<Data> {
     let types = MobTypes::load(root).ok()?.types;
     let camel = types.get("minecraft:camel_husk")?;
     let camel_husk = (camel.width as f32, camel.height as f32);
@@ -50,14 +51,15 @@ fn load(root: &std::path::Path) -> Option<Data> {
         )
         .unwrap_or_default(),
         registries: SpawnRegistries::load(root),
-        enchantments: Enchantments::load(root),
-        items: Items::tags_only(root, &horizon_world::loot::PackOverlay::NONE).ok()?,
+        enchantments: Enchantments::load(root, defaults),
+        items: Items::tags_only(root, &horizon_world::loot::PackOverlay::NONE, defaults).ok()?,
         camel_husk,
     })
 }
 
 pub struct StructureMobFinalizer {
     root: PathBuf,
+    item_data: Arc<ItemData>,
     dimension: String,
     data: OnceLock<Option<Data>>,
     /// The level's difficulty (0 peaceful to 3 hard) and overworld clock.
@@ -65,9 +67,10 @@ pub struct StructureMobFinalizer {
     day_time: AtomicI64,
 }
 impl StructureMobFinalizer {
-    pub fn new(root: PathBuf, dimension: &str) -> Self {
+    pub fn new(root: PathBuf, dimension: &str, item_data: Arc<ItemData>) -> Self {
         Self {
             root,
+            item_data,
             dimension: dimension.to_owned(),
             data: OnceLock::new(),
             difficulty: AtomicU8::new(2),
@@ -231,7 +234,7 @@ impl StructureMobFinalizer {
     fn data(&self) -> Option<&Data> {
         self.data
             .get_or_init(|| {
-                let data = load(&self.root);
+                let data = load(&self.root, self.item_data.defaults());
                 if data.is_none() {
                     log::error!("Horizon: no mob data, structure mobs are finalized when loaded");
                 }

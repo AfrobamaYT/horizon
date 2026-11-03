@@ -7,6 +7,7 @@ use horizon_client_lib::{
     item_render::{ItemRenderer, NoHost},
 };
 use horizon_world::{
+    item_defaults::ItemData,
     loot::{LootData, PackOverlay},
     native_load_context::{DataLoadOrigin, LoadContext, LoadInputs},
     native_load_hooks::{self, NativeLoadHooks},
@@ -23,8 +24,8 @@ use std::{
 
 static CALLS: AtomicUsize = AtomicUsize::new(0);
 
-/// The before-snapshot baseline includes the producer, gameplay/enchantment
-/// metadata, both render loaders, banners, loot and the content handshake.
+/// The producer fires once; gameplay/enchantment metadata, both render loaders,
+/// banners, loot and the content handshake borrow its published snapshot.
 #[test]
 fn default_components_reader_baseline() -> client::Result<()> {
     let root = std::env::temp_dir().join(format!("horizon-default-reader-{}", std::process::id()));
@@ -90,16 +91,16 @@ fn default_components_reader_baseline() -> client::Result<()> {
             root.join("settings"),
         )),
     );
-    let mut defaults = horizon_world::item_defaults::read(&root)?;
-    defaults.apply_native(&context);
-    let items = horizon_items::items::Items::catalog(&root, &PackOverlay::NONE)?;
+    let item_data = ItemData::load(&root, context)?;
+    let defaults = item_data.defaults();
+    let items = horizon_items::items::Items::catalog(&root, &PackOverlay::NONE, defaults)?;
     assert_eq!(items.get("probe:token").unwrap().max_stack, 16);
     let library = client::model_library::ParsedModels::load(&root).into_item_library();
-    let client = ItemRenderer::load_with_library(&root, library.clone())?;
-    let server = ItemRenderer::load_for_server(&root, library)?;
-    let _banners = client::banner::Banners::load(&root);
-    let _loot = LootData::load(&root, &PackOverlay::NONE)?;
-    let identity = client::content_identity::identity(&root)?;
+    let client = ItemRenderer::load_with_library(&root, library.clone(), &item_data)?;
+    let server = ItemRenderer::load_for_server(&root, library, &item_data)?;
+    let _banners = client::banner::Banners::load(&root, defaults);
+    let _loot = LootData::load(&root, &PackOverlay::NONE, defaults)?;
+    let identity = client::content_identity::identity(&root, defaults)?;
     assert_eq!(CALLS.load(Ordering::Relaxed), 1);
     assert_eq!(client.models.prototypes, server.models.prototypes);
     assert_eq!(
@@ -157,7 +158,7 @@ fn default_components_reader_baseline() -> client::Result<()> {
     println!("snapshot calls={}", CALLS.load(Ordering::Relaxed));
     let prototypes = format!(
         "{:x}",
-        Sha256::digest(serde_json::to_vec(&client.models.prototypes)?)
+        Sha256::digest(serde_json::to_vec(&*client.models.prototypes)?)
     );
     let rendered = format!("{:x}", Sha256::digest(serde_json::to_vec(&submitted)?));
     let identity = identity

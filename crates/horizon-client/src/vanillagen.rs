@@ -13,6 +13,7 @@ use horizon_core::{
 };
 use horizon_world::{
     heightmap::HeightmapType,
+    item_defaults::ItemData,
     loot::PackOverlay,
     nbt::Tag,
     registry::BlockRegistry,
@@ -33,6 +34,15 @@ use structure_mobs::StructureMobFinalizer;
 
 /// The references a saved chunk keeps for its structure start: `(structure, chunk x, chunk z)`.
 pub type SavedReferences = std::sync::Arc<dyn Fn(&str, i32, i32) -> i32 + Send + Sync>;
+
+/// Borrowed generation inputs from the owner's published resource tables.
+#[derive(Clone, Copy)]
+pub struct TerrainResources<'a> {
+    pub dir: &'a Path,
+    pub registry: &'static BlockRegistry,
+    pub biomes: &'a Biomes,
+    pub item_data: &'a Arc<ItemData>,
+}
 
 pub struct VanillaTerrain {
     generator: OverworldGenerator,
@@ -147,101 +157,75 @@ impl VanillaTerrain {
                 .unwrap_or(0),
         }
     }
-    pub fn new(
-        dir: &Path,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
-        seed: i64,
-    ) -> crate::Result<Self> {
-        Self::for_dimension(dir, registry, biomes, seed, "minecraft:overworld")
+    pub fn new(resources: TerrainResources<'_>, seed: i64) -> crate::Result<Self> {
+        Self::for_dimension(resources, seed, "minecraft:overworld")
     }
     pub fn for_dimension(
-        dir: &Path,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
+        resources: TerrainResources<'_>,
         seed: i64,
         dimension: &str,
     ) -> crate::Result<Self> {
-        Self::for_world(
-            dir,
-            registry,
-            biomes,
-            seed,
-            "minecraft:normal",
-            dimension,
-            true,
-        )
+        Self::for_world(resources, seed, "minecraft:normal", dimension, true)
     }
     /// A dimension of a world preset (`worldgen/world_preset`) whose
     /// `generate_structures` is `structures` (`ChunkGenerator.createStructures`
     /// and `findNearestMapStructure` do nothing without).
     pub fn for_world(
-        dir: &Path,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
+        resources: TerrainResources<'_>,
         seed: i64,
         preset: &str,
         dimension: &str,
         structures: bool,
     ) -> crate::Result<Self> {
         let none = WorldgenOverrides::default();
-        Self::for_world_with(
-            dir, &none, registry, biomes, seed, preset, dimension, structures,
-        )
+        Self::for_world_with(resources, &none, seed, preset, dimension, structures)
     }
     /// `for_world` with the world's data packs over the bundle at `dir`
     /// (`datapack::worldgen_overrides`).
     pub fn for_world_with(
-        dir: &Path,
+        resources: TerrainResources<'_>,
         overrides: &WorldgenOverrides,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
         seed: i64,
         preset: &str,
         dimension: &str,
         structures: bool,
     ) -> crate::Result<Self> {
         Self::for_world_with_settings(
-            dir, overrides, registry, biomes, seed, preset, dimension, structures, None,
+            resources, overrides, seed, preset, dimension, structures, None,
         )
     }
     /// `for_world_with` with the saved dimension's generator and type, below
     /// any dimension supplied by the world's data packs.
     pub fn for_world_with_settings(
-        dir: &Path,
+        resources: TerrainResources<'_>,
         overrides: &WorldgenOverrides,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
         seed: i64,
         preset: &str,
         dimension: &str,
         structures: bool,
         saved_stem: Option<&serde_json::Value>,
     ) -> crate::Result<Self> {
-        let data: Arc<GeneratorData> = shared_data_with(dir, overrides, registry)?;
+        let data: Arc<GeneratorData> =
+            shared_data_with(resources.dir, overrides, resources.registry)?;
         let generator = OverworldGenerator::for_world_with_settings(
             data, seed, preset, dimension, structures, saved_stem,
         )?;
-        Self::assemble(dir, registry, biomes, generator, seed, preset, dimension)
+        Self::assemble(resources, generator, seed, preset, dimension)
     }
     /// A superflat overworld with the structures its settings allow
     /// (`FlatLevelSource`: its layers, `structure_overrides` and the fixed biome).
-    #[allow(clippy::too_many_arguments)]
     pub fn for_flat(
-        dir: &Path,
+        resources: TerrainResources<'_>,
         overrides: &WorldgenOverrides,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
         seed: i64,
         flat: &horizon_world::worldgen::generator::FlatSettings,
         structures: bool,
     ) -> crate::Result<Self> {
-        let data: Arc<GeneratorData> = shared_data_with(dir, overrides, registry)?;
+        let data: Arc<GeneratorData> =
+            shared_data_with(resources.dir, overrides, resources.registry)?;
         let generator = OverworldGenerator::flat(data, seed, flat, structures)?;
         let mut terrain = Self::assemble(
-            dir,
-            registry,
-            biomes,
+            resources,
             generator,
             seed,
             "minecraft:normal",
@@ -256,14 +240,18 @@ impl VanillaTerrain {
     }
     /// The terrain around a generator, with the tables the client's chunks need.
     fn assemble(
-        dir: &Path,
-        registry: &'static BlockRegistry,
-        biomes: &Biomes,
+        resources: TerrainResources<'_>,
         generator: OverworldGenerator,
         seed: i64,
         preset: &str,
         dimension: &str,
     ) -> crate::Result<Self> {
+        let TerrainResources {
+            dir,
+            registry,
+            biomes,
+            item_data,
+        } = resources;
         let biome_map = generator
             .data()
             .biome_names()
@@ -293,9 +281,9 @@ impl VanillaTerrain {
                 );
             }
         }
-        let loot = dir
-            .parent()
-            .and_then(|root| crate::structure_blocks::loot_data(root, &PackOverlay::NONE));
+        let loot = dir.parent().and_then(|root| {
+            crate::structure_blocks::loot_data(root, &PackOverlay::NONE, item_data.defaults())
+        });
         if let Some(root) = dir.parent() {
             crate::mobs::trial_spawner::load_registry(root);
         }
@@ -329,6 +317,7 @@ impl VanillaTerrain {
             structure_mobs: Arc::new(StructureMobFinalizer::new(
                 dir.parent().unwrap_or(dir).to_owned(),
                 dimension,
+                Arc::clone(item_data),
             )),
             query: std::sync::Mutex::new(None),
             tick_blocks,

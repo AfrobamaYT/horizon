@@ -1,5 +1,6 @@
 //! Prepare local worlds without blocking the window's event loop.
 use super::*;
+use horizon_client::vanillagen::TerrainResources;
 use horizon_world::item_defaults::ItemData;
 
 pub(super) struct WorldRequest {
@@ -699,6 +700,13 @@ pub(super) fn make_streaming(
         res.biomes(),
         enabled_features,
     );
+    let worldgen_dir = options.resources.join("worldgen");
+    let terrain_resources = TerrainResources {
+        dir: &worldgen_dir,
+        registry: pack.assets.registry,
+        biomes: &biomes,
+        item_data: &res.core.item_data,
+    };
     let mut locator = None;
     let flat = (dim == Dim::Overworld)
         .then(|| horizon_client::save::world_gen_settings(world_root))
@@ -738,10 +746,8 @@ pub(super) fn make_streaming(
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
         match VanillaTerrain::for_flat(
-            &options.resources.join("worldgen"),
+            terrain_resources,
             &overrides,
-            pack.assets.registry,
-            &biomes,
             seed,
             &settings,
             automatic_structures,
@@ -831,7 +837,7 @@ pub(super) fn make_streaming(
         let saved_stem = horizon_client::save::world_gen_settings(world_root)
             .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
             .map(|stem| horizon_client::scoreboard::tag_to_json(&stem));
-        let mut inner = VanillaTerrain::for_world_with_settings(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures, saved_stem.as_ref()).map_err(|e| {
+        let mut inner = VanillaTerrain::for_world_with_settings(terrain_resources, &overrides, seed, preset, dim.id(), structures, saved_stem.as_ref()).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {

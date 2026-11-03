@@ -17,10 +17,12 @@ use horizon_protocol::{
     servers::parse_address,
     text::{Language, plain, translatable},
 };
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_world::{
+    item_defaults::ItemData,
+    nbt::{JavaString, Tag},
+};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -115,6 +117,9 @@ pub struct Session {
     /// The far terrain requests waiting for the server (`lod_net`).
     far: Arc<crate::lod_net::Inbox>,
 }
+#[cfg(test)]
+use std::path::PathBuf;
+
 impl Session {
     /// Start connecting in the background, as `auth`'s account when there is one.
     pub fn connect(
@@ -123,7 +128,7 @@ impl Session {
         auth: Option<Arc<AuthSession>>,
         info: cfg::ClientInformation,
         lang: Arc<Language>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(
             address, name, auth, info, lang, None, None, resources, false,
@@ -138,7 +143,7 @@ impl Session {
         auth: Option<Arc<AuthSession>>,
         info: cfg::ClientInformation,
         lang: Arc<Language>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(address, name, auth, info, lang, None, None, resources, true)
     }
@@ -151,7 +156,7 @@ impl Session {
         info: cfg::ClientInformation,
         lang: Arc<Language>,
         cookies: Cookies,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(
             address,
@@ -171,7 +176,7 @@ impl Session {
         name: &str,
         info: cfg::ClientInformation,
         lang: Arc<Language>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
     ) -> Self {
         Self::start(
             "local",
@@ -193,7 +198,7 @@ impl Session {
         lang: Arc<Language>,
         local: Option<horizon_protocol::connection::Pipe>,
         cookies: Option<Cookies>,
-        resources: PathBuf,
+        resources: Arc<ItemData>,
         lan: bool,
     ) -> Self {
         let (send, events) = channel();
@@ -614,7 +619,7 @@ fn run(
     cookies: &Cookies,
     far: &crate::lod_net::Inbox,
     transferred: bool,
-    resources: &Path,
+    resources: &ItemData,
     lan: bool,
 ) -> Result<Reason, Reason> {
     let (host, port, mut c) = if let Some(pipe) = local {
@@ -806,7 +811,7 @@ fn receive_play(
     send: &Sender<Event>,
     cookies: &Cookies,
     far: &crate::lod_net::Inbox,
-    resources: &Path,
+    resources: &ItemData,
 ) -> Result<Reason, Reason> {
     loop {
         let (id, payload) = reader
@@ -906,7 +911,7 @@ fn configure(
     lang: &Language,
     send: &Sender<Event>,
     cookies: &Cookies,
-    resources: &Path,
+    resources: &ItemData,
 ) -> Result<Dynamic, Reason> {
     let mut registries = Dynamic::default();
     let mut content_verified = false;
@@ -927,7 +932,7 @@ fn configure(
         {
             cfg::Clientbound::KeepAlive(k) => reply(cfg::Serverbound::KeepAlive(k))?,
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::content_identity::CHANNEL => {
-                let hash = crate::content_identity::identity(resources)
+                let hash = crate::content_identity::identity(resources.root(), resources.defaults())
                     .map_err(|_| Reason::plain(crate::content_identity::MISMATCH.to_string()))?;
                 content_verified = p.data == hash;
                 reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {

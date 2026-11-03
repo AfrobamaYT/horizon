@@ -6,8 +6,11 @@ use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
     fs, io,
-    path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 /// The largest stack size a native mod may set: `ItemStack.count` is a `u32`,
@@ -44,15 +47,33 @@ pub fn native_modify_default_components(
 
 /// One owning load's published defaults and metadata, shared across loader workers.
 pub struct ItemData {
+    root: PathBuf,
     context: LoadContext,
     defaults: ItemDefaults,
+    prototypes: Arc<BTreeMap<String, BTreeMap<String, Value>>>,
 }
 
 impl ItemData {
     pub fn load(root: &Path, context: LoadContext) -> io::Result<Self> {
         let mut defaults = read(root)?;
         defaults.apply_native(&context);
-        Ok(Self { context, defaults })
+        let prototypes = defaults
+            .entries()
+            .iter()
+            .map(|(item, components)| {
+                serde_json::from_value(components.clone()).map(|components| (item.clone(), components))
+            })
+            .collect::<serde_json::Result<_>>()?;
+        Ok(Self {
+            root: root.to_owned(),
+            context,
+            defaults,
+            prototypes: Arc::new(prototypes),
+        })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn defaults(&self) -> &ItemDefaults {
@@ -61,6 +82,10 @@ impl ItemData {
 
     pub fn context(&self) -> &LoadContext {
         &self.context
+    }
+
+    pub fn prototypes(&self) -> &Arc<BTreeMap<String, BTreeMap<String, Value>>> {
+        &self.prototypes
     }
 }
 

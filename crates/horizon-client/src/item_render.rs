@@ -668,12 +668,12 @@ impl ItemRenderer {
     /// the special renderers' entity models and the grass colormap.
     pub fn load(
         root: &Path,
-        defaults: &horizon_world::item_defaults::ItemDefaults,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
         Self::load_with_library(
             root,
             crate::model_library::ParsedModels::load(root).into_item_library(),
-            defaults,
+            item_data,
         )
     }
     /// Reuse the immutable models prepared with the block resources at `root`.
@@ -681,9 +681,9 @@ impl ItemRenderer {
     pub fn load_with_library(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
-        defaults: &horizon_world::item_defaults::ItemDefaults,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        Self::load_tables(root, library, true, defaults)
+        Self::load_tables(root, library, true, item_data)
     }
     /// What a dedicated server reads: the item prototypes (the stacks'
     /// default components) and ids, without the client item definitions,
@@ -692,30 +692,23 @@ impl ItemRenderer {
     pub fn load_for_server(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
-        defaults: &horizon_world::item_defaults::ItemDefaults,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        Self::load_tables(root, library, false, defaults)
+        Self::load_tables(root, library, false, item_data)
     }
     fn load_tables(
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
         drawn: bool,
-        defaults: &horizon_world::item_defaults::ItemDefaults,
+        item_data: &horizon_world::item_defaults::ItemData,
     ) -> crate::Result<Self> {
-        let prototypes: BTreeMap<String, Components> = defaults
-            .entries()
-            .iter()
-            .map(|(item, components)| {
-                Ok((item.clone(), serde_json::from_value(components.clone())?))
-            })
-            .collect::<serde_json::Result<_>>()?;
         let models = ItemModels {
             definitions: if drawn {
                 load_definitions(root)
             } else {
                 BTreeMap::new()
             },
-            prototypes,
+            prototypes: Arc::clone(item_data.prototypes()),
         };
         let (library, cit) = cit::load(root, library?);
         let permutations = PalettedPermutations::from_atlas(
