@@ -2243,7 +2243,6 @@ impl Game<'_> {
     /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
     /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
     /// not chat here. Server-side, with no player's state swapped in.
-    /// @API:server_chat@.
     pub(super) fn native_server_chat(
         &mut self,
         player_id: i32,
