@@ -591,29 +591,26 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
         return bundle(&source, None).map(Some);
     }
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let native_json: serde_json::Value =
+    let native: horizon_mods::index::native::Manifest =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    let field = |name: &str| native_json[name].as_str().map(str::to_owned);
-    let id = field("id").ok_or_else(|| format!("{} has no id.", path.display()))?;
-    if !api::valid_id(&id) {
-        return Err(format!("{}: invalid mod id {id:?}", path.display()));
+    native.check()?;
+    let found = bundle(&source, Some(native.mixins))?;
+    if found.id != native.id || found.version != native.version {
+        return Err("native manifest and mixin identity/revision differ".into());
     }
-    let found = bundle(
-        &dir.join(horizon_mods::index::native::SOURCE),
-        field("mixins"),
-    )?;
-    match (&found.horizon, field("horizon")) {
-        (Some(pinned), Some(native)) if *pinned != native => Err(format!(
-            "{id}: {NATIVE_MANIFEST} pins Horizon {native}, its {MANIFEST} {pinned}."
-        )),
-        (_, native) => Ok(Some(Bundle {
-            horizon: found.horizon.clone().or(native),
-            hooks: native_json["hooks"]
-                .as_u64()
-                .and_then(|v| u32::try_from(v).ok()),
-            ..found
-        })),
+    if let Some(pinned) = &found.horizon {
+        if *pinned != native.horizon {
+            return Err(format!(
+                "{}: {NATIVE_MANIFEST} pins Horizon {}, its {MANIFEST} {pinned}.",
+                native.id, native.horizon
+            ));
+        }
     }
+    Ok(Some(Bundle {
+        horizon: Some(native.horizon),
+        hooks: native.hooks,
+        ..found
+    }))
 }
 
 fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
@@ -2762,6 +2759,29 @@ mod tests {
             (found[0].horizon.as_ref(), found[0].mixins.as_ref()),
             (None, None)
         );
+    }
+
+    #[test]
+    fn unpacked_projects_reject_old_roots_and_mismatched_identity() {
+        let root = dir("project-layout");
+        write_native(&root, "example", A, B);
+        let path = root.join(NATIVE_MANIFEST);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        for id in ["other", "../escape"] {
+            manifest["id"] = id.into();
+            fs::write(&path, manifest.to_string()).unwrap();
+            assert!(bundle_in(&root).is_err());
+        }
+        fs::remove_dir_all(root.join("native")).unwrap();
+        fs::create_dir_all(root.join("mixins/example")).unwrap();
+        fs::write(
+            root.join("mixins/example/horizon-mixin.toml"),
+            "[mod]\nid = 'example'\nversion = '1'\n",
+        )
+        .unwrap();
+        assert!(bundle_in(&root).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
