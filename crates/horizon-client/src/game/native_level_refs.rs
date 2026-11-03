@@ -4,7 +4,7 @@
 //! `None` (or `false`) on a client, for a handle of an earlier open, or for a
 //! block in a chunk that isn't loaded.
 use super::Game;
-use horizon_client::mod_api::{ChunkRef, ChunkStatus, LevelRef, NativeTicketOwner};
+use horizon_client::mod_api::{BlockStateId, ChunkRef, ChunkStatus, LevelRef, NativeTicketOwner};
 use horizon_client::mod_chunk_tickets::ModTicket;
 use horizon_client::{streaming::Streaming, world::World};
 use horizon_core::position::ChunkPos;
@@ -196,27 +196,17 @@ impl Game<'_> {
         forced.sort_unstable_by_key(|&(x, z)| ChunkPos::new(x, z).pack());
         Some(forced.into_iter().map(|(x, z)| [x, z]).collect())
     }
-    /// The state at `pos`, if its chunk is loaded and `y` is inside the world.
+    /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
+    /// None for a chunk that isn't loaded or a `y` outside the world.
     pub(super) fn native_level_state(
         &self,
         level: LevelRef,
         pos: [i32; 3],
-    ) -> Option<horizon_world::registry::BlockStateId> {
+    ) -> Option<BlockStateId> {
         let world = self.native_level_world(level)?;
         let [x, y, z] = pos;
         let inside = world.shape.contains_y(y);
         (inside && world.chunks.contains_key(&(x >> 4, z >> 4))).then(|| world.block(x, y, z))
-    }
-    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
-    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
-    /// None for a chunk that isn't loaded or a `y` outside the world.
-    pub(super) fn native_level_block_state(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<String> {
-        self.native_level_state(level, pos)
-            .map(|state| self.state_string(state))
     }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`.
@@ -285,6 +275,34 @@ impl Game<'_> {
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_client::mod_api::{ChunkRef, NativeWorldEpoch};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn block_state_reads_stored_ids_and_refuses_unloaded_positions() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level(game.dim.id()).unwrap();
+            let bottom = game.world.bottom_y();
+            let top = game.world.top_y();
+            let registry = &game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let stairs = registry.default_state("minecraft:oak_stairs").unwrap();
+            let air = registry.default_state("minecraft:air").unwrap();
+            for (pos, expected) in [([0, bottom, 0], stone), ([15, top - 1, 15], stairs)] {
+                game.world.set(pos[0], pos[1], pos[2], expected).unwrap();
+                assert_eq!(level.block_state(game, pos), Some(expected));
+            }
+            assert_eq!(level.block_state(game, [1, bottom, 1]), Some(air));
+            assert_eq!(level.block_state(game, [16, bottom, 0]), None);
+            assert_eq!(level.block_state(game, [0, bottom - 1, 0]), None);
+            assert_eq!(level.block_state(game, [0, top, 0]), None);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
