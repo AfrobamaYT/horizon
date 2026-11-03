@@ -221,14 +221,10 @@ mod tests {
         let d = compare(&server, &client);
         assert_eq!(d.missing, Vec::<String>::new());
         assert_eq!(d.extra, ["xray_blocks 1.0"]);
-        assert_eq!(
-            d.changed,
-            [VersionDifference {
-                id: "glass".into(),
-                server: "1.0".into(),
-                client: "0.9".into()
-            }]
-        );
+        assert_eq!(d.changed.len(), 1);
+        assert_eq!(d.changed[0].id, "glass");
+        assert_eq!(d.changed[0].server, "1.0");
+        assert_eq!(d.changed[0].client, "0.9");
         let d = compare(&server, &client[..1]);
         assert_eq!(d.missing, ["pipes 2.0", "glass 1.0"]);
     }

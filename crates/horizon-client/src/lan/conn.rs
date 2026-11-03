@@ -976,6 +976,35 @@ fn login_and_configure(
             _ => {}
         }
     };
+    // A Horizon client hears that this server runs its mods' quiet commands
+    // (horizon_protocol::quiet); a vanilla one is told nothing.
+    if brand == "horizon" {
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: horizon_protocol::quiet::CHANNEL.into(),
+                data: Vec::new(),
+            }),
+        )?;
+        // And that it carries native mods' messages (horizon_protocol::mod_net).
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: horizon_protocol::mod_net::CHANNEL.into(),
+                data: Vec::new(),
+            }),
+        )?;
+    }
+    // And how far it samples far terrain for it (crate::lod_net).
+    if brand == "horizon" && shared.config.lod_distance > 0 {
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: crate::lod_net::CHANNEL.into(),
+                data: crate::lod_net::Offer::new(shared.config.lod_distance).encode(),
+            }),
+        )?;
+    }
     // Even an empty server asks: a client may have extra both-side mods.
     let server_mods = horizon_protocol::mod_list::local();
     let mut client_mods = Vec::new();
@@ -1035,35 +1064,6 @@ fn login_and_configure(
         }
         lost(shared, &format!("{name} ({})", uuid_string(uuid)), text);
         return Ok(None);
-    }
-    // A Horizon client hears that this server runs its mods' quiet commands
-    // (horizon_protocol::quiet); a vanilla one is told nothing.
-    if brand == "horizon" {
-        send(
-            c,
-            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
-                channel: horizon_protocol::quiet::CHANNEL.into(),
-                data: Vec::new(),
-            }),
-        )?;
-        // And that it carries native mods' messages (horizon_protocol::mod_net).
-        send(
-            c,
-            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
-                channel: horizon_protocol::mod_net::CHANNEL.into(),
-                data: Vec::new(),
-            }),
-        )?;
-    }
-    // And how far it samples far terrain for it (crate::lod_net).
-    if brand == "horizon" && shared.config.lod_distance > 0 {
-        send(
-            c,
-            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
-                channel: crate::lod_net::CHANNEL.into(),
-                data: crate::lod_net::Offer::new(shared.config.lod_distance).encode(),
-            }),
-        )?;
     }
     if brand == "horizon"
         && let Some(hash) = sync.content_identity
