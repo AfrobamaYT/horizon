@@ -1,12 +1,12 @@
 {
   "hooks": [],
   "helpers": [
-    {"name":"menu", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_ref"},
-    {"name":"menu_container_id", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_container_id", "receiver":"menu"},
-    {"name":"menu_kind", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_kind", "receiver":"menu"},
-    {"name":"menu_slot_count", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_count", "receiver":"menu"},
-    {"name":"menu_slot", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot", "receiver":"menu"},
-    {"name":"menu_carried", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_carried", "receiver":"menu"}
+    {"name":"menu", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_ref"},
+    {"name":"menu_container_id", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_container_id", "receiver":"menu"},
+    {"name":"menu_kind", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_kind", "receiver":"menu"},
+    {"name":"menu_slot_count", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_count", "receiver":"menu"},
+    {"name":"menu_slot", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot", "receiver":"menu"},
+    {"name":"menu_carried", "side":"server", "target":"horizon_client::game::native_menu_refs::Game<'_>::native_menu_carried", "receiver":"menu"}
   ],
   "rust_summary":"read supported player menus and their slots.",
   "doc_summary":"`MenuRef`, made with `host.menu(player)`, reads supported player menus. Bundles need \"hooks\": @API:menu_refs@.",
