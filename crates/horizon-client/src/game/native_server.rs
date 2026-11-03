@@ -176,7 +176,11 @@ pub(super) fn command_tree(
                 n["level"] = 4.into();
                 n
             });
-            if entry["type"] != node["type"] || entry["parser"] != node["parser"] {
+            // `word` and `text` share a parser; their properties tell them apart.
+            if entry["type"] != node["type"]
+                || entry["parser"] != node["parser"]
+                || entry["properties"] != node["properties"]
+            {
                 problems.push(format!(
                     "`{}`: `{name}` is another kind in an earlier usage",
                     command.usage
@@ -1552,6 +1556,40 @@ mod tests {
         assert!(c["pay"].get("permissions").is_none());
         assert_eq!(levels["eco"], 3);
         assert_eq!(levels["pay"], 0);
+    }
+
+    #[test]
+    fn a_usage_with_another_string_kind_is_left_out_in_either_order() {
+        for (first, second, line, other) in [
+            (
+                "foo <value:word>",
+                "foo <value:text>",
+                "foo hello",
+                "foo hello world",
+            ),
+            (
+                "foo <value:text>",
+                "foo <value:word>",
+                "foo hello world",
+                "foo hello",
+            ),
+        ] {
+            let (tree, _, problems) =
+                tree(&[NativeCommand::new(first), NativeCommand::new(second)]);
+            assert_eq!(problems.len(), 1, "{first} then {second}: {problems:?}");
+            assert!(problems[0].starts_with(&format!("`{second}`")));
+            let mut dispatcher = Dispatcher::new();
+            register_dispatcher(&mut dispatcher, &tree);
+            let registries = horizon_client::command::Registries::default();
+            assert!(dispatcher.parse(line, &registries).executable().is_ok());
+            // The kept kind decides: `word` stops at the space, `text` takes it all.
+            let kept_greedy = first.contains(":text");
+            assert_eq!(
+                dispatcher.parse(other, &registries).executable().is_ok(),
+                kept_greedy,
+                "{first} then {second}: {other}"
+            );
+        }
     }
 
     #[test]
