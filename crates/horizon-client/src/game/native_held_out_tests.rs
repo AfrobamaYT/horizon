@@ -47,7 +47,11 @@ impl Hooks for Observer {
 
 fn with_observer(test: impl FnOnce(&mut super::Game<'_>, &Arc<Mutex<Observation>>)) {
     let state = Arc::new(Mutex::new(Observation::default()));
-    let mods: mod_api::Mods = vec![Box::new(Observer(state.clone())) as Box<dyn Hooks>].into();
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "observer",
+        Box::new(Observer(state.clone())),
+    )]
+    .into();
     mod_api::testing::with_mods(mods, || {
         with_game(|game| {
             game.world
