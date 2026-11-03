@@ -91,7 +91,8 @@ impl Game<'_> {
                 .lan_acting_uuid
                 .or_else(|| self.remote.as_ref().map(|r| r.profile())),
             player_entity_id: Some(self.own_entity_id()),
-            side: if self.serving.is_some() {
+            // The server thread's and a dedicated server's menus are the server's.
+            side: if self.native_authoritative() {
                 horizon_client::menu::LogicalSide::Server
             } else {
                 horizon_client::menu::LogicalSide::Client

@@ -73,12 +73,13 @@ impl Game<'_> {
     /// while any entity has some. Only those entities are looked at, and
     /// nothing else of the entities' memory changes.
     pub(super) fn prune_entity_attachments(&mut self) {
+        let alive = self.live_entity_ids();
         let gone: Vec<[i32; 4]> = self
             .persist
             .uuids
             .iter()
             .filter(|(id, uuid)| {
-                self.entity_attachments.contains_key(*uuid) && !self.attachment_entity_exists(**id)
+                self.entity_attachments.contains_key(*uuid) && !alive.contains(*id)
             })
             .map(|(_, uuid)| *uuid)
             .collect();

@@ -1415,12 +1415,8 @@ impl Game<'_> {
         }
     }
     pub(super) fn prune_entity_memory(&mut self) {
-        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
         // Forget entities that no longer exist.
-        let mut alive: HashSet<u32> = self.entity_ids_off_walk().collect();
-        for_each_entity!(entity_lists_of!(self), entity => {
-            alive.insert(entity.id());
-        });
+        let alive = self.live_entity_ids();
         for (id, uuid) in &self.persist.uuids {
             if !alive.contains(id) {
                 self.entity_attachments.remove(uuid);
@@ -1925,7 +1921,7 @@ mod tests {
         game.spawn_loaded_entities();
         let saved = game.entity_chunks(&HashSet::from([(0, 0)]), false);
         let saved: Vec<&Tag> = saved.iter().flat_map(|(_, tags)| tags).collect();
-        for (kind, uuid, n) in uuids {
+        for &(kind, uuid, n) in &uuids {
             let id = game
                 .persist
                 .uuids
@@ -1944,6 +1940,21 @@ mod tests {
                 "{kind}: attachments not saved back"
             );
             println!("{kind}: id {id}, UUID kept, attachments loaded and saved back");
+        }
+        // Pruning drops the attachments of an entity that left the level and keeps every
+        // live one's, whatever list it lives in.
+        let (_, zombie, _) = uuids[0];
+        let zombie_id = game
+            .persist
+            .uuids
+            .iter()
+            .find(|(_, u)| **u == zombie)
+            .map(|(id, _)| *id);
+        game.mobs.retain(|mob| Some(mob.id) != zombie_id);
+        game.prune_entity_attachments();
+        for (kind, uuid, _) in uuids {
+            let kept = game.entity_attachments.contains_key(&uuid);
+            assert_eq!(kept, uuid != zombie, "{kind}: pruned wrongly");
         }
     }
 

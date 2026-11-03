@@ -13866,8 +13866,40 @@ impl Game<'_> {
     }
     /// `renderPlayerHand` (`AvatarRenderer.renderHand`): the player's own
     /// `left` or right arm with its skin at pose `m`, in its rest pose
-    /// turned 0.1 radians outwards.
-    fn first_person_arm(&self, left: bool, m: glam::Mat4, light: u32, out: &mut Vec<Vertex>) {
+    /// turned 0.1 radians outwards. Mods are asked first (`RenderArmEvent`)
+    /// and may draw at `m` or leave the arm out.
+    fn first_person_arm(
+        &self,
+        left: bool,
+        m: glam::Mat4,
+        light: u32,
+        partial: f32,
+        out: &mut Vec<Vertex>,
+    ) {
+        if !crate::mod_api::mods().is_empty() {
+            let eye = self.eye_position().unwrap_or_default();
+            let mut draw = BlockEntityDraw::posed(
+                partial,
+                self.world.game_time,
+                light,
+                eye.map(|c| c.floor() as i32),
+                m,
+                horizon_client::block_entity_render::diffuse_lights(self.dim == Dim::Nether),
+                std::mem::take(out),
+            );
+            let mut canceled = false;
+            self.native_render_arm(
+                self.own_uuid(),
+                self.own_entity_id(),
+                left,
+                &mut draw,
+                &mut canceled,
+            );
+            *out = draw.into_vertices();
+            if canceled {
+                return;
+            }
+        }
         let slim = self.player_model.as_ref().is_some_and(|m| m.slim);
         let Some(arm) = self.res.player_arm(slim, left).as_ref() else {
             return;
@@ -14001,7 +14033,7 @@ impl Game<'_> {
                 // renderPlayerArm
                 let m = to_world
                     * horizon_client::first_person::player_arm_pose(left, inverse_height, attack);
-                self.first_person_arm(left, m, packed, &mut out);
+                self.first_person_arm(left, m, packed, a, &mut out);
                 continue;
             };
             if let Some(id) = maps::map_id(&stack) {
@@ -14012,7 +14044,7 @@ impl Game<'_> {
                 if !self.own_invisible() {
                     for (arm, pose) in map_arm_poses(hold, left, self.pitch, inverse_height, attack)
                     {
-                        self.first_person_arm(arm, to_world * pose, packed, &mut out);
+                        self.first_person_arm(arm, to_world * pose, packed, a, &mut out);
                     }
                 }
                 match hold {

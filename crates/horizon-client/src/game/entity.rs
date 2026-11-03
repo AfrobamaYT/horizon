@@ -513,6 +513,16 @@ impl Game<'_> {
             .chain(self.dragon.iter().map(|e| e.id))
             .chain(self.ominous_spawners.iter().map(|e| e.id))
     }
+    /// The ids of every entity in the level that is not removed: one walk.
+    pub(super) fn live_entity_ids(&self) -> HashSet<u32> {
+        let mut alive: HashSet<u32> = self.entity_ids_off_walk().collect();
+        for_each_entity!(entity_lists_of!(self), entity => {
+            if !entity.is_removed() {
+                alive.insert(entity.id());
+            }
+        });
+        alive
+    }
     /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
     pub(super) fn save_every_entity(
         &mut self,
