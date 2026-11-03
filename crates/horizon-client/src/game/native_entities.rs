@@ -517,118 +517,119 @@ mod tests {
             leaves: leaves.clone(),
         }) as Box<dyn Hooks>]
         .into();
-        assert!(mod_api::MODS.set(mods).is_ok());
-        super::super::native_entity_refs::tests::with_game(|game| {
-            game.native_joins_skip();
-            let base = game.next_entity;
-            let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
-            let sheep = game.res.mob_types().get("minecraft:sheep").unwrap().clone();
-            let child = Mob::new(base + 1, cow.clone(), Vec3::ZERO, 0.0);
-            game.next_entity += 2;
-            game.mobs.push(Mob::new(base + 2, cow, Vec3::ZERO, 0.0));
-            game.native_joins_flush(false, 0);
-            game.mobs.push(child);
-            game.native_joins_flush(false, 0);
-            game.native_joins_flush(false, 0);
-            assert_eq!(
-                *joins.lock().unwrap(),
-                vec![
-                    (base + 2, "minecraft:cow".into(), false),
-                    (base + 1, "minecraft:cow".into(), false)
-                ]
-            );
-            game.next_entity += 1;
-            game.mobs.push(Mob::new(base + 3, sheep, Vec3::ZERO, 0.0));
-            assert!(!game.native_joins_flush(true, base + 3));
-            assert!(!game.mobs.iter().any(|mob| mob.id == base + 3));
-            game.native_entity_left(base + 3);
-            assert!(leaves.lock().unwrap().is_empty());
-            assert_eq!(
-                joins.lock().unwrap().last(),
-                Some(&(base + 3, "minecraft:sheep".into(), true))
-            );
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.native_joins_skip();
+                let base = game.next_entity;
+                let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                let sheep = game.res.mob_types().get("minecraft:sheep").unwrap().clone();
+                let child = Mob::new(base + 1, cow.clone(), Vec3::ZERO, 0.0);
+                game.next_entity += 2;
+                game.mobs.push(Mob::new(base + 2, cow, Vec3::ZERO, 0.0));
+                game.native_joins_flush(false, 0);
+                game.mobs.push(child);
+                game.native_joins_flush(false, 0);
+                game.native_joins_flush(false, 0);
+                assert_eq!(
+                    *joins.lock().unwrap(),
+                    vec![
+                        (base + 2, "minecraft:cow".into(), false),
+                        (base + 1, "minecraft:cow".into(), false)
+                    ]
+                );
+                game.next_entity += 1;
+                game.mobs.push(Mob::new(base + 3, sheep, Vec3::ZERO, 0.0));
+                assert!(!game.native_joins_flush(true, base + 3));
+                assert!(!game.mobs.iter().any(|mob| mob.id == base + 3));
+                game.native_entity_left(base + 3);
+                assert!(leaves.lock().unwrap().is_empty());
+                assert_eq!(
+                    joins.lock().unwrap().last(),
+                    Some(&(base + 3, "minecraft:sheep".into(), true))
+                );
 
-            game.crystals.push(super::super::dragon::Crystal {
-                join: Default::default(),
-                id: base + 4,
-                position: Vec3::ZERO,
-                show_bottom: true,
-                time: 0,
-                beam: None,
-                invulnerable: false,
+                game.crystals.push(super::super::dragon::Crystal {
+                    join: Default::default(),
+                    id: base + 4,
+                    position: Vec3::ZERO,
+                    show_bottom: true,
+                    time: 0,
+                    beam: None,
+                    invulnerable: false,
+                });
+                game.cushions.push(horizon_client::entities::Cushion {
+                    join: Default::default(),
+                    id: base + 5,
+                    position: Vec3::ZERO,
+                    pos: [0; 3],
+                    yaw: 0.0,
+                    color: 0,
+                    check_interval: 0,
+                });
+                game.paintings.push(horizon_client::entities::Painting {
+                    join: Default::default(),
+                    id: base + 6,
+                    pos: [0; 3],
+                    facing: 0,
+                    variant: "minecraft:kebab".into(),
+                    width: 1,
+                    height: 1,
+                    check_interval: 0,
+                });
+                game.item_frames.push(horizon_client::entities::ItemFrame {
+                    join: Default::default(),
+                    id: base + 7,
+                    pos: [0; 3],
+                    facing: 0,
+                    glow: false,
+                    item: None,
+                    rotation: 0,
+                    drop_chance: 1.0,
+                    fixed: false,
+                    invisible: false,
+                    check_interval: 0,
+                });
+                let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
+                dragon.id = base + 8;
+                dragon.join = horizon_client::join_seq::JoinSeq::next();
+                game.dragon = Some(dragon);
+                game.next_entity = base + 8;
+                game.native_joins_flush(true, 0);
+                game.native_joins_flush(true, 0);
+                let seen = joins.lock().unwrap();
+                assert_eq!(
+                    &seen[3..],
+                    &[
+                        (base + 4, "minecraft:end_crystal".into(), true),
+                        (base + 5, "minecraft:cushion".into(), true),
+                        (base + 6, "minecraft:painting".into(), true),
+                        (base + 7, "minecraft:item_frame".into(), true),
+                        (base + 8, "minecraft:ender_dragon".into(), true)
+                    ]
+                );
+                drop(seen);
+                game.tnts.push(super::super::tnt::PrimedTnt {
+                    join: Default::default(),
+                    id: 0,
+                    position: Vec3::ZERO,
+                    previous: Vec3::ZERO,
+                    velocity: Vec3::ZERO,
+                    fuse: 80,
+                    on_ground: false,
+                    owner: None,
+                    guest: None,
+                    no_gravity: false,
+                    power: 4.0,
+                });
+                game.native_joins_flush(false, 0);
+                game.native_joins_flush(false, 0);
+                assert_eq!(game.tnts.last().unwrap().id, base + 9);
+                assert_eq!(
+                    joins.lock().unwrap().last(),
+                    Some(&(base + 9, "minecraft:tnt".into(), false))
+                );
+                assert_eq!(joins.lock().unwrap().len(), 9);
             });
-            game.cushions.push(horizon_client::entities::Cushion {
-                join: Default::default(),
-                id: base + 5,
-                position: Vec3::ZERO,
-                pos: [0; 3],
-                yaw: 0.0,
-                color: 0,
-                check_interval: 0,
-            });
-            game.paintings.push(horizon_client::entities::Painting {
-                join: Default::default(),
-                id: base + 6,
-                pos: [0; 3],
-                facing: 0,
-                variant: "minecraft:kebab".into(),
-                width: 1,
-                height: 1,
-                check_interval: 0,
-            });
-            game.item_frames.push(horizon_client::entities::ItemFrame {
-                join: Default::default(),
-                id: base + 7,
-                pos: [0; 3],
-                facing: 0,
-                glow: false,
-                item: None,
-                rotation: 0,
-                drop_chance: 1.0,
-                fixed: false,
-                invisible: false,
-                check_interval: 0,
-            });
-            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
-            dragon.id = base + 8;
-            dragon.join = horizon_client::join_seq::JoinSeq::next();
-            game.dragon = Some(dragon);
-            game.next_entity = base + 8;
-            game.native_joins_flush(true, 0);
-            game.native_joins_flush(true, 0);
-            let seen = joins.lock().unwrap();
-            assert_eq!(
-                &seen[3..],
-                &[
-                    (base + 4, "minecraft:end_crystal".into(), true),
-                    (base + 5, "minecraft:cushion".into(), true),
-                    (base + 6, "minecraft:painting".into(), true),
-                    (base + 7, "minecraft:item_frame".into(), true),
-                    (base + 8, "minecraft:ender_dragon".into(), true)
-                ]
-            );
-            drop(seen);
-            game.tnts.push(super::super::tnt::PrimedTnt {
-                join: Default::default(),
-                id: 0,
-                position: Vec3::ZERO,
-                previous: Vec3::ZERO,
-                velocity: Vec3::ZERO,
-                fuse: 80,
-                on_ground: false,
-                owner: None,
-                guest: None,
-                no_gravity: false,
-                power: 4.0,
-            });
-            game.native_joins_flush(false, 0);
-            game.native_joins_flush(false, 0);
-            assert_eq!(game.tnts.last().unwrap().id, base + 9);
-            assert_eq!(
-                joins.lock().unwrap().last(),
-                Some(&(base + 9, "minecraft:tnt".into(), false))
-            );
-            assert_eq!(joins.lock().unwrap().len(), 9);
         });
     }
 
