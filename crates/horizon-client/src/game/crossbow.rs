@@ -166,9 +166,8 @@ impl Game<'_> {
         let supported =
             |s: &ItemStack| is_arrow(s) || &*weapon.item == CROSSBOW && &*s.item == FIREWORK_ROCKET;
         extra
-            .off_hand
-            .as_deref()
-            .map(|item| ItemStack::new(item, 1))
+            .slot_stack(horizon_items::equipment::OFFHAND)
+            .cloned()
             .into_iter()
             .chain(extra.main_hand_stack().cloned())
             .find(supported)
