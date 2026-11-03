@@ -55,6 +55,9 @@ pub(super) struct NativeSound {
     pub source: i32,
     pub volume: f32,
     pub pitch: f32,
+    /// The connection of a player who doesn't hear it, as
+    /// `Level.playSound(except, ...)`.
+    pub except: Option<u32>,
 }
 
 /// Mob-system state owned by the game.
