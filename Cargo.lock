@@ -1648,6 +1648,7 @@ dependencies = [
  "sha1",
  "toml",
  "ureq",
+ "url",
  "zip",
 ]
 

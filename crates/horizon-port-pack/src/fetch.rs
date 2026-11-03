@@ -14,6 +14,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha1::{Digest, Sha1};
 use std::{
     collections::HashMap,
     fs,
@@ -221,33 +222,29 @@ pub(crate) fn download(
     dest: &Path,
     overwrite: bool,
 ) -> Result<(), String> {
-    let response = crate::net::agent(url)
-        .get(url)
-        .set("User-Agent", modrinth::AGENT)
-        .call()
-        .map_err(|e| format!("{url}: {e}"))?;
+    let response = crate::net::get_from_hosts(
+        url,
+        &[
+            "cdn.modrinth.com",
+            "github.com",
+            "raw.githubusercontent.com",
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+            "gitlab.com",
+            "maven.neoforged.net",
+        ],
+    )?
+    .ok_or_else(|| format!("{url}: not found"))?;
     store_download(response.into_reader(), sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
 }
 
-/// Read and verify the whole bounded response before publishing it; a failed read leaves no file.
+/// Stream into a private temporary file, publishing only after verification.
 pub(crate) fn store_download(
-    reader: impl Read,
+    mut reader: impl Read,
     sha1: Option<&str>,
     dest: &Path,
     overwrite: bool,
 ) -> Result<(), String> {
-    let mut bytes = Vec::new();
-    reader
-        .take(MAX_JAR + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > MAX_JAR {
-        return Err("download exceeds 512 MiB".into());
-    }
-    let got = sha1_hex(&bytes);
-    if let Some(want) = sha1.filter(|w| !w.eq_ignore_ascii_case(&got)) {
-        return Err(format!("SHA-1 {got}, the pack says {want}"));
-    }
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let suffix = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let part = dest.with_file_name(format!(
@@ -259,39 +256,55 @@ pub(crate) fn store_download(
         .create_new(true)
         .open(&part)
         .map_err(|e| e.to_string())?;
-    let result = file
-        .write_all(&bytes)
-        .map_err(|e| e.to_string())
-        .and_then(|()| {
-            drop(file);
-            if overwrite {
-                fs::rename(&part, dest).map_err(|e| e.to_string())
-            } else {
-                // Publish without replacing a file that appeared while the request was in flight.
-                match fs::hard_link(&part, dest) {
-                    Ok(()) => fs::remove_file(&part).map_err(|e| e.to_string()),
-                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e.to_string()),
-                    Err(_) => {
-                        // No hard links here (FAT, some network mounts): copy into a new file.
-                        let mut out = fs::OpenOptions::new()
-                            .write(true)
-                            .create_new(true)
-                            .open(dest)
-                            .map_err(|e| e.to_string())?;
-                        let written = out.write_all(&bytes).map_err(|e| e.to_string());
-                        drop(out);
-                        if written.is_err() {
-                            let _ = fs::remove_file(dest);
-                        }
-                        let _ = fs::remove_file(&part);
-                        written
+    let result = (|| {
+        let mut hash = Sha1::new();
+        let mut size = 0u64;
+        let mut buf = [0u8; 65536];
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            size += n as u64;
+            if size > MAX_JAR {
+                return Err("download exceeds 512 MiB".into());
+            }
+            hash.update(&buf[..n]);
+            file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        }
+        let got = format!("{:x}", hash.finalize());
+        if let Some(want) = sha1.filter(|want| !want.eq_ignore_ascii_case(&got)) {
+            return Err(format!("SHA-1 {got}, the pack says {want}"));
+        }
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        if overwrite {
+            fs::rename(&part, dest).map_err(|e| e.to_string())
+        } else {
+            match fs::hard_link(&part, dest) {
+                Ok(()) => fs::remove_file(&part).map_err(|e| e.to_string()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e.to_string()),
+                Err(_) => {
+                    let mut out = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(dest)
+                        .map_err(|e| e.to_string())?;
+                    let copied = std::io::copy(
+                        &mut fs::File::open(&part).map_err(|e| e.to_string())?,
+                        &mut out,
+                    )
+                    .map_err(|e| e.to_string());
+                    drop(out);
+                    if copied.is_err() {
+                        let _ = fs::remove_file(dest);
                     }
+                    copied.map(|_| ())
                 }
             }
-        });
-    if result.is_err() {
-        let _ = fs::remove_file(&part);
-    }
+        }
+    })();
+    let _ = fs::remove_file(&part);
     result
 }
 
@@ -370,6 +383,54 @@ pub fn curseforge_names(instance: &Value) -> HashMap<(u64, u64), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn sha1_stream_is_verified_before_atomic_publication() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("port-pack-stream-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("file.jar");
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for name in [
+            "assets/a/test",
+            "data/a/test",
+            "META-INF/neoforge.mods.toml",
+            "Dummy.class",
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"test").unwrap();
+        }
+        let bytes = zip.finish().unwrap().into_inner();
+        let hash = sha1_hex(&bytes);
+        fs::write(&dest, b"existing").unwrap();
+        assert!(store_download(&b"wrong"[..], Some(&hash), &dest, true).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"existing");
+        struct Interrupted;
+        impl Read for Interrupted {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("interrupted"))
+            }
+        }
+        assert!(store_download(Interrupted, Some(&hash), &dest, true).is_err());
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_file(&dest).unwrap();
+        store_download(&bytes[..], Some(&hash), &dest, true).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), bytes);
+        let sha1 = sha1_hex(b"legacy");
+        fs::remove_file(&dest).unwrap();
+        store_download(&b"legacy"[..], Some(&sha1), &dest, true).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"legacy");
+        assert!(store_download(&b"bad"[..], Some(&sha1), &dest, true).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"legacy");
+        assert!(store_download(&b"new"[..], None, &dest, false).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"legacy");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn a_pack_index_name_must_stay_inside_jars() {
