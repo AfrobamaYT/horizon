@@ -176,23 +176,21 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str, injection: &str) -> (std::path::PathBuf, Bundle) {
-        let root =
-            std::env::temp_dir().join(format!("horizon-inject-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("rust/src")).unwrap();
-        fs::write(
-            root.join("rust/Cargo.toml"),
-            "[package]\nname = 'mod-example'\nversion = '1.0.0'\n",
-        )
-        .unwrap();
-        fs::write(root.join("rust/src/lib.rs"), "").unwrap();
-        fs::write(
-            root.join(MANIFEST),
-            format!("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n{injection}"),
-        )
-        .unwrap();
-        let bundle = super::super::bundle(&root, None).unwrap();
+        let root = super::super::tests::dir(&format!("inject-{name}"));
+        super::super::tests::write_bundle(&root, "example", "");
+        let path = root.join(horizon_mods::manifest::MANIFEST);
+        let text = fs::read_to_string(&path).unwrap()
+            + &injection.replace("[[injection]]", "[[native.injection]]");
+        fs::write(path, text).unwrap();
+        let bundle = super::super::bundle_in(&root).unwrap().unwrap();
         (root, bundle)
+    }
+
+    fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, String> {
+        for bundle in mods {
+            super::super::package::tool_manifest(bundle)?;
+        }
+        super::prepare(mods, source)
     }
 
     fn compile_and_run(root: &Path, program: &str) {
@@ -377,9 +375,10 @@ mod tests {
             .unwrap()
         };
         let before = key();
-        fs::write(root.join("rust/src/lib.rs"), "// one line edit").unwrap();
+        fs::write(root.join("src/lib.rs"), "// one line edit").unwrap();
         assert_eq!(before, key());
-        fs::write(root.join("other.rs"), "// mixin input").unwrap();
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::write(root.join("data/table.bin"), "mixin input").unwrap();
         assert_ne!(before, key());
         fs::remove_dir_all(root).unwrap();
     }
@@ -388,7 +387,7 @@ mod tests {
     fn mixin_inputs_inside_api_are_not_excluded_from_cache() {
         let (root, bundle) = fixture(
             "api-helper",
-            "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'rust/src/lib.rs'\n",
+            "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\nhelper = 'src/lib.rs'\n",
         );
         let key = || {
             super::super::inject_cache::key(
@@ -400,19 +399,18 @@ mod tests {
             .unwrap()
         };
         let before = key();
-        fs::write(root.join("rust/src/lib.rs"), "fn changed() {}\n").unwrap();
+        fs::write(root.join("src/lib.rs"), "fn changed() {}\n").unwrap();
         assert_ne!(before, key());
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn rejects_two_routes_for_the_same_source_folder() {
-        let (root, _) = fixture("dual-route", "");
-        let path = root.join(MANIFEST);
+    fn rejects_manual_tool_crate_declarations() {
+        let (root, _) = fixture("tool-route", "");
+        let path = root.join(horizon_mods::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap();
-        fs::write(path, text + "[[crate]]\nid = 'code'\npath = 'rust'\n").unwrap();
-        let error = super::super::bundle(&root, None).unwrap_err();
-        assert!(error.contains("both [api] and [[crate]]"), "{error}");
+        fs::write(path, text + "[[crate]]\nid='code'\npath='src'\n").unwrap();
+        assert!(super::super::bundle_in(&root).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -420,7 +418,7 @@ mod tests {
     fn installed_build_key_tracks_dispatch_order() {
         let (root, first) = fixture("order", "");
         let mut second = first.clone();
-        second.id = "second".into();
+        second.manifest.id = "second".into();
         let a = super::super::version_for(
             "0123456789012345678901234567890123456789",
             "mixins",
