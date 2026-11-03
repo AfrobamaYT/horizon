@@ -216,6 +216,8 @@ pub(super) struct GuestSwap {
         Option<u8>,
         Option<u32>,
     ),
+    /// Whether the outer turn is a fake player.
+    acting_fake: bool,
     /// That turn's `known_movement`.
     known_movement: Vec3,
     /// The packets queued for that guest.
@@ -576,6 +578,7 @@ impl Game<'_> {
             self.lan_acting_permission.replace(g.permission),
             self.lan_acting_entity.replace(g.entity_id as u32),
         );
+        let acting_fake = std::mem::replace(&mut self.lan_acting_fake, !g.participates_online());
         let packets = std::mem::take(&mut self.guest_packets);
         let entity_events = std::mem::take(&mut self.guest_entity_events);
         let cooldown_events = std::mem::take(&mut self.guest_cooldowns);
@@ -655,6 +658,7 @@ impl Game<'_> {
             marks,
             death_cause,
             acting,
+            acting_fake,
             known_movement,
             packets,
             entity_events,
@@ -757,6 +761,7 @@ impl Game<'_> {
             death_cause,
             combat,
             acting,
+            acting_fake,
             known_movement,
             packets,
             entity_events,
@@ -868,6 +873,7 @@ impl Game<'_> {
             self.lan_acting_permission,
             self.lan_acting_entity,
         ) = acting;
+        self.lan_acting_fake = acting_fake;
         self.known_movement = known_movement;
         play.death_cause = std::mem::replace(&mut self.ui.death_cause, death_cause);
         // An ender chest the guest opened: the menu shows their inventory

@@ -704,20 +704,10 @@ API 53 adds `native_entity_leave_level(dimension, entity, kind)`, an entity leav
 still loaded when the server stops. It only hears. It tells item entities, experience orbs and mobs (`kind` is the mob type) so far; check `kind`.
 Bundles that use it need `"hooks": 53`.
 
-API 54 adds fluid tanks on a mod block's block entity, and the fluid helpers that read and change them, in millibuckets (a
-bucket is a thousand). `native_block_entity_fluids` declares the tanks, as `native_block_entity_container` declares the slots: each tank's capacity, the
+API 54 adds fluid tanks on a mod block's block entity, in millibuckets (a bucket is a thousand). `native_block_entity_fluids` declares the tanks, as `native_block_entity_container` declares the slots: each tank's capacity, the
 tanks each face reaches, and which a fill may reach and a drain may take; the tanks' contents live in the entity's saved compound under
-`fluids`, so they survive restarts, and the block's own tick reads them there. `native_fluid_tanks` reads them through a side, `native_fluid_insert`
-fills (first into tanks holding the same fluid, then into empty ones) and answers what did not fit, `native_fluid_extract` drains and answers what it
-took; both also work a cauldron, which gives and takes whole thirds of a bucket and never more than was asked (less than its top third gives nothing), a lava one only whole, and powder snow none, as it is no fluid. Water and lava
-(`minecraft:water`, `minecraft:lava`) are the fluids; a tank holds one at a time. Bundles that use them need `"hooks": 54`.
-
-API 55 adds moving a block's fluids to another block. `native_move_fluids(dimension, from, from_face, to, to_face, max)`
-moves up to `max` millibuckets between two blocks, one fluid, and what the target won't take goes back into the
-source, past the fill sides' leave: the source's tanks just gave the fluid up, so they have the room, and a
-cauldron levels back up by the thirds it gave, which a drain hands out whole. None where `native_fluid_tanks`
-is none at the source, where nothing drainable is, where the target holds no fluids, and within one block.
-Bundles that use it need "hooks": 55.
+`fluids`, so they survive restarts, and the block's own tick reads them there. Other blocks and mods reach them, and a
+cauldron's, through the [`FLUIDS` capability](#a-blocks-fluids). Bundles that use them need `"hooks": 54`.
 
 API 56 adds what the mob effects of a content mod ([mods.md](mods.md)) do, named after vanilla's `MobEffect` methods,
 or NeoForge's event where it has one. On the server, each tick a player or a mob has one,
@@ -2440,6 +2430,14 @@ a dimension.
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
   `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
+- `entity.play_sound(host, sound, volume, pitch)` (`Entity.playSound`: at the entity, under its `sound_source`, for the
+  players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
+  (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
+  `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players near it, for
+  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `NativeSoundSource`) and
+  `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
+  place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
+  client only.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2661,7 +2659,7 @@ API 10, `crates/horizon-client/src/game/native_menus.rs`: menus a server mod bui
 stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is installed on the player's side.
 
 - `native_open_menu(uuid, rows, title, items)` opens one in place of the player's open menu (its window id);
-  `native_set_menu_items(uuid, items)` changes what it shows; `native_close_menu(uuid)` closes it.
+  its slots are [menu slots](#a-menus-slots), written in a transaction; `native_close_menu(uuid)` closes it.
 - **No click moves anything.** Each reaches `native_menu_clicked(uuid, window, slot, button, mode)`, and the client
   is sent the menu, its inventory and its cursor as they were. `slot` counts the menu's own slots first, then the
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
@@ -3143,6 +3141,37 @@ host.transaction(|host, tx| {
 })
 ```
 
+#### A menu's slots
+
+`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`host.menu(player)`). It is
+a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
+(`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
+(`MenuSlotBacking`), and a write goes to that storage through its own handler, so it is kept once by the transaction
+and the storage's rules hold: the player's inventory, armour and off hand by their
+[`ENTITY_ITEMS`](#an-entitys-items) index, a chest's or a furnace's slot through its `ITEMS` handler, a chest minecart's
+or a chested mount's through its `ENTITY_ITEMS`, and the player's ender chest, inventory crafting grid and a mod's chest
+menu (`native_open_menu`), kept by the game. The slot's own rules come first, as a click has them:
+`menu.slot_holds(host, slot, &stack)` is how many of a stack it holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`: a
+furnace's fuel slot one bucket, an armour slot one piece that fits it, a shulker box's slot no shulker box, a result
+slot none), and `menu.slot_gives(host, slot)` whether it gives up what it holds (`Slot.mayPickup`: bound armour stays
+on outside creative). An insert fills that slot alone, and what doesn't fit stays out. A crafting grid a transaction
+changed has its result made again at the outermost commit, once for each player however many writes it took
+(`InventoryMenu.slotsChanged`, with `native_prepare_item_craft`); the result slot takes nothing and gives nothing,
+since taking it is a craft. A menu closed, replaced or reopened since the `MenuRef` was made, or one whose player left,
+reads and writes nothing. `menu.cursor()` is that menu's cursor (`ItemPlace::PlayerCursor { menu }`,
+`forPlayerCursor`), which reaches nothing once the menu is gone, so a kept cursor never reaches the next menu's. The player's screen follows with the tick's container sync.
+
+```rust
+// Put four of the menu's offered emeralds into slot 0 of the open chest, or nothing.
+let (slot, cursor) = (ItemPlace::MenuSlot { menu, slot: 0 }, menu.cursor());
+host.transaction(|host, tx| {
+    let took = cursor.extract(host, tx, &emerald, 4);
+    if took == 4 && slot.insert(host, tx, &emerald, 4) == 4 { Ok(()) } else { Err(()) }
+})
+```
+
+#### A block's fluids
+
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
 fluid's contents; water and lava have none), and a tank fills only from empty or with the same fluid and the same
@@ -3156,8 +3185,6 @@ one fluid between two handlers in rounds shaped as NeoForge's `FluidUtil.tryFlui
 nothing: the source's give and the target's take are simulated until they agree on an amount the target takes
 whole, then the source really gives with that request and the target is filled with exactly what came out. A
 handler whose real calls answer as its simulations never loses fluid and is never warned.
-`native_fluid_insert`, `native_fluid_extract`, `native_fluid_tanks` and `native_move_fluids` use a mod's handler
-where one is registered; they name a fluid by its id, so they leave fluids with components alone.
 
 A handler's `simulate` must answer as its real call does. One that doesn't is a mod bug, warned once naming the
 mod: what it leaves over in a move goes back into the source tank, else into the target. Fluid has no item form
@@ -3195,27 +3222,34 @@ Reading or writing a minecart's slots unpacks its loot table with no player, as 
 
 ### Testing a trait mod
 
-Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
-only what its hook calls, and an unexpected call fails loudly. Drive the hook through
-`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does.
+Every `Host` method defaults to a panic naming it, so a test double implements only what its hook calls, and an
+unexpected call fails loudly. Enable the `testing` feature on the mod's `horizon-client` test dependency. Then
+`testing::with_mods` takes an owned `Mods` list and runs a closure with it installed on the current thread.
+It restores the previous list even if the closure panics. The test allocation is retained because dispatch exposes
+a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
+
+```rust
+use horizon_client::mod_api::{Hooks, Host, TickEvent, dispatch_tick, testing::with_mods};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+
+struct HostDouble;
+impl Host for HostDouble {}
+struct Counter(Arc<AtomicUsize>);
+impl Hooks for Counter {
+    fn tick(&self, _: &mut dyn Host, _: &mut TickEvent) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+let count = Arc::new(AtomicUsize::new(0));
+let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Counter(count.clone()))];
+with_mods(mods.into(), || dispatch_tick(&mut HostDouble));
+assert_eq!(count.load(Ordering::Relaxed), 1);
+```
+
 If a `Host` method returns a game value a test can't build, a double can return `None` instead, as with
 `acting_player() -> Option<NativeServerPlayer>`. If the dispatch function itself takes an unconstructible value,
 such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
 hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
-
-```rust
-struct Stone;
-impl Host for Stone {
-    fn block(&self, _pos: [i32; 3]) -> String {
-        "minecraft:stone".to_string()
-    }
-}
-let mods = [Box::new(MyMod) as Box<dyn Hooks>];
-let mut claimed = false;
-let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
-dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], Hand::Main, hit, 7, &mut claimed);
-assert!(claimed);
-```
 
 ### Adding a hook
 
@@ -3337,7 +3371,7 @@ The following documented `Game` helpers are not in the trait yet:
   `set_display`, `sidebar`, `experience_orbs`,
   `item_entities`, `player`, `panel_recipes`, `recipes`, `component`,
   `set_component`, `remove_component`, `spawn_falling_block`, `explode`,
-  `fluid_tanks` and `container_slots` use gameplay-private types.
+  `container_slots` uses gameplay-private types.
 - `with_mod_block_entity` and `trigger_criterion` are generic or take
   `impl Trait`, so their signatures cannot be called through `dyn Host`.
 

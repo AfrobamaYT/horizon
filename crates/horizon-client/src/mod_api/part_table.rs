@@ -732,7 +732,6 @@ pub(crate) mod tests {
     use std::any::{TypeId, type_name};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// The level the test worlds are.
     fn here() -> LevelRef {
@@ -747,9 +746,6 @@ pub(crate) mod tests {
             side,
         }
     }
-
-    /// How often `test:counted`'s fluid provider, which never answers, was asked.
-    pub(crate) static FLUIDS_ASKED: AtomicUsize = AtomicUsize::new(0);
 
     /// A comparator reading of 5 more than it was.
     struct Gauge;
@@ -839,10 +835,6 @@ pub(crate) mod tests {
                 let two = place.amount(host) == 2;
                 two.then(|| Box::new(Marked(3)) as _)
             });
-            r.block_entity_capability(&FLUIDS, "test:counted", |_, _| {
-                FLUIDS_ASKED.fetch_add(1, Ordering::Relaxed);
-                None
-            });
             r.block_entity_capability_before_game(&FLUIDS, "test:tank", |_, _| {
                 Some(Box::new(Tank))
             });
@@ -852,7 +844,6 @@ pub(crate) mod tests {
             for (id, overstates) in [
                 ("test:gives_more", Overstates::GivesMore),
                 ("test:refuses_more", Overstates::RefusesMore),
-                ("test:gives_lava", Overstates::GivesLava),
             ] {
                 r.block_entity_capability_before_game(&FLUIDS, id, move |_, _| {
                     Some(Box::new(overstates))
@@ -1706,19 +1697,19 @@ pub(crate) mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub(crate) fn game_thread() -> Vec<Box<dyn Hooks>> {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Doubler)];
+    pub(crate) fn game_thread() -> super::super::Mods {
+        let mods: super::super::Mods = vec![Box::new(Doubler) as Box<dyn Hooks>].into();
+        super::super::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
         mods
     }
 
     /// The comparator reading of state `state`, from 1.
-    fn read(mods: &[Box<dyn Hooks>], state: u32) -> i32 {
+    fn read(state: u32) -> i32 {
         let mut output = 1;
         dispatch_analog_output(
             &Level,
-            mods,
             LevelDimension::Overworld,
             BlockPos::new(0, 64, 0),
             BlockStateId(state),
@@ -1746,11 +1737,11 @@ pub(crate) mod tests {
 
     #[test]
     fn a_block_part_answers_for_its_block_only_after_the_mods() {
-        let mods = game_thread();
+        game_thread();
         // Doubled by the mod, then 5 more from the part: (1 * 2) + 5. No world is open, so the
         // tag part is not attached yet.
-        assert_eq!(read(&mods, 1), 7);
-        assert_eq!(read(&mods, 2), 2);
+        assert_eq!(read(1), 7);
+        assert_eq!(read(2), 2);
     }
 
     #[test]
@@ -1760,19 +1751,21 @@ pub(crate) mod tests {
         let resolved = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
+                super::super::install(mods.clone());
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
                 resolved.wait();
-                (read(&mods, 1), read(&mods, 2))
+                (read(1), read(2))
             });
             let server = scope.spawn(|| {
+                super::super::install(mods.clone());
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
                 resolved.wait();
-                let before = (read(&mods, 1), read(&mods, 2));
+                let before = (read(1), read(2));
                 // `/reload` with the tag emptied.
                 resolve(&[]).unwrap();
-                (before, read(&mods, 1))
+                (before, read(1))
             });
             // The tag part comes after the key part of the same mod: (1 * 2) + 5 + 100.
             assert_eq!(client.join().unwrap(), (7, 102));
@@ -2944,13 +2937,12 @@ pub(crate) mod tests {
     }
 
     /// The game's tank under it, but its real calls misanswer: an extract gives 100 mB more than
-    /// asked (`GivesMore`) or its amount as lava (`GivesLava`), or an insert keeps nothing and
+    /// asked (`GivesMore`), or an insert keeps nothing and
     /// answers 100 mB more than offered (`RefusesMore`).
     #[derive(Clone, Copy, PartialEq)]
     enum Overstates {
         GivesMore,
         RefusesMore,
-        GivesLava,
     }
     impl FluidHandler for Overstates {
         fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
@@ -3002,11 +2994,7 @@ pub(crate) mod tests {
                 return host.fluid_tank_extract(on(at, side), tank, max, true);
             }
             let more = if *self == Self::GivesMore { 100 } else { 0 };
-            let out = host.fluid_tank_extract(on(at, side), tank, max + more, false)?;
-            match self {
-                Self::GivesLava => Some(FluidStack::new("minecraft:lava", out.amount)),
-                _ => Some(out),
-            }
+            host.fluid_tank_extract(on(at, side), tank, max + more, false)
         }
     }
 
@@ -3258,27 +3246,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_api_55_move_leaves_a_fluid_with_components_where_it_is() {
-        game_thread();
-        let at = |pos| BlockSide {
-            level: here(),
-            pos,
-            side: None,
-        };
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(potion(500, "minecraft:healing")), true);
-        world.tank(TANK, None, true);
-        let host: &mut dyn Host = &mut world;
-        let plain = |fluid: &FluidStack| !fluid.has_components();
-        assert!(
-            host.transfer_fluids_where(at(SOURCE), at(TANK), 1000, &plain)
-                .is_none()
-        );
-        assert_eq!(world.held(SOURCE), Some(potion(500, "minecraft:healing")));
-        assert_eq!(world.held(TANK), None);
-    }
-
-    #[test]
     fn a_tank_whose_simulation_lies_gets_back_what_it_refused_or_loses_it_and_is_named() {
         game_thread();
         let water = FluidStack::new("minecraft:water", 1000);
@@ -3329,26 +3296,6 @@ pub(crate) mod tests {
             Some(water(300))
         );
         assert_eq!((world.amount(SOURCE), world.amount(TANK)), (300, 700));
-        // The API 54 drain's excess goes back into the tank it came from.
-        world.tanks.get_mut(&SOURCE).unwrap().fills = true;
-        let host: &mut dyn Host = &mut world;
-        let handler = here().capability(host, &FLUIDS, SOURCE, None).unwrap();
-        assert_eq!(
-            host.drain_one_named_fluid(&handler, SOURCE, None, 100),
-            Some(water(100))
-        );
-        assert_eq!(world.amount(SOURCE), 200);
-        // One giving lava from a water tank: the lava is given back, and nothing comes out.
-        let mut world = TankWorld::default();
-        world.tank(SOURCE, Some(water(1000)), true);
-        world.types.insert(SOURCE, "test:gives_lava");
-        let host: &mut dyn Host = &mut world;
-        let handler = here().capability(host, &FLUIDS, SOURCE, None).unwrap();
-        assert_eq!(
-            host.drain_one_named_fluid(&handler, SOURCE, None, 300),
-            None
-        );
-        assert_eq!(world.amount(SOURCE), 700);
         // A target that keeps nothing and answers more than it was offered: it all goes back.
         let mut world = TankWorld::default();
         world.tank(SOURCE, Some(water(1000)), true);
@@ -3384,10 +3331,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_block_entity_part_answers_by_block_and_by_entity_type() {
-        let mods = game_thread();
+        game_thread();
         let ticks = |block| {
             let mut ticks = false;
-            dispatch_block_entity_ticks(&NoHost, &mods, block, &mut ticks);
+            dispatch_block_entity_ticks(&NoHost, block, &mut ticks);
             ticks
         };
         // The ticker is asked by block: the type id is not a block.
@@ -3396,7 +3343,7 @@ pub(crate) mod tests {
         let tick = |kind: &str| {
             let mut entity = ModBlockEntity::default();
             entity.id = kind.into();
-            dispatch_block_entity_tick(&mut NoHost, &mods, [0, 64, 0], &mut entity);
+            dispatch_block_entity_tick(&mut NoHost, [0, 64, 0], &mut entity);
             entity.data.len()
         };
         // The tick is asked by the entity's type, which differs from its block's id.
