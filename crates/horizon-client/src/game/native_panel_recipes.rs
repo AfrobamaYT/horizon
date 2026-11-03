@@ -28,8 +28,11 @@ const GAP: f32 = 6.0;
 /// it) and the row's height under the slot.
 const FLUID_WELL: f32 = 44.0;
 const FLUID_TEXT: f32 = 10.0;
-/// The room a result's chance takes under its slot.
+/// The room a line of chances takes under the results, and the step between
+/// results when one has a chance and the panel has room: the widest chance
+/// text ("99.5%") is 26 px.
 const CHANCE_TEXT: f32 = 9.0;
+const CHANCE_STEP: f32 = 26.0;
 
 /// Recipes a page may show, slots in one, stacks a slot cycles, and tabs.
 const RECIPES: usize = 256;
@@ -201,14 +204,27 @@ impl Shown {
     fn block(&self, room: f32) -> f32 {
         let h = self.inputs().0.1;
         let (_, _, action) = self.places(room);
-        let h = if self.chances.iter().any(Option::is_some) {
-            h.max(((h - SLOT) / 2.0).floor() + SLOT + CHANCE_TEXT)
-        } else {
-            h
-        };
+        let lines = self.result_step(room).1;
+        let h = h.max(((h - SLOT) / 2.0).floor() + SLOT + lines * CHANCE_TEXT);
         match self.action {
             Some(_) => h.max(action.1 + 12.0),
             None => h,
+        }
+    }
+    /// The step between results and the lines of chances under them, `room`
+    /// wide: with a chance they step wide enough for its text when that fits,
+    /// else slot to slot with every other chance a line lower, so two never
+    /// touch.
+    fn result_step(&self, room: f32) -> (f32, f32) {
+        let n = self.chances.len();
+        if !self.chances.iter().any(Option::is_some) {
+            return (SLOT, 0.0);
+        }
+        let first = self.inputs().0.0 + 32.0;
+        if first + n.saturating_sub(1) as f32 * CHANCE_STEP + SLOT <= room {
+            (CHANCE_STEP, 1.0)
+        } else {
+            (SLOT, if n > 1 { 2.0 } else { 1.0 })
         }
     }
     /// The fluid wells' places from the recipe's corner, `room` wide: the
@@ -251,25 +267,21 @@ impl Shown {
         at.truncate(inputs);
         let arrow = (w + 4.0, ((h - 16.0) / 2.0).floor());
         let first = (w + 32.0, ((h - SLOT) / 2.0).floor());
+        let (step, lines) = self.result_step(room);
         let result = (
-            first.0 + self.chances.len().saturating_sub(1) as f32 * SLOT,
+            first.0 + self.chances.len().saturating_sub(1) as f32 * step,
             first.1,
         );
         let action = if result.0 + SLOT + 16.0 <= room {
             (result.0 + SLOT + 4.0, ((h - 12.0) / 2.0).floor())
         } else {
-            // Under the result, past the line its chance is written on.
-            let chance = if self.chances.iter().any(Option::is_some) {
-                CHANCE_TEXT
-            } else {
-                0.0
-            };
-            (result.0 + 3.0, result.1 + SLOT + chance + 2.0)
+            // Under the result, past the lines its chance is written on.
+            (result.0 + 3.0, result.1 + SLOT + lines * CHANCE_TEXT + 2.0)
         };
         while at.len() < inputs {
             at.push((f32::NAN, f32::NAN));
         }
-        at.extend((0..self.chances.len()).map(|j| (first.0 + j as f32 * SLOT, first.1)));
+        at.extend((0..self.chances.len()).map(|j| (first.0 + j as f32 * step, first.1)));
         (at, arrow, action)
     }
 }
@@ -528,6 +540,7 @@ impl Game<'_> {
             let h = r.block(layout.width());
             let (cooking, button) = (r.layout == BrowserLayout::Cooking, r.action);
             let inputs = r.slots.len() - r.chances.len();
+            let staggered = r.result_step(layout.width()).1 > 1.0;
             let (wells_in, wells_out, wells_h) = r.fluid_places(layout.width());
             let atlas = &self.gui.atlas;
             for &(sx, sy) in at.iter().filter(|p| p.0.is_finite()) {
@@ -591,7 +604,15 @@ impl Game<'_> {
                 if let Some(text) = chance {
                     let atlas = &self.gui.atlas;
                     let w = HudBatch::text_width(atlas, text);
-                    let at = (x + sx + ((SLOT - w) / 2.0).floor(), y + sy + SLOT + 1.0);
+                    let line = if staggered && (k - inputs) % 2 == 1 {
+                        CHANCE_TEXT
+                    } else {
+                        0.0
+                    };
+                    let at = (
+                        x + sx + ((SLOT - w) / 2.0).floor(),
+                        y + sy + SLOT + 1.0 + line,
+                    );
                     batch.text(atlas, text, at.0, at.1, rgba(255, 255, 85, 255), true);
                 }
                 if inside(cursor, [x + sx, y + sy, SLOT, SLOT]) {
@@ -795,7 +816,11 @@ mod tests {
         let (at, _, action) = shown.places(200.0);
         assert_eq!(at.len(), 4);
         assert_eq!(at[0], (0.0, 0.0));
-        assert_eq!((at[2].0 - at[1].0, at[3].0 - at[2].0), (SLOT, SLOT));
+        // One has a chance, so they step wide enough for its text.
+        assert_eq!(
+            (at[2].0 - at[1].0, at[3].0 - at[2].0),
+            (CHANCE_STEP, CHANCE_STEP)
+        );
         assert_eq!(at[1].1, at[3].1);
         assert!(action.0 > at[3].0);
     }
@@ -888,6 +913,48 @@ mod tests {
         assert_eq!(well.amount, "250 mB");
         assert_eq!(well.label, "Formic Acid 250 mB");
         assert_eq!(well.tint, 0xFF9A9A9A);
+    }
+
+    /// Too narrow for the wide step, results with chances sit slot to slot and
+    /// write every other chance a line lower; the block and a fallback action
+    /// make room for both lines.
+    #[test]
+    fn narrow_results_stagger_their_chances() {
+        let shown = Shown {
+            layout: BrowserLayout::Single,
+            width: 1,
+            height: 1,
+            slots: vec![Vec::new(); 4],
+            chances: vec![None, Some("25%".into()), Some("12.5%".into())],
+            fluid_inputs: Vec::new(),
+            fluid_outputs: Vec::new(),
+            note: String::new(),
+            action: Some(true),
+        };
+        assert_eq!(shown.result_step(100.0), (SLOT, 2.0));
+        let (at, _, action) = shown.places(100.0);
+        assert_eq!(at[2].0 - at[1].0, SLOT);
+        assert!(action.1 >= at[3].1 + SLOT + 2.0 * CHANCE_TEXT);
+        assert!(shown.block(100.0) >= at[3].1 + SLOT + 2.0 * CHANCE_TEXT);
+        assert_eq!(shown.result_step(200.0), (CHANCE_STEP, 1.0));
+    }
+
+    /// Without a chance the results sit slot to slot, as a crafting result does.
+    #[test]
+    fn results_without_chances_step_by_a_slot() {
+        let shown = Shown {
+            layout: BrowserLayout::Single,
+            width: 1,
+            height: 1,
+            slots: vec![Vec::new(); 3],
+            chances: vec![None, None],
+            fluid_inputs: Vec::new(),
+            fluid_outputs: Vec::new(),
+            note: String::new(),
+            action: None,
+        };
+        let (at, _, _) = shown.places(200.0);
+        assert_eq!(at[2].0 - at[1].0, SLOT);
     }
 
     #[test]
