@@ -421,6 +421,6 @@ mod tests {
         ]);
         assert!(v.remove_entity_ticket(7, [1, 1], true));
         assert_eq!(v.entity_tickets(), vec![(7, set(&[[1, 1]], &[]))]);
-        assert_eq!(removals.into_removed()[0].natural_spawning, true);
+        assert!(removals.into_removed()[0].natural_spawning);
     }
 }
