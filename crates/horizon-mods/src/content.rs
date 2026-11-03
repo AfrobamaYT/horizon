@@ -141,12 +141,10 @@ impl RandomTicks {
     }
 }
 
-/// Boxes selected by one property (legacy) or an ordered tuple of properties.
+/// Boxes selected by an ordered tuple of properties.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BlockShapes {
-    #[serde(default)]
-    pub property: String,
     #[serde(default)]
     pub properties: Vec<String>,
     #[serde(default)]
@@ -155,18 +153,9 @@ pub struct BlockShapes {
 }
 
 impl BlockShapes {
-    pub fn property_names(&self) -> Vec<&str> {
-        if self.property.is_empty() {
-            self.properties.iter().map(String::as_str).collect()
-        } else {
-            vec![self.property.as_str()]
-        }
-    }
-
     fn check(&self) -> Result<(), String> {
-        let names = self.property_names();
-        if (!self.property.is_empty() && !self.properties.is_empty())
-            || names.iter().any(|name| !state_name(name))
+        let names = &self.properties;
+        if names.iter().any(|name| !state_name(name))
             || names.iter().collect::<BTreeSet<_>>().len() != names.len()
             || (names.is_empty() && !self.values.is_empty())
             || (self.values.is_empty() && self.default.is_none())
@@ -1172,15 +1161,17 @@ capabilities = ["registries"]
         )]).unwrap();
         let block = &content.blocks[0];
         assert_eq!(
-            block.shapes.as_ref().unwrap().property_names(),
+            block.shapes.as_ref().unwrap().properties,
             ["facing", "count"]
         );
         assert_eq!(
             block.collision_shapes.as_ref().unwrap().default,
             Some(vec![])
         );
+        assert!(
+            serde_json::from_str::<BlockShapes>(r#"{"property":"axis","default":[]}"#).is_err()
+        );
         for value in [
-            r#"{"property":"axis","properties":["count"],"default":[]}"#,
             r#"{"properties":["axis","axis"],"default":[]}"#,
             r#"{"properties":["Axis"],"default":[]}"#,
             r#"{"properties":["axis","count"],"values":{"x":[]}}"#,
@@ -1920,13 +1911,13 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:stone", "glow": true}"#,
             )],
         );
-        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
-        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[0,0,0,1,1]]}}}"#)]);
+        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
+        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{"x":[[0,0,0,1,1]]}}}"#)]);
         refused(
             "shape-no-values",
             &[(
                 "data/ruby/horizon/block/a.json",
-                br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{}}}"#,
+                br#"{"template":"minecraft:stone","shapes":{"properties":["axis"],"values":{}}}"#,
             )],
         );
         let e = refused(
