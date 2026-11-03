@@ -26,7 +26,8 @@ pub(super) enum NativeBlockReadError {
 }
 
 /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs` or
-/// `logs`, no `#`). An unknown tag or state is false.
+/// `logs`, no `#`). An unknown tag or state is false. A tag with its namespace is looked up as
+/// it is, without allocating.
 pub(super) fn state_in_tag(
     items: &Items,
     registry: &BlockRegistry,
@@ -34,7 +35,7 @@ pub(super) fn state_in_tag(
     tag: &str,
 ) -> bool {
     registry.state(state).is_some_and(|state| {
-        items.block_in_tag(&horizon_client::command::args::normalize(tag), &state.name)
+        items.block_in_tag(&horizon_client::command::args::normalized(tag), &state.name)
     })
 }
 
@@ -45,7 +46,7 @@ pub(super) fn stack_in_tag(items: &Items, stack: &ItemStack, tag: &str) -> bool 
     } else {
         &stack.item
     };
-    items.item_in_tag(&horizon_client::command::args::normalize(tag), item)
+    items.item_in_tag(&horizon_client::command::args::normalized(tag), item)
 }
 
 /// `BlockState.getFluidState`. None for an id no state has.
@@ -60,7 +61,7 @@ pub(super) fn state_fluid(
 /// `FluidState.is(TagKey)` over the merged fluid tags. The empty fluid is in none.
 pub(super) fn fluid_in_tag(items: &Items, fluid: FluidState, tag: &str) -> bool {
     items.fluid_in_tag(
-        &horizon_client::command::args::normalize(tag),
+        &horizon_client::command::args::normalized(tag),
         fluid.kind().name(),
     )
 }
@@ -291,20 +292,38 @@ mod tests {
             assert_eq!(game.native_level_fluid_state(level, [16, 64, 1]), None);
             assert_eq!(game.native_level_fluid_state(level, [1, 4000, 1]), None);
             game.with_level(|_, host, _| {
-                // Not an authoritative level: tags are not the server's, so they read false.
-                assert!(!host.block_state_in_tag(stone, "minecraft:base_stone_overworld"));
-                assert!(!host.fluid_in_tag(FluidState::WATER, "minecraft:water"));
+                // Not an authoritative level: tags are not the server's, so they read None.
+                assert_eq!(
+                    host.block_state_in_tag(stone, "minecraft:base_stone_overworld"),
+                    None
+                );
+                assert_eq!(
+                    host.fluid_in_tag(FluidState::WATER, "minecraft:water"),
+                    None
+                );
                 assert_eq!(host.fluid_state([1, 64, 1]), Some(FluidState::WATER));
             });
             game.options.dedicated = Some(Vec::new());
             game.with_level(|_, host, _| {
-                assert!(host.block_state_in_tag(stone, "minecraft:base_stone_overworld"));
-                assert!(!host.block_state_in_tag(stone, "minecraft:logs"));
+                assert_eq!(
+                    host.block_state_in_tag(stone, "minecraft:base_stone_overworld"),
+                    Some(true)
+                );
+                assert_eq!(
+                    host.block_state_in_tag(stone, "minecraft:logs"),
+                    Some(false)
+                );
                 assert_eq!(host.fluid_state([1, 64, 1]), Some(FluidState::WATER));
                 assert_eq!(host.fluid_state([16, 64, 1]), None);
                 assert_eq!(host.state_fluid_state(slab), Some(FluidState::WATER));
-                assert!(host.fluid_in_tag(FluidState::WATER, "minecraft:water"));
-                assert!(!host.fluid_in_tag(FluidState::EMPTY, "minecraft:water"));
+                assert_eq!(
+                    host.fluid_in_tag(FluidState::WATER, "minecraft:water"),
+                    Some(true)
+                );
+                assert_eq!(
+                    host.fluid_in_tag(FluidState::EMPTY, "minecraft:water"),
+                    Some(false)
+                );
             });
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
             game.session_lock = None;

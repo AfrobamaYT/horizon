@@ -2418,14 +2418,14 @@ pub trait LevelHost {
     }
     /// `BlockState.is(TagKey)`: the block of `state` is in the block tag `tag` (`minecraft:logs`
     /// or `logs`, no `#`), over the world's merged tags, its data packs and content mods
-    /// included. False for an unknown tag or state, and on a client level, whose tags are not
-    /// the server's.
-    fn block_state_in_tag(&self, _state: BlockStateId, _tag: &str) -> bool {
+    /// included. False for an unknown tag or state. None on a client level, whose tags are not
+    /// the server's, as `Host::block_state_in_tag` is.
+    fn block_state_in_tag(&self, _state: BlockStateId, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_state_in_tag")
     }
     /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_state_in_tag` reads
     /// a tag. An empty stack tests `minecraft:air`.
-    fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> bool {
+    fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::item_stack_in_tag")
     }
     /// `BlockGetter.getFluidState`: the fluid at `pos`, the empty fluid where there is none.
@@ -2440,7 +2440,7 @@ pub trait LevelHost {
     }
     /// `FluidState.is(TagKey)`: the fluid is in the fluid tag `tag` (`minecraft:water`), as
     /// `block_state_in_tag` reads a tag. The empty fluid is in none.
-    fn fluid_in_tag(&self, _fluid: FluidState, _tag: &str) -> bool {
+    fn fluid_in_tag(&self, _fluid: FluidState, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::fluid_in_tag")
     }
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.

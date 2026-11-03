@@ -465,10 +465,14 @@ pub fn read_identifier(reader: &mut Reader) -> CmdResult<String> {
 }
 pub use horizon_client_core::identifier::parse_identifier;
 pub fn normalize(id: &str) -> String {
+    normalized(id).into_owned()
+}
+/// `normalize` that borrows an id which already has its namespace.
+pub fn normalized(id: &str) -> std::borrow::Cow<'_, str> {
     match id.split_once(':') {
-        Some(("", path)) => format!("minecraft:{path}"),
-        Some(_) => id.to_owned(),
-        None => format!("minecraft:{id}"),
+        Some(("", path)) => format!("minecraft:{path}").into(),
+        Some(_) => id.into(),
+        None => format!("minecraft:{id}").into(),
     }
 }
 /// SharedSuggestionProvider.matchesSubStr: `input` is a prefix of
