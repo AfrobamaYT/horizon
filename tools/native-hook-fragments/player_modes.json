@@ -15,15 +15,10 @@
       "name": "player_can_use_game_master_blocks",
       "target": "horizon_client::game::native_player_modes::Game<'_>::native_player_can_use_game_master_blocks",
       "receiver": "player"
-    },
-    {
-      "name": "player_set_game_mode",
-      "target": "horizon_client::game::native_player_modes::Game<'_>::native_player_set_game_mode",
-      "receiver": "player"
     }
   ],
-  "rust_summary": "a player's permission level and game mode write through a `PlayerRef` (`native_player_set_game_mode`...).",
-  "doc_summary": "a player's permission level and game mode through a `PlayerRef`, as vanilla's `Player`: `permission_level(host)` (0 to 4), `has_infinite_materials(host)`, `can_use_game_master_blocks(host)` (creative and level 2 or more) and `set_game_mode(host, mode)` (`ServerPlayer.setGameMode`, 0 survival to 3 spectator, as `/gamemode` does; `player_game_mode_changed` may cancel it). The write returns false when nothing changed or for a stale handle, a dead player, or another player than the one whose turn it is. Bundles need \"hooks\": @API:player_modes@.",
+  "rust_summary": "a player's permission level through a `PlayerRef` (`native_player_permission_level`...).",
+  "doc_summary": "a player's permission level through a `PlayerRef`, as vanilla's `Player`: `permission_level(host)` (0 to 4), `has_infinite_materials(host)` and `can_use_game_master_blocks(host)` (creative and level 2 or more). None for a stale handle or a player who isn't online here. Bundles need \"hooks\": @API:player_modes@.",
   "comments": [
     "crates/horizon-client/src/game/native_player_modes.rs"
   ]
