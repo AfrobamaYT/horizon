@@ -1,7 +1,7 @@
 {
   "hooks": [],
   "helpers": [
-    {"name": "mob", "side": "server", "target": "horizon_client::game::native_mob_refs::Game<'_>::native_mob_ref"},
+    {"name": "mob", "side": "both", "target": "horizon_client::game::native_mob_refs::Game<'_>::native_mob_ref"},
     {"name": "mob_target", "side": "server", "target": "horizon_client::game::native_mob_refs::Game<'_>::native_mob_target", "receiver": "mob"},
     {"name": "mob_set_target", "side": "server", "target": "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_target", "receiver": "mob"},
     {"name": "mob_is_aggressive", "side": "server", "target": "horizon_client::game::native_mob_refs::Game<'_>::native_mob_is_aggressive", "receiver": "mob"},

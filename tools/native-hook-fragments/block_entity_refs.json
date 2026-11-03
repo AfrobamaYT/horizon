@@ -1,7 +1,7 @@
 {
   "hooks": [],
   "helpers": [
-    { "name": "block_entity", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_ref" },
+    { "name": "block_entity", "side": "both", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_ref" },
     { "name": "block_entity_kind", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_kind", "receiver": "block_entity" },
     { "name": "block_entity_position", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_position", "receiver": "block_entity" },
     { "name": "block_entity_level", "side": "server", "target": "horizon_client::game::native_block_entity_refs::Game<'_>::native_block_entity_level", "receiver": "block_entity" },
