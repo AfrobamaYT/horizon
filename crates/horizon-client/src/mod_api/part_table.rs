@@ -932,11 +932,12 @@ mod tests {
 
     /// Three shelf slots at (2, 64, 0), answered by the game's handler, else by `Liar`. A slot
     /// takes up to `limit` of one item, the `output` slot none, and gives at most one item per
-    /// extract.
+    /// extract; with `one_per_insert`, it takes at most one per insert too.
     struct Shelf {
         slots: [Option<ItemStack>; 3],
         limit: u32,
         output: Option<usize>,
+        one_per_insert: bool,
         liar: bool,
         dropped: Vec<ItemStack>,
     }
@@ -945,6 +946,7 @@ mod tests {
             slots,
             limit: 64,
             output: None,
+            one_per_insert: false,
             liar: false,
             dropped: Vec::new(),
         }
@@ -1005,7 +1007,8 @@ mod tests {
                 }
                 Some(_) => 0,
             };
-            let put = room.min(stack.count);
+            let most = if self.one_per_insert { 1 } else { u32::MAX };
+            let put = room.min(stack.count).min(most);
             if !simulate && put > 0 {
                 self.slots[slot] = Some(ItemStack {
                     count: held.map_or(0, |h| h.count) + put,
@@ -1472,6 +1475,25 @@ mod tests {
         assert_eq!(player.items(), before);
         assert_eq!(player.slots[&21], stack("test:pouch", 2, 0));
         assert_eq!(player.slots[&22], stack("test:bag", 2, 1));
+    }
+
+    #[test]
+    fn a_truthful_handler_short_of_room_refuses_a_swap_cleanly() {
+        game_thread();
+        // A slot of 64 that takes one item per insert: its capacity, a hint, says 2 bread fit,
+        // but once the apple is out, the empty slot takes one. The apple goes back.
+        let apple = || Some(stack("minecraft:apple", 1, 0));
+        let mut shelf_ = shelf([apple(), None, None]);
+        shelf_.one_per_insert = true;
+        let host: &mut dyn Host = &mut shelf_;
+        let bread = stack("minecraft:bread", 2, 0);
+        assert_eq!(
+            host.set_place_stack(&shelf_slot(0), bread.clone(), false, false),
+            Some(bread)
+        );
+        assert_eq!(shelf_.slots, [apple(), None, None]);
+        assert!(shelf_.dropped.is_empty());
+        assert!(!super::super::item_place::warned_about("the game"));
     }
 
     #[test]

@@ -2960,11 +2960,14 @@ block entity's slot, an item entity, a stack inside another item (`ItemPlace::Ne
 `StackItemHandler`; `host.item_capability(&ITEM_ITEMS, &place)` finds it, else the game's own over
 `item_container`. A handler keeps its contents in the stack, and reads and writes it only with
 `host.place_stack(&place)` and `host.set_place_stack(&place, stack, one_by_one, simulate)`. A write plans with
-`simulate` first, then commits: the old stack must come out whole and the new one go in whole (an occupied slot
-answers with `capacity`, NeoForge's `isValid` and `getCapacityAsLong`), or it refuses before anything moves and
-hands the stack back. So a handler's `simulate` must answer exactly as its real call does, as NeoForge's must, and
-pass it on to `set_place_stack`; one whose real call disagrees is a mod bug: what it leaves out goes back, else is
-dropped at the block, and the game warns once, naming the mod. With `one_by_one`, a changed item is split off a
+`simulate` first, then commits: the old stack must come out whole and the new one go in whole, or it refuses and
+hands the stack back with nothing moved. An occupied slot can't be asked whether the new stack fits until it is
+empty: its `capacity` (NeoForge's `isValid` and `getCapacityAsLong`, how many if the slot were empty) is asked
+first, as a hint; then the old stack comes out, the empty slot is asked with a simulated insert, and where that
+falls short the old stack goes back and the write is refused, with no warning. So a handler's `simulate` must
+answer exactly as its real call does, as NeoForge's must, and pass it on to `set_place_stack`; one whose real call
+disagrees is a mod bug: what it leaves out goes back, else is dropped at the block, and the game warns once,
+naming the mod. With `one_by_one`, a changed item is split off a
 bigger stack: from a player's hand as vanilla's filled bucket (into the inventory, else dropped with no thrower,
 and in creative the hand is kept), from a block entity's or an item's slot into that container's other slots.
 A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and

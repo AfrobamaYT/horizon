@@ -266,10 +266,14 @@ impl Container<'_> {
     }
 
     /// Puts `stack` in `slot` in place of what is there, planned with `simulate` first: all of
-    /// the old stack must come out and all of `stack` fit the emptied slot. With `one_by_one`,
-    /// from a stack of more than one, one item comes out and `stack` goes into the other slots
-    /// (`ItemAccess.forHandlerIndex`). With `simulate`, only the plan. All or nothing, while the
-    /// handler's simulation holds (`broken` when it doesn't).
+    /// the old stack must come out, and `stack` must fit the emptied slot. An occupied slot
+    /// can't be asked that before it is emptied, so its capacity (a hint, as NeoForge's) is
+    /// asked first; then the old stack comes out, the empty slot is asked by a simulated insert,
+    /// and where that falls short the old stack goes back and the write is refused, with
+    /// nothing moved. With `one_by_one`, from a stack of more than one, one item comes out and
+    /// `stack` goes into the other slots (`ItemAccess.forHandlerIndex`). With `simulate`, only
+    /// the plan. All or nothing, while the handler's real calls answer as its simulations did
+    /// (`broken` when they don't).
     fn set(
         &self,
         host: &mut dyn Host,
@@ -338,6 +342,18 @@ impl Container<'_> {
             let out = self.extract(host, slot, old.count, false);
             if !is_exactly(out.as_ref(), old, old.count) {
                 self.broken(host, place, slot, out);
+                return false;
+            }
+            // Emptied, the slot answers for itself. Short of room, the old stack goes back, as
+            // its simulation says it can, and the write is refused cleanly.
+            if stack.count > 0 && self.insert(host, slot, stack.clone(), true).is_some() {
+                let rest = match self.insert(host, slot, old.clone(), true) {
+                    None => self.insert(host, slot, old.clone(), false),
+                    Some(_) => Some(old.clone()),
+                };
+                if rest.is_some() {
+                    self.broken(host, place, slot, rest);
+                }
                 return false;
             }
         }
