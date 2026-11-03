@@ -3059,7 +3059,6 @@ mod tests {
         let Err(error) = pipeline(
             "native-missing-record-test",
             Path::new("missing-mod-folder"),
-            false,
             Profile::Dev,
             Target::Client,
             &|_| panic!("invalid records must not start a build"),
