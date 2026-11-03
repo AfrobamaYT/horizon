@@ -4058,17 +4058,6 @@
       }
     },
     {
-      "name": "prepare_anvil",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_anvil",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "replace",
-        "out": "result"
-      }
-    },
-    {
       "name": "prepare_grindstone",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_grindstone",
