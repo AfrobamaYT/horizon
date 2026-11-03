@@ -134,12 +134,97 @@ impl Game<'_> {
             Body::Other(_) => None,
         }
     }
+    /// Sets the remaining fire ticks (`Entity.setRemainingFireTicks`).
+    pub(super) fn native_entity_set_remaining_fire_ticks(
+        &mut self,
+        entity: EntityRef,
+        ticks: i32,
+    ) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => self.player.as_mut().is_some_and(|p| {
+                p.fire_ticks = ticks;
+                true
+            }),
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guest_mut(conn))
+                .and_then(|guest| guest.motion.as_deref_mut())
+                .is_some_and(|p| {
+                    p.fire_ticks = ticks;
+                    true
+                }),
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.fire_ticks = ticks;
+                m.needs_sync = true;
+                true
+            }),
+            Some(Target::Stand(id)) => self
+                .armor_stands
+                .iter_mut()
+                .find(|s| s.id == id)
+                .is_some_and(|s| {
+                    s.fire_ticks = ticks;
+                    true
+                }),
+            Some(Target::Item(id)) => {
+                self.dropped
+                    .iter_mut()
+                    .find(|i| i.id == id)
+                    .is_some_and(|i| {
+                        i.fire_ticks = ticks;
+                        true
+                    })
+            }
+            _ => false,
+        }
+    }
+    /// Clears positive fire ticks while retaining fire immunity (`Entity.clearFire`).
+    pub(super) fn native_entity_clear_fire(&mut self, entity: EntityRef) -> bool {
+        let Some(ticks) = self.native_entity_fire_ticks(entity) else {
+            return false;
+        };
+        self.native_entity_set_remaining_fire_ticks(entity, ticks.min(0))
+    }
     /// The entity's air (`Entity.getAirSupply`): players and mobs.
     pub(super) fn native_entity_air_supply(&self, entity: EntityRef) -> Option<i32> {
         match self.native_entity_body(entity)? {
             Body::Player(p) => Some(p.air),
             Body::Mob(m) => Some(m.air),
             Body::Other(_) => None,
+        }
+    }
+    /// Sets the entity's air (`Entity.setAirSupply`).
+    pub(super) fn native_entity_set_air_supply(&mut self, entity: EntityRef, air: i32) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => match self.player.as_mut() {
+                Some(player) => {
+                    player.air = air;
+                    true
+                }
+                None => false,
+            },
+            Some(Target::Guest(conn)) => match self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guest_mut(conn))
+                .and_then(|guest| guest.motion.as_deref_mut())
+            {
+                Some(player) => {
+                    player.air = air;
+                    true
+                }
+                None => false,
+            },
+            Some(Target::Mob(id)) => match self.mobs.iter_mut().find(|mob| mob.id == id) {
+                Some(mob) => {
+                    mob.air = air;
+                    mob.needs_sync = true;
+                    true
+                }
+                None => false,
+            },
+            _ => false,
         }
     }
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
@@ -191,6 +276,53 @@ impl Game<'_> {
             }
             Target::Stand(id) => Some(self.armor_stands.iter().find(|s| s.id == id)?.invisible),
             _ => None,
+        }
+    }
+    /// Sets the entity's frozen ticks (`Entity.setTicksFrozen`).
+    pub(super) fn native_entity_set_ticks_frozen(&mut self, entity: EntityRef, ticks: i32) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => self.player.as_mut().is_some_and(|p| {
+                p.ticks_frozen = ticks;
+                true
+            }),
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guest_mut(conn))
+                .and_then(|guest| guest.motion.as_deref_mut())
+                .is_some_and(|p| {
+                    p.ticks_frozen = ticks;
+                    true
+                }),
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.ticks_frozen = ticks;
+                m.needs_sync = true;
+                true
+            }),
+            _ => false,
+        }
+    }
+    /// Sets the entity's shared invisibility flag (`Entity.setInvisible`).
+    pub(super) fn native_entity_set_invisible(
+        &mut self,
+        entity: EntityRef,
+        invisible: bool,
+    ) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.invisible = invisible;
+                m.needs_sync = true;
+                true
+            }),
+            Some(Target::Stand(id)) => self
+                .armor_stands
+                .iter_mut()
+                .find(|s| s.id == id)
+                .is_some_and(|s| {
+                    s.invisible = invisible;
+                    true
+                }),
+            _ => false,
         }
     }
     /// The entity's pose (`Entity.getPose`) as `Pose` names it: `standing`,
