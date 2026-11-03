@@ -2116,15 +2116,7 @@ impl Game<'_> {
         message: &mut Text,
         cancel: &mut bool,
     ) {
-        mod_api::dispatch_server_chat(
-            self,
-            player_id,
-            player,
-            username,
-            raw_text,
-            message,
-            cancel,
-        );
+        mod_api::dispatch_server_chat(self, player_id, player, username, raw_text, message, cancel);
     }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
