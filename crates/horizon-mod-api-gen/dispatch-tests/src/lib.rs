@@ -36,12 +36,13 @@ mod tests {
         pub(super) trait LevelRandomHost: LevelHost {}
         pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
         pub(super) struct Compound;
+        pub(super) struct Tag;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct GameRuleValue;
         pub(super) struct NativePortalShape;
         pub(super) struct NativeNoteInstrument;
-        pub(super) struct NativeNoteBlockChange<'a>(pub &'a ());
+        pub(super) struct NativeNoteBlockChange;
         pub(super) struct NativeExplosionStart<'a>(pub &'a ());
         pub(super) struct NativeItemFished<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
@@ -139,6 +140,9 @@ mod tests {
             pub mod camera {
                 pub struct CameraEntity;
                 pub struct FovPlayer;
+            }
+            pub mod mod_api {
+                pub struct NativeClientInfo;
             }
             pub mod menu {
                 pub struct AnvilCraft;
