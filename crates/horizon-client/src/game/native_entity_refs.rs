@@ -27,19 +27,25 @@ impl Game<'_> {
         if id == 0 {
             return None;
         }
+        // A guest action can take the hub out of the game while its player
+        // state is in place. Resolve that player before looking in the hub.
+        if self.lan_acting_uuid.is_some()
+            && self.lan_acting_entity == Some(entity.id())
+            && self.player.is_some()
+        {
+            return Some(Target::Player);
+        }
         let player = self
             .lan
             .iter()
             .flat_map(|h| h.hub.guests.iter())
             .find(|g| g.placed && g.entity_id == id);
         if let Some(g) = player {
-            // `as_guest` swaps the acting player's state into the game.
-            let acting = self.lan_acting == Some(g.conn) && self.player.is_some();
-            return Some(if acting {
-                Target::Player
-            } else {
-                Target::Guest(g.conn)
-            });
+            // A nested swap can leave other guests' records displaced.
+            return self
+                .lan_acting_uuid
+                .is_none()
+                .then_some(Target::Guest(g.conn));
         }
         match self.level_entity(id)? {
             Target::Mob(id) if !self.mobs.iter().any(|m| m.id == id && !m.removed) => None,
@@ -48,8 +54,9 @@ impl Game<'_> {
     }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None on a client, with no world open, or for no such entity
-    /// in the level in place or among the server's players. API
-    /// @API:entity_handles@.
+    /// in the level in place or among the server's players. During a player
+    /// swap, only the acting player's handle resolves; other player records
+    /// may contain displaced state. API @API:entity_handles@.
     pub(super) fn native_entity(&self, id: u32) -> Option<EntityRef> {
         let entity = EntityRef::new(self.native_lifecycle.epoch()?, id);
         self.native_entity_target(entity).map(|_| entity)
@@ -271,7 +278,7 @@ impl Game<'_> {
     /// API @API:entity_handles@.
     pub(super) fn native_entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
         let words = match self.native_entity_target(entity)? {
-            Target::Player => return self.command_guest(self.lan_acting?).map(|g| g.uuid),
+            Target::Player => return self.lan_acting_uuid,
             Target::Guest(conn) => return self.command_guest(conn).map(|g| g.uuid),
             _ => self.uuid_for(entity.id()),
         };
@@ -477,6 +484,105 @@ pub(super) mod tests {
                 assert!(game.dropped.iter().any(|drop| drop.stack == stack));
                 assert!(game.mobs[index].extra.body.is_none());
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn acting_guest_handles_resolve_while_hub_is_out() {
+        use super::super::lan::LanSettings;
+        use horizon_client::{
+            items::ItemStack,
+            lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
+            mod_api::EquipmentSlot,
+        };
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+
+        with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let mut host = game.lan.take().unwrap();
+            for id in [12, 13] {
+                let (tx, _rx) = std::sync::mpsc::channel();
+                let mut guest = Guest::new(
+                    Joined {
+                        conn: id,
+                        uuid: id as u128,
+                        name: format!("guest{id}"),
+                        properties: Vec::new(),
+                        info: ClientInformation::new(8),
+                        brand: String::new(),
+                        sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                        latency: Arc::new(AtomicI32::new(0)),
+                        address: "127.0.0.1:1".parse().unwrap(),
+                    },
+                    id as i32,
+                    [3.0, 64.0, 5.0],
+                    10,
+                );
+                guest.placed = true;
+                guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
+                host.hub.guests.push(guest);
+            }
+            let other = game
+                .native_lifecycle
+                .epoch()
+                .map(|epoch| horizon_client::mod_api::EntityRef::new(epoch, 13))
+                .unwrap();
+            game.as_guest(&mut host, 12, |game| {
+                let player = game.native_player_ref(12).unwrap();
+                let entity = game.native_entity(12).unwrap();
+                assert_eq!(player.entity, entity);
+                assert_eq!(entity.position(game), Some([3.0, 64.0, 5.0]));
+                assert_eq!(entity.uuid(game), Some(12));
+                let living = game.native_living(entity).unwrap();
+                assert_eq!(
+                    living
+                        .equipment(game, EquipmentSlot::MainHand)
+                        .unwrap()
+                        .item
+                        .as_ref(),
+                    "minecraft:stone"
+                );
+                assert_eq!(game.player.as_ref().unwrap().health.health(), 20.0);
+                assert!(other.position(game).is_none());
+                assert!(game.native_living(other).is_none());
+            })
+            .unwrap();
+            let swap = game.enter_guest(&mut host, 12).unwrap();
+            game.lan = Some(host);
+            assert!(game.native_entity(12).is_some());
+            assert!(game.native_entity(13).is_none());
+            host = game.lan.take().unwrap();
+            game.leave_guest(&mut host, swap);
         });
     }
 
