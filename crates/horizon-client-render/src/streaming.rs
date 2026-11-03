@@ -131,20 +131,9 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// contents.
     fn final_block_entities(
         &self,
-        _proto: &Proto,
-        _writes: &[([i32; 3], u32)],
+        _entries: &[(&Proto, &[([i32; 3], u32)])],
     ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
         Vec::new()
-    }
-    /// Resolve all neighbouring final chunks in one decoration job.
-    fn final_block_entities_batch(
-        &self,
-        entries: &[(&Proto, Vec<([i32; 3], u32)>)],
-    ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
-        entries
-            .iter()
-            .flat_map(|(proto, writes)| self.final_block_entities(proto, writes))
-            .collect()
     }
     fn finish(&self, proto: Proto) -> Chunk;
     /// Whether `proto` has been decorated (a saved one can come back decorated).
@@ -928,16 +917,18 @@ impl<G: ChunkGenerator> Jobs<G> {
                 }
                 generator.decorate(&mut *worker, &mut region);
                 let mut writes = FinalWrites::default();
+                let blocks: [Vec<_>; 9] = std::array::from_fn(|n| {
+                    finals.get(n).map_or_else(Vec::new, |(i, snapshot)| {
+                        generator.final_writes(snapshot, &region[*i])
+                    })
+                });
                 let entries: Vec<_> = finals
                     .iter()
-                    .map(|(i, snapshot)| {
-                        (&region[*i], generator.final_writes(snapshot, &region[*i]))
-                    })
+                    .zip(&blocks)
+                    .map(|((i, _), blocks)| (&region[*i], blocks.as_slice()))
                     .collect();
-                writes.block_entities = generator.final_block_entities_batch(&entries);
-                writes
-                    .blocks
-                    .extend(entries.into_iter().flat_map(|(_, blocks)| blocks));
+                writes.block_entities = generator.final_block_entities(&entries);
+                writes.blocks.extend(blocks.into_iter().flatten());
                 for (i, _) in &finals {
                     region[*i] = Box::new(());
                 }

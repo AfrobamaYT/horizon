@@ -5104,16 +5104,9 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
     }
     fn final_block_entities(
         &self,
-        proto: &crate::streaming::Proto,
-        writes: &[([i32; 3], u32)],
+        entries: &[(&crate::streaming::Proto, &[([i32; 3], u32)])],
     ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
-        self.inner.final_block_entities(proto, writes)
-    }
-    fn final_block_entities_batch(
-        &self,
-        entries: &[(&crate::streaming::Proto, Vec<([i32; 3], u32)>)],
-    ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
-        self.inner.final_block_entities_batch(entries)
+        self.inner.final_block_entities(entries)
     }
     fn decorate(&self, worker: &mut G::Worker, region: &mut [crate::streaming::Proto; 9]) {
         self.inner.decorate(worker, region);

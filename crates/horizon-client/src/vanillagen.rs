@@ -841,16 +841,11 @@ impl ChunkGenerator for VanillaTerrain {
     }
     fn final_block_entities(
         &self,
-        proto: &Proto,
-        writes: &[([i32; 3], u32)],
+        entries: &[(&Proto, &[([i32; 3], u32)])],
     ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
-        self.final_block_entities_batch(&[(proto, writes.to_vec())])
-    }
-    fn final_block_entities_batch(
-        &self,
-        entries: &[(&Proto, Vec<([i32; 3], u32)>)],
-    ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
-        if entries.is_empty() {
+        if !entries.iter().any(|(proto, _)| {
+            matches!(proto.downcast_ref::<VanillaProto>(), Some(VanillaProto::Ready(chunk)) if !chunk.block_entities.is_empty())
+        }) {
             return Vec::new();
         }
         let loot = self.loot.get();
