@@ -22231,7 +22231,8 @@ mod tests {
                 ));
             }
         }
-        let mods: mod_api::Mods = vec![Box::new(ReloadMod) as Box<dyn Hooks>].into();
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
         mod_api::install_parts(&mods).unwrap();
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
@@ -22280,11 +22281,10 @@ mod tests {
         let allowed = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
         let calls = Arc::new(AtomicUsize::new(0));
-        let mods: mod_api::Mods =
-            Arc::from(vec![
-                Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone()))
-                    as Box<dyn Hooks>,
-            ]);
+        let mods: mod_api::Mods = Arc::from([mod_api::ModEntry::new(
+            "right-click-observer",
+            Box::new(Observer(allowed.clone(), cancel.clone(), calls.clone())),
+        )]);
         mod_api::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());

@@ -63,6 +63,9 @@ A native mod targets one exact Horizon source revision: `[compatibility] horizon
 with, and rebuild it after game updates. A source pin is not a promise that a later game or launcher will keep
 building the mod unchanged.
 
+An installed native build with a missing or invalid build record must be rebuilt from an installed
+Horizon version rather than used as a source revision.
+
 Hook points are functions the game calls at fixed places. Their names, parameters and call sites belong to the
 game source and may change. Per-hook catalog versions describe individual contracts, not minimum game versions
 or a cross-release compatibility range.
@@ -1542,17 +1545,15 @@ trusting native code is the player's decision, never an agent's.
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with `performance`. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
    as they are. The Mods page's "Native build" row, `horizon-launcher settings native-profile performance|dev|release`
-   or `native-build --profile ...` pick one (the setting's older value `fast` still means `performance`, and an older
-   settings file's "Release build" switch still picks `release`).
+   or `native-build --profile ...` pick one. `native-mods.json` records the profile.
 
-   A revision whose `Cargo.toml` has no `fast` builds with `release`; `native-mods.json` says which (`profile`).
    Each profile is in the build's key, so their builds never mix and may all stay. `performance` and `dev` share
    `native/target/fast/`: every crate but `horizon-client` is built with the same settings, so switching between
    them recompiles only `horizon-client`, and Cargo keeps both builds of it, so switching back finds the other
    still there. `release` has its own folder (`native/target/release/`). The first build in a folder builds every
    crate once (1½ to 3½ minutes measured through the launcher, depending on the machine); later builds reuse them.
    Post-build steps build with the same
-   profile, reusing its crates. The mods feature is passed while the revision still has it. Cargo downloads the locked crates from crates.io (Horizon has no git
+   profile, reusing its crates. Cargo downloads the locked crates from crates.io (Horizon has no git
    dependencies). The compiler and the horizon-mixins build run at the lowest priority (`rust_toolchain::low_priority`:
    nice 19 and the idle I/O class on Linux, nice 19 on macOS, below-normal priority on Windows), so the desktop and a
    game in play stay smooth; on an otherwise idle computer they still use every core. The log is `native/build.log`;
@@ -1754,7 +1755,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
 Builds a standalone dedicated-server engine into `DIR`, which must not exist yet. `FOLDER` (a mod folder or a
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.
 It reuses the pinned toolchain, source and horizon-mixins and compiles `--no-default-features` (no audio or
-controllers), keeping the mods feature when the revision has it. `--version` pins the Horizon release/Nightly the
+controllers). `--version` pins the Horizon release/Nightly the
 export reuses (explicit for reproducibility). The export holds the built `horizon-engine` executable, prepared resources,
 `native-data/` and `native-mods.json`, and prints its absolute path. It runs on the same OS/architecture as the
 host only (no cross compilation), needs a prepared installed launcher base release, and survives cache pruning
@@ -2842,10 +2843,18 @@ another mod's hook object is not exposed.
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
 
+The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
+The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
+construction, the allocator and the canonical game identity. Source without this template is refused
+before staging trait mods: update the game first.
+
 A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
-and in the server thread's log line, with the bundle's `[mod] id` (the generated executable passes the ids to
-`mod_api::name_mods`; a build that doesn't gives the mod's place in dispatch order, `#0` first). The game still
-stops as before. Render hooks and trait injections are not named yet.
+and in the server thread's log line, with the bundle's `[mod] id`. Each entry passed to
+`entry::main_with` must bind its id and hooks together: `ModEntry::new("example", example::hooks())`.
+The ordered list is `Mods = Arc<[ModEntry]>`; there is no separate naming step or unnamed entry.
+Before installation, `mod_api::mods()` still returns an empty list. Parts retain their registering mod's
+id for startup errors and hook panics. The game still stops as before. Render hooks and trait injections
+are not named yet.
 
 A bundle with an `[api]` package may declare its own injection in the trait:
 
@@ -3241,7 +3250,7 @@ It restores the previous list even if the closure panics. The test allocation is
 a static slice. Call `dispatch_<hook>(&mut host, args…)` inside the closure to build the event as the game does:
 
 ```rust
-use horizon_client::mod_api::{Hooks, Host, TickEvent, dispatch_tick, testing::with_mods};
+use horizon_client::mod_api::{Hooks, Host, ModEntry, TickEvent, dispatch_tick, testing::with_mods};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 struct HostDouble;
@@ -3253,7 +3262,7 @@ impl Hooks for Counter {
     }
 }
 let count = Arc::new(AtomicUsize::new(0));
-let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Counter(count.clone()))];
+let mods = [ModEntry::new("counter", Box::new(Counter(count.clone())))];
 with_mods(mods.into(), || dispatch_tick(&mut HostDouble));
 assert_eq!(count.load(Ordering::Relaxed), 1);
 ```
@@ -3262,6 +3271,7 @@ If a `Host` method returns a game value a test can't build, a double can return 
 `acting_player() -> Option<NativeServerPlayer>`. If the dispatch function itself takes an unconstructible value,
 such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
 hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
+
 
 ### Adding a hook
 

@@ -505,10 +505,13 @@ mod tests {
         }
         let joins = Joins::default();
         let leaves = Arc::new(Mutex::new(Vec::new()));
-        let mods: mod_api::Mods = vec![Box::new(Observer {
-            joins: joins.clone(),
-            leaves: leaves.clone(),
-        }) as Box<dyn Hooks>]
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "join-order-observer",
+            Box::new(Observer {
+                joins: joins.clone(),
+                leaves: leaves.clone(),
+            }),
+        )]
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
