@@ -520,9 +520,8 @@ impl Registrar {
         id: String,
         blocks: Vec<String>,
     ) -> super::BlockEntityTypeKey {
-        if self.block_entity_types.iter().any(|key| key.id() == id) {
-            self.refused
-                .push(format!("duplicate block entity type {id}"));
+        if !horizon_mods::content::namespaced_id(&id) {
+            self.refused.push(format!("invalid block entity type {id}"));
         }
         let key = super::BlockEntityTypeKey(Arc::new(super::block_entity_type::BlockEntityType {
             id,
@@ -867,6 +866,25 @@ pub(crate) mod tests {
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output += 5;
         }
+    }
+
+    #[test]
+    fn invalid_block_entity_type_paths_refuse_registration() {
+        struct Invalid;
+        impl super::super::Hooks for Invalid {
+            fn register(&self, r: &mut Registrar) {
+                for path in ["", "other:press", "Uppercase", "has space"] {
+                    r.block_entity_type(path).build();
+                }
+            }
+        }
+        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        assert_eq!(errors.len(), 4);
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.starts_with("invalid block entity type test:"))
+        );
     }
 
     /// The block entity of type `doubler:press_entity`, held by block `test:press`: it ticks, and
