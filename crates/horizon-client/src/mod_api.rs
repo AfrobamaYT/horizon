@@ -3685,6 +3685,8 @@ mod tests {
             names: &names,
             trade: None,
             maps: None,
+            limited_crafting: false,
+            known_recipes: None,
         };
         let potion = ItemStack::new("minecraft:potion", 1);
         let seen = Arc::new(Mutex::new(Vec::new()));
