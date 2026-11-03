@@ -5865,9 +5865,8 @@ impl Game<'_> {
     /// the rename text and vanilla's result, and its `output`, `xp_cost`
     /// and `material_cost` start at vanilla's for the mods to change; set
     /// `cancel` for no result. Negative costs are clamped to zero, unlike
-    /// the NeoForge event.
-    /// Both sides: the
-    /// server's menu, and a server's client menu with the local player.
+    /// the NeoForge event. Both sides: the server's menu, and a server's
+    /// client menu with the local player.
     /// @API:anvil_update@.
     pub(super) fn native_anvil_update(
         &mut self,
