@@ -978,6 +978,24 @@ pub(super) mod tests {
             assert!(!game.run_command_quietly("tp fake 0 64 0"));
             game.lan_acting = None;
             let mut host = game.lan.take().unwrap();
+            for (conn, learns) in [(fake_id, false), (real_id, true)] {
+                game.as_guest(&mut host, conn, |game| {
+                    let mut book =
+                        horizon_client::items::ItemStack::new("minecraft:knowledge_book", 1);
+                    book.data_mut().set_other(
+                        "minecraft:recipes",
+                        Some(horizon_world::nbt::Tag::List(vec![
+                            horizon_world::nbt::Tag::String("minecraft:stick".into()),
+                        ])),
+                    );
+                    let slot = game.held_slot();
+                    *game.stack_in_mut(slot) = Some(book.clone());
+                    assert!(game.use_knowledge_book(&book));
+                    assert!(game.stack_in(slot).is_none());
+                    assert_eq!(game.level.recipe_book.knows("minecraft:stick"), learns);
+                })
+                .unwrap();
+            }
             game.guest_packets
                 .push(Clientbound::SetSimulationDistance(Distance { distance: 4 }));
             game.as_guest(&mut host, fake_id, |game| {
@@ -991,7 +1009,7 @@ pub(super) mod tests {
                 game.award_stat("custom", "minecraft:jump", 1);
                 assert_eq!(game.stats.get("custom", "minecraft:jump"), before);
                 game.trigger("minecraft:tick", |_, _| panic!("fake criterion evaluated"));
-                assert_eq!(game.recipe_unlocked(&["minecraft:test".into()]), 0);
+                assert_eq!(game.award_recipes(&["minecraft:test".into()]), 0);
                 let source = horizon_client::command::args::Selector {
                     kind: 's',
                     limit: 1,

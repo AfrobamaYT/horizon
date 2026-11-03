@@ -676,9 +676,6 @@ impl Game<'_> {
     /// number of recipe displays taken back out because a mod refused their
     /// discovery.
     pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) -> usize {
-        if self.lan_acting_fake {
-            return 0;
-        }
         let mut allowed = Vec::with_capacity(unlocked.len());
         let mut refused = Vec::new();
         let mut taken_back = 0;
@@ -726,6 +723,16 @@ impl Game<'_> {
         }
         taken_back
     }
+    /// `ServerPlayer.awardRecipes`: fake players learn no recipes.
+    pub(super) fn award_recipes(&mut self, recipes: &[String]) -> usize {
+        if self.lan_acting_fake {
+            return 0;
+        }
+        let index = &world_stations!(self).recipe_index;
+        let (count, unlocked) = self.level.recipe_book.add_recipes(index, recipes);
+        count.saturating_sub(self.recipe_unlocked(&unlocked))
+    }
+
     /// `KnowledgeBookItem.use`: the recipes the book names become known and it
     /// is used up. A book naming a recipe this server does not have is
     /// vanilla's `Invalid recipe: {}` and knows nothing. Whether the click
@@ -746,7 +753,7 @@ impl Game<'_> {
         *self.stack_in_mut(slot) = hand;
         match result {
             Ok(unlocked) => {
-                self.recipe_unlocked(&unlocked);
+                self.award_recipes(&unlocked);
                 self.award_stat("used", &stack.item, 1);
                 self.swing_arm();
                 true
@@ -779,10 +786,6 @@ impl Game<'_> {
             .filter(|r| world_stations!(self).recipe_index.contains(r))
             .cloned()
             .collect();
-        let (_, unlocked) = self
-            .level
-            .recipe_book
-            .add_recipes(&world_stations!(self).recipe_index, &rewards);
         for table in &a.rewards.loot {
             let items = self
                 .res
@@ -841,7 +844,7 @@ impl Game<'_> {
                 }
             }
         }
-        self.recipe_unlocked(&unlocked);
+        self.award_recipes(&rewards);
     }
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {
