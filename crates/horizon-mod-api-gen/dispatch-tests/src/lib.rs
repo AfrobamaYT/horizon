@@ -265,7 +265,10 @@ mod tests {
             }
         }
         let observed = Arc::new(Mutex::new(Vec::new()));
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Observer(observed.clone()))];
+        let mods = [ModEntry::new(
+            "observer",
+            Box::new(Observer(observed.clone())),
+        )];
         for progress_type in [NativeProgressType::Grant, NativeProgressType::Revoke] {
             dispatch_player_advancement_progress(
                 &mut TestHost,
@@ -381,10 +384,13 @@ mod tests {
     }
     #[test]
     fn menu_button_mutates_entity_and_cursor_once() {
-        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Mod {
-            id: 1,
-            calls: Arc::new(Mutex::new(Vec::new())),
-        })];
+        let mods = [ModEntry::new(
+            "menu-button",
+            Box::new(Mod {
+                id: 1,
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }),
+        )];
         let context = generated::horizon_client::menu::MenuButtonContext {
             player: 123,
             player_entity_id: 42,
