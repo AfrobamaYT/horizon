@@ -894,7 +894,7 @@ impl Game<'_> {
         let Some(owner) = self.serving.as_ref().map(|s| s.owner) else {
             return Vec::new();
         };
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -902,13 +902,9 @@ impl Game<'_> {
             let conn = g.conn;
             // Commands.performCommand runs in the player's level.
             let (back, theirs) = (self.dim, super::Dim::from_id(&g.dimension));
-            let entered = theirs == back || self.enter_level(Some(&mut host), theirs).is_ok();
-            if entered && let Some(swap) = self.enter_guest(&mut host, conn) {
+            let entered = theirs == back || self.enter_level(None, theirs).is_ok();
+            if entered && let Some(swap) = self.enter_guest(conn) {
                 let command = command.trim_start_matches('/').to_owned();
-                // The hub is back in place while the command runs, as for a
-                // guest's own (`run_guest_commands`): selectors see every
-                // player (`team join … @a`), and `defaultgamemode` reaches it.
-                self.lan = Some(host);
                 let lines = self.as_console(|g| {
                     g.chat_capture = Some(Vec::new());
                     // A command a native mod registered goes to the mods
@@ -919,16 +915,18 @@ impl Game<'_> {
                     }
                     g.chat_capture.take().unwrap_or_default()
                 });
-                host = self.lan.take().expect("a command puts the hub back");
-                self.leave_guest(&mut host, swap);
-                host.hub.sync_all_effects();
+                self.leave_guest(swap);
+                if let Some(host) = self.lan.as_mut() {
+                    host.hub.sync_all_effects();
+                }
                 // A teleport into another level happens before its feedback is
                 // sent, and what the command earned is announced before it too.
-                self.run_level_teleports(&mut host);
-                self.announce_guest_advancements(&mut host);
+                self.run_level_teleports();
+                self.announce_guest_advancements();
                 for line in lines {
                     out.push(line.plain());
-                    host.hub.send_to(
+                    if let Some(host) = self.lan.as_ref() {
+                        host.hub.send_to(
                         conn,
                         &horizon_protocol::packets::play::Clientbound::SystemChat(
                             horizon_protocol::packets::play::SystemChat {
@@ -938,17 +936,17 @@ impl Game<'_> {
                                 overlay: false,
                             },
                         ),
-                    );
+                        );
+                    }
                 }
-                self.send_admin_feedback(&mut host, Some(conn));
+                self.send_admin_feedback(Some(conn));
             }
             if theirs != back
-                && let Err(e) = self.enter_level(Some(&mut host), back)
+                && let Err(e) = self.enter_level(None, back)
             {
                 log::error!("could not reopen {}: {e}", back.id());
             }
         }
-        self.lan = Some(host);
         out
     }
 
