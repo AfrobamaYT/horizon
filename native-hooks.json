@@ -313,10 +313,6 @@
       "target": "horizon_client::game::native_motion::Game<'_>::native_push_player", "side": "client"
     },
     {
-      "name": "set_flying_speed",
-      "target": "horizon_client::game::native_motion::Game<'_>::native_set_flying_speed", "side": "server"
-    },
-    {
       "name": "net_send_to_player",
       "target": "horizon_client::game::native_net::Game<'_>::native_net_send_to_player", "side": "server"
     },
@@ -331,10 +327,6 @@
     {
       "name": "open_menu",
       "target": "horizon_client::game::native_menus::Game<'_>::native_open_menu", "side": "server"
-    },
-    {
-      "name": "set_menu_items",
-      "target": "horizon_client::game::native_menus::Game<'_>::native_set_menu_items", "side": "server"
     },
     {
       "name": "close_menu",
@@ -2461,7 +2453,7 @@
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_critical_hit",
       "neoforge": "CriticalHitEvent",
-      "side": "both",
+      "side": "server",
       "cancellable": false,
       "mod_api": {
         "contract": "listen"
