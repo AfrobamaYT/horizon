@@ -81,8 +81,8 @@ pub trait PlaceProvider: Send + Sync + 'static {
 /// provider, if the game has one.
 pub struct ItemCapabilityKey<T: ?Sized + 'static> {
     pub name: &'static str,
-    default: Option<fn(&mut dyn Host, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
-    handler: PhantomData<fn() -> Box<T>>,
+    pub(super) default: Option<fn(&mut dyn Host, &ItemPlace, &ItemStack) -> Option<Box<T>>>,
+    pub(super) handler: PhantomData<fn() -> Box<T>>,
 }
 
 impl<T: ?Sized + 'static> ItemCapabilityKey<T> {

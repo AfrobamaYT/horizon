@@ -3158,6 +3158,15 @@ fluid with components. `level.capability(host, &FLUIDS, pos, side)` finds a hand
 undone and tried again with that part, so a cauldron, which gives whole thirds and never more than asked, gives
 what fits: asked for a bucket with room for 500 mB, it gives one level, 334 mB.
 
+Fluid held by an item is `ITEM_FLUIDS` (NeoForge's `Capabilities.Fluid.ITEM`), found where its stack lives, as
+`ITEM_ITEMS` is: `place.capability(host, &ITEM_FLUIDS)` gives a `ResourceHandler<FluidResource>` for the item at
+that `ItemPlace`, and a write rewrites the item there by an exchange of one, so from a stack of more than one the
+changed item splits off (`r.item_capability(&ITEM_FLUIDS, "mymod:canister", …)` answers it for a mod's item). The
+game answers it for vanilla's buckets, as NeoForge's `BucketResourceHandler` does: one tank of 1000 mB, filled and
+drained whole, an empty bucket taking plain water or lava and becoming its full bucket, a full one becoming an empty
+bucket. `move_resources` moves between an item and a block as between two blocks: a full cauldron fills a bucket in a
+player's slot, and two thirds of one fill none.
+
 The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
 move undone, in its transaction, and is warned once naming the mod, and `move_resources` returns `Overanswered`
 naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so neither end keeps
