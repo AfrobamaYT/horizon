@@ -564,6 +564,7 @@ impl Game<'_> {
         let death_cause = std::mem::replace(&mut self.ui.death_cause, play.death_cause.take());
         let [x, y, z] = g.known_movement;
         let known_movement = std::mem::replace(&mut self.known_movement, Vec3::new(x, y, z));
+        self.lan_guest_swaps.push(conn);
         let acting = (
             self.lan_acting.replace(conn),
             self.lan_acting_name.replace(g.name.clone()),
@@ -837,6 +838,8 @@ impl Game<'_> {
                 }),
             );
         }
+        debug_assert_eq!(self.lan_guest_swaps.last(), Some(&conn));
+        self.lan_guest_swaps.pop();
         (
             self.lan_acting,
             self.lan_acting_name,
@@ -2520,6 +2523,11 @@ impl Game<'_> {
             S::SetGameRule(p) if host.hub.guests[gi].permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
+                        if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
+                            && let Some(value) = self.ui.rules.get(rule.name)
+                        {
+                            self.game_rule_changed(rule.name, value);
+                        }
                         let guest = &host.hub.guests[gi];
                         self.native_world_game_rule_change(
                             guest.uuid,
@@ -3326,9 +3334,14 @@ impl Game<'_> {
             self.run_command(&c.command)
         };
         self.ui.registries.permission = level;
-        let lines = self.chat_capture.take().unwrap_or_default();
+        let mut lines = self.chat_capture.take().unwrap_or_default();
         let mut host = self.lan.take().expect("a command puts the hub back");
         self.leave_guest(&mut host, swap);
+        if std::mem::take(&mut self.save_after_guest_turn) {
+            self.lan = Some(host);
+            lines.push(self.save_all_reply());
+            host = self.lan.take().expect("saving puts the hub back");
+        }
         host.hub.sync_all_effects();
         if !c.integrated {
             // A teleport into another level happens before its feedback is sent.
@@ -3844,6 +3857,34 @@ impl Game<'_> {
     /// `ServerPlayer.die` for a guest whose health has run out: the death
     /// message, the loot and experience, the death screen.
     fn guest_die(&mut self, host: &mut LanHost, gi: usize, conn: u32) {
+        if host.hub.guests[gi].health <= 0.0
+            && !host.hub.guests[gi].dead
+            && !horizon_client::mod_api::mods().is_empty()
+        {
+            // LivingDeathEvent: a canceled death keeps the player at 1 health.
+            let (damage_type, attacker) =
+                match host.play.get(&conn).and_then(|p| p.death_cause.as_deref()) {
+                    Some("death.attack.genericKill") => ("minecraft:generic_kill", 0),
+                    _ => self
+                        .guest_combat
+                        .get(&conn)
+                        .and_then(|tracker| tracker.last_blow())
+                        .unwrap_or(("minecraft:generic", 0)),
+                };
+            let (damage_type, entity) = (damage_type.to_owned(), host.hub.guests[gi].entity_id);
+            let mut cancel = false;
+            self.native_living_death(
+                entity as u32,
+                "minecraft:player",
+                &damage_type,
+                attacker,
+                &mut cancel,
+            );
+            if cancel {
+                host.hub.guests[gi].health = 1.0;
+                return;
+            }
+        }
         if host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead {
             self.guest_forget_digging(host, conn);
             // FishingHook.shouldStopFishing: its owner is dead.
@@ -5078,7 +5119,7 @@ impl Game<'_> {
                 };
                 let mut amount = rest.min(i32::MAX as u32) as i32;
                 game.native_player_exp_change(player, &name, &mut amount);
-                game.give_experience_points(amount.max(0));
+                game.give_experience_points(amount.max(0), false);
             }
         });
     }

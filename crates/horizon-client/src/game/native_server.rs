@@ -284,9 +284,8 @@ impl PlayerRead<'_> {
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// Resolve an online UUID on this server. During a player swap only the
-    /// acting player is available; other players return None because swaps can
-    /// nest and their records may hold displaced state. API @API:player_read@.
+    /// Resolve an online UUID on this server. During a nested player swap,
+    /// outer players whose records are displaced return None. API @API:player_read@.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let (_, id) = self.player_lookup(uuid)?;
@@ -297,10 +296,7 @@ impl Game<'_> {
     }
 
     fn player_lookup(&self, uuid: u128) -> Option<(PlayerRead<'_>, u32)> {
-        if let Some(acting) = self.lan_acting_uuid {
-            if acting != uuid {
-                return None;
-            }
+        if self.lan_acting_uuid == Some(uuid) {
             return Some((
                 PlayerRead::Acting {
                     mode: self.mode_id(),
@@ -310,14 +306,14 @@ impl Game<'_> {
             ));
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
-            host.hub
-                .guests
-                .iter()
-                .find(|guest| guest.placed && guest.uuid == uuid)
+            host.hub.guests.iter().find(|guest| {
+                guest.placed && guest.uuid == uuid && !self.lan_guest_swaps.contains(&guest.conn)
+            })
         }) {
             return Some((PlayerRead::Guest(guest), guest.entity_id as u32));
         }
-        if self.serving.is_some()
+        if self.lan_acting_uuid.is_none()
+            && self.serving.is_some()
             && self
                 .level
                 .player_uuid
@@ -343,9 +339,25 @@ impl Game<'_> {
     }
 
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
-    /// None for stale, offline or unavailable players (including other players during a swap).
+    /// None for stale, offline or unavailable players (including displaced outer players).
     pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<i32> {
         Some(self.player_handle_read(player)?.mode())
+    }
+
+    /// Changes a player's game mode as `ServerPlayer.setGameMode` and
+    /// `/gamemode` do, including the cancellable change hook and ability
+    /// updates. Modes are 0 survival, 1 creative, 2 adventure and 3 spectator.
+    /// Returns false for an invalid mode, stale or unavailable player, another
+    /// player during a swap, no change, or a canceled change. API
+    /// @API:player_game_mode_write@.
+    pub(super) fn native_player_set_game_mode(&mut self, player: PlayerRef, mode: i32) -> bool {
+        if !(0..=3).contains(&mode) || self.player_handle_read(player).is_none() {
+            return false;
+        }
+        let mut changed = false;
+        self.native_as_player(player.uuid, |game| {
+            changed = game.set_game_mode(super::game_mode::mode_from_id(mode));
+        }) && changed
     }
 
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
@@ -1023,7 +1035,7 @@ impl Game<'_> {
         self.native_as_player(uuid, |game| {
             let rest = if points > 0 { game.mending(points) } else { 0 };
             if rest > 0 {
-                game.give_experience_points(rest as i32);
+                game.give_experience_points(rest as i32, false);
             }
         })
     }

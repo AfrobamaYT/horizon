@@ -1273,6 +1273,7 @@ name = "horizon-assets"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "log",
  "png",
  "serde",
  "serde_json",
@@ -1497,6 +1498,7 @@ name = "horizon-command"
 version = "0.1.0"
 dependencies = [
  "horizon-client-core",
+ "horizon-core",
  "horizon-protocol",
  "horizon-world",
 ]
@@ -1665,6 +1667,7 @@ dependencies = [
  "horizon-core",
  "horizon-world",
  "ipconfig",
+ "log",
  "serde_json",
  "sha1",
  "sha2",
@@ -1694,6 +1697,7 @@ dependencies = [
  "ab_glyph",
  "base64",
  "chrono",
+ "getrandom 0.3.4",
  "horizon-anticheat",
  "horizon-bench",
  "horizon-chat-filter",

@@ -42,7 +42,7 @@ impl Game<'_> {
             .map(|_| ChunkStatus::Full)
     }
     /// The state at `pos`, if its chunk is loaded and `y` is inside the world.
-    fn native_level_state(
+    pub(super) fn native_level_state(
         &self,
         level: LevelRef,
         pos: [i32; 3],
