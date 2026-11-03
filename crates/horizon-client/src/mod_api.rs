@@ -481,6 +481,33 @@ impl LevelRef {
     }
 }
 
+/// A chunk position in an open level. A handle may be kept after unloading;
+/// reads resolve it again and return `None` when it is no longer loaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ChunkRef {
+    pub(crate) level: LevelRef,
+    pub(crate) pos: [i32; 2],
+}
+
+impl ChunkRef {
+    /// The chunk coordinates, `[x, z]`.
+    pub fn pos(self) -> [i32; 2] {
+        self.pos
+    }
+    /// The level containing the chunk.
+    pub fn level(self) -> LevelRef {
+        self.level
+    }
+}
+
+/// The status of a loaded chunk that Horizon can expose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ChunkStatus {
+    /// A full chunk in a level's live world.
+    Full,
+}
+
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeBlockShapeKind {

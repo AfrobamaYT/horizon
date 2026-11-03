@@ -297,6 +297,49 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
+        use horizon_client::{
+            chunk::Chunk,
+            mod_api::{ChunkStatus, Host, NativeAuthority},
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            game.world
+                .chunks
+                .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
+            let chunk = game.chunk(level, [-2, 3]).unwrap();
+            assert_eq!(chunk.pos(), [-2, 3]);
+            assert_eq!(chunk.level(), level);
+            assert_eq!(chunk.loaded(game), Some(true));
+            assert_eq!(chunk.status(game), Some(ChunkStatus::Full));
+            assert!(game.chunk(level, [99, 99]).is_none());
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
+            assert_eq!(chunk.status(game), Some(ChunkStatus::Full));
+            assert_eq!(game.chunk(level, [-2, 3]), Some(chunk));
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            game.world.chunks.remove(&(-2, 3));
+            assert_eq!(chunk.loaded(game), None);
+            assert_eq!(chunk.status(game), None);
+            game.world
+                .chunks
+                .insert((-2, 3), Arc::new(Chunk::empty(-2, 3)));
+            game.native_lifecycle
+                .begin_open(NativeAuthority::IntegratedServer);
+            assert!(game.chunk(level, [-2, 3]).is_none());
+            assert_eq!(chunk.loaded(game), None);
+            assert_eq!(chunk.status(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn entities_in_returns_readable_handles_and_intersects_boxes() {
         use horizon_client::entities::ArmorStand;
         use horizon_client::mod_api::{LevelRef, NativeWorldEpoch};
