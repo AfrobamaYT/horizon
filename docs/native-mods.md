@@ -3144,15 +3144,18 @@ block entity's slot, an item entity, a stack inside another item (`ItemPlace::Ne
 `ITEM_ITEMS` for an item with a `ResourceHandler<ItemResource>` made for that place, and
 `r.item_capability_before_game` ahead of the game's own over `item_container`;
 `host.item_capability(&ITEM_ITEMS, &place)` asks them in the same order. A handler keeps its contents in the
-stack, and reads and writes it only with `host.place_stack(&place)` and `host.set_place_stack(&place, stack,
-one_by_one, tx)`. A write runs in a transaction of its own, nested in `tx`: the old stack must come out whole and
-the new one go in whole, in passes while a pass takes something (a handler may take less per call than it holds),
-or it aborts and hands the stack back with nothing moved. A handler answering more than it was asked or offered is
-a mod bug: the move it was part of is undone, and the game warns once, naming the mod. With `one_by_one`, a
-changed item is split off a bigger stack: from a player's hand as vanilla's filled bucket (into the inventory,
-else dropped with no thrower, and in creative the hand is kept), from a block entity's or an item's slot into that
-container's other slots. A stack of two backpacks holding the changed item splits too: one backpack is rewritten holding the change, and
-the other stays as it was.
+stack, and reads and writes it through the place, as NeoForge 26.3's `ItemAccess`: `place.stack(host)`,
+`place.resource(host)` and `place.amount(host)`, and `place.insert`, `place.extract` and `place.exchange(host, tx,
+&resource, amount)`, which answer how much moved. Each runs in a transaction of its own, nested in `tx`, and changes
+the place where it is, journaled, so an abort puts it back at every level of an item inside an item. A handler
+answering more than it was asked or offered is a mod bug: the move it was part of is undone, and the game warns
+once, naming the mod. What doesn't stack with the place, or doesn't fit, goes where vanilla puts an item split off
+it, so `exchange(host, tx, &filled, 1)` on a stack of empty buckets is vanilla's filled bucket: from a player's
+place into their inventory, else dropped with no thrower (a creative player's hand takes anything and gives them
+one if they have none, as `forInfiniteMaterials`); from an item entity dropped beside it; from a block entity's,
+an entity's or an item's slot into that container's other slots (`forHandlerIndex`). A handler rewrites its item
+with an `exchange` of one. An exchange inside one of two backpacks is done in one of them: that one is rewritten
+holding the change and splits off, and the other stays as it was.
 
 Fluids are the capability `FLUIDS` (NeoForge's `Capabilities.Fluid.BLOCK`), answered by a `FluidHandler` in
 millibuckets. A `FluidStack` is a fluid id, an amount and data components, kept as an item stack's are (a potion
@@ -3197,7 +3200,7 @@ change. A panic unwinding out of the closure aborts that transaction as it passe
 its state is the game's, so the game's journal covers it.
 
 `ItemPlace::EntitySlot { entity, slot }` is slot `slot` of such an entity's inventory (NeoForge's
-`Capabilities.Item.ENTITY`), read and written through `place_stack` and `set_place_stack` like any other place.
+`Capabilities.Item.ENTITY`), read and written like any other place.
 Reading or writing a minecart's slots unpacks its loot table with no player, as `getChestVehicleItem` does.
 
 ### Testing a trait mod

@@ -336,7 +336,7 @@ mod tests {
     use horizon_client::{
         chunk::Chunk,
         items::ItemStack,
-        mod_api::{Host, NativeAuthority, NativeBlockUpdateFlags},
+        mod_api::{Host, ItemResource, NativeAuthority, NativeBlockUpdateFlags},
     };
     use std::{sync::Arc, time::Instant};
 
@@ -400,6 +400,8 @@ mod tests {
         assert!(game.native_level_set_block(level, [2, 64, 0], full, flags));
         assert!(game.native_level_set_block(level, [4, 64, 0], jukebox, flags));
         let sticks = |count| ItemStack::new("minecraft:stick", count);
+        let stick = ItemResource::of(&sticks(1));
+        let rod = ItemResource::of(&ItemStack::new("minecraft:blaze_rod", 1));
         let host: &mut dyn Host = &mut game;
 
         // Five in, then a committed child takes two and an aborted one adds three: the
@@ -535,9 +537,9 @@ mod tests {
         assert!(j.playing);
         assert_eq!(j.ticks, 0, "the new disc's song starts from its beginning");
 
-        // A player's place: a bucket of three in the hand splits one off, filled; the hand
-        // keeps two and the filled one goes to the inventory, the cursor changes too, and what
-        // doesn't fit would be thrown. Aborted, the hand, the inventory and the cursor are as
+        // A player's place: one of three buckets in the hand is exchanged for a filled one; the
+        // hand keeps two and the filled one goes to the inventory, the cursor changes too, and
+        // what doesn't fit would be thrown. Aborted, the hand, the inventory and the cursor are as
         // they were, and nothing was thrown.
         game.player = Some(
             super::super::PlayerMotion::new(
@@ -565,14 +567,11 @@ mod tests {
             hand: horizon_client::first_person::Hand::Main,
         };
         let cursor = horizon_client::mod_api::ItemPlace::PlayerCursor { player: me };
+        let water = ItemResource::of(&bucket("minecraft:water_bucket", 1));
         let host: &mut dyn Host = &mut game;
         let _ = host.transaction(|host, tx| {
-            let water = bucket("minecraft:water_bucket", 1);
-            assert!(host.set_place_stack(&hand, water, true, tx).is_none());
-            assert!(
-                host.set_place_stack(&cursor, bucket("minecraft:stick", 4), false, tx)
-                    .is_none()
-            );
+            assert_eq!(hand.exchange(host, tx, &water, 1), 1);
+            assert_eq!(cursor.insert(host, tx, &stick, 4), 4);
             Err::<(), ()>(())
         });
         assert_eq!(
@@ -591,18 +590,15 @@ mod tests {
 
         // Committed, the split stands and the full inventory throws the filled bucket.
         let host: &mut dyn Host = &mut game;
-        let _ = host.transaction(|host, tx| {
-            let water = bucket("minecraft:water_bucket", 1);
-            host.set_place_stack(&hand, water, true, tx);
-            Ok::<_, ()>(())
-        });
+        let _ = host.transaction(|host, tx| Ok::<_, ()>(hand.exchange(host, tx, &water, 1)));
         assert_eq!(game.inventory[0], Some(bucket("minecraft:bucket", 2)));
         assert_eq!(game.dropped.len(), dropped + 1);
         let thrown = &game.dropped[game.dropped.len() - 1].stack;
         assert_eq!(&*thrown.item, "minecraft:water_bucket");
 
         // A chest minecart's, a chest boat's and a chested donkey's slots: an abort puts back
-        // what a write and a split changed; a commit keeps it.
+        // what an insert changed; a commit keeps an exchange, whose new item goes into the next
+        // free slot.
         let mut chested = horizon_world::nbt::Compound::new();
         chested.insert("ChestedHorse".into(), horizon_world::nbt::Tag::Byte(1));
         let vehicles = [
@@ -645,7 +641,7 @@ mod tests {
                 entity: id,
                 slot: 0,
             };
-            host.set_place_stack(&place, sticks(1), false, tx);
+            place.insert(host, tx, &stick, 1);
             Err::<(), ()>(())
         });
         assert_eq!(len(&game), before);
@@ -656,32 +652,26 @@ mod tests {
                 .unwrap_or_else(|| panic!("{kind} not summoned"));
             let place = |slot| horizon_client::mod_api::ItemPlace::EntitySlot { entity: id, slot };
             let host: &mut dyn Host = &mut game;
-            let set = host.transaction(|host, tx| {
-                Ok::<_, ()>(host.set_place_stack(&place(0), sticks(5), false, tx))
-            });
-            assert_eq!(set, Ok(None), "{kind}");
+            let went =
+                host.transaction(|host, tx| Ok::<_, ()>(place(0).insert(host, tx, &stick, 5)));
+            assert_eq!(went, Ok(5), "{kind}");
             let _ = host.transaction(|host, tx| {
-                host.set_place_stack(&place(0), sticks(9), false, tx);
-                // From five, one splits off changed into the next free slot.
-                host.set_place_stack(&place(1), sticks(2), false, tx);
+                assert_eq!(place(0).insert(host, tx, &stick, 4), 4, "{kind}");
+                assert_eq!(place(1).insert(host, tx, &stick, 2), 2, "{kind}");
                 Err::<(), ()>(())
             });
             let host: &mut dyn Host = &mut game;
-            assert_eq!(host.place_stack(&place(0)), Some(sticks(5)), "{kind}");
-            assert_eq!(host.place_stack(&place(1)), None, "{kind}");
-            let _ = host.transaction(|host, tx| {
-                let one = ItemStack::new("minecraft:blaze_rod", 1);
-                host.set_place_stack(&place(0), one, true, tx);
-                Ok::<_, ()>(())
-            });
+            assert_eq!(place(0).stack(host), Some(sticks(5)), "{kind}");
+            assert_eq!(place(1).stack(host), None, "{kind}");
+            let _ = host.transaction(|host, tx| Ok::<_, ()>(place(0).exchange(host, tx, &rod, 1)));
             let host: &mut dyn Host = &mut game;
-            assert_eq!(host.place_stack(&place(0)), Some(sticks(4)), "{kind}");
-            let rod = host.place_stack(&place(1)).map(|s| s.item);
+            assert_eq!(place(0).stack(host), Some(sticks(4)), "{kind}");
+            let rod = place(1).stack(host).map(|s| s.item);
             assert_eq!(rod.as_deref(), Some("minecraft:blaze_rod"), "{kind}");
         }
 
-        // An item entity: emptied in an aborted transaction, it's back whole; one split off
-        // a stack of four in a committed one is dropped beside it at the commit; emptied in a
+        // An item entity: emptied in an aborted transaction, it's back whole; one of four
+        // exchanged in a committed one is dropped beside it at the commit; emptied in a
         // committed one, it's gone.
         game.spawn_item(sticks(4), [0.5, 70.0, 6.5], [0.0; 3], 10);
         let id = game.dropped.last().unwrap().id;
@@ -690,23 +680,18 @@ mod tests {
         let items = count(&game);
         let host: &mut dyn Host = &mut game;
         let _ = host.transaction(|host, tx| {
-            host.set_place_stack(&entity, sticks(0), false, tx);
-            assert!(host.place_stack(&entity).is_none());
+            assert_eq!(entity.extract(host, tx, &stick, 4), 4);
+            assert!(entity.stack(host).is_none());
             Err::<(), ()>(())
         });
         let host: &mut dyn Host = &mut game;
-        assert_eq!(host.place_stack(&entity), Some(sticks(4)));
-        let _ = host.transaction(|host, tx| {
-            let rod = ItemStack::new("minecraft:blaze_rod", 1);
-            Ok::<_, ()>(host.set_place_stack(&entity, rod, true, tx))
-        });
+        assert_eq!(entity.stack(host), Some(sticks(4)));
+        let _ = host.transaction(|host, tx| Ok::<_, ()>(entity.exchange(host, tx, &rod, 1)));
         let host: &mut dyn Host = &mut game;
-        assert_eq!(host.place_stack(&entity), Some(sticks(3)));
+        assert_eq!(entity.stack(host), Some(sticks(3)));
         assert_eq!(count(&game), items + 1);
         let host: &mut dyn Host = &mut game;
-        let _ = host.transaction(|host, tx| {
-            Ok::<_, ()>(host.set_place_stack(&entity, sticks(0), false, tx))
-        });
+        let _ = host.transaction(|host, tx| Ok::<_, ()>(entity.extract(host, tx, &stick, 3)));
         assert!(game.dropped.iter().all(|e| e.id != id));
         assert_eq!(count(&game), items);
 

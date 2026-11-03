@@ -1,17 +1,17 @@
 //! Items as holders (arismoko/horizon#41 §7): an item's own capability, such as
 //! [`ITEM_ITEMS`] for a backpack's slots, reached where its stack lives. NeoForge 26.3 reaches
-//! an item through an `ItemAccess`; here the place is an [`ItemPlace`], and every read and write
-//! of a place goes through [`place_stack`](dyn Host::place_stack) and
-//! [`set_place_stack`](dyn Host::set_place_stack), so the inventory holding the stack is the one
-//! changed. Handlers hold no borrow of the game, as block entity capabilities don't (#71).
+//! an item through an `ItemAccess`; here the place is an [`ItemPlace`], read and written as one
+//! ([`ItemPlace::insert`], [`extract`](ItemPlace::extract) and
+//! [`exchange`](ItemPlace::exchange)), so the inventory holding the stack is the one changed.
+//! Handlers hold no borrow of the game, as block entity capabilities don't (#71).
 //!
-//! A write runs in a transaction of its own, nested in the caller's: the old stack must come out
-//! whole and the new one go in whole, or it aborts, and nothing moved. A handler answering more
-//! than it was asked is a mod bug, named once, and the write aborts the same way.
+//! A write runs in a transaction of its own, nested in the caller's, and changes the place where
+//! it is, journaled: an abort puts it back, at every level of an item inside an item. A handler
+//! answering more than it was asked is a mod bug, named once, and the write aborts.
 use super::{
     Capability, Direction, Hand, Host, ITEMS, ItemResource, ItemStack, ResourceHandler, Transaction,
 };
-use std::{cell::RefCell, collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
+use std::{collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
 
 /// Where a stack lives.
 #[non_exhaustive]
@@ -47,25 +47,32 @@ pub enum ItemPlace {
 }
 
 /// A mod's own places ([`ItemPlace::Mod`]), registered with
-/// [`Registrar::place_provider`](super::Registrar::place_provider). Like a handler, it holds no
-/// borrow: its stacks live where the mod keeps them (a player's attachments).
+/// [`Registrar::place_provider`](super::Registrar::place_provider): NeoForge's own `ItemAccess`s.
+/// Like a handler, it holds no borrow: its stacks live where the mod keeps them (a player's
+/// attachments).
 pub trait PlaceProvider: Send + Sync + 'static {
     /// The stack at `key`, if any.
     fn stack(&self, host: &mut dyn Host, key: u64) -> Option<ItemStack>;
-    /// Puts `stack` in place of what is at `key` (a count of 0 empties it), in transaction `tx`.
-    /// With `one_by_one`, `stack` stands for one item of what is there: from a stack of more
-    /// than one, `key` keeps the others and `stack` goes where the mod puts a split-off item,
-    /// such as the player's inventory, else the ground (`host.set_game_stack` does both for a
-    /// player's place). All or nothing: false when nothing changed, as where `key` is no longer
-    /// a place.
-    fn set_stack(
+    /// Puts up to `amount` of `resource` at `key`, in transaction `tx`: how much went. What
+    /// doesn't stack with what is there may go where the mod puts it, such as the player's
+    /// inventory (`ItemAccess.insert`); none where `key` is no longer a place.
+    fn insert(
         &self,
         host: &mut dyn Host,
         tx: &Transaction,
         key: u64,
-        stack: ItemStack,
-        one_by_one: bool,
-    ) -> bool;
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32;
+    /// Takes up to `amount` of `resource` from `key`, in transaction `tx`: how much came.
+    fn extract(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        key: u64,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32;
 }
 
 /// An item capability: its name, the handler trait `T` it answers with, and the game's own
@@ -88,9 +95,8 @@ impl<T: ?Sized + 'static> ItemCapabilityKey<T> {
 }
 
 /// Items held by an item, as NeoForge 26.3's `Capabilities.Item.ITEM`: a handler for the item at
-/// one place, whose changes rewrite the item there through
-/// [`set_place_stack`](dyn Host::set_place_stack) with `one_by_one`, so from a stack of more
-/// than one the changed item splits off. The game answers it for an item with `item_container`
+/// one place, whose changes rewrite the item there with an [`exchange`](ItemPlace::exchange) of
+/// one, so from a stack of more than one the changed item splits off. The game answers it for an item with `item_container`
 /// slots, kept in its `minecraft:container`.
 pub const ITEM_ITEMS: ItemCapabilityKey<dyn ResourceHandler<ItemResource>> = ItemCapabilityKey {
     name: "horizon:item_items",
@@ -106,13 +112,27 @@ pub const ITEM_ITEMS: ItemCapabilityKey<dyn ResourceHandler<ItemResource>> = Ite
 struct GameItemItems(ItemPlace);
 impl GameItemItems {
     fn slot(&self, host: &mut dyn Host, index: usize) -> Option<ItemStack> {
-        let held = host.place_stack(&self.0)?;
+        let held = self.0.stack(host)?;
         host.item_container_slots(&held)?.get(index)?.clone()
+    }
+    /// Rewrites one item at `.0` as `changed`: `moved` when that goes through, else 0.
+    fn rewrite(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        changed: &ItemStack,
+        moved: u32,
+    ) -> u32 {
+        match self.0.exchange(host, tx, &ItemResource::of(changed), 1) {
+            1 => moved,
+            _ => 0,
+        }
     }
 }
 impl ResourceHandler<ItemResource> for GameItemItems {
     fn size(&self, host: &mut dyn Host) -> usize {
-        host.place_stack(&self.0)
+        self.0
+            .stack(host)
             .and_then(|held| host.item_container_slots(&held))
             .map_or(0, |slots| slots.len())
     }
@@ -123,7 +143,7 @@ impl ResourceHandler<ItemResource> for GameItemItems {
         self.slot(host, index).map_or(0, |stack| stack.count)
     }
     fn capacity(&self, host: &mut dyn Host, index: usize, resource: &ItemResource) -> u32 {
-        host.place_stack(&self.0).map_or(0, |held| {
+        self.0.stack(host).map_or(0, |held| {
             host.item_container_capacity(&held, index, &resource.to_stack(1))
         })
     }
@@ -136,15 +156,16 @@ impl ResourceHandler<ItemResource> for GameItemItems {
         amount: u32,
     ) -> u32 {
         let offer = resource.to_stack(amount);
-        let Some((went, changed)) = host
-            .place_stack(&self.0)
+        let Some((went, changed)) = self
+            .0
+            .stack(host)
             .and_then(|held| host.item_container_insert_slot(&held, index, &offer))
         else {
             return 0;
         };
-        match went > 0 && host.set_place_stack(&self.0, changed, true, tx).is_none() {
-            true => went.min(amount),
-            false => 0,
+        match went {
+            0 => 0,
+            went => self.rewrite(host, tx, &changed, went.min(amount)),
         }
     }
     fn extract(
@@ -161,31 +182,14 @@ impl ResourceHandler<ItemResource> for GameItemItems {
         {
             return 0;
         }
-        let Some((Some(out), changed)) = host
-            .place_stack(&self.0)
+        let Some((Some(out), changed)) = self
+            .0
+            .stack(host)
             .and_then(|held| host.item_container_extract(&held, index, amount))
         else {
             return 0;
         };
-        match host.set_place_stack(&self.0, changed, true, tx).is_none() {
-            true => out.count.min(amount),
-            false => 0,
-        }
-    }
-}
-
-thread_local! {
-    /// One item of the stack at a place, held here while a write into one of its slots
-    /// (`set_nested`) changes it: reads and writes of that place come here, so nothing real
-    /// changes until the whole write is known to go through.
-    static STAGED: RefCell<Vec<(ItemPlace, ItemStack)>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Drops the newest staged item, also when a handler panics.
-struct Unstage;
-impl Drop for Unstage {
-    fn drop(&mut self) {
-        STAGED.with_borrow_mut(Vec::pop);
+        self.rewrite(host, tx, &changed, out.count.min(amount))
     }
 }
 
@@ -210,63 +214,193 @@ pub(super) fn warned_about(owner: &str) -> bool {
     broken.as_ref().is_some_and(|owners| owners.contains(owner))
 }
 
-/// Puts `stack` in slot `slot` of `handler`, at `at`, in place of what is there, in a transaction
-/// of its own: all of the old stack must come out, and all of `stack` go in, in passes until one
-/// takes nothing (`Inventory.add` and NeoForge's insert loops: a handler may take less per call
-/// than it holds). With `one_by_one`, from a stack of more than one, one item comes out and
-/// `stack` goes into the other slots (`ItemAccess.forHandlerIndex`). Anything short aborts it,
-/// so nothing moved: false.
-fn set_slot(
-    handler: &Capability<dyn ResourceHandler<ItemResource>>,
-    host: &mut dyn Host,
-    at: &dyn Debug,
-    slot: usize,
-    stack: ItemStack,
-    one_by_one: bool,
-) -> bool {
-    let fill = |host: &mut dyn Host, tx: &Transaction, slot: usize, left: &mut u32| {
-        let resource = ItemResource::of(&stack);
-        while *left > 0 {
-            let asked = *left;
-            let went = handler.insert(host, tx, slot, &resource, asked);
-            match handler.checked(went, asked, at) {
-                Some(0) => break,
-                Some(went) => *left -= went,
-                None => return Err(()),
+impl ItemPlace {
+    /// The stack here, if any (`getResource` and `getAmount`).
+    pub fn stack(&self, host: &mut dyn Host) -> Option<ItemStack> {
+        match self {
+            ItemPlace::BlockEntity { pos, side, slot } => {
+                let handler = host.capability(&ITEMS, *pos, *side)?;
+                let resource = handler.resource(host, *slot)?;
+                Some(resource.to_stack(handler.amount(host, *slot)))
             }
+            ItemPlace::Nested { parent, slot } => {
+                let handler = host.item_capability(&ITEM_ITEMS, parent)?;
+                let resource = handler.resource(host, *slot)?;
+                Some(resource.to_stack(handler.amount(host, *slot)))
+            }
+            ItemPlace::Mod { provider, key } => {
+                super::place_provider(provider)?.1.stack(host, *key)
+            }
+            _ => host.game_stack(self),
         }
-        Ok(())
-    };
-    let result = host.transaction(|host, tx| {
-        let take = |host: &mut dyn Host, resource: &ItemResource, asked: u32| {
-            let came = handler.extract(host, tx, slot, resource, asked);
-            handler
-                .checked(came, asked, at)
-                .filter(|&came| came == asked)
-                .ok_or(())
+        .filter(|stack| stack.count > 0)
+    }
+
+    /// What is here, without its count (`ItemAccess.getResource`).
+    pub fn resource(&self, host: &mut dyn Host) -> Option<ItemResource> {
+        self.stack(host).map(|stack| ItemResource::of(&stack))
+    }
+
+    /// How many are here (`ItemAccess.getAmount`).
+    pub fn amount(&self, host: &mut dyn Host) -> u32 {
+        self.stack(host).map_or(0, |stack| stack.count)
+    }
+
+    /// Puts up to `amount` of `resource` here, in transaction `tx`: how much went
+    /// (`ItemAccess.insert`). What doesn't stack with what is here, or doesn't fit, goes where
+    /// vanilla puts an item split off it: a player's into their inventory, else dropped at the
+    /// root commit (a creative player's hand takes anything, and gives them one if they have
+    /// none, as `forInfiniteMaterials`); an item entity's dropped beside it at the root commit; a
+    /// block entity's, an entity's or an item's slot's into that container's other slots
+    /// (`forHandlerIndex`); a mod's place's where its [`PlaceProvider`] puts it.
+    pub fn insert(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32 {
+        self.moved(host, tx, resource, amount, true)
+    }
+
+    /// Takes up to `amount` of `resource` from here, in transaction `tx`: how much came
+    /// (`ItemAccess.extract`). A creative player's hand gives without losing any.
+    pub fn extract(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32 {
+        self.moved(host, tx, resource, amount, false)
+    }
+
+    /// Takes `amount` of what is here and puts as many of `resource` in their place
+    /// (`ItemAccess.exchange`): from a bigger stack, they go where [`insert`](Self::insert) puts
+    /// what doesn't stack, as vanilla's `ItemUtils.createFilledResult` puts a filled bucket. In a
+    /// transaction of its own, nested in `tx`: all of it, or nothing and 0. Inside an item that
+    /// shares its place with others like it, it's done in one of them: that one splits off,
+    /// changed, and the others stay as they were.
+    pub fn exchange(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        resource: &ItemResource,
+        amount: u32,
+    ) -> u32 {
+        let _ = tx;
+        let swap = |host: &mut dyn Host, tx: &Transaction| {
+            let old = self.resource(host).ok_or(())?;
+            let out = self.extract(host, tx, &old, amount);
+            match out == amount && self.insert(host, tx, resource, out) == out {
+                true => Ok(out),
+                false => Err(()),
+            }
         };
-        let old = handler.resource(host, slot);
-        let count = handler.amount(host, slot);
-        let mut left = stack.count;
-        match old {
-            Some(old) if one_by_one && count > 1 => {
-                take(host, &old, 1)?;
-                for other in (0..handler.size(host)).filter(|&other| other != slot) {
-                    fill(host, tx, other, &mut left)?;
+        let done = host.transaction(|host, tx| match self {
+            ItemPlace::Nested { parent, .. } => one_of(parent, host, tx, swap),
+            _ => swap(host, tx),
+        });
+        done.unwrap_or(0)
+    }
+
+    /// `insert` or `extract`, in a transaction of its own: a handler answering more than it was
+    /// asked has it undone, and its mod named.
+    fn moved(
+        &self,
+        host: &mut dyn Host,
+        tx: &Transaction,
+        resource: &ItemResource,
+        amount: u32,
+        insert: bool,
+    ) -> u32 {
+        let _ = tx;
+        if amount == 0 {
+            return 0;
+        }
+        // Through index `slot` of `handler`, in passes while one moves something
+        // (`Inventory.add`'s and NeoForge's loops: a handler may move less per call than it
+        // could). What `slot` doesn't take goes to the other indices (`forHandlerIndex`).
+        let through = |handler: Capability<dyn ResourceHandler<ItemResource>>,
+                       host: &mut dyn Host,
+                       tx: &Transaction,
+                       slot: usize| {
+            let others = match insert {
+                true => (0..handler.size(host)).filter(|&i| i != slot).collect(),
+                false => Vec::new(),
+            };
+            let mut left = amount;
+            for index in std::iter::once(slot).chain(others) {
+                while left > 0 {
+                    let moved = match insert {
+                        true => handler.insert(host, tx, index, resource, left),
+                        false => handler.extract(host, tx, index, resource, left),
+                    };
+                    match handler.checked(moved, left, self).ok_or(())? {
+                        0 => break,
+                        moved => left -= moved,
+                    }
                 }
             }
-            Some(old) => {
-                take(host, &old, count)?;
-                fill(host, tx, slot, &mut left)?;
+            Ok(amount - left)
+        };
+        let moved = host.transaction(|host, tx| match self {
+            ItemPlace::BlockEntity { pos, side, slot } => {
+                let handler = host.capability(&ITEMS, *pos, *side).ok_or(())?;
+                through(handler, host, tx, *slot)
             }
-            None => fill(host, tx, slot, &mut left)?,
-        }
-        match left {
-            0 => Ok(()),
-            _ => Err(()),
-        }
-    });
-    result.is_ok()
+            ItemPlace::Nested { parent, slot } => {
+                let handler = host.item_capability(&ITEM_ITEMS, parent).ok_or(())?;
+                through(handler, host, tx, *slot)
+            }
+            ItemPlace::Mod { provider, key } => {
+                let (owner, provider) = super::place_provider(provider).ok_or(())?;
+                let moved = match insert {
+                    true => provider.insert(host, tx, *key, resource, amount),
+                    false => provider.extract(host, tx, *key, resource, amount),
+                };
+                if moved > amount {
+                    warn_broken(Some(owner), self);
+                    return Err(());
+                }
+                Ok(moved)
+            }
+            _ => Ok(match insert {
+                true => host.game_insert(self, resource.to_stack(amount), tx),
+                false => host.game_extract(self, resource.to_stack(amount), tx),
+            }),
+        });
+        moved.unwrap_or(0)
+    }
+}
+
+/// Runs `f` on one item of the stack at `parent` (NeoForge's `oneByOne`): from a stack of more,
+/// the others are taken out first and put back after, and if `f` changed the one, it goes where
+/// an exchange puts it. All written in place in `tx`, so an abort puts every level back.
+fn one_of(
+    parent: &ItemPlace,
+    host: &mut dyn Host,
+    tx: &Transaction,
+    f: impl FnOnce(&mut dyn Host, &Transaction) -> Result<u32, ()>,
+) -> Result<u32, ()> {
+    let held = parent.stack(host).ok_or(())?;
+    let others = held.count - 1;
+    if others == 0 {
+        return f(host, tx);
+    }
+    let resource = ItemResource::of(&held);
+    let all = |moved: u32, asked: u32| (moved == asked).then_some(()).ok_or(());
+    all(parent.extract(host, tx, &resource, others), others)?;
+    let moved = f(host, tx)?;
+    let changed = parent.resource(host).filter(|now| *now != resource);
+    if let Some(changed) = &changed {
+        all(parent.extract(host, tx, changed, 1), 1)?;
+    }
+    all(parent.insert(host, tx, &resource, others), others)?;
+    if let Some(changed) = &changed {
+        all(parent.insert(host, tx, changed, 1), 1)?;
+    }
+    Ok(moved)
 }
 
 impl dyn Host + '_ {
@@ -278,7 +412,7 @@ impl dyn Host + '_ {
         key: &ItemCapabilityKey<T>,
         place: &ItemPlace,
     ) -> Option<Capability<T>> {
-        let stack = self.place_stack(place)?;
+        let stack = place.stack(self)?;
         let mut game = None;
         let parts = super::providers(true, key.name, self, |_| Some(stack.item.to_string()));
         let answer = super::ask_providers::<super::ItemProvider<T>, T>(
@@ -298,117 +432,5 @@ impl dyn Host + '_ {
             }),
             super::Answer::Nobody => None,
         }
-    }
-
-    /// The stack at `place`, if any: the one place every item handler reads.
-    pub fn place_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
-        let staged = STAGED.with_borrow(|staged| {
-            staged
-                .iter()
-                .rev()
-                .find(|(at, _)| at == place)
-                .map(|(_, stack)| stack.clone())
-        });
-        match (staged, place) {
-            (Some(stack), _) => Some(stack),
-            (None, ItemPlace::BlockEntity { pos, side, slot }) => {
-                let handler = self.capability(&ITEMS, *pos, *side)?;
-                let resource = handler.resource(self, *slot)?;
-                Some(resource.to_stack(handler.amount(self, *slot)))
-            }
-            (None, ItemPlace::Nested { parent, slot }) => {
-                let handler = self.item_capability(&ITEM_ITEMS, parent)?;
-                let resource = handler.resource(self, *slot)?;
-                Some(resource.to_stack(handler.amount(self, *slot)))
-            }
-            (None, ItemPlace::Mod { provider, key }) => {
-                super::place_provider(provider)?.stack(self, *key)
-            }
-            (None, _) => self.game_stack(place),
-        }
-        .filter(|stack| stack.count > 0)
-    }
-
-    /// Puts `stack` at `place` (a count of 0 empties it), in transaction `tx`: the one place
-    /// every item handler writes. With `one_by_one`, `stack` stands for one item of what is
-    /// there, as `ItemAccess.oneByOne`: from a stack of more than one, the place keeps the
-    /// others and `stack` goes elsewhere. From a player's hand it goes as vanilla's
-    /// `ItemUtils.createFilledResult` puts a filled bucket: into their inventory, else dropped
-    /// at the root commit, and in creative the hand is kept. From a player's other places the
-    /// same, without creative's rule. From an item entity, it's dropped there. From a block
-    /// entity's slot or an item's, into that container's other slots. From a mod's place, where
-    /// its [`PlaceProvider`] puts it. A stack of items holding the place splits the same way:
-    /// one of them is rewritten holding the change, and the others stay as they were.
-    ///
-    /// All or nothing: None when it's done, Some(`stack`) when it can't be, and nothing moved.
-    pub fn set_place_stack(
-        &mut self,
-        place: &ItemPlace,
-        stack: ItemStack,
-        one_by_one: bool,
-        tx: &Transaction,
-    ) -> Option<ItemStack> {
-        let staged = STAGED.with_borrow_mut(|staged| {
-            let at = staged.iter_mut().rev().find(|(at, _)| at == place);
-            at.map(|(_, held)| *held = stack.clone()).is_some()
-        });
-        let done = staged
-            || match place {
-                ItemPlace::BlockEntity { pos, side, slot } => {
-                    self.capability(&ITEMS, *pos, *side).is_some_and(|handler| {
-                        set_slot(&handler, self, place, *slot, stack.clone(), one_by_one)
-                    })
-                }
-                ItemPlace::Nested { parent, slot } => {
-                    self.set_nested(parent, *slot, stack.clone(), one_by_one)
-                }
-                ItemPlace::Mod { provider, key } => {
-                    super::place_provider(provider).is_some_and(|provider| {
-                        provider.set_stack(self, tx, *key, stack.clone(), one_by_one)
-                    })
-                }
-                _ => self.set_game_stack(place, stack.clone(), one_by_one, tx),
-            };
-        (!done).then_some(stack)
-    }
-
-    /// Writes slot `slot` of the item at `parent` on one item of it, staged, then writes that
-    /// one item back to `parent` with `one_by_one`: from a stack of them, it splits off holding
-    /// the change. All in a transaction of its own, so a refusal anywhere, that last write's
-    /// included, undoes what the slot's handler wrote elsewhere.
-    fn set_nested(
-        &mut self,
-        parent: &ItemPlace,
-        slot: usize,
-        stack: ItemStack,
-        one_by_one: bool,
-    ) -> bool {
-        let Some(handler) = self.item_capability(&ITEM_ITEMS, parent) else {
-            return false;
-        };
-        let Some(before) = self.place_stack(parent) else {
-            return false;
-        };
-        let one = ItemStack { count: 1, ..before };
-        let place = ItemPlace::Nested {
-            parent: Box::new(parent.clone()),
-            slot,
-        };
-        let result = self.transaction(|host, tx| {
-            STAGED.with_borrow_mut(|staged| staged.push((parent.clone(), one.clone())));
-            let unstage = Unstage;
-            let done = set_slot(&handler, host, &place, slot, stack, one_by_one);
-            let after = STAGED.with_borrow(|staged| staged.last().map(|(_, held)| held.clone()));
-            drop(unstage);
-            match after {
-                Some(after) if done => {
-                    let written =
-                        after == one || host.set_place_stack(parent, after, true, tx).is_none();
-                    written.then_some(()).ok_or(())
-                }
-                _ => Err(()),
-            }
-        });
-        result.is_ok()
     }
 }
