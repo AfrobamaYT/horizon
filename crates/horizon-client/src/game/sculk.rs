@@ -541,13 +541,7 @@ impl Game<'_> {
             return;
         }
         if !horizon_client::mod_api::mods().is_empty() {
-            let cause = match ctx.source {
-                Some(Who::Player) => self
-                    .network_entity_id(super::commands::Target::Player)
-                    .map(|id| id as u32),
-                Some(Who::Mob(id)) => Some(id),
-                None => None,
-            };
+            let cause = event_cause(ctx.source, self.lan_acting_entity);
             let mut cancel = false;
             self.native_vanilla_game_event(self.dim.id(), event, pos, cause, &mut cancel);
             if cancel {
@@ -2005,9 +1999,25 @@ fn flaps(species: Species, resting: bool, on_ground: bool, age: u32) -> bool {
     }
 }
 
+fn event_cause(source: Option<Who>, acting_player: Option<u32>) -> Option<u32> {
+    match source {
+        Some(Who::Player) => acting_player,
+        Some(Who::Mob(id)) => Some(id),
+        None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn game_event_cause_uses_acting_guest() {
+        assert_eq!(event_cause(Some(Who::Player), Some(42)), Some(42));
+        assert_eq!(event_cause(Some(Who::Player), None), None);
+        assert_eq!(event_cause(Some(Who::Mob(7)), Some(42)), Some(7));
+        assert_eq!(event_cause(None, Some(42)), None);
+    }
 
     /// Retaining keeps the insertion order and the membership in step.
     #[test]
