@@ -124,7 +124,7 @@ pub(super) fn content_root(
             content,
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) if announce => announced.push(announced_entry(m, path)),
+            Ok(_) if announce => announced.push(announced_entry(m)),
             Ok(_) => {}
             Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
         }
@@ -175,26 +175,13 @@ pub(super) fn content_root(
     }
 }
 
-/// A loaded mod as a server tells joining clients (`horizon_protocol::mod_list`): its manifest's
-/// id, version and side, and the SHA-256 of its `.hmod` (none for a folder).
-fn announced_entry(
-    m: &horizon_mods::Manifest,
-    path: &std::path::Path,
-) -> horizon_protocol::mod_list::Entry {
+/// Manifest identity for the configuration-phase mod check.
+fn announced_entry(m: &horizon_mods::Manifest) -> horizon_protocol::mod_list::Entry {
     use horizon_mods::Side;
     use horizon_protocol::mod_list;
-    use sha2::{Digest, Sha256};
-    let sha256 = if path.is_file() {
-        std::fs::read(path)
-            .ok()
-            .map(|bytes| Sha256::digest(bytes).into())
-    } else {
-        None
-    };
     mod_list::Entry {
         id: m.id.clone(),
         version: m.version.clone(),
-        sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
             Side::Client => mod_list::Side::Client,

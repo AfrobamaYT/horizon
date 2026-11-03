@@ -83,14 +83,18 @@ effects, entity types and menu types (each below) in `creative_tab/`, `mob_effec
 them. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
 content is refused when it joins, with the reason.
 
-A server that has content mods on also checks them one by one (`horizon_protocol::mod_list`, channel
-`horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
-`side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
-not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
-local resource pack) never blocks a join and is never told to a server. A manifest with no `side` line is `client`,
-so a content mod meant for both halves must say `side = "both"`, or this check
-ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
-list yet: their manifest has no side.
+Every Horizon server checks loaded mods in the configuration phase (`horizon_protocol::mod_list`, channel
+`horizon:mod_list`), including when its own list is empty. Only the ids and versions of `side = "both"` mods cross
+this channel. Missing mods, extra both-side mods and version differences refuse the join, naming every id and
+version in a translated, wrapped disconnect. Client-only mods stay private and never block a join. A manifest
+with no `side` line is `client`, so a mod meant for both halves must say `side = "both"`. A vanilla or other
+non-Horizon client is refused when the server needs both-side mods, with their names and versions and an English
+fallback for clients without Horizon translations. The content registry identity check remains separate; the
+mod list does not hash package bytes. Native build inventory validation is a separate server-export concern.
+
+This is the fork's compatibility policy, not NeoForge channel negotiation. **Diverges from upstream:** the wire
+contains ids and versions only, with no side/hash fields or legacy format fallback; the old six-name display cap
+is removed. Upstream syncs must keep this contract and the configuration-phase check on both endpoints.
 
 A block names its template and what differs from it:
 
