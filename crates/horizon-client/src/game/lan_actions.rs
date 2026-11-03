@@ -6240,7 +6240,7 @@ mod tests {
                 *self.empty_answer.lock().unwrap()
             }
         }
-        // The held stick's and water bucket's own `Item.useOn`, counted, taking the click.
+        // The held items' own `Item.useOn`, counted, taking the click.
         impl ItemPart for User {
             fn use_on(&self, _: &mut dyn ServerHost, _: &mut UseOnEvent<'_>) -> Flow {
                 self.item_uses
@@ -6267,6 +6267,7 @@ mod tests {
                 r.block_part("minecraft:cake", self.user.clone());
                 r.item_part("minecraft:stick", self.user.clone());
                 r.item_part("minecraft:water_bucket", self.user.clone());
+                r.item_part("minecraft:stone", self.user.clone());
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -6793,10 +6794,11 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
-    fn global_block_use_item_on_runs_without_a_part() {
+    fn block_part_use_item_on_consumes_once() {
         use super::super::native_entity_refs::tests::with_game;
         use crate::mod_api::{
-            self, Hooks, NativeInteractionResult as Answer, ServerHost, UseItemOnEvent,
+            self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
+            UseItemOnEvent,
         };
         use horizon_client::chunk::Chunk;
         use std::sync::{
@@ -6804,9 +6806,9 @@ mod tests {
             atomic::{AtomicUsize, Ordering::SeqCst},
         };
 
-        struct Global(Arc<AtomicUsize>);
-        #[mod_api::__subscriptions]
-        impl Hooks for Global {
+        #[derive(Clone)]
+        struct BlockUse(Arc<AtomicUsize>);
+        impl BlockPart for BlockUse {
             fn use_item_on(
                 &self,
                 _: &mut dyn ServerHost,
@@ -6816,10 +6818,16 @@ mod tests {
                 Some(Answer::Success)
             }
         }
+        #[mod_api::__subscriptions]
+        impl Hooks for BlockUse {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:lever", self.clone());
+            }
+        }
         let calls = Arc::new(AtomicUsize::new(0));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-            "global_block_use",
-            Box::new(Global(calls.clone())),
+            "block_use",
+            Box::new(BlockUse(calls.clone())),
         )]
         .into();
         mod_api::install_parts(&mods).unwrap();
@@ -6848,6 +6856,76 @@ mod tests {
                 assert!(game.use_hand(Some(&hit)).unwrap());
                 assert_eq!(game.world.block(0, 64, 4), lever);
                 assert_eq!(calls.load(SeqCst), 1);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
+    fn replacing_empty_note_block_use_does_not_award_vanilla_stats() {
+        use super::super::native_entity_refs::tests::with_game;
+        use crate::mod_api::{
+            self, BlockPart, Hooks, NativeInteractionResult as Answer, Registrar, ServerHost,
+            UseWithoutItemEvent,
+        };
+        use horizon_client::chunk::Chunk;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering::SeqCst},
+        };
+
+        #[derive(Clone)]
+        struct Replacement(Arc<AtomicBool>);
+        impl BlockPart for Replacement {
+            fn use_without_item(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut UseWithoutItemEvent<'_>,
+            ) -> Option<Answer> {
+                self.0.load(SeqCst).then_some(Answer::Success)
+            }
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for Replacement {
+            fn register(&self, r: &mut Registrar) {
+                r.block_part("minecraft:note_block", self.clone());
+            }
+        }
+        let replace = Arc::new(AtomicBool::new(true));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "empty_note_replacement",
+            Box::new(Replacement(replace.clone())),
+        )]
+        .into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let note = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:note_block")
+                    .unwrap();
+                game.world.set(0, 64, 4, note).unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 4],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 4.5],
+                    inside: false,
+                };
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(game.world.block(0, 64, 4), note);
+                assert_eq!(game.stats.get("custom", "minecraft:tune_noteblock"), 0);
+
+                // Delegating still runs the actual method and awards its stat.
+                replace.store(false, SeqCst);
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_ne!(game.world.block(0, 64, 4), note);
+                assert_eq!(game.stats.get("custom", "minecraft:tune_noteblock"), 1);
             });
         });
     }

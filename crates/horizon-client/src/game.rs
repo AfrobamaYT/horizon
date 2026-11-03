@@ -6790,6 +6790,7 @@ impl Game<'_> {
                         b.block_use_item_on(level, ticks, state, block_hit, player, item.as_deref())
                     }),
                 };
+                let mut empty_template_ran = false;
                 let (result, branch) = if let Some(result) = item_result {
                     (result, UseBranch::ItemOn)
                 } else if self.hand == Hand::Main {
@@ -6827,6 +6828,7 @@ impl Game<'_> {
                     let result = if let Some(answer) = answer {
                         native_hooks::block_use_result(answer).unwrap_or(InteractionResult::Pass)
                     } else {
+                        empty_template_ran = true;
                         let player = self.use_context();
                         self.with_level(|b, level, ticks| {
                             b.use_without_item(level, ticks, state, block_hit, player)
@@ -6863,10 +6865,8 @@ impl Game<'_> {
                         );
                     }
                 }
-                // NoteBlock.useWithoutItem (tuned) and BellBlock.onHit (rung).
-                if (block_answer.is_none()
-                    || branch == horizon_world::level::UseBranch::WithoutItem)
-                    && result == horizon_world::level::InteractionResult::Success
+                // These effects belong to the vanilla method, not its Part replacement.
+                if empty_template_ran && result == horizon_world::level::InteractionResult::Success
                 {
                     let name = self
                         .res
