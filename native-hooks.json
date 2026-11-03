@@ -3695,17 +3695,6 @@
       }
     },
     {
-      "name": "player_exp_change",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_change",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerExpChangeEvent)",
-      "side": "server",
-      "cancellable": false,
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "player_exp_cooldown_change",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_cooldown_change",

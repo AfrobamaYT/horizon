@@ -13892,7 +13892,7 @@ impl Game<'_> {
             self.add_pickup(pickups::Taken::Orb(Box::new(o)), pickups::Collector::Player);
         }
         if gained > 0 {
-            self.give_experience_points(gained as i32, false);
+            self.give_experience_points(gained as i32);
         }
     }
     /// `FurnaceResultSlot.checkTakeAchievements`: the player took from the output of the
@@ -13918,14 +13918,9 @@ impl Game<'_> {
     }
     /// `Player.giveExperiencePoints`: `add_experience_levels` runs once for each
     /// level gained or lost, and the mods hear of the level change once.
-    pub(super) fn give_experience_points(&mut self, points: i32, allow_negative: bool) {
+    pub(super) fn give_experience_points(&mut self, points: i32) {
         let Some(points) = self.xp_change(points) else {
             return;
-        };
-        let points = if allow_negative {
-            points
-        } else {
-            points.max(0)
         };
         let old_level = self.experience.level;
         self.experience.add_points(points);
