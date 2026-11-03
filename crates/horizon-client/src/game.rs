@@ -223,6 +223,8 @@ mod native_entity_sounds;
 mod native_entity_state;
 mod native_explosions;
 mod native_falling;
+#[cfg(test)]
+mod native_held_out_tests;
 mod native_hooks;
 mod native_inventories;
 mod native_item_container;

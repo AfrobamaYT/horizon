@@ -170,13 +170,21 @@ impl Game<'_> {
 
     /// `Leashable.dropLeash` / `removeLeash` on a boat: the lead falls as an
     /// item (`drop`). The change reaches clients through the entity tracker.
-    fn release_boat_leash(&mut self, b: &mut Boat, drop: bool) {
-        if b.leash.take().is_none() {
-            return;
-        }
+    fn take_boat_leash(b: &mut Boat, drop: bool) -> Option<[f64; 3]> {
+        b.leash.take()?;
         b.leash_player = None;
-        if drop {
-            self.drop_lead_item([b.position.x, b.position.y, b.position.z]);
+        drop.then_some([b.position.x, b.position.y, b.position.z])
+    }
+
+    fn release_boat_leash(&mut self, b: &mut Boat, drop: bool) {
+        if let Some(at) = Self::take_boat_leash(b, drop) {
+            self.drop_lead_item(at);
+        }
+    }
+
+    fn release_stored_boat_leash(&mut self, i: usize, drop: bool) {
+        if let Some(at) = Self::take_boat_leash(&mut self.boats[i], drop) {
+            self.drop_lead_item(at);
         }
     }
 
@@ -402,13 +410,11 @@ impl Game<'_> {
 
     /// `Leashable.dropLeash` for each boat in `list`.
     pub(super) fn drop_boat_leashes(&mut self, list: &[usize]) {
-        for &i in list {
-            let id = self.boats[i].id;
-            self.with_entity_held_out(id, |game| {
-                let mut b = game.boats[i].clone();
-                game.release_boat_leash(&mut b, true);
-                game.boats[i] = b;
-            });
+        let ids: Vec<_> = list.iter().map(|&i| self.boats[i].id).collect();
+        for id in ids {
+            if let Some(i) = self.boats.iter().position(|boat| boat.id == id) {
+                self.release_stored_boat_leash(i, true);
+            }
         }
     }
 
@@ -457,11 +463,7 @@ impl Game<'_> {
         if self.boat_led_by_player(i) {
             // hasInfiniteMaterials: removeLeash, else dropLeash.
             let drop = !self.creative;
-            self.with_entity_held_out(id, |game| {
-                let mut b = game.boats[i].clone();
-                game.release_boat_leash(&mut b, drop);
-                game.boats[i] = b;
-            });
+            self.release_stored_boat_leash(i, drop);
             self.lead_game_event("minecraft:entity_interact", at);
             self.lead_sound("untied", at);
             return true;
@@ -470,13 +472,12 @@ impl Game<'_> {
         if item.as_deref() == Some("minecraft:lead") && !taken_by_player {
             let player = self.player_center();
             if self.boat_can_attach(i, player) {
-                self.with_entity_held_out(id, |game| {
-                    let mut b = game.boats[i].clone();
-                    game.release_boat_leash(&mut b, true);
-                    b.leash = Some(Holder::Player);
-                    b.leash_player = Some(game.acting_player_uuid());
-                    game.boats[i] = b;
-                });
+                self.release_stored_boat_leash(i, true);
+                let Some(i) = self.boats.iter().position(|boat| boat.id == id) else {
+                    return true;
+                };
+                self.boats[i].leash = Some(Holder::Player);
+                self.boats[i].leash_player = Some(self.acting_player_uuid());
                 self.lead_sound("tied", at);
                 // The lead is always used up.
                 if let Some(stack) = self.held_mut().as_mut() {
