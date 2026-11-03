@@ -180,7 +180,7 @@ impl Game<'_> {
     }
 
     /// Sets the transformation. False for a value that isn't finite or a
-    /// zero quaternion. Clients ease to it when the start delay changes too
+    /// zero quaternion. Clients ease to it when the start delay is set
     /// (`set_start_interpolation`).
     pub(super) fn native_display_set_transformation(
         &mut self,
@@ -343,18 +343,23 @@ impl Game<'_> {
     }
 
     /// `Display.getTransformationInterpolationDelay`: ticks before an
-    /// interpolation starts. Clients restart the ease when this value
-    /// changes, so alternate it (0 and -1) with each transformation write.
+    /// interpolation starts.
     pub(super) fn native_display_start_interpolation(&self, display: DisplayRef) -> Option<i32> {
         self.display_int(display, None, 8)
     }
 
-    /// `Display.setTransformationInterpolationDelay`.
+    /// `Display.setTransformationInterpolationDelay`. Like vanilla, every
+    /// call is sent to the clients that track the display, even with the
+    /// delay it already has, and each client restarts its interpolation.
     pub(super) fn native_display_set_start_interpolation(
         &mut self,
         display: DisplayRef,
         ticks: i32,
     ) -> bool {
+        let Some((_, id)) = self.display_entity(display) else {
+            return false;
+        };
+        self.persist.display_forced.insert(id);
         self.display_put(display, None, "start_interpolation", Tag::Int(ticks))
     }
 
@@ -796,6 +801,29 @@ mod tests {
                 saved.get("text").and_then(|t| t.get("text")),
                 Some(&Tag::String("saved".into()))
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn each_start_delay_write_forces_a_send_even_when_equal() {
+        with_game(|game| {
+            let text = push(game, 21, "minecraft:text_display");
+            let other = push(game, 22, "minecraft:item_display");
+            assert!(game.persist.display_forced.is_empty());
+            for _ in 0..2 {
+                assert!(text.set_start_interpolation(game, 0));
+                assert_eq!(text.start_interpolation(game), Some(0));
+                assert!(game.persist.display_forced.contains(&21));
+                // The tracking pass spends the force; the next write sets it again.
+                game.persist.display_forced.clear();
+            }
+            // Other writes, and writes that fail, force nothing.
+            assert!(other.set_view_range(game, 3.0));
+            assert!(game.persist.display_forced.is_empty());
+            assert!(text.entity().discard(game));
+            assert!(!text.set_start_interpolation(game, 0));
+            assert!(game.persist.display_forced.is_empty());
         });
     }
 

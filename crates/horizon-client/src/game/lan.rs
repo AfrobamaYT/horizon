@@ -2291,10 +2291,13 @@ impl Game<'_> {
                 self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true, 0);
                 self.lan_hook_states(&host.play, &host.hub, &mut states);
                 self.lan_entity_uuids(&mut states);
+                // Every tracker sees these states this tick: the forced entries are spent.
+                self.persist.display_forced.clear();
                 host.states_next_entity = Some(self.next_entity);
             } else {
                 host.states_next_entity = None;
                 states.clear();
+                self.persist.display_forced.clear();
                 // Nobody can receive past movement. A returning viewer pairs
                 // from the cart's current position/rotation, as AddEntity does.
                 for cart in &mut self.carts {

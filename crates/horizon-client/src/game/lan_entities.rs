@@ -44,6 +44,7 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
         data: 0,
         meta: Vec::new(),
         defaults: Vec::new(),
+        forced: Vec::new(),
         equipment: Vec::new(),
         attributes: Vec::new(),
         precise: false,
@@ -478,6 +479,10 @@ impl Game<'_> {
         e.meta.extend(meta);
         e.defaults = display_data(&empty, true);
         e.defaults.extend(defaults);
+        if self.persist.display_forced.contains(&(e.id as u32)) {
+            // Display.DATA_TRANSFORMATION_INTERPOLATION_START_DELTA_TICKS_ID.
+            e.forced.push(8);
+        }
     }
 
     /// `ClientboundAddEntityPacket(Entity, ServerEntity, int)`: the entity's

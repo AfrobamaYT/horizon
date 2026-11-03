@@ -3350,6 +3350,7 @@ impl Game<'_> {
             data: 0,
             meta,
             defaults: Vec::new(),
+            forced: Vec::new(),
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
