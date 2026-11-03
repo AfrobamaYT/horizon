@@ -13,7 +13,7 @@ pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
     items::ItemStack,
     lan::{data::component_nbt, guest::Guest},
-    mod_api::{NativePlayerAbilities, NativePlayerFood, PlayerRef},
+    mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
     motion::PlayerMotion,
     text::Text,
 };
@@ -340,8 +340,27 @@ impl Game<'_> {
 
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
     /// None for stale, offline or unavailable players (including displaced outer players).
-    pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<i32> {
-        Some(self.player_handle_read(player)?.mode())
+    pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<GameMode> {
+        GameMode::from_id(self.player_handle_read(player)?.mode())
+    }
+
+    /// Changes a player's game mode as `ServerPlayer.setGameMode` and
+    /// `/gamemode` do, including the cancellable change hook and ability
+    /// updates. Returns false for a stale or unavailable player, another
+    /// player during a swap, no change, or a canceled change. API
+    /// @API:player_game_mode_write@.
+    pub(super) fn native_player_set_game_mode(
+        &mut self,
+        player: PlayerRef,
+        mode: GameMode,
+    ) -> bool {
+        if self.player_handle_read(player).is_none() {
+            return false;
+        }
+        let mut changed = false;
+        self.native_as_player(player.uuid, |game| {
+            changed = game.set_game_mode(super::game_mode::mode_from_id(mode.id()));
+        }) && changed
     }
 
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
