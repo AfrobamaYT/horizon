@@ -2237,15 +2237,11 @@ impl Goal for Breed {
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
             let llama = super::llama::is_llama(m.species())
                 .then(|| Box::new(super::llama::breed_offspring(m, &p)));
-            let parent_variant = (!cx.w.ask_mods
-                && matches!(
-                    m.species(),
-                    Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
-                ))
-            .then(|| m.random.next_boolean());
+            let parent_variant = (!cx.w.ask_mods && super::draws_parent_variant(m.species()))
+                .then(|| m.random.next_boolean());
             let experience = if (llama.is_some() || parent_variant.is_some())
                 && !cx.w.ask_mods
-                && m.species() != Species::Fox
+                && !super::orb_after_child(m.species())
             {
                 super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
             } else {

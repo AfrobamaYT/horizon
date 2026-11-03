@@ -3365,10 +3365,7 @@ impl Game<'_> {
             self.award_breeding_experience(parent, [p.position.x, p.position.y, p.position.z]);
             return None;
         }
-        let coin = if matches!(
-            p.species(),
-            Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
-        ) {
+        let coin = if horizon_client::mobs::draws_parent_variant(p.species()) {
             match parent_variant {
                 Some(choice) => choice,
                 None => {
@@ -3562,10 +3559,9 @@ impl Game<'_> {
             // Offspring inherit a parent's variant (pigs/cows/chickens) or mixed wool.
             child.extra.variant = p.extra.variant;
             // Fox, Pig, Cow and Chicken.getBreedOffspring: either parent's variant.
-            if matches!(
-                p.species(),
-                Species::Fox | Species::Pig | Species::Cow | Species::Chicken
-            ) && !coin
+            if horizon_client::mobs::draws_parent_variant(p.species())
+                && p.species() != Species::Cat
+                && !coin
             {
                 child.extra.variant = q.as_ref().map_or(p.extra.variant, |q| q.extra.variant);
             }
@@ -3584,7 +3580,7 @@ impl Game<'_> {
                 child.extra.color = mixed;
             }
         }
-        let order = if p.species() == Species::Fox {
+        let order = if horizon_client::mobs::orb_after_child(p.species()) {
             OrbOrder::AfterChild
         } else {
             OrbOrder::BeforeChild

@@ -330,6 +330,17 @@ pub enum Brain {
 pub use anim::Anim;
 pub use species::Species;
 
+pub fn draws_parent_variant(species: Species) -> bool {
+    matches!(
+        species,
+        Species::Pig | Species::Cow | Species::Chicken | Species::Fox | Species::Cat
+    )
+}
+
+pub fn orb_after_child(species: Species) -> bool {
+    species == Species::Fox
+}
+
 /// Per-type behaviour switches derived from vanilla classes and tags.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Flags {
