@@ -481,6 +481,12 @@ mod tests {
         std::fs::write(misplaced.join("plain.hmod"), plain).unwrap();
         let base = f.0.join("resources");
         std::fs::create_dir_all(&base).unwrap();
+        // A prepared root's registry report: block entity registration reads it (B1).
+        std::fs::write(
+            base.join("registries.json"),
+            "{\"minecraft:block_entity_type\":{\"entries\":{}}}",
+        )
+        .unwrap();
         std::env::set_current_dir(&here).unwrap();
         let sources = ModsState {
             native: std::sync::Arc::new(native),

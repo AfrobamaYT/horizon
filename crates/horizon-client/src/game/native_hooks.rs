@@ -9173,7 +9173,7 @@ impl Game<'_> {
             };
             self.settings.mods.installed.push(Installed {
                 id: m.id.clone(),
-                title: format!("{} {}", m.name, m.version),
+                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
                 description: m.description.clone(),
                 problem: None,
                 dev: false,
@@ -9509,7 +9509,8 @@ mod tests {
         horizon_client::mod_api::install(mods.clone());
         horizon_client::mod_api::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default(), &[]);
+        let root =
+            super::super::mods::content_root(&base, &Default::default(), &Default::default());
         if invalid {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
