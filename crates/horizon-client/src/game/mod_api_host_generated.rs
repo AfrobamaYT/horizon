@@ -519,6 +519,46 @@ impl Host for super::Game<'_> {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         self.native_entity_level(entity)
     }
+    fn fluid_tank_count(&self, pos: [i32; 3], side: Option<Direction>) -> Option<usize> {
+        self.native_fluid_tank_count(pos, side)
+    }
+    fn fluid_tank(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+    ) -> Option<FluidStack> {
+        self.native_fluid_tank(pos, side, tank)
+    }
+    fn fluid_tank_capacity(
+        &self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        fluid: &FluidStack,
+    ) -> u32 {
+        self.native_fluid_tank_capacity(pos, side, tank, fluid)
+    }
+    fn fluid_tank_insert(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        fluid: FluidStack,
+        simulate: bool,
+    ) -> Option<FluidStack> {
+        self.native_fluid_tank_insert(pos, side, tank, fluid, simulate)
+    }
+    fn fluid_tank_extract(
+        &mut self,
+        pos: [i32; 3],
+        side: Option<Direction>,
+        tank: usize,
+        max: u32,
+        simulate: bool,
+    ) -> Option<FluidStack> {
+        self.native_fluid_tank_extract(pos, side, tank, max, simulate)
+    }
     fn block_entity_type(&self, pos: [i32; 3]) -> Option<String> {
         self.native_block_entity_type(pos)
     }
