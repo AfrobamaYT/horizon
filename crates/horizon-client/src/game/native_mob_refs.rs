@@ -22,6 +22,45 @@ fn brain_target(mob: &Mob) -> Option<Option<Who>> {
     })
 }
 
+/// What decides whether a player can be a mob's target.
+pub(super) struct PlayerFacts {
+    pub mode: i32,
+    pub alive: bool,
+    pub invulnerable: bool,
+    pub uuid: [i32; 4],
+}
+
+impl Game<'_> {
+    /// A player target's game mode, liveness, invulnerability ability and uuid.
+    pub(super) fn native_player_facts(&self, target: Target) -> Option<PlayerFacts> {
+        match target {
+            Target::Guest(conn) => {
+                let g = self.command_guest(conn)?;
+                Some(PlayerFacts {
+                    mode: g.game_mode,
+                    alive: !g.dead && g.health > 0.0,
+                    invulnerable: g.motion.as_ref().is_some_and(|p| p.invulnerable),
+                    uuid: horizon_client::lan::playerdata::uuid_ints(g.uuid),
+                })
+            }
+            Target::Player => {
+                let player = self.player.as_ref()?;
+                Some(PlayerFacts {
+                    mode: self.mode_id(),
+                    alive: !player.health.dead_or_dying(),
+                    invulnerable: player.invulnerable,
+                    uuid: self
+                        .lan_acting_uuid
+                        .map(horizon_client::lan::playerdata::uuid_ints)
+                        .or(self.level.player_uuid)
+                        .unwrap_or_default(),
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum MobFlag {
     Aggressive,
@@ -59,33 +98,14 @@ impl Game<'_> {
                 !mob.spares_target(&self.mob_world_base(&seen), Who::Mob(id))
             }
             Target::Player | Target::Guest(_) => {
-                let (mode, alive, invulnerable, uuid) = match target {
-                    Target::Guest(conn) => {
-                        let Some(g) = self.command_guest(conn) else {
-                            return false;
-                        };
-                        (
-                            g.game_mode,
-                            !g.dead && g.health > 0.0,
-                            g.motion.as_ref().is_some_and(|p| p.invulnerable),
-                            horizon_client::lan::playerdata::uuid_ints(g.uuid),
-                        )
-                    }
-                    Target::Player => {
-                        let Some(player) = &self.player else {
-                            return false;
-                        };
-                        (
-                            self.mode_id(),
-                            !player.health.dead_or_dying(),
-                            player.invulnerable,
-                            self.lan_acting_uuid
-                                .map(horizon_client::lan::playerdata::uuid_ints)
-                                .or(self.level.player_uuid)
-                                .unwrap_or_default(),
-                        )
-                    }
-                    _ => unreachable!(),
+                let Some(PlayerFacts {
+                    mode,
+                    alive,
+                    invulnerable,
+                    uuid,
+                }) = self.native_player_facts(target)
+                else {
+                    return false;
                 };
                 alive
                     && !invulnerable

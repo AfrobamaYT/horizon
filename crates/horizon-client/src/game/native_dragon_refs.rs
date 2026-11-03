@@ -1,9 +1,9 @@
 //! Ender dragon handles for native server mods: the `Mob` state the dragon
 //! keeps, its phase and the fight it belongs to.
 use super::{
-    Game,
+    Dim, Game,
     commands::Target,
-    dragon::{Dragon, FightWho},
+    dragon::{Dragon, Fight},
 };
 use horizon_client::mod_api::{DragonRef, EntityRef, LivingRef, NativeDragonPhase};
 
@@ -49,42 +49,46 @@ impl Game<'_> {
             return false;
         };
         d.set_native_phase(phase);
+        if std::mem::take(&mut d.flame_ended) {
+            self.breath_clouds.retain(|c| !c.from_dragon);
+        }
         true
+    }
+
+    /// The dragon's fight: Horizon keeps the End's fight only, so it is the
+    /// fight of a dragon in the level in place when that is the End.
+    fn native_dragon_fight(&self, dragon: DragonRef) -> Option<&Fight> {
+        self.native_dragon(dragon.entity())?;
+        (self.dim == Dim::End && self.fight.loaded).then_some(&self.fight)
     }
 
     /// `EnderDragonFight.aliveCrystals`: the crystals the last scan found
     /// (every 100 ticks). None for a stale handle, a client, or a dragon
-    /// whose fight is not loaded.
+    /// outside the End or whose fight is not loaded.
     pub(super) fn native_dragon_alive_crystals(&self, dragon: DragonRef) -> Option<i32> {
-        self.native_dragon(dragon.entity())?;
-        self.fight.loaded.then_some(self.fight.alive_crystals)
+        Some(self.native_dragon_fight(dragon)?.alive_crystals)
     }
 
     /// `EnderDragonFight.hasPreviouslyKilledDragon`. None as
     /// `alive_crystals` is.
     pub(super) fn native_dragon_previously_killed(&self, dragon: DragonRef) -> Option<bool> {
-        self.native_dragon(dragon.entity())?;
-        self.fight.loaded.then_some(self.fight.previously_killed)
+        Some(self.native_dragon_fight(dragon)?.previously_killed)
     }
 
     /// `EnderDragon.canAttack` (`canBeSeenAsEnemy`) and `Mob.asValidTarget`
     /// for the targets Horizon models: mobs and players. Armor stands, end
     /// crystals and the like are not supported.
     fn native_dragon_valid_target(&self, target: Target) -> bool {
-        let who = match target {
-            Target::Mob(id) => {
-                return self
-                    .mobs
-                    .iter()
-                    .any(|m| m.id == id && !m.removed && m.alive() && !m.invulnerable_flag);
-            }
-            Target::Player => FightWho::Host,
-            Target::Guest(conn) => FightWho::Guest(conn),
-            _ => return false,
-        };
-        self.fight_players()
-            .iter()
-            .any(|p| p.who == who && p.enemy())
+        match target {
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .any(|m| m.id == id && !m.removed && m.alive() && !m.invulnerable_flag),
+            Target::Player | Target::Guest(_) => self
+                .native_player_facts(target)
+                .is_some_and(|p| p.alive && !p.invulnerable && !matches!(p.mode, 1 | 3)),
+            _ => false,
+        }
     }
 
     /// `Mob.getTarget` for the dragon: the mob or player a mod set, None once
@@ -126,6 +130,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Dim;
     use super::super::native_entity_refs::tests::with_game;
     use super::*;
     use horizon_client::{
@@ -178,17 +183,24 @@ mod tests {
             assert!(mob.set_aggressive(game, false));
             let state = game.lan_dragon_state().unwrap();
             assert!(state.meta.iter().all(|m| m.0 != 15));
-            assert!(
-                state
-                    .defaults
-                    .contains(&(15, serializer::BYTE, Value::Byte(0)))
-            );
             assert_eq!(mob.persistence_required(game), Some(false));
             assert!(mob.set_persistence_required(game));
             assert_eq!(mob.persistence_required(game), Some(true));
             let saved = game.dragon.as_ref().unwrap().to_nbt([0; 4], None);
             assert_eq!(saved.get("PersistenceRequired"), Some(&Tag::Byte(1)));
             assert!(Dragon::from_nbt(&saved, 0).unwrap().persistent);
+            // `getBooleanOr` takes any nonzero number as true.
+            for (value, want) in [
+                (Tag::Byte(2), true),
+                (Tag::Int(1), true),
+                (Tag::Byte(0), false),
+            ] {
+                let mut tag = saved.clone();
+                if let Tag::Compound(map) = &mut tag {
+                    map.insert("PersistenceRequired".into(), value);
+                }
+                assert_eq!(Dragon::from_nbt(&tag, 0).unwrap().persistent, want);
+            }
 
             // A target a mod set: valid mobs only, and it goes stale.
             let zombie = game.native_living(game.native_entity(12).unwrap()).unwrap();
@@ -263,23 +275,20 @@ mod tests {
             }
             assert_eq!(NativeDragonPhase::from_id(11), None);
             assert_eq!(NativeDragonPhase::from_id(-1), None);
-            let state = game.lan_dragon_state().unwrap();
-            assert!(
-                state
-                    .defaults
-                    .contains(&(16, serializer::INT, Value::Int(10)))
-            );
 
             // Setting the phase it holds changes nothing, a strafe included.
             assert!(dragon.set_phase(game, NativeDragonPhase::Hover));
             assert_eq!(dragon.phase(game), Some(NativeDragonPhase::Hover));
 
-            // The fight: unloaded until the End loads it.
+            // The fight: unloaded until the End loads it, and only the End's.
             assert_eq!(dragon.alive_crystals(game), None);
             assert_eq!(dragon.previously_killed(game), None);
             game.fight.loaded = true;
             game.fight.alive_crystals = 3;
             game.fight.previously_killed = true;
+            assert_eq!(dragon.alive_crystals(game), None, "not in the End");
+            assert_eq!(dragon.previously_killed(game), None);
+            game.dim = Dim::End;
             assert_eq!(dragon.alive_crystals(game), Some(3));
             assert_eq!(dragon.previously_killed(game), Some(true));
 
@@ -293,6 +302,67 @@ mod tests {
             game.dragon = None;
             assert_eq!(dragon.phase(game), None);
             assert!(!dragon.set_phase(game, NativeDragonPhase::Landing));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn leaving_flaming_discards_the_cloud_at_once() {
+        use super::super::dragon::Breath;
+        with_game(|game| {
+            let (_, dragon) = dragon_in(game);
+            let cloud = |from_dragon| Breath {
+                id: 0,
+                at: [0.0; 3],
+                radius: 5.0,
+                age: 0,
+                duration: 200,
+                from_dragon,
+                potion: None,
+            };
+            assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
+            game.breath_clouds.push(cloud(true));
+            game.breath_clouds.push(cloud(false));
+            assert!(dragon.set_phase(game, NativeDragonPhase::Hover));
+            assert_eq!(game.breath_clouds.len(), 1, "the flame cloud is gone");
+            assert!(!game.breath_clouds[0].from_dragon);
+            // Back in and out within one hook leaves nothing of the old cloud.
+            assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
+            game.breath_clouds.push(cloud(true));
+            assert!(dragon.set_phase(game, NativeDragonPhase::Hover));
+            assert!(dragon.set_phase(game, NativeDragonPhase::SittingFlaming));
+            assert_eq!(game.breath_clouds.len(), 1);
+            // The gameplay path leaves the flag for the tick.
+            game.breath_clouds.push(cloud(true));
+            game.dragon
+                .as_mut()
+                .unwrap()
+                .set_native_phase(NativeDragonPhase::Hover);
+            game.dragon
+                .as_mut()
+                .unwrap()
+                .set_native_phase(NativeDragonPhase::SittingFlaming);
+            game.tick_breath();
+            assert!(game.breath_clouds.iter().all(|c| !c.from_dragon));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_invulnerable_player_is_not_a_target() {
+        with_game(|game| {
+            let (entity, _) = dragon_in(game);
+            let mob = game.native_mob_ref(entity).unwrap();
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(7);
+            game.lan_acting_entity = Some(30);
+            let target = game.native_entity(30).unwrap();
+            let living = game.native_living(target).unwrap();
+            assert!(mob.set_target(game, Some(living)));
+            game.player.as_mut().unwrap().invulnerable = true;
+            assert_eq!(mob.target(game), None);
+            assert!(!mob.set_target(game, Some(living)));
         });
     }
 }

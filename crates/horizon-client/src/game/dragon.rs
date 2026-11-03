@@ -341,6 +341,9 @@ pub(super) struct Dragon {
     pub(super) aggressive: bool,
     pub(super) persistent: bool,
     pub(super) target: Option<u32>,
+    /// The phase left was `Flaming` (`DragonSittingFlamingPhase.end`) and its
+    /// cloud is still to be discarded.
+    pub(super) flame_ended: bool,
     flame_count: i32,
     sitting_damage: f32,
     growl: i32,
@@ -478,6 +481,7 @@ impl Dragon {
             aggressive: false,
             persistent: false,
             target: None,
+            flame_ended: false,
             flame_count: 0,
             sitting_damage: 0.0,
             growl: 100,
@@ -728,6 +732,10 @@ impl Dragon {
     fn set_phase(&mut self, phase: Phase) {
         if self.phase.id() == phase.id() && phase.id() != 1 {
             return;
+        }
+        // `EnderDragonPhaseManager.setPhase`: the outgoing `end()` first.
+        if matches!(self.phase, Phase::Flaming { .. }) {
+            self.flame_ended = true;
         }
         if let Phase::Flaming { .. } = phase {
             self.flame_count += 1;
@@ -2584,7 +2592,7 @@ impl Game<'_> {
     }
     /// The dragon's breath clouds (`AreaEffectCloud` with instant damage at
     /// a quarter duration scale): shrinking, puffing particles, harming the player.
-    fn tick_breath(&mut self) {
+    pub(super) fn tick_breath(&mut self) {
         // What instant damage reaches: neither creative nor spectator players.
         let players: Vec<FightPlayer> = self
             .fight_players()
@@ -2593,10 +2601,9 @@ impl Game<'_> {
             .collect();
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
         // DragonSittingFlamingPhase.end discards the flame cloud.
-        let flame_over = self
-            .dragon
-            .as_ref()
-            .is_some_and(|d| !matches!(d.phase, Phase::Flaming { .. }));
+        let flame_over = self.dragon.as_mut().is_some_and(|d| {
+            std::mem::take(&mut d.flame_ended) || !matches!(d.phase, Phase::Flaming { .. })
+        });
         let mut clouds = std::mem::take(&mut self.breath_clouds);
         clouds.retain_mut(|c| {
             // Lingering potions' clouds tick with the potions.
@@ -3242,7 +3249,7 @@ impl Dragon {
         if let Some(Tag::Int(t)) = tag.get("DragonDeathTime") {
             d.death_time = *t;
         }
-        d.persistent = matches!(tag.get("PersistenceRequired"), Some(Tag::Byte(1)));
+        d.persistent = horizon_client::entity_nbt::flag(tag, "PersistenceRequired");
         Some(d)
     }
 }
@@ -3378,13 +3385,7 @@ impl Game<'_> {
             minecart_steps: None,
             data: 0,
             meta,
-            // Back at their defaults the values leave `meta`, and the clients
-            // still hold the old ones.
-            defaults: vec![
-                (9, serializer::FLOAT, Value::Float(1.0)),
-                (15, serializer::BYTE, Value::Byte(0)),
-                (16, serializer::INT, Value::Int(10)),
-            ],
+            defaults: Vec::new(),
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
