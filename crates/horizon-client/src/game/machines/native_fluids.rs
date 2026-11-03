@@ -6,7 +6,7 @@
 //! (`minecraft:overworld`), as `native_set_block` does.
 use super::Game;
 use horizon_client::containers::{BlockEntity, ModFluidTanks};
-use horizon_client::mod_api::{self, FluidHandler, FluidStack, Host};
+use horizon_client::mod_api::{self, BlockSide, Capability, FluidHandler, FluidStack, Host};
 use horizon_core::geometry::Direction;
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use std::sync::Arc;
@@ -252,14 +252,21 @@ impl Game<'_> {
             Err(_) => false,
         }
     }
-    /// The fluid capability part a mod registered for the type of the mod block entity at
-    /// `pos`. With no capability part registered, one empty-table check.
-    fn fluid_part_at(&self, pos: [i32; 3]) -> Option<Arc<dyn FluidHandler>> {
-        mod_api::block_entity_capability(&mod_api::FLUIDS, || {
-            match self.world.block_entities.get(&(pos[0], pos[1], pos[2])) {
-                Some(BlockEntity::Mod(m)) => Some(m.id.as_str()),
-                _ => None,
-            }
+    /// The fluid handler a mod's provider gives for the mod block entity at `pos` through
+    /// `side`, where it comes before the game's own tanks or the game has none there. With no
+    /// fluid provider registered, one table check.
+    fn fluid_part_at(
+        &mut self,
+        pos: [i32; 3],
+        side: Direction,
+    ) -> Option<Capability<dyn FluidHandler>> {
+        let at = BlockSide {
+            pos,
+            side: Some(side),
+        };
+        let host: &mut dyn Host = self;
+        mod_api::block_entity_capability(&mod_api::FLUIDS, host, at, |host| {
+            host.fluid_tank_count(pos, None).is_some()
         })
     }
     /// The saved tanks of the mod block entity at `pos`, `n` of them.
@@ -441,7 +448,7 @@ impl Game<'_> {
         if !self.native_simulates() {
             return amount;
         }
-        if let Some(part) = self.fluid_part_at(pos) {
+        if let Some(part) = self.fluid_part_at(pos, face) {
             if amount <= 0 {
                 return amount;
             }
@@ -520,16 +527,18 @@ impl Game<'_> {
     /// block without tanks, or the mod block entity ticking now (it's out of
     /// the world). A cauldron reads as one tank of a bucket's capacity. API 54.
     pub(in crate::game) fn native_fluid_tanks(
-        &self,
+        &mut self,
         dimension: &str,
         pos: [i32; 3],
         face: Direction,
     ) -> Option<Vec<NativeFluidTank>> {
-        if let Some(part) = self.fluid_part_at(pos) {
-            if !self.native_simulates() || dimension != self.dim.id() {
-                return None;
-            }
-            let host: &dyn Host = self;
+        // Before any provider is asked: a request for another level isn't about this one's
+        // block at `pos`.
+        if !self.native_simulates() || dimension != self.dim.id() {
+            return None;
+        }
+        if let Some(part) = self.fluid_part_at(pos, face) {
+            let host: &mut dyn Host = self;
             let side = Some(face);
             let tanks = (0..part.tanks(host, pos, side)).map(|tank| {
                 let fluid = part.fluid(host, pos, side, tank);
@@ -609,10 +618,10 @@ impl Game<'_> {
         face: Direction,
         amount: i32,
     ) -> Option<(String, i32)> {
-        if let Some(part) = self.fluid_part_at(pos) {
-            if !self.native_simulates() || dimension != self.dim.id() || amount <= 0 {
-                return None;
-            }
+        if !self.native_simulates() || dimension != self.dim.id() || amount <= 0 {
+            return None;
+        }
+        if let Some(part) = self.fluid_part_at(pos, face) {
             let host: &mut dyn Host = self;
             let out = host.drain_one_named_fluid(&part, pos, Some(face), amount.unsigned_abs());
             return out.map(|out| (out.fluid.to_string(), mb(out.amount)));
@@ -707,13 +716,12 @@ impl Game<'_> {
         to_face: Direction,
         max: i32,
     ) -> Option<(String, i32)> {
-        if from == to {
+        if from == to || !self.native_simulates() || dimension != self.dim.id() || max <= 0 {
             return None;
         }
-        if self.fluid_part_at(from).is_some() || self.fluid_part_at(to).is_some() {
-            if !self.native_simulates() || dimension != self.dim.id() || max <= 0 {
-                return None;
-            }
+        if self.fluid_part_at(from, from_face).is_some()
+            || self.fluid_part_at(to, to_face).is_some()
+        {
             let host: &mut dyn Host = self;
             // These helpers name a fluid by its id, so fluids with components stay put.
             let plain = |fluid: &FluidStack| !fluid.has_components();
@@ -749,7 +757,7 @@ impl Game<'_> {
     /// that fluid or none. None when `from` gives nothing or `to` holds no
     /// fluids.
     fn fluid_room(
-        &self,
+        &mut self,
         dimension: &str,
         from: [i32; 3],
         from_face: Direction,
@@ -812,6 +820,73 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_fluid_request_for_another_level_asks_no_provider() {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        use horizon_client::chunk::Chunk;
+        use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+        use horizon_client::mod_api::part_tests::{FLUIDS_ASKED, game_thread};
+        use std::sync::atomic::Ordering;
+        let _mods = game_thread();
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        options.dedicated = Some(Vec::new());
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        // A mod block entity whose type has a fluid provider, which counts each time it's asked.
+        let counted = ModBlockEntity::new(ModBlockEntityFields {
+            id: "test:counted".into(),
+            ..Default::default()
+        });
+        game.world
+            .block_entities
+            .insert((1, 64, 1), BlockEntity::Mod(Box::new(counted)));
+        let (pos, face) = ([1, 64, 1], Direction::North);
+        let nether = "minecraft:the_nether";
+        let before = FLUIDS_ASKED.load(Ordering::Relaxed);
+        assert!(game.native_fluid_tanks(nether, pos, face).is_none());
+        assert!(game.native_fluid_extract(nether, pos, face, 1000).is_none());
+        let to = [2, 64, 1];
+        assert!(
+            game.native_move_fluids(nether, pos, face, to, face, 1000)
+                .is_none()
+        );
+        assert_eq!(FLUIDS_ASKED.load(Ordering::Relaxed), before);
+        // Asked about the level in place, the provider is reached.
+        assert!(
+            game.native_fluid_tanks("minecraft:overworld", pos, face)
+                .is_none()
+        );
+        assert_eq!(FLUIDS_ASKED.load(Ordering::Relaxed), before + 1);
+    }
 
     #[test]
     fn a_cauldron_level_holds_a_third_of_a_bucket() {

@@ -374,6 +374,16 @@ pub trait LevelAccess {
     fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
         true
     }
+    /// Returns the new note, or None to cancel tuning.
+    fn note_block_change(
+        &self,
+        _pos: BlockPos,
+        _instrument: &str,
+        _old: i32,
+        new: i32,
+    ) -> Option<i32> {
+        Some(new)
+    }
     fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
         true
     }
@@ -881,6 +891,10 @@ impl Behaviours {
     }
     pub fn is_randomly_ticking(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::RANDOM_TICKS)
+    }
+    /// Whether the exported vanilla support cache can answer for this state.
+    pub fn has_cached_support(&self, state: BlockStateId) -> bool {
+        !self.data(state).dynamic_shape && self.facts(state).sturdy & (1 << 30) == 0
     }
     /// `isFaceSturdy(level, pos, direction, FULL)` from the empty-level cache.
     pub fn is_face_sturdy(&self, state: BlockStateId, direction: Direction) -> bool {
