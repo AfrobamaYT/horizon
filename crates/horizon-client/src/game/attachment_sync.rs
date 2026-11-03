@@ -85,7 +85,7 @@ impl Game<'_> {
         let hub = &mut host.hub;
         for snapshot in std::mem::take(&mut hub.attachment_snapshots) {
             let AttachmentSnapshot { player, holder } = snapshot;
-            let Some(guest) = hub.guests.iter().find(|g| g.uuid == player) else {
+            let Some(guest) = hub.online_players().find(|g| g.uuid == player) else {
                 continue;
             };
             if !guest.reads_attachment_sync() {

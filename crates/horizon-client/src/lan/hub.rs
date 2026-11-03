@@ -1101,7 +1101,10 @@ impl Hub {
     }
 
     fn player_info(&self, uuid: u128, name: &str, mode: i32, latency: i32) -> play::PlayerInfo {
-        let guest = self.guests.iter().find(|g| g.uuid == uuid);
+        let guest = self
+            .guests
+            .iter()
+            .find(|g| g.uuid == uuid && g.participates_online());
         play::PlayerInfo {
             uuid,
             name: Some(name.to_owned()),

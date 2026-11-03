@@ -73,7 +73,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .find(|g| g.placed && g.uuid == uuid)?;
+            .find(|g| g.placed && g.participates_online() && g.uuid == uuid)?;
         Some(g.conn)
     }
     /// Opens a chest menu of `rows` rows (1 to 6) titled `title` for the

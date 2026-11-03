@@ -72,12 +72,9 @@ impl Game<'_> {
     /// What the mods sent this tick leaves; the tick's allowances start over.
     pub(super) fn flush_native_net(&mut self, host: &mut LanHost) {
         for (player, data) in std::mem::take(&mut self.native_net.to_players) {
-            if let Some(g) = host
-                .hub
-                .guests
-                .iter()
-                .find(|g| g.placed && g.uuid == player && g.brand == "horizon")
-            {
+            if let Some(g) = host.hub.guests.iter().find(|g| {
+                g.placed && g.participates_online() && g.uuid == player && g.brand == "horizon"
+            }) {
                 host.hub.send_to(
                     g.conn,
                     &C::CustomPayload(CustomPayload {

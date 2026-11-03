@@ -1843,7 +1843,7 @@ impl Game<'_> {
                         .hub
                         .guests
                         .iter()
-                        .find(|g| g.placed && g.uuid == message.sender)
+                        .find(|g| g.placed && g.participates_online() && g.uuid == message.sender)
                         .map(|g| g.entity_id)
                     else {
                         continue;
@@ -2994,7 +2994,12 @@ impl Game<'_> {
     /// After a player's chat was broadcast: the dedicated server's event
     /// log, and `detectRateSpam`.
     fn lan_player_chatted(&mut self, host: &mut LanHost, sender: u128, text: &str) {
-        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
+        if let Some(g) = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.participates_online() && g.uuid == sender)
+        {
             if self.options.dedicated.is_some() {
                 super::dedicated::events::record(
                     "chat",
