@@ -1802,51 +1802,15 @@ impl Game<'_> {
     /// random draws) keeps the name, flags, persistence and age; the old one
     /// is discarded.
     pub(super) fn convert_mob(&mut self, index: usize, kind: &str) -> Option<u32> {
-        let t = self.res.mob_types().get(kind).cloned()?;
-        let (old_id, old_kind) = (
-            self.mobs[index].id,
-            super::native_hooks::mob_kind(&self.mobs[index]),
-        );
-        // LivingConversionEvent.Pre: a canceled conversion leaves the mob.
-        let mut cancel = false;
-        self.native_living_conversion_pre(old_id, &old_kind, kind, &mut cancel);
-        if cancel {
-            return None;
-        }
-        let old = &self.mobs[index];
-        self.next_entity += 1;
-        let mut mob = Mob::new(self.next_entity, t, old.position, old.yaw);
-        mob.previous = old.previous;
-        mob.head_yaw = old.head_yaw;
-        mob.body_yaw = old.body_yaw;
-        mob.head_pitch = old.head_pitch;
-        mob.persistent = old.persistent;
-        mob.custom_name = old.custom_name.clone();
-        mob.custom_name_text = old.custom_name_text.clone();
-        mob.name_visible = old.name_visible;
-        mob.invisible = old.invisible;
-        mob.no_ai = old.no_ai;
-        mob.silent = old.silent;
-        mob.no_gravity = old.no_gravity;
-        mob.invulnerable_flag = old.invulnerable_flag;
-        mob.extra.age = if old.is_baby() { old.extra.age } else { 0 };
-        for slot in [
-            &mut mob.extra.main_hand,
-            &mut mob.extra.off_hand,
-            &mut mob.extra.head,
-            &mut mob.extra.body,
-            &mut mob.extra.chest,
-            &mut mob.extra.legs,
-            &mut mob.extra.feet,
-        ] {
-            *slot = None;
-        }
-        let id = mob.id;
-        self.mobs[index].removed = true;
-        self.mobs.push(mob);
-        self.native_mobs_joined(self.mobs.len() - 1, false);
-        self.native_living_conversion_post(old_id, &old_kind, id, kind);
-        Some(id)
+        let old = self.mobs[index].clone();
+        self.convert_to(
+            &old,
+            kind,
+            horizon_client::mobs::conversion::Params {
+                keep_equipment: false,
+                preserve_can_pick_up_loot: false,
+            },
+        )
     }
     /// `ShearsDispenseItemBehavior.tryShearEntity`: the first live, ready
     /// `Shearable` in the block is sheared.

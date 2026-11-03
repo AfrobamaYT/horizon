@@ -606,25 +606,20 @@ impl Game<'_> {
             self.lan_entity_event(id as i32, event, at);
         }
     }
-    /// What a converted frog gets once its tadpole has grown up: the spawn
-    /// finalization of a conversion, then persistence.
-    fn finalize_converted(&mut self, id: u32) {
-        let Some(at) = self.mobs.iter().find(|m| m.id == id).map(|m| m.position) else {
-            return;
-        };
+    /// Finalize a converted frog or witch before it joins the level.
+    fn finalize_converted(&self, mob: &mut Mob) {
+        let at = mob.position;
         let facts = self.biome_facts(
             at.x.floor() as i32,
             at.y.floor() as i32,
             at.z.floor() as i32,
         );
         let difficulty = self.local_difficulty([at.x, at.y, at.z]);
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            spawning::finalize(m, &facts, &difficulty);
-            m.persistent = true;
-        }
+        spawning::finalize(mob, &facts, &difficulty);
+        mob.persistent = true;
     }
-    /// `Mob.convertTo(type, ConversionParams.single(...))` for a mob already
-    /// removed: a new mob of `kind`, made without spawn finalization, takes
+    /// `Mob.convertTo(type, ConversionParams.single(...))`: a new mob of
+    /// `kind`, made without spawn finalization unless its conversion asks, takes
     /// its place with what `conversion::single` carries over, and the old
     /// mob's riders move onto it. A zombie that comes out of it rolls
     /// `Zombie.handleAttributes(special, CONVERSION)` (the
@@ -635,26 +630,27 @@ impl Game<'_> {
         kind: &str,
         params: horizon_client::mobs::conversion::Params,
     ) -> Option<u32> {
+        // Tick conversions can have been removed from the tick list before
+        // their queued event is handled. Restore them until Post has returned.
+        match self.mobs.iter_mut().find(|m| m.id == from.id) {
+            Some(old) => old.removed = false,
+            None => {
+                let mut old = from.clone();
+                old.removed = false;
+                self.mobs.push(old);
+            }
+        }
         let t = self.res.mob_types().get(kind).cloned()?;
-        // LivingConversionEvent.Pre: the caller already marked the mob removed,
-        // so a canceled conversion puts it back as it was.
         let mut cancel = false;
         let from_kind = super::native_hooks::mob_kind(from);
         self.native_living_conversion_pre(from.id, &from_kind, kind, &mut cancel);
         if cancel {
-            match self.mobs.iter_mut().find(|m| m.id == from.id) {
-                Some(kept) => kept.removed = false,
-                None => {
-                    let mut kept = from.clone();
-                    kept.removed = false;
-                    self.mobs.push(kept);
-                }
-            }
             return None;
         }
+        let from = self.mobs.iter().find(|m| m.id == from.id)?.clone();
         self.next_entity += 1;
         let mut mob = Mob::new(self.next_entity, t, from.position, from.yaw);
-        horizon_client::mobs::conversion::single(from, &mut mob, params);
+        horizon_client::mobs::conversion::single(&from, &mut mob, params);
         if matches!(from.species(), Species::Zombie | Species::Husk) {
             let at = [from.position.x, from.position.y, from.position.z];
             let special = self.local_difficulty(at).special();
@@ -663,6 +659,26 @@ impl Game<'_> {
                 special,
                 horizon_client::mobs::finalize::Reason::Conversion,
             );
+        }
+        match (from.species(), kind) {
+            (Species::Tadpole, "minecraft:frog") | (Species::Villager, "minecraft:witch") => {
+                self.finalize_converted(&mut mob);
+            }
+            (Species::Pig, "minecraft:zombified_piglin") => {
+                let old = self.mobs.iter_mut().find(|m| m.id == from.id)?;
+                let spear = old.random.next_int_bound(20).unwrap_or(1) == 0;
+                mob.extra.set_main_hand(Some(if spear {
+                    "minecraft:golden_spear".into()
+                } else {
+                    "minecraft:golden_sword".into()
+                }));
+                mob.persistent = true;
+            }
+            (Species::Hoglin, "minecraft:zoglin")
+            | (Species::Piglin | Species::PiglinBrute, "minecraft:zombified_piglin") => {
+                mob.add_effect("minecraft:nausea", 200, 0);
+            }
+            _ => {}
         }
         let id = mob.id;
         // ConversionType.SINGLE: the passengers get off and board the new mob.
@@ -673,14 +689,11 @@ impl Game<'_> {
         }
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
-        let transformed_kind = self
-            .mobs
-            .last()
-            .expect("converted mob was just inserted")
-            .kind
-            .id
-            .clone();
+        let transformed_kind = self.mobs.iter().find(|m| m.id == id)?.kind.id.clone();
         self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
+        if let Some(old) = self.mobs.iter_mut().find(|m| m.id == from.id) {
+            old.removed = true;
+        }
         Some(id)
     }
     /// The `summon` command: spawn a mob in front of the player or at a position.
@@ -2462,21 +2475,7 @@ impl Game<'_> {
                     }
                 }
                 MobEvent::Convert { from, kind, params } => {
-                    let id = self.convert_to(&from, kind, params);
-                    // `Piglin.finishConversion` and `Hoglin.finishConversion`:
-                    // the converted mob is nauseous for 10 seconds.
-                    if matches!(kind, "minecraft:zombified_piglin" | "minecraft:zoglin")
-                        && let Some(m) = self.mobs.iter_mut().find(|m| Some(m.id) == id)
-                    {
-                        m.add_effect("minecraft:nausea", 200, 0);
-                    }
-                    // `Tadpole.ageUp`: the frog is finalized for the
-                    // conversion and made persistent.
-                    if kind == "minecraft:frog"
-                        && let Some(id) = id
-                    {
-                        self.finalize_converted(id);
-                    }
+                    self.convert_to(&from, kind, params);
                 }
                 MobEvent::ThrowItem {
                     mob,

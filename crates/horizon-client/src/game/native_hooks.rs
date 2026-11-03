@@ -6358,9 +6358,8 @@ impl Game<'_> {
 
     /// A mob converted into another type (NeoForge's
     /// `LivingConversionEvent.Post`): `converted` replaces `entity`. Fires
-    /// after the new mob joined the level, for the conversions
-    /// `native_living_conversion_pre` tells. Horizon marks the old mob removed
-    /// before this notification; NeoForge reports it before final removal.
+    /// after the finalized new mob joined the level and before the old mob
+    /// is removed, for the conversions `native_living_conversion_pre` tells.
     /// API @API:living_conversion_post@.
     pub(super) fn native_living_conversion_post(
         &mut self,

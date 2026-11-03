@@ -67,6 +67,7 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     to.extra.leash_pending = from.extra.leash_pending;
     to.extra.leash_player = from.extra.leash_player;
     // convertCommon.
+    to.absorption = from.absorption;
     to.extra.effects = from.extra.effects.clone();
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
@@ -121,6 +122,7 @@ mod tests {
             s.yaw = 90.0;
             s.custom_name = Some("Frosty".into());
             s.no_ai = true;
+            s.absorption = 3.5;
             s.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
             s.extra.chest = Some("minecraft:chainmail_chestplate".into());
@@ -143,6 +145,7 @@ mod tests {
             single(&s, &mut st, Params::KEEP_ALL);
             assert_eq!(st.custom_name.as_deref(), Some("Frosty"));
             assert!(st.no_ai);
+            assert_eq!(st.absorption, 3.5);
             assert_eq!(st.yaw, 90.0);
             assert_eq!(
                 st.extra.main_hand_stack().map(|s| &*s.item),
