@@ -52,8 +52,6 @@ mod tests {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
         pub(super) struct Corners;
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-        pub(super) struct ItemEnergyBuffer;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct BiomeColors;
@@ -63,6 +61,9 @@ mod tests {
         pub(super) struct Hand;
         #[derive(Clone, Copy)]
         pub(super) struct BlockHit;
+        pub(super) struct NativeBlockClick<'a>(pub &'a ());
+        pub(super) struct NativeTriState;
+        pub(super) struct NativeInteractionResult;
         pub(super) struct NativeMobRender<'a>(pub &'a ());
         pub(super) struct NativeShake;
         pub(super) struct ShieldBlock;
