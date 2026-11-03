@@ -1336,7 +1336,7 @@ mod tests {
         assert_eq!(back.recipes, s.recipes);
     }
     #[test]
-    fn a_knowledge_book_unlocks_its_recipes_and_is_used_up() {
+    fn a_knowledge_book_validates_recipes_and_is_used_up() {
         let root =
             std::env::temp_dir().join(format!("horizon-knowledge-book-{}", std::process::id()));
         let dir = root.join("data/minecraft/recipe");
@@ -1368,8 +1368,8 @@ mod tests {
             .use_knowledge_book(&index, &mut hand, false)
             .unwrap();
         assert_eq!(unlocked, ["minecraft:stick", "minecraft:crafting_table"]);
-        assert!(settings.knows("minecraft:stick"));
-        assert!(settings.knows("minecraft:crafting_table"));
+        assert!(!settings.knows("minecraft:stick"));
+        assert!(!settings.knows("minecraft:crafting_table"));
         // One book used up, the second still in the hand.
         assert_eq!(hand.as_ref().map(|s| s.count), Some(1));
 
@@ -1378,7 +1378,7 @@ mod tests {
         let mut hand = Some(book(&["minecraft:stick"], 1));
         assert_eq!(
             settings.use_knowledge_book(&index, &mut hand, true),
-            Ok(Vec::new())
+            Ok(vec!["minecraft:stick".to_owned()])
         );
         assert_eq!(hand.as_ref().map(|s| s.count), Some(1));
 

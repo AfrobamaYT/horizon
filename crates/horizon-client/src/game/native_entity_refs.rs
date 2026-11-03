@@ -991,7 +991,7 @@ pub(super) mod tests {
                 game.award_stat("custom", "minecraft:jump", 1);
                 assert_eq!(game.stats.get("custom", "minecraft:jump"), before);
                 game.trigger("minecraft:tick", |_, _| panic!("fake criterion evaluated"));
-                assert_eq!(game.recipe_unlocked(&["minecraft:test".into()]), 0);
+                assert_eq!(game.award_recipes(&["minecraft:test".into()]), 0);
                 let source = horizon_client::command::args::Selector {
                     kind: 's',
                     limit: 1,
