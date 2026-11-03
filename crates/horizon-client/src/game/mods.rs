@@ -66,7 +66,7 @@ pub(super) fn content_root(
     root: &std::path::Path,
     enabled: &std::collections::BTreeSet<String>,
     dev: &[std::path::PathBuf],
-) -> std::path::PathBuf {
+) -> horizon_client::Result<std::path::PathBuf> {
     use horizon_client::mod_content::{self, ContentMod};
     use horizon_mods::{Content, Package};
     let here = std::env::current_dir().unwrap_or_default();
@@ -114,8 +114,7 @@ pub(super) fn content_root(
                 Ok(types) => known.insert(types),
                 Err(e) => {
                     log::warn!("Horizon: content mods not loaded: {e}");
-                    register_mob_effects(&[]);
-                    return root.to_owned();
+                    return Err(e);
                 }
             },
         };
@@ -148,31 +147,21 @@ pub(super) fn content_root(
             }
         }
     }
-    match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
-        Ok(out) => {
-            if announce {
-                horizon_protocol::mod_list::set_local(announced);
-            }
-            if out != root {
-                log::info!(
-                    "Horizon: content from {} mod(s) in {}",
-                    mods.len(),
-                    out.display()
-                );
-            }
-            register_mob_effects(&mods);
-            register_entity_types(&mods);
-            register_menu_types(&mods);
-            out
-        }
-        Err(e) => {
-            log::warn!("Horizon: content mods not loaded: {e}");
-            register_mob_effects(&[]);
-            register_entity_types(&[]);
-            register_menu_types(&[]);
-            root.to_owned()
-        }
+    let out = mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))?;
+    if announce {
+        horizon_protocol::mod_list::set_local(announced);
     }
+    if out != root {
+        log::info!(
+            "Horizon: content from {} mod(s) in {}",
+            mods.len(),
+            out.display()
+        );
+    }
+    register_mob_effects(&mods);
+    register_entity_types(&mods);
+    register_menu_types(&mods);
+    Ok(out)
 }
 
 /// A loaded mod as a server tells joining clients (`horizon_protocol::mod_list`): its manifest's
