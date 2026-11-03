@@ -6,7 +6,7 @@
 //! at a time, checked against what the mod last showed, so a menu built on
 //! these never copies or loses an item. Server menus are in `native_menus.rs`;
 //! maps a mod draws in `native_send_map` below.
-use super::Game;
+use super::{Game, commands::Target};
 use horizon_client::{
     items::ItemStack,
     lan::{guest::Guest, playerdata},
@@ -159,8 +159,8 @@ enum Side {
 impl Game<'_> {
     /// The player `uuid`'s inventory `kind`: the live one when they are on
     /// the server, else their file's. Err while they are logging in, dead,
-    /// swapped in (inside a player's hook: call from `native_menu_clicked` or
-    /// `native_server_tick`), or when they have never played here.
+    /// swapped in or displaced by an inner turn, or when they have never
+    /// played here. Other guests' live inventories remain available.
     pub(super) fn native_inventory(
         &self,
         uuid: u128,
@@ -182,9 +182,6 @@ impl Game<'_> {
     }
 
     fn native_inventory_side(&self, uuid: u128) -> Result<Side, String> {
-        if self.lan_acting.is_some() {
-            return Err("inside a player's turn".into());
-        }
         let Some(host) = self.lan.as_ref() else {
             return Err("no server".into());
         };
@@ -194,6 +191,12 @@ impl Game<'_> {
                 Err("the player is logging in".into())
             } else if g.dead {
                 Err("the player is dead".into())
+            } else if !matches!(
+                self.native_player_ref(uuid)
+                    .and_then(|player| self.native_entity_target(player.entity())),
+                Some(Target::Guest(_))
+            ) {
+                Err("the player's inventory is swapped out".into())
             } else {
                 Ok(Side::Live(i))
             };

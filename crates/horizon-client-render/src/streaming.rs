@@ -2614,15 +2614,10 @@ impl Streaming {
         }
     }
     /// The level's saved forced state: `/forceload`'s chunks, and the mods'
-    /// tickets of the mods `loaded` accepts (the rest are discarded), which
-    /// wait in `take_loaded_tickets`.
-    pub fn load_forced(
-        &mut self,
-        commanded: HashSet<(i32, i32)>,
-        tickets: Vec<ModTicket>,
-        loaded: impl Fn(&str) -> bool,
-    ) {
-        self.mod_tickets = ModTickets::from_saved(tickets, loaded);
+    /// tickets (of controllers that are registered), which wait in
+    /// `take_loaded_tickets`.
+    pub fn load_forced(&mut self, commanded: HashSet<(i32, i32)>, tickets: Vec<ModTicket>) {
+        self.mod_tickets = ModTickets::from_saved(tickets);
         self.commanded = commanded;
         self.forced.clear();
         let held: Vec<_> = self.commanded.iter().copied().collect();

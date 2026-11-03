@@ -281,11 +281,21 @@ pub(super) enum PlayerRead<'a> {
         body: Option<&'a PlayerMotion>,
         /// The player's stored abilities, when it is a server player's turn.
         abilities: Option<PlayerAbilities>,
+        /// Where the player last died: the acting guest's record, swapped
+        /// into the level for their turn.
+        last_death: Option<&'a (String, [i32; 3])>,
     },
     Guest(&'a Guest),
 }
 
 impl PlayerRead<'_> {
+    fn last_death(&self) -> Option<&(String, [i32; 3])> {
+        match self {
+            Self::Acting { last_death, .. } => *last_death,
+            Self::Guest(guest) => guest.last_death.as_ref(),
+        }
+    }
+
     fn mode(&self) -> i32 {
         match self {
             Self::Acting { mode, .. } => *mode,
@@ -510,6 +520,7 @@ impl Game<'_> {
                     mode: self.mode_id(),
                     body: self.player.as_ref(),
                     abilities: self.acting_abilities,
+                    last_death: self.level.last_death.as_ref(),
                 },
                 self.lan_acting_entity?,
             ));
@@ -538,11 +549,21 @@ impl Game<'_> {
                     mode: self.mode_id(),
                     body: Some(body),
                     abilities: self.acting_abilities,
+                    last_death: self.level.last_death.as_ref(),
                 },
                 body.entity_id as u32,
             ));
         }
         None
+    }
+
+    /// The dimension id and block of the player's last death, through the
+    /// shared player resolver. None for a stale or unavailable player.
+    pub(super) fn native_player_last_death_record(
+        &self,
+        player: PlayerRef,
+    ) -> Option<(String, [i32; 3])> {
+        self.player_handle_read(player)?.last_death().cloned()
     }
 
     pub(super) fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
@@ -555,6 +576,7 @@ impl Game<'_> {
                 mode: self.mode_id(),
                 body: self.player.as_ref(),
                 abilities: self.acting_abilities,
+                last_death: self.level.last_death.as_ref(),
             });
         }
         if let Some((read, id)) = self.player_lookup(player.uuid)
@@ -932,11 +954,11 @@ impl Game<'_> {
     /// level 4, from the overworld's spawn, with no output. A teleport to
     /// another level (`execute in minecraft:the_nether run tp Alex 0 70 0`)
     /// happens at the next tick's start, as the console's. Whether it ran
-    /// without failing. Only where no player's state is swapped in
-    /// (`native_tick`, `native_menu_clicked`): false inside a player's hook,
-    /// where the other players are out of reach.
+    /// without failing. During a guest's turn, live players (including the
+    /// acting player) are reachable; displaced outer players are excluded
+    /// from name, UUID and selector resolution on this path only.
     pub(super) fn native_run_command(&mut self, line: &str) -> bool {
-        if self.lan_acting.is_some() || self.lan.is_none() {
+        if self.lan.is_none() {
             return false;
         }
         let server = execute::Source {
@@ -944,7 +966,9 @@ impl Game<'_> {
             ..self.server_source()
         };
         let outer = self.command_source.replace(server);
+        let filter = std::mem::replace(&mut self.native_command_filter, true);
         let ok = self.as_console(|g| g.run_command(line));
+        self.native_command_filter = filter;
         self.command_source = outer;
         ok
     }

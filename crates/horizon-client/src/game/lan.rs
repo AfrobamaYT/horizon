@@ -426,7 +426,7 @@ fn mob_meta(
     let shared = i8::from(m.is_on_fire())
         | i8::from(m.extra.sprinting) << 3
         | i8::from(m.species() == Species::Drowned && m.extra.flag) << 4
-        | i8::from(m.invisible || horizon_client::mobs::trader::is_invisible(m)) << 5
+        | i8::from(m.is_invisible()) << 5
         | i8::from(m.is_currently_glowing()) << 6;
     if shared != 0 {
         meta.push((0, serializer::BYTE, Value::Byte(shared)));
@@ -1717,6 +1717,13 @@ impl Game<'_> {
     pub(super) fn set_allow_flight(&mut self, allow: bool) {
         if let Some(host) = self.lan.as_mut() {
             host.hub.config.allow_flight = allow;
+        }
+    }
+
+    /// Update whether status responses include online player names.
+    pub(super) fn set_hide_online_players(&mut self, hide: bool) {
+        if let Some(host) = self.lan.as_ref() {
+            host.hub.lan.shared.set_hide_online_players(hide);
         }
     }
 

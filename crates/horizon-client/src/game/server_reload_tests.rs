@@ -51,6 +51,7 @@ impl ServerReloadListener for CheckListener {
         Ok(ServerReloadApply::new(|| {}))
     }
 }
+#[mod_api::__subscriptions]
 impl Hooks for DataListener {
     fn add_server_reload_listeners(
         &self,
@@ -176,6 +177,8 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             assert_eq!(*live.lock().unwrap(), 8);
             let old_function = game.fns.store.functions["reload_test:keep"].clone();
             let old_selection = std::fs::read(world.join("datapacks.json")).unwrap();
+            let old_enabled = game.fns.enabled.clone();
+            let old_vanilla_disabled = game.cmds.vanilla_disabled;
             write(&data, "4");
             write(&function, "say new");
             reject.store(true, Ordering::Relaxed);
@@ -199,6 +202,14 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             assert_eq!(
                 std::fs::read(world.join("datapacks.json")).unwrap(),
                 old_selection
+            );
+            assert_eq!(
+                game.fns.enabled, old_enabled,
+                "the refused change publishes nothing"
+            );
+            assert_eq!(
+                game.cmds.vanilla_disabled, old_vanilla_disabled,
+                "the refused change flips no command switch"
             );
             assert!(game.fns.store.functions.contains_key("reload_test:keep"));
             assert_eq!(*live.lock().unwrap(), 8);
@@ -245,6 +256,7 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
         }
     }
     struct SkipHooks(Arc<Mutex<Vec<(String, String)>>>);
+    #[mod_api::__subscriptions]
     impl Hooks for SkipHooks {
         fn add_server_reload_listeners(
             &self,
@@ -347,10 +359,12 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
 
 #[test]
 #[ignore = "needs prepared resources"]
-fn server_reload_registration_failure_stops_world_open_and_quiet_mods_are_pruned() {
+fn server_reload_registration_failure_stops_world_open_and_quiet_mods_never_listen() {
     struct Quiet;
+    #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
     struct Broken;
+    #[mod_api::__subscriptions]
     impl Hooks for Broken {
         fn add_server_reload_listeners(
             &self,
@@ -370,7 +384,11 @@ fn server_reload_registration_failure_stops_world_open_and_quiet_mods_are_pruned
     let _ = std::fs::remove_dir_all(&root);
     mod_api::testing::with_mods(vec![ModEntry::new("quiet", Box::new(Quiet))].into(), || {
         with_game(|game| {
-            assert!(mod_api::listened(mod_api::HookId::AddServerReloadListeners));
+            // A mod that doesn't implement the hook is never subscribed, so
+            // world open and `/reload` skip the registration graph.
+            assert!(!mod_api::listened(
+                mod_api::HookId::AddServerReloadListeners
+            ));
             game.load_world(request(&root)).unwrap();
             assert!(!mod_api::listened(
                 mod_api::HookId::AddServerReloadListeners

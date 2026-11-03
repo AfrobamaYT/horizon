@@ -659,8 +659,8 @@ mod tests {
     use crate::mod_api::ClientHost;
     use serde_json::json;
 
-    /// A mod that leaves `item_model_property` at its default is asked once, then the
-    /// resolver skips the hook; a mod that answers it is asked on every resolve.
+    /// The resolver skips a mod that leaves `item_model_property` at its default;
+    /// a mod that implements it is asked on every resolve.
     #[test]
     #[ignore = "needs prepared resources"]
     fn item_model_property_is_asked_only_while_a_mod_answers() {
@@ -671,8 +671,10 @@ mod tests {
         };
 
         struct Quiet;
+        #[mod_api::__subscriptions]
         impl Hooks for Quiet {}
         struct Charged(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Charged {
             fn item_model_property(
                 &self,
@@ -689,7 +691,7 @@ mod tests {
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let env = Env { game };
-                assert!(mod_api::listened(HookId::ItemModelProperty));
+                assert!(!mod_api::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
                 assert!(!mod_api::listened(HookId::ItemModelProperty));
                 assert!(!env.item_model_property("example:charged", &stack));
