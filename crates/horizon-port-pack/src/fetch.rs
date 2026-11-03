@@ -14,11 +14,12 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha1::{Digest, Sha1};
+use sha1::Sha1;
+use sha2::{Digest, digest::Output};
 use std::{
     collections::HashMap,
     fs,
-    io::{Read, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -238,9 +239,38 @@ pub(crate) fn download(
     store_download(response.into_reader(), sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
 }
 
+/// Hash and copy a jar stream, refusing inputs larger than 512 MiB.
+/// Pass [`io::sink()`] as the writer when only the digest is needed.
+pub fn hash_reader<D: Digest>(
+    mut reader: impl Read,
+    mut writer: impl Write,
+) -> io::Result<Output<D>> {
+    let mut hash = D::new();
+    let mut size = 0u64;
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        size += n as u64;
+        if size > MAX_JAR {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "jar exceeds 512 MiB",
+            ));
+        }
+        hash.update(&buf[..n]);
+        writer.write_all(&buf[..n])?;
+    }
+    Ok(hash.finalize())
+}
+
 /// Stream into a private temporary file, publishing only after verification.
 pub(crate) fn store_download(
-    mut reader: impl Read,
+    reader: impl Read,
     sha1: Option<&str>,
     dest: &Path,
     overwrite: bool,
@@ -257,22 +287,8 @@ pub(crate) fn store_download(
         .open(&part)
         .map_err(|e| e.to_string())?;
     let result = (|| {
-        let mut hash = Sha1::new();
-        let mut size = 0u64;
-        let mut buf = [0u8; 65536];
-        loop {
-            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
-            size += n as u64;
-            if size > MAX_JAR {
-                return Err("download exceeds 512 MiB".into());
-            }
-            hash.update(&buf[..n]);
-            file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-        }
-        let got = format!("{:x}", hash.finalize());
+        let hash = hash_reader::<Sha1>(reader, &mut file).map_err(|e| e.to_string())?;
+        let got = format!("{hash:x}");
         if let Some(want) = sha1.filter(|want| !want.eq_ignore_ascii_case(&got)) {
             return Err(format!("SHA-1 {got}, the pack says {want}"));
         }
@@ -383,6 +399,25 @@ pub fn curseforge_names(instance: &Value) -> HashMap<(u64, u64), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn hashing_and_copying_share_the_digest_for_each_algorithm() {
+        let mut copied = Vec::new();
+        let hash = hash_reader::<Sha1>(&b"abc"[..], &mut copied).unwrap();
+        assert_eq!(
+            format!("{hash:x}"),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+        assert_eq!(copied, b"abc");
+        let hash = hash_reader::<sha2::Sha512>(&b"abc"[..], io::sink()).unwrap();
+        assert_eq!(
+            format!("{hash:x}"),
+            concat!(
+                "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a",
+                "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+            )
+        );
+    }
 
     #[test]
     fn sha1_stream_is_verified_before_atomic_publication() {
