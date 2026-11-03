@@ -4640,6 +4640,23 @@ pub trait Hooks: Send + Sync {
         let _ = event_;
         Flow::Continue
     }
+    /// A dying mob or player `entity` of `kind` is about to drop `original`
+    /// points of experience; the vanilla conditions have been checked.
+    /// `attacking_player` is the player who last hurt it, if any. Change
+    /// `amount` (0 or less drops nothing), or set `cancel` to drop none. A
+    /// sculk catalyst that takes the experience does not call this.
+    /// Server-side. @API:living_experience_drop@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_experience_drop(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingExperienceDropEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
     /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
@@ -4688,6 +4705,24 @@ pub trait Hooks: Send + Sync {
     /// Every mod gets `event.display_name` in order and may add, change or remove display_name.
     fn player_tab_list_name_format(&self, event: &mut PlayerTabListNameFormatEvent<'_>) {
         let _ = event;
+    }
+    /// A server player's level is about to change through
+    /// `Player.giveExperienceLevels`: once per level gained or lost by points,
+    /// and for the anvil, `/experience add ... levels` and `native_give_levels`.
+    /// Change `levels`, or set `cancel` to leave the level unchanged. The
+    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// and the item helpers reach them. Server-side.
+    /// @API:player_xp_level_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_xp_level_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerXpLevelChangeEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
@@ -15224,6 +15259,46 @@ pub fn dispatch_item_stacked_on_other(
         }
     }
 }
+/// What [`Hooks::living_experience_drop`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingExperienceDropEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub attacking_player: Option<u128>,
+    pub original: i32,
+    pub amount: i32,
+}
+pub fn dispatch_living_experience_drop(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    attacking_player: Option<u128>,
+    original: i32,
+    amount: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingExperienceDropEvent {
+        entity,
+        kind,
+        attacking_player,
+        original,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "living_experience_drop") {
+        if matches!(
+            mod_hook.living_experience_drop(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
 /// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct LivingGetProjectileEvent<'a> {
@@ -15359,6 +15434,40 @@ pub fn dispatch_player_tab_list_name_format(
     for mod_hook in super::entered(mods, "player_tab_list_name_format") {
         mod_hook.player_tab_list_name_format(&mut event);
     }
+}
+/// What [`Hooks::player_xp_level_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerXpLevelChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub levels: i32,
+}
+pub fn dispatch_player_xp_level_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    levels: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerXpLevelChangeEvent {
+        player,
+        name,
+        levels: *levels,
+    };
+    for mod_hook in super::entered(mods, "player_xp_level_change") {
+        if matches!(
+            mod_hook.player_xp_level_change(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *levels = event.levels;
 }
 /// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
