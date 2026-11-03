@@ -6574,6 +6574,67 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
+    fn global_block_use_item_on_runs_without_a_part() {
+        use super::super::native_entity_refs::tests::with_game;
+        use crate::mod_api::{
+            self, Hooks, NativeInteractionResult as Answer, ServerHost, UseItemOnEvent,
+        };
+        use horizon_client::chunk::Chunk;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering::SeqCst},
+        };
+
+        struct Global(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Global {
+            fn use_item_on(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut UseItemOnEvent<'_>,
+            ) -> Option<Answer> {
+                self.0.fetch_add(1, SeqCst);
+                Some(Answer::Success)
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "global_block_use",
+            Box::new(Global(calls.clone())),
+        )]
+        .into();
+        mod_api::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let registry = game.pack.assets.registry;
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                let lever = game
+                    .with_props(
+                        registry.default_state("minecraft:lever").unwrap(),
+                        &[("face", "floor")],
+                    )
+                    .unwrap();
+                game.world.set(0, 63, 4, stone).unwrap();
+                game.world.set(0, 64, 4, lever).unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 4],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 4.5],
+                    inside: false,
+                };
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(game.world.block(0, 64, 4), lever);
+                assert_eq!(calls.load(SeqCst), 1);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "requires prepared game resources"]
     fn fake_body_does_not_count_toward_sleep() {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(

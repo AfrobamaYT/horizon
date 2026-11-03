@@ -6583,11 +6583,7 @@ impl Game<'_> {
             let held = self.held().cloned();
             let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
             let mut block_answer = None;
-            if !horizon_client::mod_api::mods().is_empty()
-                && !horizon_client::mod_api::parts("use_item_on")
-                    .block_state(state)
-                    .is_empty()
-            {
+            if !horizon_client::mod_api::mods().is_empty() {
                 let click = self.block_click(hit, self.hand, held.as_ref());
                 self.native_use_item_on(state, &click, &mut block_answer);
             }
