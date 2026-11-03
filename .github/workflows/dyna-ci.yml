@@ -14,10 +14,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A new push to a pull request replaces its running checks, and a new push to main replaces main's:
-  # the newest main run covers every commit before it (releases follow the newest that passes).
+  # A new push to a pull request replaces its running checks. Main runs are never cancelled: a run in
+  # progress finishes, and only the newest waiting push runs next, so main is always checked.
   group: dyna-checks-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main') || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   HORIZON_TELEMETRY_URL: "off"
