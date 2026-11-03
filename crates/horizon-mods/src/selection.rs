@@ -2,7 +2,7 @@
 mod context;
 pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext};
 
-use crate::{Package, find, index::native};
+use crate::{Package, find};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
@@ -30,7 +30,11 @@ pub fn packages<'a>(
     paths.extend(dev.iter().cloned());
     paths.into_iter().filter_map(move |path| {
         let package = Package::read(&path).ok()?;
-        let selected = if native::holds(&path) { built } else { enabled };
+        let selected = if package.manifest.native.is_some() {
+            built
+        } else {
+            enabled
+        };
         (selected.contains(&package.manifest.id) || dev.contains(&path))
             .then_some(SelectedPackage { path, package })
     })
@@ -92,12 +96,22 @@ mod tests {
         home.package("horizon-mods", "disabled", false);
         let content = home.package("horizon-native-mods", "plain", false);
         let native = home.package("horizon-native-mods", "other_compiled", true);
+        let source = home.package("workspace", "directory_compiled", true);
+        let directory = home.0.join("horizon-native-mods/source");
+        zip::ZipArchive::new(fs::File::open(source).unwrap())
+            .unwrap()
+            .extract(&directory)
+            .unwrap();
         let enabled = BTreeSet::from(["next_build".into(), "plain".into()]);
-        let compiled = BTreeSet::from(["compiled".into(), "other_compiled".into()]);
+        let compiled = BTreeSet::from([
+            "compiled".into(),
+            "other_compiled".into(),
+            "directory_compiled".into(),
+        ]);
         let selected: Vec<_> = packages(&home.0, &enabled, &compiled, &[])
             .map(|p| p.path)
             .collect();
-        assert_eq!(selected, [built, native, content.clone()]);
+        assert_eq!(selected, [built, native, content.clone(), directory]);
         let rebuilt: Vec<_> = packages(&home.0, &enabled, &BTreeSet::new(), &[])
             .map(|p| p.path)
             .collect();

@@ -18,7 +18,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         Ok(LaunchArguments::parse(
             std::env::args().skip(1),
             &cwd,
-            &logging::data_dir().join("horizon"),
+            &logging::game_home(),
             std::env::var_os("HORIZON_HOME").as_deref(),
         )?)
     });

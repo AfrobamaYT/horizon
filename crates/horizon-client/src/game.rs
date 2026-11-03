@@ -544,7 +544,7 @@ struct Options {
     /// as vanilla's DisplayData does, without saving it there.
     fullscreen: bool,
     /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...).
-    game_dir: Option<PathBuf>,
+    game_dir: PathBuf,
     /// `--quickPlaySingleplayer`, checked once the game folder is known.
     quick_play: Option<String>,
     session_file: Option<String>,
@@ -599,15 +599,13 @@ impl Options {
             Ok(None) => {}
             Err(e) => eprintln!("Horizon: not signed in: {e}"),
         }
-        if let Some(dir) = o.game_dir.take() {
-            // Paths given on the command line stay relative to where the game was started.
-            o.resources = std::path::absolute(&o.resources)?;
-            o.report = o.report.map(std::path::absolute).transpose()?;
-            o.control = o.control.map(std::path::absolute).transpose()?;
-            std::fs::create_dir_all(&dir)
-                .and_then(|()| std::env::set_current_dir(&dir))
-                .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
-        }
+        // Paths given on the command line stay relative to where the game was started.
+        o.resources = std::path::absolute(&o.resources)?;
+        o.report = o.report.map(std::path::absolute).transpose()?;
+        o.control = o.control.map(std::path::absolute).transpose()?;
+        std::fs::create_dir_all(&o.game_dir)
+            .and_then(|()| std::env::set_current_dir(&o.game_dir))
+            .map_err(|e| format!("game folder {}: {e}", o.game_dir.display()))?;
         // Vanilla's quick play (Main, QuickPlay.joinSingleplayerWorld): only a
         // world that exists opens; else the title screen. --world also creates one.
         if let Some(world) = o.quick_play.take() {
@@ -631,7 +629,7 @@ impl Options {
         Self::from_launch(LaunchArguments::parse(
             args,
             &std::env::current_dir()?,
-            &horizon_client::logging::data_dir().join("horizon"),
+            &horizon_client::logging::game_home(),
             std::env::var_os("HORIZON_HOME").as_deref(),
         )?)
     }
@@ -682,7 +680,7 @@ impl Options {
             dev_mods: context.dev_mods,
             execution_role: execution_role::ExecutionRole::Client,
             fullscreen: false,
-            game_dir: Some(context.game_dir),
+            game_dir: context.game_dir,
             quick_play: None,
             session_file: std::env::var("HORIZON_SESSION_FILE").ok(),
             session_stdin: false,

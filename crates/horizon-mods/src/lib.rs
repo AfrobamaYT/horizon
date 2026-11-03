@@ -8,7 +8,6 @@ pub mod icon;
 pub mod index;
 pub mod manifest;
 pub mod modpack;
-#[cfg(feature = "index")]
 pub mod selection;
 
 pub use content::Content;
