@@ -5,6 +5,7 @@ use super::ModEntry;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RegistrationPhase {
+    Parts,
     Components,
     Blocks,
     Items,
