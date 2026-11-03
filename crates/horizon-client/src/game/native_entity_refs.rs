@@ -1099,6 +1099,7 @@ pub(super) mod tests {
                 .unwrap()
                 .conn;
             game.as_guest(&mut host, conn, |game| {
+                assert_eq!(game.native_player_permission_level(replacement), Some(0));
                 assert!(!game.native_player_remove_fake(replacement));
                 assert!(game.native_fake_player(level, 4321, "other").is_none());
             })

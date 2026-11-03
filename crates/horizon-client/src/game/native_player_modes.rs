@@ -13,6 +13,9 @@ impl Game<'_> {
     pub(super) fn native_player_permission_level(&self, player: PlayerRef) -> Option<u8> {
         Some(match self.player_handle_read(player)? {
             super::native_server::PlayerRead::Guest(g) => g.permission,
+            super::native_server::PlayerRead::Acting { .. } if self.lan_acting.is_some() => {
+                self.ui.registries.permission
+            }
             super::native_server::PlayerRead::Acting { .. } if self.allow_commands() => 4,
             super::native_server::PlayerRead::Acting { .. } => 0,
         })
