@@ -281,11 +281,11 @@ fn a_mod_with_no_pinned_horizon_commit_is_refused_with_the_fix() {
 }
 
 #[test]
-fn an_unpacked_hnmod_keeps_its_pins_and_hook_points_and_ships_only_sources() {
+fn an_unpacked_hnmod_keeps_its_pins_and_ships_only_sources() {
     let root = tree("unpacked");
     let manifest = json!({
         "schema": 1, "id": "zoom", "version": "0.1.0", "game": "26.3",
-        "horizon": SHA, "mixins": SHA2, "hooks": 3,
+        "horizon": SHA, "mixins": SHA2,
     });
     write(&root.join("horizon-native.json"), &manifest.to_string());
     write(
@@ -303,7 +303,6 @@ fn an_unpacked_hnmod_keeps_its_pins_and_hook_points_and_ships_only_sources() {
         ),
         (SHA, SHA2)
     );
-    assert_eq!(read.manifest.hooks, Some(3));
     // Only sources and data ship: a binary beside them stays behind.
     write(&root.join("mixins/zoom/evil.exe"), "MZ");
     let again = checked(&pack(bundle).unwrap(), &root.join("out2")).unwrap();

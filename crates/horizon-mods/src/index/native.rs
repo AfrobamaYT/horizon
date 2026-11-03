@@ -40,12 +40,6 @@ pub struct Manifest {
     /// Exact source revisions tested together, never mutable tags.
     pub horizon: String,
     pub mixins: String,
-    /// The version of Horizon's native hook points (`game/native_hooks.rs`,
-    /// `NATIVE_HOOKS_API`) a mod that hooks nothing else needs: the launcher
-    /// builds it on any Horizon with that version or a later one, and
-    /// `horizon` is only the revision it was tested on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hooks: Option<u32>,
 }
 
 pub fn revision(value: &str) -> bool {
@@ -63,7 +57,6 @@ impl Manifest {
             || self.game.is_empty()
             || !revision(&self.horizon)
             || !revision(&self.mixins)
-            || self.hooks == Some(0)
         {
             return Err(
                 "invalid native manifest: schema 1, id, version, game and exact revisions required"
@@ -178,9 +171,16 @@ impl Bundle {
                 return Err("duplicate native bundle path".into());
             }
         }
-        let manifest: Manifest =
+        let manifest_json: serde_json::Value =
             serde_json::from_slice(files.get(MANIFEST).ok_or("missing horizon-native.json")?)
                 .map_err(|e| e.to_string())?;
+        if manifest_json.get("hooks").is_some() {
+            return Err(
+                "native hook version is no longer supported; rebuild against this game".into(),
+            );
+        }
+        let manifest: Manifest =
+            serde_json::from_value(manifest_json).map_err(|e| e.to_string())?;
         manifest.check()?;
         if let Some(id) = content_id.filter(|id| *id != manifest.id) {
             return Err(format!(
@@ -239,7 +239,6 @@ mod tests {
             game: "26.3".into(),
             horizon: "a".repeat(40),
             mixins: "b".repeat(40),
-            hooks: None,
         }
     }
     fn read(name: &str, extras: &[(&str, &[u8])], mixin: &str) -> Result<Bundle, String> {
@@ -267,6 +266,30 @@ mod tests {
             "[mod]\nid = \"veinminer\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{}\"\n",
             "a".repeat(40)
         )
+    }
+    #[test]
+    fn archive_with_hook_number_requires_rebuilding() {
+        let path = std::env::temp_dir().join(format!("native-hooks-{}.hnmod", std::process::id()));
+        for value in [
+            serde_json::json!(1),
+            serde_json::Value::Null,
+            serde_json::json!("bad"),
+        ] {
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            zip.start_file(MANIFEST, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            let mut json = serde_json::to_value(manifest()).unwrap();
+            json["hooks"] = value;
+            zip.write_all(&serde_json::to_vec(&json).unwrap()).unwrap();
+            zip.finish().unwrap();
+            assert!(
+                Bundle::read(&path)
+                    .err()
+                    .unwrap()
+                    .contains("rebuild against this game")
+            );
+        }
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn source_bundle_carries_exact_compatibility_into_index_facts() {
@@ -390,23 +413,5 @@ capabilities = ["registries"]
             .check()
             .is_err()
         );
-    }
-    #[test]
-    fn hooks_is_optional_and_kept() {
-        let hooked = Manifest {
-            hooks: Some(1),
-            ..manifest()
-        };
-        assert!(hooked.check().is_ok());
-        let text = serde_json::to_string(&hooked).unwrap();
-        assert!(text.contains("\"hooks\":1"), "{text}");
-        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap(), hooked);
-        let plain = serde_json::to_string(&manifest()).unwrap();
-        assert!(!plain.contains("hooks"), "{plain}");
-        let zero = Manifest {
-            hooks: Some(0),
-            ..manifest()
-        };
-        assert!(zero.check().is_err());
     }
 }
