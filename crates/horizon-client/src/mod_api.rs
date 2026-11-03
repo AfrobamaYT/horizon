@@ -800,6 +800,7 @@ impl MobRef {
 /// species ids are namespaced (`minecraft:zombie`); a bare id reads as
 /// `minecraft:`'s, like the effects' ids.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum NativeMobFilter {
     /// The nearest player.
     Player,
@@ -813,6 +814,7 @@ pub enum NativeMobFilter {
 /// with behavior of their own (a `MoveToBlockGoal` subclass's block test)
 /// stay out: they take code, not parameters.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum NativeGoal {
     /// `FloatGoal`: swim up in water or lava. Vanilla parameters: none.
     Float,

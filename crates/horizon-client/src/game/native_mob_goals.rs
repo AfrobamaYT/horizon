@@ -44,23 +44,16 @@ fn goal_id(name: &str) -> &str {
     }
 }
 
-/// The vanilla `Mob`s that hold no `PathfinderMob` goal: the cubes and the
-/// shulker move by their own code (`Slime.SlimeAttackGoal` and friends),
-/// not by a path-found goal. The dragon is one too, but it never comes this
-/// far (it keeps no place in the mob list). Flying mobs are not on the list:
-/// vanilla's `FlyingMob` (a bee, an allay, a ghast) is a `PathfinderMob`.
+/// The supported `Mob` classes that do not inherit `PathfinderMob`.
 fn pathfinder(species: Species) -> bool {
-    !matches!(
-        species,
-        Species::Slime | Species::MagmaCube | Species::Shulker
-    )
+    !matches!(species, Species::Bat | Species::Ghast | Species::Phantom)
 }
 
 impl Game<'_> {
     /// `GoalSelector.addGoal(priority, goal)` on a mob's goal selector.
     /// Refuses a stale or unavailable mob, a client, and the dragon (it
     /// keeps no selector); a goal the mob's vanilla class does not hold (a
-    /// `PathfinderMob` goal for a slime or shulker, `BreedGoal` or
+    /// `PathfinderMob` goal for a bat, ghast or phantom, `BreedGoal` or
     /// `FollowParentGoal` for a mob that is no animal); and non-finite
     /// numbers, negative speeds and distances, a probability outside
     /// 0..=1, a negative interval, and an unknown species id (in `prey`,
@@ -183,8 +176,15 @@ impl Game<'_> {
     /// the tick's `Cx` sees; no hook fires in between. The events a stop
     /// makes land as any tick's do.
     fn remove_from_selector(&mut self, index: usize, id: &str, targets: bool) -> usize {
+        let snapshot: Vec<_> = self
+            .mobs
+            .iter()
+            .map(|m| super::creatures::seen(m, self.level.player_uuid))
+            .collect();
         let mut mobs = std::mem::take(&mut self.mobs);
-        let w = self.mob_world_base(&[]);
+        let mut w = self.mob_world_base(&snapshot);
+        let pos = mobs[index].position;
+        w.difficulty = self.local_difficulty([pos.x, pos.y, pos.z]);
         let mut lr = self.world.random.clone();
         let mut events = Vec::new();
         let removed = {
@@ -207,6 +207,8 @@ impl Game<'_> {
             }
             removed
         };
+        self.world.random = lr;
+        mobs::apply_brain_events(&mut mobs, &mut events, 0);
         self.mobs = mobs;
         self.handle_mob_events(events).ok();
         removed
@@ -225,11 +227,32 @@ impl Game<'_> {
                 | NativeGoal::LookAtPlayer { .. }
                 | NativeGoal::RandomLookAround
                 | NativeGoal::LeapAtTarget { .. }
-                | NativeGoal::RestrictSun
+                | NativeGoal::EatBlock
+                | NativeGoal::FollowMob { .. }
                 | NativeGoal::NearestTarget { .. }
-                | NativeGoal::HurtByTarget { .. }
         );
         if needs_pathfinder && !pathfinder(species) {
+            return None;
+        }
+        if matches!(goal, NativeGoal::FollowMob { .. })
+            && matches!(
+                species,
+                Species::Tadpole
+                    | Species::Cod
+                    | Species::Salmon
+                    | Species::TropicalFish
+                    | Species::Pufferfish
+                    | Species::Dolphin
+                    | Species::Guardian
+                    | Species::ElderGuardian
+                    | Species::Nautilus
+                    | Species::ZombieNautilus
+                    | Species::Axolotl
+                    | Species::Drowned
+                    | Species::Turtle
+                    | Species::Frog
+            )
+        {
             return None;
         }
         let animal_only = matches!(
@@ -465,6 +488,223 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn goal_constructors_follow_vanilla_classes() {
+        use horizon_client::mobs::Species;
+        with_game(|game| {
+            let mut mismatches = Vec::new();
+            for (species, accepts) in [
+                (Species::Slime, true),
+                (Species::MagmaCube, true),
+                (Species::Shulker, true),
+                (Species::Ghast, false),
+                (Species::Phantom, false),
+                (Species::Bat, false),
+            ] {
+                let actual = game
+                    .boxed_goal(
+                        species,
+                        &NativeGoal::Panic {
+                            speed: 1.0,
+                            water_range: None,
+                        },
+                    )
+                    .is_some();
+                if actual != accepts {
+                    mismatches.push(format!(
+                        "{species:?}: accepted {actual}, expected {accepts}"
+                    ));
+                }
+            }
+            assert!(mismatches.is_empty(), "{}", mismatches.join("; "));
+            for species in [Species::Bat, Species::Ghast, Species::Phantom] {
+                assert!(game.boxed_goal(species, &NativeGoal::EatBlock).is_some());
+                assert!(game.boxed_goal(species, &NativeGoal::RestrictSun).is_none());
+                assert!(
+                    game.boxed_goal(species, &NativeGoal::HurtByTarget { alert: false })
+                        .is_none()
+                );
+                assert!(
+                    game.boxed_goal(
+                        species,
+                        &NativeGoal::FollowMob {
+                            speed: 1.0,
+                            stop: 2.0,
+                            area: 8.0
+                        }
+                    )
+                    .is_some()
+                );
+            }
+            for species in [
+                Species::Cod,
+                Species::Dolphin,
+                Species::Guardian,
+                Species::Frog,
+                Species::Drowned,
+                Species::Turtle,
+                Species::Axolotl,
+            ] {
+                assert!(
+                    game.boxed_goal(
+                        species,
+                        &NativeGoal::FollowMob {
+                            speed: 1.0,
+                            stop: 2.0,
+                            area: 8.0
+                        }
+                    )
+                    .is_none()
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn removing_running_goal_supplies_snapshot_and_persists_level_random() {
+        use horizon_client::mobs::goals::{Cx, Goal};
+        use horizon_core::random::RandomSource;
+        #[derive(Clone, Debug)]
+        struct StopProbe;
+        impl Goal for StopProbe {
+            fn flags(&self) -> u8 {
+                0
+            }
+            fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn box_clone(&self) -> Box<dyn Goal> {
+                Box::new(self.clone())
+            }
+            fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+                m.extra.followers = cx.w.others.len() as i32;
+                m.health = cx.lr.next_int_bound(1000).unwrap() as f32;
+            }
+        }
+        with_game(|game| {
+            let handle = mob_in_game(game, "minecraft:zombie", 99);
+            mob_in_game(game, "minecraft:zombie", 100);
+            let mut mobs = std::mem::take(&mut game.mobs);
+            let snapshot: Vec<_> = mobs
+                .iter()
+                .map(|m| super::super::creatures::seen(m, game.level.player_uuid))
+                .collect();
+            let mut random = game.world.random.clone();
+            let mut events = Vec::new();
+            let mut selector = std::mem::take(&mut mobs[0].ai.goals);
+            selector.clear();
+            selector.add(0, StopProbe);
+            {
+                let world = game.mob_world_base(&snapshot);
+                let mut cx = Cx {
+                    w: &world,
+                    lr: &mut random,
+                    events: &mut events,
+                };
+                selector.tick(&mut mobs[0], &mut cx);
+            }
+            mobs[0].ai.goals = selector;
+            game.mobs = mobs;
+            let mut expected = game.world.random.clone();
+            let draw = expected.next_int_bound(1000).unwrap();
+            let next = expected.next_int_bound(1000).unwrap();
+            assert_eq!(handle.remove_goal(game, "StopProbe"), Some(1));
+            assert_eq!(game.mobs[0].extra.followers, 2);
+            assert_eq!(game.mobs[0].health, draw as f32);
+            assert_eq!(game.world.random.next_int_bound(1000).unwrap(), next);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn removing_hold_ground_notifies_nearby_raiders() {
+        use horizon_client::mobs::{
+            Who,
+            goals::Cx,
+            raider::{self, HoldGroundAttack},
+        };
+        with_game(|game| {
+            let handle = mob_in_game(game, "minecraft:pillager", 99);
+            mob_in_game(game, "minecraft:pillager", 100);
+            let mut mobs = std::mem::take(&mut game.mobs);
+            raider::state_mut(&mut mobs[0]).patrolling = true;
+            mobs[0].ai.target = Some(Who::Player);
+            let snapshot: Vec<_> = mobs
+                .iter()
+                .map(|m| super::super::creatures::seen(m, game.level.player_uuid))
+                .collect();
+            let mut random = game.world.random.clone();
+            let mut events = Vec::new();
+            let mut selector = std::mem::take(&mut mobs[0].ai.goals);
+            selector.clear();
+            selector.add(0, HoldGroundAttack::new(8.0));
+            {
+                let world = game.mob_world_base(&snapshot);
+                let mut cx = Cx {
+                    w: &world,
+                    lr: &mut random,
+                    events: &mut events,
+                };
+                selector.tick(&mut mobs[0], &mut cx);
+            }
+            assert!(selector.is_running("HoldGroundAttack"));
+            mobs[0].ai.goals = selector;
+            game.mobs = mobs;
+            assert_eq!(handle.remove_goal(game, "HoldGroundAttack"), Some(1));
+            assert!(game.mobs[1].ai.aggressive);
+            assert_eq!(game.mobs[1].ai.target, Some(Who::Player));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn removing_school_goal_updates_the_leader() {
+        use horizon_client::mobs::{aquatic::FollowFlockLeader, goals::Cx};
+        with_game(|game| {
+            let follower = mob_in_game(game, "minecraft:cod", 99);
+            let _leader = mob_in_game(game, "minecraft:cod", 100);
+            let mut mobs = std::mem::take(&mut game.mobs);
+            mobs[0].extra.leader = Some(100);
+            mobs[1].extra.followers = 1;
+            let snapshot: Vec<_> = mobs
+                .iter()
+                .map(|m| m.seen(game.level.player_uuid))
+                .collect();
+            let mut random = game.world.random.clone();
+            let mut events = Vec::new();
+            let mut selector = std::mem::take(&mut mobs[0].ai.goals);
+            selector.clear();
+            selector.add(0, FollowFlockLeader::new(0));
+            {
+                let world = game.mob_world_base(&snapshot);
+                let mut context = Cx {
+                    w: &world,
+                    lr: &mut random,
+                    events: &mut events,
+                };
+                selector.tick(&mut mobs[0], &mut context);
+            }
+            assert!(selector.is_running("FollowFlockLeaderGoal"));
+            assert!(
+                events.is_empty(),
+                "starting an established follower must not change the school"
+            );
+            mobs[0].ai.goals = selector;
+            game.mobs = mobs;
+            assert_eq!(follower.remove_goal(game, "FollowFlockLeaderGoal"), Some(1));
+            assert_eq!(
+                game.mobs[0].extra.leader, None,
+                "the actual stop method must run"
+            );
+            assert_eq!(
+                game.mobs[1].extra.followers, 0,
+                "stopping a follower must decrement its leader"
+            );
+        });
+    }
+
+    #[test]
     #[ignore = "needs prepared resources"]
     fn goals_read_add_remove_and_refuse_what_the_mob_does_not_hold() {
         with_game(|game| {
@@ -528,7 +768,7 @@ mod tests {
                     water_range: None,
                 }
             ));
-            assert!(!slime.add_goal(
+            assert!(slime.add_goal(
                 game,
                 4,
                 &NativeGoal::Panic {
@@ -536,7 +776,7 @@ mod tests {
                     water_range: None,
                 }
             ));
-            assert!(!slime.add_goal(
+            assert!(slime.add_goal(
                 game,
                 4,
                 &NativeGoal::MeleeAttack {
