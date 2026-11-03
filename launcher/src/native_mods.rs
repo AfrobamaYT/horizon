@@ -1608,8 +1608,9 @@ fn pipeline(
     let started = std::time::Instant::now();
     let built_on = about(base);
     if is_native(base) && built_on.is_none() {
-        return Err(format!(
-            "Native build {base} has a missing or invalid native-mods.json record."
+        return Err(trf(
+            "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.",
+            &[("version", base)],
         ));
     }
     backend::need_prepared(base)?;

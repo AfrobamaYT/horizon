@@ -335,11 +335,6 @@ mod tests {
         let bundle = super::super::bundle(&dir, None).unwrap();
         let stage_dir = dir.join("workspace");
         fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
-        fs::write(
-            stage_dir.join(MAIN_TEMPLATE),
-            include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
-        )
-        .unwrap();
         fs::write(stage_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
         fs::write(
             stage_dir.join("crates/horizon-client/Cargo.toml"),
@@ -354,7 +349,7 @@ mod tests {
             &resolution,
         )
         .unwrap_err();
-        assert!(err.contains("update the game"), "{err}");
+        assert!(err.contains("no readable native entry template"), "{err}");
         fs::create_dir_all(stage_dir.join("crates/horizon-client/src")).unwrap();
         fs::write(
             stage_dir.join(MAIN_TEMPLATE),
