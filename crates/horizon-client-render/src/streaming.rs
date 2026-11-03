@@ -2470,28 +2470,26 @@ impl Streaming {
     }
     /// Finish generation for a closing world without waiting on the event
     /// loop. No new generation is scheduled while the save screen is shown.
-    /// Proto snapshots are checked out to workers before chunk writes, just as
-    /// in `save(true)`, so older generation cannot overwrite the final chunks.
-    pub fn poll_save(&mut self, world: &mut World) -> bool {
-        let started = std::time::Instant::now();
-        loop {
-            match self.prepare_poll_save(world) {
-                SaveStep::Pending => return false,
-                SaveStep::Full(chunk) => {
-                    self.save_finished(chunk);
-                    if started.elapsed() >= std::time::Duration::from_millis(2) {
-                        return false;
-                    }
-                }
-                SaveStep::Protos(protos) => return self.submit_protos(protos),
-            }
-        }
+    /// Poll generation and yield for each late full save before proto submission.
+    /// The caller keeps the same deadline across every yield in this tick.
+    pub fn prepare_poll_save(
+        &mut self,
+        world: &mut World,
+        deadline: std::time::Instant,
+    ) -> SaveStep {
+        self.prepare_poll_save_with_clock(world, deadline, std::time::Instant::now)
     }
 
-    /// Poll generation and yield for each late full save before proto submission.
-    pub fn prepare_poll_save(&mut self, world: &mut World) -> SaveStep {
-        let started = std::time::Instant::now();
-        while let Some(done) = self.shared.done.try_recv() {
+    fn prepare_poll_save_with_clock(
+        &mut self,
+        world: &mut World,
+        deadline: std::time::Instant,
+        mut now: impl FnMut() -> std::time::Instant,
+    ) -> SaveStep {
+        while now() < deadline {
+            let Some(done) = self.shared.done.try_recv() else {
+                break;
+            };
             match done {
                 Done::Decorated(x, z, region, finals, writes) => {
                     self.receive_decorated(x, z, *region, finals, writes, world)
@@ -2505,9 +2503,9 @@ impl Streaming {
                 Done::LightView(x, z, proto, view) => self.receive_light_view(x, z, proto, view),
                 other => self.deferred.push(other),
             }
-            if started.elapsed() >= std::time::Duration::from_millis(2) {
-                return SaveStep::Pending;
-            }
+        }
+        if now() >= deadline {
+            return SaveStep::Pending;
         }
         if self.decorating > 0
             || !self.finishing.is_empty()
@@ -3333,12 +3331,29 @@ mod tests {
             streaming.resume_plan_update(&mut world, resume),
             PlanStep::Ready(_)
         ));
-        streaming.finishing.insert((102, 0));
+        streaming.finishing.extend([(102, 0), (104, 0)]);
         streaming.shared.done.send(late(102));
-        let SaveStep::Full(chunk) = streaming.prepare_poll_save(&mut world) else {
+        streaming.shared.done.send(late(104));
+        let before = std::time::Instant::now();
+        let poll_deadline = before + std::time::Duration::from_millis(2);
+        let SaveStep::Full(chunk) =
+            streaming.prepare_poll_save_with_clock(&mut world, poll_deadline, || before)
+        else {
             panic!("poll yield")
         };
         assert_eq!(*generator.0.lock().unwrap(), [(100, 0), (101, 0)]);
+        streaming.save_finished(chunk);
+        assert!(matches!(
+            streaming.prepare_poll_save_with_clock(&mut world, poll_deadline, || poll_deadline),
+            SaveStep::Pending
+        ));
+        let next_deadline = poll_deadline + std::time::Duration::from_millis(2);
+        let SaveStep::Full(chunk) =
+            streaming.prepare_poll_save_with_clock(&mut world, next_deadline, || poll_deadline)
+        else {
+            panic!("next tick yield")
+        };
+        assert_eq!(*generator.0.lock().unwrap(), [(100, 0), (101, 0), (102, 0)]);
         streaming.save_finished(chunk);
         streaming.finishing.insert((103, 0));
         streaming.shared.done.send(late(103));
@@ -3346,7 +3361,10 @@ mod tests {
         let SaveStep::Full(chunk) = streaming.prepare_save(&mut world, true, deadline) else {
             panic!("blocking yield")
         };
-        assert_eq!(*generator.0.lock().unwrap(), [(100, 0), (101, 0), (102, 0)]);
+        assert_eq!(
+            *generator.0.lock().unwrap(),
+            [(100, 0), (101, 0), (102, 0), (104, 0)]
+        );
         streaming.save_finished(chunk);
         assert!(matches!(
             streaming.prepare_save(&mut world, true, deadline),
@@ -3354,7 +3372,7 @@ mod tests {
         ));
         assert_eq!(
             *generator.0.lock().unwrap(),
-            [(100, 0), (101, 0), (102, 0), (103, 0)]
+            [(100, 0), (101, 0), (102, 0), (104, 0), (103, 0)]
         );
     }
 

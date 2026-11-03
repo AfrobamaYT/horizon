@@ -150,16 +150,13 @@ impl Game<'_> {
                     if save.started.elapsed() > Duration::from_secs(30) {
                         return Err("chunk generation did not finish before saving".into());
                     }
-                    let started = Instant::now();
+                    let deadline = Instant::now() + Duration::from_millis(2);
                     loop {
-                        match self.streaming.prepare_poll_save(&mut self.world) {
+                        match self.streaming.prepare_poll_save(&mut self.world, deadline) {
                             horizon_client::streaming::SaveStep::Pending => break,
                             horizon_client::streaming::SaveStep::Full(chunk) => {
                                 self.native_late_full_chunk_snapshot(&chunk);
                                 self.streaming.save_finished(chunk);
-                                if started.elapsed() >= Duration::from_millis(2) {
-                                    break;
-                                }
                             }
                             horizon_client::streaming::SaveStep::Protos(protos) => {
                                 self.native_proto_snapshots(&protos);
