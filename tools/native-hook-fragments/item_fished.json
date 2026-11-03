@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "item_fished",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_fished",
+      "neoforge": "ItemFishedEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a cancellable fishing catch (`native_item_fished`).",
+  "doc_summary": "`native_item_fished(player, player_entity_id, fished, cancel)`, in `FishingHook.retrieve` once a server player's reel-in rolled the fishing loot. `fished` (`NativeItemFished`) holds the bobber, the items and the rod's damage (1, or 2 on the ground), which the mods may change. Set `cancel` and the player receives nothing; the rod still takes `rod_damage`. After `player_fish`'s reel-in. Server-side. Bundles need \"hooks\": @API:item_fished@."
+}

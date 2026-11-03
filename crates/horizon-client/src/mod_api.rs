@@ -122,6 +122,44 @@ pub struct NativeLootDrops<'a> {
     pub used: bool,
 }
 
+/// A server explosion about to happen, for `explosion_start`
+/// (`ServerLevel.explode`'s `ServerExplosion`).
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NativeExplosionStart<'a> {
+    /// The level it happens in (`minecraft:overworld`).
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub radius: f32,
+    /// It sets fires (`createFire`).
+    pub fire: bool,
+    /// `Explosion.BlockInteraction`: `keep`, `destroy`, `destroy_with_decay`,
+    /// or `trigger_block` (a wind burst, which pushes and triggers blocks).
+    pub interaction: &'a str,
+    /// The damage type it hurts with (`minecraft:explosion`,
+    /// `minecraft:player_explosion`, `minecraft:bad_respawn_point`); none for
+    /// a wind burst, which hurts nothing.
+    pub damage_type: Option<&'a str>,
+    /// The mob that explodes (a creeper) or whose projectile does (a ghast's
+    /// fireball, a wither's skull), when Horizon tracks one.
+    pub source: Option<u32>,
+}
+
+/// A fishing catch, for `item_fished` (`ItemFishedEvent`): what the mods may
+/// change before the player gets it.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct NativeItemFished {
+    /// The bobber's entity id and position.
+    pub hook: u32,
+    pub position: [f64; 3],
+    /// The items the fishing loot table rolled, for the player to receive.
+    pub drops: Vec<ItemStack>,
+    /// The damage the rod takes: vanilla's 1, or 2 with the bobber on the
+    /// ground.
+    pub rod_damage: i32,
+}
+
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones

@@ -406,6 +406,20 @@ impl Game<'_> {
             });
             return Ok(());
         }
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let start = horizon_client::mod_api::NativeExplosionStart {
+                dimension: self.dim.id(),
+                center,
+                radius,
+                fire: false,
+                interaction: "trigger_block",
+                damage_type: None,
+                source: None,
+            };
+            if self.explosion_start_cancelled(&start) {
+                return Ok(());
+            }
+        }
         // ServerExplosion.explode: the blast is heard first.
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);

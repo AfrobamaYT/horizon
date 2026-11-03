@@ -326,39 +326,64 @@ impl Game<'_> {
                 Some(hook.open_water),
             );
             self.world.random = random;
-            let mut caught = Vec::new();
-            for stack in items {
+            let mut caught: Vec<ItemStack> = items
+                .into_iter()
+                .map(|stack| {
+                    let mut item = ItemStack {
+                        item: Arc::from(stack.item.as_str()),
+                        count: stack.count.max(1) as u32,
+                        damage: stack.damage.max(0) as u32,
+                        extra: None,
+                    };
+                    for (id, level) in &stack.enchantments {
+                        if &*item.item == "minecraft:enchanted_book" {
+                            horizon_client::item_data::set_level(
+                                &mut item.data_mut().stored_enchantments,
+                                id,
+                                (*level).max(0) as u32,
+                            );
+                        } else {
+                            item.enchant(id, (*level).max(0) as u32);
+                        }
+                    }
+                    if let Some(potion) = &stack.potion {
+                        item = item.with_potion(potion);
+                    }
+                    item
+                })
+                .collect();
+            // ItemFishedEvent, on the rolled catch: the mods may change it and
+            // the rod's damage, or cancel it.
+            let mut rod_damage = if hook.on_ground { 2 } else { 1 };
+            if let Some(player) = self.lan_acting_uuid
+                && !horizon_client::mod_api::mods().is_empty()
+            {
+                let mut fished = horizon_client::mod_api::NativeItemFished {
+                    hook: hook.id,
+                    position: [hook.position.x, hook.position.y, hook.position.z],
+                    drops: caught,
+                    rod_damage,
+                };
+                let mut cancel = false;
+                let entity_id = self.own_entity_id();
+                self.native_item_fished(player, entity_id, &mut fished, &mut cancel);
+                rod_damage = fished.rod_damage;
+                if cancel {
+                    return rod_damage.max(0) as u32;
+                }
+                caught = fished.drops;
+            }
+            for item in caught.iter().cloned() {
                 // FishingHook.retrieve: fish_caught for each catch in #minecraft:fishes.
                 if self
                     .res
                     .items()
                     .item_tags
                     .get("minecraft:fishes")
-                    .is_some_and(|t| t.contains(stack.item.as_str()))
+                    .is_some_and(|t| t.contains(&*item.item))
                 {
                     self.award_custom_stat("fish_caught", 1);
                 }
-                let mut item = ItemStack {
-                    item: Arc::from(stack.item.as_str()),
-                    count: stack.count.max(1) as u32,
-                    damage: stack.damage.max(0) as u32,
-                    extra: None,
-                };
-                for (id, level) in &stack.enchantments {
-                    if &*item.item == "minecraft:enchanted_book" {
-                        horizon_client::item_data::set_level(
-                            &mut item.data_mut().stored_enchantments,
-                            id,
-                            (*level).max(0) as u32,
-                        );
-                    } else {
-                        item.enchant(id, (*level).max(0) as u32);
-                    }
-                }
-                if let Some(potion) = &stack.potion {
-                    item = item.with_potion(potion);
-                }
-                caught.push(item.clone());
                 let (dx, dy, dz) = (
                     owner.x - hook.position.x,
                     owner.y - hook.position.y,
@@ -387,7 +412,7 @@ impl Game<'_> {
                 ..Default::default()
             };
             self.trigger_fishing_rod_hooked(rod, &bobber, &caught);
-            damage = 1;
+            return rod_damage.max(0) as u32;
         }
         if hook.on_ground {
             damage = 2;

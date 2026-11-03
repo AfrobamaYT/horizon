@@ -888,8 +888,9 @@ use horizon_client::mod_api::{
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, BlockHit, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
-    NativeBlockRim, NativeColoredLight, NativeLootDrops, NativeMinimap, NativeMod,
-    NativePanelEvent, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
+    NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
+    NativeMinimap, NativeMod, NativePanelEvent, NativeScreen, NativeScreenView, NativeStack,
+    NativeZoom,
 };
 use horizon_client::{
     atlas_sources::qualified,
@@ -6199,6 +6200,43 @@ impl Game<'_> {
     /// `item` is the projectile's held item. 346.
     pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
         mod_api::dispatch_player_launch_projectile(self, mod_api::mods(), player, name, item);
+    }
+    /// A server explosion is about to happen (`ExplosionEvent.Start`, in
+    /// `ServerLevel.explode` before `ServerExplosion.explode`): every one,
+    /// TNT, creepers, beds and anchors, fireballs, withers, end crystals and
+    /// wind bursts. Set `cancel` and nothing of it happens: no blocks, no
+    /// damage or knockback, no sound, particles or game event. Before
+    /// `explosion_prime`, which a cancel skips. Server-side.
+    /// @API:explosion_start@.
+    pub(super) fn native_explosion_start(
+        &mut self,
+        explosion: &NativeExplosionStart<'_>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_explosion_start(self, mod_api::mods(), explosion, cancel);
+    }
+    /// A server player `player` (UUID) and `player_entity_id` reeled in a
+    /// catch (`ItemFishedEvent`, in `FishingHook.retrieve` after the fishing
+    /// loot rolled): `fished` holds the bobber, the items and the rod's
+    /// damage, which the mods may change. Set `cancel` and the player
+    /// receives nothing (no items, experience, statistic or advancement);
+    /// the bobber is gone and the rod still takes `rod_damage`. After
+    /// `player_fish`'s reel-in. Server-side. @API:item_fished@.
+    pub(super) fn native_item_fished(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        fished: &mut NativeItemFished,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_item_fished(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            fished,
+            cancel,
+        );
     }
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as

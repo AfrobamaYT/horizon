@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "explosion_start",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_explosion_start",
+      "neoforge": "ExplosionEvent.Start",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a cancellable server explosion (`native_explosion_start`).",
+  "doc_summary": "`native_explosion_start(explosion, cancel)`, in `ServerLevel.explode` before the explosion runs: every server explosion, TNT, creepers, beds and anchors, fireballs, withers, end crystals and wind bursts. `explosion` (`NativeExplosionStart`) holds the dimension, centre, radius, fire, block interaction, damage type and source mob. Set `cancel` and nothing of it happens. Before `explosion_prime`, which a cancel skips. Server-side. Bundles need \"hooks\": @API:explosion_start@."
+}

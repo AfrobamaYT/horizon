@@ -7,7 +7,8 @@ use super::{
     entity::{Blast, Entity, EntityHandle, with_entity, with_entity_mut},
 };
 use horizon_client::{
-    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, mobs::Who, text::Text,
+    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, mobs::Who,
+    mod_api::NativeExplosionStart, text::Text,
 };
 use horizon_core::{
     geometry::{Vec3, VoxelShape},
@@ -798,6 +799,16 @@ impl Game<'_> {
             }
         }
     }
+    /// `ExplosionEvent.Start` for the explosion `start`: true when a mod
+    /// cancels it, and nothing of it happens.
+    pub(super) fn explosion_start_cancelled(&mut self, start: &NativeExplosionStart<'_>) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let mut cancel = false;
+        self.native_explosion_start(start, &mut cancel);
+        cancel
+    }
     /// Paintings and cushions in reach (`BlockAttachedEntity.hurtServer`).
     fn explosion_breaks_hanging(&mut self, center: [f64; 3], diameter: f64) {
         let mut i = 0;
@@ -866,6 +877,23 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
         if self.serving.is_some() || self.options.dedicated.is_some() {
+            let interaction_name = match interaction {
+                BlockInteraction::Keep => "keep",
+                BlockInteraction::Destroy => "destroy",
+                BlockInteraction::DestroyWithDecay => "destroy_with_decay",
+            };
+            let start = NativeExplosionStart {
+                dimension: self.dim.id(),
+                center,
+                radius,
+                fire,
+                interaction: interaction_name,
+                damage_type: Some(damage_type),
+                source: self.combat.explosion_source,
+            };
+            if self.explosion_start_cancelled(&start) {
+                return Ok(());
+            }
             self.native_explosion_prime(center, radius);
         }
         if let Some(p) = &self.player {
