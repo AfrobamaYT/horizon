@@ -52,8 +52,6 @@ mod tests {
             pub(super) _lifetime: std::marker::PhantomData<&'a mut ()>,
         }
         pub(super) struct Corners;
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-        pub(super) struct ItemEnergyBuffer;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct BiomeColors;
@@ -102,6 +100,11 @@ mod tests {
             Grant,
             Revoke,
         }
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(super) enum NativePermissionLevel {
+            All,
+            Owners,
+        }
         pub(super) struct NativeLifecycleContext;
         pub(super) struct ToolUse;
         pub(super) struct NativeServerPlayer;
@@ -148,6 +151,7 @@ mod tests {
             }
             pub mod mod_api {
                 pub struct NativeClientInfo;
+                pub struct NativeArmorHurt;
             }
             pub mod menu {
                 pub struct MenuButtonContext {

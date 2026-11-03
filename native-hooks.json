@@ -29,16 +29,8 @@
       "target": "horizon_client::game::native_mobs::Game<'_>::native_kill_mob", "side": "server"
     },
     {
-      "name": "remove_mob",
-      "target": "horizon_client::game::native_mobs::Game<'_>::native_remove_mob", "side": "server"
-    },
-    {
       "name": "summon",
       "target": "horizon_client::game::native_entities::Game<'_>::native_summon", "side": "server"
-    },
-    {
-      "name": "remove_entity",
-      "target": "horizon_client::game::native_entities::Game<'_>::native_remove_entity", "side": "server"
     },
     {
       "name": "server_players",
@@ -281,10 +273,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_property", "side": "both"
     },
     {
-      "name": "insert_item",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_insert_item", "side": "server"
-    },
-    {
       "name": "cursor",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_cursor", "side": "client"
     },
@@ -407,14 +395,6 @@
     {
       "name": "dimension",
       "target": "horizon_client::game::machines::native_items::Game<'_>::native_dimension", "side": "both"
-    },
-    {
-      "name": "extract_item",
-      "target": "horizon_client::game::machines::native_items::Game<'_>::native_extract_item", "side": "server"
-    },
-    {
-      "name": "move_items",
-      "target": "horizon_client::game::machines::native_items::Game<'_>::native_move_items", "side": "server"
     },
     {
       "name": "hide_player",
@@ -1346,6 +1326,7 @@
       "name": "loot_table_load", "side": "both",
       "version": 1,
       "target": "horizon_world::loot::native_loot_table_load",
+      "side": "server",
       "mod_api": {
         "contract": "collect",
         "out": "table"
@@ -2114,16 +2095,6 @@
       }
     },
     {
-      "name": "item_fluid_tank", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_fluid_tank",
-      "neoforge": "Capabilities.FluidHandler.ITEM",
-      "mod_api": {
-        "contract": "replace",
-        "out": "capacity"
-      }
-    },
-    {
       "name": "living_equipment_change",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_equipment_change",
@@ -2733,16 +2704,6 @@
       }
     },
     {
-      "name": "entity_transform",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_transform",
-      "neoforge": "none (NeoForge has no such event)",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
-    },
-    {
       "name": "entity_unleash",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_unleash",
@@ -2970,16 +2931,6 @@
       "side": "server",
       "mod_api": {
         "contract": "listen"
-      }
-    },
-    {
-      "name": "item_energy_buffer", "side": "server",
-      "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_energy_buffer",
-      "neoforge": "Capabilities.Energy.ITEM",
-      "mod_api": {
-        "contract": "replace",
-        "out": "buffer"
       }
     },
     {

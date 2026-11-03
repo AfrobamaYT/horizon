@@ -108,8 +108,8 @@
 //!
 //! API 308 adds the time players wake at after sleeping through the night, changeable (`native_sleep_finished_time`).
 //!
-//! API 307 adds a mod item holding energy (`native_item_energy_buffer`), and the item energy helpers in
-//! `native_item_energy.rs`: `native_item_energy`, `native_item_energy_insert`, `native_item_energy_extract`.
+//! API 307 added a mod item holding energy (`native_item_energy_buffer`) and its helpers; Parts' item
+//! energy capability replaces them, and they are removed.
 //!
 //! API 306 adds A world save cycle completed (`native_world_saved`).
 //!
@@ -260,8 +260,6 @@
 //! API 225 adds A firework rocket completed explosion effects (`native_firework_explode`).
 //!
 //! API 224 adds An experience bottle broke and awarded experience (`native_exp_bottle`).
-//!
-//! API 223 adds A mob conversion completed (`native_entity_transform`).
 //!
 //! API 222 adds A guest player's fall flying state changed (`native_entity_toggle_glide`).
 //!
@@ -420,7 +418,8 @@
 //!
 //! API 148 adds a mob's or an armor stand's equipment slot taking another stack (`native_living_equipment_change`), and whether a mod listens to the mobs' (`native_living_equipment_listened`).
 //!
-//! API 147 adds a mod item as a fluid container (`native_item_fluid_tank`), and the item fluid helpers in `native_item_fluids.rs`: `native_item_fluid`, `native_item_fluid_fill`, `native_item_fluid_drain`.
+//! API 147 added a mod item as a fluid container (`native_item_fluid_tank`) and its helpers; Parts' item fluid
+//! capability (`Capabilities.Fluid.ITEM`) replaces them, and they are removed.
 //!
 //! API 146 adds entities ticking, which a mod can stop (`native_entity_tick_pre`, `native_entity_tick_post`, told while a mod sets `native_entity_tick_listened`).
 //!
@@ -653,7 +652,7 @@
 //! hands it vanilla's choice (the damage bar, or a bundle's fullness already applied), to replace or hide.
 //!
 //! API 59 adds entities for server mods (`native_summon`,
-//! `native_set_display`, `native_remove_entity`, in `native_entities.rs`).
+//! `native_set_display`, in `native_entities.rs`).
 //!
 //! API 58 adds the renderer's hook points, in `horizon-client-render`'s
 //! `gfx/native_render.rs`: `native_world_drawn` (draw with the world's colour,
@@ -731,8 +730,7 @@
 //! `native_is_signal_source`, and the helper `native_update_signal_neighbors`).
 //!
 //! API 37 adds mobs for server mods (`native_spawn_mob`, `native_mob`,
-//! `native_mobs`,
-//! `native_set_mob_health`, `native_kill_mob`, `native_remove_mob`... in
+//! `native_mobs`, `native_set_mob_health`, `native_kill_mob`... in
 //! `native_mobs.rs`).
 //!
 //! API 36 adds recipes of a mod's own types (`native_recipes_of_type`,
@@ -847,7 +845,6 @@
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
-use super::native_item_energy::ItemEnergyBuffer;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
     execution_role::ExecutionRole,
@@ -893,6 +890,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
+    mod_api::NativePermissionLevel,
     mod_list::{self, Installed, NativePage},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
@@ -2221,6 +2219,35 @@ impl Game<'_> {
             dimension_changed,
         );
     }
+    /// NeoForge's `ServerChatEvent`: a player's chat message, through their
+    /// chain and the chat filter, is about to be broadcast.
+    /// `player_id` is the server's entity id for the player, `player` their
+    /// UUID, `username` their name and `raw_text` what they typed. `message`
+    /// starts as that text; replace it and players see the new message
+    /// (`withUnsignedContent`: a signed message keeps its signature), and
+    /// the log shows it. Set `cancel` and nobody sees it, and it doesn't
+    /// count toward the chat spam limit. Commands (`/say`, `/msg`...) are
+    /// not chat here. Server-side, with no player's state swapped in.
+    pub(super) fn native_server_chat(
+        &mut self,
+        player_id: i32,
+        player: u128,
+        username: &str,
+        raw_text: &str,
+        message: &mut Text,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_server_chat(
+            self,
+            mod_api::mods(),
+            player_id,
+            player,
+            username,
+            raw_text,
+            message,
+            cancel,
+        );
+    }
     /// NeoForge's `ClientChatEvent`: a client is about to send `message`.
     /// `original_message` is immutable; change `message` or set `cancel` to
     /// prevent sending. @API:client_chat@.
@@ -2995,33 +3022,6 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_block_entity_energy(self, mod_api::mods(), block, energy);
     }
-    /// Item `item` (`mod_id:name`) is a fluid container
-    /// (`Capabilities.FluidHandler.ITEM`): set `capacity`, in millibuckets,
-    /// when the item is yours (clamped to 1..=1 000 000; vanilla's buckets
-    /// are built in and cannot be changed). Asked at each call of the item
-    /// fluid helpers (`native_item_fluid`, `native_item_fluid_fill`,
-    /// `native_item_fluid_drain`, in `native_item_fluids.rs`). What the
-    /// container holds is kept in the stack's `minecraft:custom_data`, under
-    /// `horizon_fluid`. API 147.
-    pub(super) fn native_item_fluid_tank(&self, item: &str, capacity: &mut Option<i32>) {
-        mod_api::dispatch_item_fluid_tank(self, mod_api::mods(), item, capacity);
-    }
-    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
-    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
-    /// its capacity and the most one insert and one extract move. A capacity
-    /// under 1 leaves the buffer out, and the limits are clamped to
-    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
-    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
-    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
-    /// is kept in the stack's `minecraft:custom_data`, as the int
-    /// `horizon_energy`. API 307.
-    pub(super) fn native_item_energy_buffer(
-        &self,
-        item: &str,
-        buffer: &mut Option<ItemEnergyBuffer>,
-    ) {
-        mod_api::dispatch_item_energy_buffer(self, mod_api::mods(), item, buffer);
-    }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
     /// `slots` when the item is yours, for a backpack, a storage cell or a
     /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
@@ -3733,8 +3733,8 @@ impl Game<'_> {
     /// below `container_slots` it is the block's own slot (`entity.items`),
     /// from there on the player's inventory (27 main slots, then the hotbar).
     /// `stack` is a copy of what the slot holds; take what you move out of
-    /// it (put it in `entity.items`, or in another block with
-    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// it (put it in `entity.items`, or in another block through its
+    /// `ITEMS` capability) and set `handled`: the slot then holds what is
     /// left of `stack` (whatever you wrote to that slot of `entity.items`),
     /// the game's routing is skipped, and the player's client gets the menu
     /// again. Left unhandled, `entity.items` goes back to what it held and
@@ -4123,6 +4123,63 @@ impl Game<'_> {
             name,
             from,
             target,
+            cancel,
+        );
+    }
+    /// Armor is about to take durability damage from a hit (NeoForge's
+    /// `ArmorHurtEvent`, vanilla's `LivingEntity.doHurtEquipment`): once per
+    /// hit, for the pieces that would wear. `entity` is the wearer's entity id,
+    /// `player` its UUID (None for a mob), `kind` its type and `source` the hit's
+    /// damage type (`causing` and `direct` are 0: the hit does not carry them here). Each entry has
+    /// its `slot`, the `stack`, the `damage` vanilla worked out and a
+    /// `new_damage` a mod may change (0 for none; Unbreaking is applied
+    /// after). Canceling means no armor damage. A server player's `feet`,
+    /// `legs`, `chest` and `head`; a mob's `body` (a horse's armor).
+    /// Falling-block helmet hits (`hurtHelmet`) are not ported yet.
+    /// Server-side.
+    pub(super) fn native_armor_hurt(
+        &mut self,
+        player: Option<u128>,
+        entity: u32,
+        kind: &str,
+        source: &HurtSource<'_>,
+        entries: &mut Vec<horizon_client::mod_api::NativeArmorHurt>,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_armor_hurt(
+            self,
+            mod_api::mods(),
+            player,
+            entity,
+            kind,
+            source,
+            entries,
+            cancel,
+        );
+    }
+    /// A mob is about to destroy a block (NeoForge's `LivingDestroyBlockEvent`):
+    /// a wither breaking blocks around it, a ravager breaking leaves, the ender
+    /// dragon's wall check, an enderman picking a block up, a silverfish waking
+    /// its friends (the infested blocks break), a zombie breaking a door or a
+    /// turtle egg. `entity` is its entity id, `kind` its type (`minecraft:wither`),
+    /// `pos` the block and `state` its state. Canceling keeps the block (an
+    /// enderman then holds nothing). Asked once per block, only while a mod is
+    /// loaded. Server-side.
+    pub(super) fn native_living_destroy_block(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        pos: [i32; 3],
+        state: BlockStateId,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_destroy_block(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            pos,
+            state,
             cancel,
         );
     }
@@ -4749,6 +4806,57 @@ impl Game<'_> {
             pos,
             forced,
             cancel,
+        );
+    }
+    /// NeoForge's `PermissionsChangedEvent`: the operator list is about to give player
+    /// `player` (`name`) the permission level `new` in place of `old`, through `PlayerList.op`
+    /// (`/op`, the console's `op`, the management API's `operators/add` and `operators/set`)
+    /// or `PlayerList.deop` (`/deop` and the same on the console and the management API;
+    /// `new` is then `All`). Set `cancel` and the list keeps the old level. The player need
+    /// not be online: `player_entity_id` is their server entity id when they are. Clearing
+    /// the list (`operators/clear`) is not a call to either, as in vanilla. Dedicated
+    /// servers only; a single-player world has no operator list. Server-side.
+    pub(super) fn native_permissions_changed(
+        &mut self,
+        player: u128,
+        player_entity_id: Option<i32>,
+        name: &str,
+        old: NativePermissionLevel,
+        new: NativePermissionLevel,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_permissions_changed(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            old,
+            new,
+            cancel,
+        );
+    }
+    /// NeoForge's `PlayerFlyableFallEvent`: server player `player` (`name`) landed after
+    /// falling `distance` blocks at damage multiplier `multiplier` while allowed to fly (a
+    /// creative or spectator player walking), so `Player.causeFallDamage` returned early
+    /// and nothing was hurt. Listen only. Once for each landing, after the fall's
+    /// block reaction. The player's state is swapped in. Server-side.
+    pub(super) fn native_player_flyable_fall(
+        &mut self,
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        distance: f64,
+        multiplier: f32,
+    ) {
+        mod_api::dispatch_player_flyable_fall(
+            self,
+            mod_api::mods(),
+            player,
+            player_entity_id,
+            name,
+            distance,
+            multiplier,
         );
     }
     /// A server player is about to travel through a Nether portal, End portal
@@ -6267,25 +6375,6 @@ impl Game<'_> {
         mod_api::dispatch_entity_enter_love_mode(self, mod_api::mods(), entity, kind, player);
     }
 
-    /// A mob conversion completed; both ids and entity types are reported.
-    /// 223.
-    pub(super) fn native_entity_transform(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        transformed: u32,
-        transformed_kind: &str,
-    ) {
-        mod_api::dispatch_entity_transform(
-            self,
-            mod_api::mods(),
-            entity,
-            kind,
-            transformed,
-            transformed_kind,
-        );
-    }
-
     /// A mob or server player is about to die (NeoForge's `LivingDeathEvent`,
     /// vanilla's `LivingEntity.die`): its health has run out, and the loot,
     /// experience and death message have not run. `entity` is its id and
@@ -6340,9 +6429,9 @@ impl Game<'_> {
     }
 
     /// A mob converted into another type (NeoForge's
-    /// `LivingConversionEvent.Post`): `entity` is gone, `converted` took its
-    /// place. Fires with `native_entity_transform`, after the new mob joined
-    /// the level, for the conversions `native_living_conversion_pre` tells.
+    /// `LivingConversionEvent.Post`): `converted` replaces `entity`. Fires
+    /// after the finalized new mob joined the level and before the old mob
+    /// is removed, for the conversions `native_living_conversion_pre` tells.
     /// API @API:living_conversion_post@.
     pub(super) fn native_living_conversion_post(
         &mut self,
@@ -9595,18 +9684,6 @@ impl Game<'_> {
             .get(key)
             .cloned()
     }
-    /// Puts `stack` into the container at `pos` (a chest, a furnace, a mod
-    /// container) through its side `face`, as a hopper would, one by one, and
-    /// returns what did not fit: a machine's auto-output. A composter takes
-    /// one a call, and a client's copy of the world none. API 20.
-    pub(super) fn native_insert_item(
-        &mut self,
-        pos: [i32; 3],
-        face: Direction,
-        stack: ItemStack,
-    ) -> Option<ItemStack> {
-        self.insert_stack_through(pos, face, stack)
-    }
     /// The window's width and height in physical pixels, independent of GUI
     /// scale; none on a server or when no window exists. API 165.
     pub(super) fn native_physical_window_size(&self) -> Option<[u32; 2]> {
@@ -10038,18 +10115,19 @@ impl Game<'_> {
         self.native_loot_drops(&context, drops);
         drops.retain(|stack| stack.count > 0 && &*stack.item != "minecraft:air");
     }
-    /// The mods' say on what the acting player's use drops
-    /// (`NativeLootDrops::used`): `table` is the loot table rolled, if any.
+    /// The mods' say on what a use drops (`NativeLootDrops::used`): `table`
+    /// is the loot table rolled, if any, and `player` the user, none for a
+    /// dispenser.
     pub(super) fn native_use_drops(
         &mut self,
         table: &str,
         origin: [f64; 3],
         block: Option<([i32; 3], BlockStateId)>,
         entity: Option<(u32, &str)>,
+        player: Option<u128>,
         tool: Option<&ItemStack>,
         drops: &mut Vec<ItemStack>,
     ) {
-        let player = Some(self.native_acting_id());
         let context = NativeLootDrops {
             table,
             dimension: self.dim.id(),
