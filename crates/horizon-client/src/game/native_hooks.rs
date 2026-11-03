@@ -4051,10 +4051,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_tnt_primed(self, player, pos, cancel);
     }
-    /// A server player selected a new hotbar slot. The player's state is not
-    /// swapped in, and helpers that look them up through `self.lan` may find
-    /// nothing while a guest packet is being handled. Set `cancel` to keep
-    /// the old slot; the client is sent that slot again. 263.
+    /// A server player selected a new hotbar slot. The player's state is not swapped in. Set `cancel`
+    /// to keep the old slot; the client is sent that slot again. 263.
     pub(super) fn native_player_item_held(
         &mut self,
         player: u128,
@@ -4065,11 +4063,9 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_item_held(self, player, name, from_slot, to_slot, cancel);
     }
-    /// A server player picked an item from a block or entity, before it enters
-    /// the hotbar. `pos` is zero for an entity; `entity_id` is zero for a
-    /// block. The player's state is swapped in, though helpers that look them
-    /// up through `self.lan` may find nothing while a guest packet is handled.
-    /// Set `cancel` to leave the inventory and client unchanged. 269.
+    /// A server player picked an item from a block or entity, before it enters the hotbar. `pos` is
+    /// zero for an entity; `entity_id` is zero for a block. The player's state is swapped in. Set
+    /// `cancel` to leave the inventory and client unchanged. 269.
     pub(super) fn native_player_pick_item(
         &mut self,
         player: u128,
@@ -4100,10 +4096,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_can_player_sleep(self, player, name, pos, problem);
     }
-    /// A server player is about to enter a bed after the sleep checks pass.
-    /// Set `cancel` to keep them out. The player's state is swapped in, but
-    /// helpers that look them up through `self.lan` may find nothing during a
-    /// guest packet. 251.
+    /// A server player is about to enter a bed after the sleep checks pass. Set `cancel` to keep them
+    /// out. The player's state is swapped in. 251.
     pub(super) fn native_player_bed_enter(
         &mut self,
         player: u128,
@@ -4113,7 +4107,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_bed_enter(self, player, name, pos, cancel);
     }
-    /// while a guest packet is handled. 252.
+    /// A server player woke or stood up from the bed at `pos`, after their
+    /// sleeping state changed. 252.
     pub(super) fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         mod_api::dispatch_player_bed_leave(self, player, name, pos);
     }
@@ -4161,10 +4156,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_spawn_phantoms(self, player, name, pos, phantoms, result);
     }
-    /// A server player's book edit or signing packet is about to be applied.
-    /// `pages` is its page count; `signing` means the packet has a title. Set
-    /// `cancel` to drop the edit. Helpers looking up the guest through
-    /// `self.lan` may find nothing during the packet. 257.
+    /// A server player's book edit or signing packet is about to be applied. `pages` is its page
+    /// count; `signing` means the packet has a title. Set `cancel` to drop the edit. 257.
     pub(super) fn native_player_edit_book(
         &mut self,
         player: u128,
@@ -4175,10 +4168,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_edit_book(self, player, name, pages, signing, cancel);
     }
-    /// A player shearing a mob is about to do so. Set `cancel` to leave the
-    /// mob and shears unchanged. The guest's state is swapped in, though
-    /// helpers looking them up through `self.lan` may find nothing during a
-    /// guest packet. 275.
+    /// A player shearing a mob is about to do so. Set `cancel` to leave the mob and shears unchanged.
+    /// The guest's state is swapped in. 275.
     pub(super) fn native_player_shear_entity(
         &mut self,
         player: u128,
@@ -4189,9 +4180,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_shear_entity(self, player, name, entity_id, off_hand, cancel);
     }
-    /// A server player completed an advancement, after progress was recorded.
-    /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// its packet. 249.
+    /// A server player completed an advancement, after progress was recorded. 249.
     pub(super) fn native_player_advancement_done(
         &mut self,
         player: u128,
@@ -4200,14 +4189,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_advancement_done(self, player, name, advancement);
     }
-    /// A criterion of a server player's advancement was granted or revoked,
-    /// after its progress changed and before any completion rewards, except
-    /// the `minecraft:tick` criteria granted on a network player's first tick
-    /// or a reload, which are heard after that tick's rewards and packets
-    /// (tracked on #29). A grant or revoke that changes nothing is not heard.
-    /// The full advancement progress is not yet exposed (tracked on #29). Helpers
-    /// looking up the guest through `self.lan` may find nothing during its
-    /// packet. 320.
+    /// A criterion of a server player's advancement was granted or revoked, after its progress changed
+    /// and before any completion rewards, except the `minecraft:tick` criteria granted on a network
+    /// player's first tick or a reload, which are heard after that tick's rewards and packets (tracked
+    /// on #29). A grant or revoke that changes nothing is not heard. The full advancement progress is
+    /// not yet exposed (tracked on #29). 320.
     pub(super) fn native_player_advancement_progress(
         &mut self,
         player: u128,
@@ -4227,12 +4213,9 @@ impl Game<'_> {
             progress_type,
         );
     }
-    /// A statistic is about to be awarded to a server player, before its count
-    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
-    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
-    /// `cancel` to award nothing. Helpers looking up the guest through
-    /// `self.lan` may find nothing during its packet. Server-side.
-    /// 321.
+    /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
+    /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
+    /// `value` the amount. Set `cancel` to award nothing. Server-side. 321.
     pub(super) fn native_player_stat_award(
         &mut self,
         player: u128,
@@ -4383,10 +4366,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_xp_change(self, player, player_entity_id, name, amount, cancel);
     }
-    /// An item cooldown is about to start for a server player. `item` is the
-    /// item id and `ticks` its duration. The player's state is not swapped in,
-    /// so helpers that look them up through `self.lan` may find nothing while a
-    /// guest packet is handled. Set `cancel` to skip starting the cooldown.
+    /// An item cooldown is about to start for a server player. `item` is the item id and `ticks` its
+    /// duration. The player's state is not swapped in. Set `cancel` to skip starting the cooldown.
     /// Server-side. 262.
     pub(super) fn native_player_item_cooldown(
         &mut self,
@@ -4398,10 +4379,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_item_cooldown(self, player, name, item, ticks, cancel);
     }
-    /// A recipe is about to be unlocked for a server player. Set `cancel` to
-    /// keep it locked. The player's state is not swapped in, so helpers that
-    /// look them up through `self.lan` may find nothing while a guest packet
-    /// is handled. Server-side. 273.
+    /// A recipe is about to be unlocked for a server player. Set `cancel` to keep it locked. The
+    /// player's state is not swapped in. Server-side. 273.
     pub(super) fn native_player_recipe_discovered(
         &mut self,
         player: u128,
@@ -4490,12 +4469,9 @@ impl Game<'_> {
             multiplier,
         );
     }
-    /// A server player is about to travel through a Nether portal, End portal
-    /// or End gateway. `cause` is `nether_portal`, `end_portal` or `end_gateway`.
-    /// The player's state is not swapped in, so helpers that look them up
-    /// through `self.lan` may find nothing while a guest packet is handled.
-    /// Set `cancel` to keep them in their current place. Server-side.
-    /// 271.
+    /// A server player is about to travel through a Nether portal, End portal or End gateway. `cause`
+    /// is `nether_portal`, `end_portal` or `end_gateway`. The player's state is not swapped in. Set
+    /// `cancel` to keep them in their current place. Server-side. 271.
     pub(super) fn native_player_portal(
         &mut self,
         player: u128,
@@ -4517,8 +4493,7 @@ impl Game<'_> {
     }
     /// A server player launched with a riptide trident, after the velocity,
     /// spin attack and grounded lift have been applied. The player's state is
-    /// swapped in; during a guest packet, helpers that look them up through
-    /// `self.lan` may find nothing. No reply is needed. 274.
+    /// swapped in. No reply is needed. 274.
     pub(super) fn native_player_riptide(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_riptide(self, player, name);
     }
@@ -4830,17 +4805,13 @@ impl Game<'_> {
         mod_api::dispatch_block_lock_check(self, player, name, pos, locked);
     }
 
-    /// A server player reset their attack strength by swinging (`handlePunch`).
-    /// The swing and reset have already happened. The player's state is not
-    /// swapped in, and helpers looking them up through `self.lan` may find
-    /// nothing during a guest packet. Server-side. 250.
+    /// A server player reset their attack strength by swinging (`handlePunch`). The swing and reset
+    /// have already happened. The player's state is not swapped in. Server-side. 250.
     pub(super) fn native_player_attack_cooldown_reset(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_attack_cooldown_reset(self, player, name);
     }
-    /// A server player caught a mob in a bucket, after it was removed and the
-    /// filled bucket was given. Helpers looking up the guest through
-    /// `self.lan` may find nothing during its packet. Server-side.
-    /// 253.
+    /// A server player caught a mob in a bucket, after it was removed and the filled bucket was given.
+    /// Server-side. 253.
     pub(super) fn native_player_bucket_entity(
         &mut self,
         player: u128,
@@ -4850,10 +4821,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_bucket_entity(self, player, name, entity_id, entity);
     }
-    /// A server player changed a beacon's selected effects, after they were
-    /// stored. Empty effect ids mean no effect. Helpers looking up the guest
-    /// through `self.lan` may find nothing during its packet. Server-side.
-    /// 254.
+    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
+    /// mean no effect. Server-side. 254.
     pub(super) fn native_player_change_beacon_effect(
         &mut self,
         player: u128,
@@ -4864,29 +4833,23 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_change_beacon_effect(self, player, name, pos, primary, secondary);
     }
-    /// A server player has slept for 100 ticks in a bed and now counts as
-    /// deeply asleep for the night-skip check. Helpers looking the guest up
-    /// through `self.lan` may find nothing during its tick. 256.
+    /// A server player has slept for 100 ticks in a bed and now counts as deeply asleep for the
+    /// night-skip check. 256.
     pub(super) fn native_player_deep_sleep(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_deep_sleep(self, player, name);
     }
-    /// A server player threw an egg, after its projectile was launched and
-    /// the use was applied. Helpers looking up the guest through `self.lan`
-    /// may find nothing during its packet. Server-side. 258.
+    /// A server player threw an egg, after its projectile was launched and the use was applied.
+    /// Server-side. 258.
     pub(super) fn native_player_egg_throw(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_egg_throw(self, player, name);
     }
-    /// A server player used a firework rocket to boost while gliding, after
-    /// the rocket was launched and consumed. Helpers looking up the guest
-    /// through `self.lan` may find nothing during its packet. Server-side.
-    /// 259.
+    /// A server player used a firework rocket to boost while gliding, after the rocket was launched
+    /// and consumed. Server-side. 259.
     pub(super) fn native_player_elytra_boost(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_elytra_boost(self, player, name);
     }
-    /// A server player put a plant into a flower pot, after the potted block
-    /// state was stored and the item consumed. `plant` is the item id and
-    /// `pos` the pot position. Helpers looking up the guest through `self.lan`
-    /// may find nothing during packet handling. Server-side. 238.
+    /// A server player put a plant into a flower pot, after the potted block state was stored and the
+    /// item consumed. `plant` is the item id and `pos` the pot position. Server-side. 238.
     pub(super) fn native_player_flower_pot_manipulate(
         &mut self,
         player: u128,
@@ -4896,10 +4859,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_flower_pot_manipulate(self, player, name, pos, plant);
     }
-    /// A server player inserted a book into a lectern, after the block entity
-    /// and inventory changed. `book` is the item id. Helpers looking up a
-    /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. 239.
+    /// A server player inserted a book into a lectern, after the block entity and inventory changed.
+    /// `book` is the item id. Server-side. 239.
     pub(super) fn native_player_insert_lectern_book(
         &mut self,
         player: u128,
@@ -4909,10 +4870,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_insert_lectern_book(self, player, name, pos, book);
     }
-    /// A server player took the book from a lectern, after the menu and block
-    /// entity changed. `book` is the removed item id. Helpers looking up a
-    /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. 243.
+    /// A server player took the book from a lectern, after the menu and block entity changed. `book`
+    /// is the removed item id. Server-side. 243.
     pub(super) fn native_player_take_lectern_book(
         &mut self,
         player: u128,
@@ -4922,10 +4881,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_take_lectern_book(self, player, name, pos, book);
     }
-    /// A server player changed the page of a lectern, after its page and
-    /// redstone pulse changed. `page` is the zero-based new page. Helpers
-    /// looking up a guest through `self.lan` may find nothing during packet
-    /// handling. Server-side. 242.
+    /// A server player changed the page of a lectern, after its page and redstone pulse changed.
+    /// `page` is the zero-based new page. Server-side. 242.
     pub(super) fn native_player_lectern_page_change(
         &mut self,
         player: u128,
@@ -4935,11 +4892,9 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_lectern_page_change(self, player, name, pos, page);
     }
-    /// A server player changed an item frame after its contents or rotation
-    /// changed. `action` is `put`, `rotate`, `remove_item` or `break`; `item`
-    /// is empty when no item remains, and `rotation` is the resulting step.
-    /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// packet handling. Server-side. 240.
+    /// A server player changed an item frame after its contents or rotation changed. `action` is
+    /// `put`, `rotate`, `remove_item` or `break`; `item` is empty when no item remains, and `rotation`
+    /// is the resulting step. Server-side. 240.
     pub(super) fn native_player_item_frame_change(
         &mut self,
         player: u128,
@@ -4953,10 +4908,8 @@ impl Game<'_> {
             self, player, name, entity_id, action, item, rotation,
         );
     }
-    /// Mending repaired a server player's item with experience from an orb.
-    /// `repair` is durability restored and `experience` is the orb's value.
-    /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// packet handling. Server-side. 241.
+    /// Mending repaired a server player's item with experience from an orb. `repair` is durability
+    /// restored and `experience` is the orb's value. Server-side. 241.
     pub(super) fn native_player_item_mend(
         &mut self,
         player: u128,
@@ -4967,10 +4920,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_item_mend(self, player, name, item, repair, experience);
     }
-    /// A server player completed a villager or wandering trader trade.
-    /// `entity_id` is the merchant network id. Helpers looking up the guest
-    /// through `self.lan` may find nothing during packet handling. Server-side.
-    /// 283.
+    /// A server player completed a villager or wandering trader trade. `entity_id` is the merchant
+    /// network id. Server-side. 283.
     pub(super) fn native_player_trade(&mut self, player: u128, name: &str, entity_id: u32) {
         mod_api::dispatch_player_trade(self, player, name, entity_id);
     }
@@ -4992,17 +4943,13 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_trade_with_villager(self, merchant, kind, offer);
     }
-    /// A server player's shield was disabled by a blocked melee hit. The
-    /// shield cooldown is set immediately after this call. Helpers looking up
-    /// the guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. 276.
+    /// A server player's shield was disabled by a blocked melee hit. The shield cooldown is set
+    /// immediately after this call. Server-side. 276.
     pub(super) fn native_player_shield_disable(&mut self, player: u128, name: &str, ticks: u32) {
         mod_api::dispatch_player_shield_disable(self, player, name, ticks);
     }
-    /// A server player selected a loom pattern, after the loom menu accepted
-    /// the button. `pattern` is the zero-based button index. Helpers looking
-    /// up the guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. 265.
+    /// A server player selected a loom pattern, after the loom menu accepted the button. `pattern` is
+    /// the zero-based button index. Server-side. 265.
     pub(super) fn native_player_loom_pattern_select(
         &mut self,
         player: u128,
@@ -5011,10 +4958,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_loom_pattern_select(self, player, name, pattern);
     }
-    /// A server player named a mob with a name tag, after its name and
-    /// persistence changed and the tag was consumed. Helpers looking up the
-    /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. 267.
+    /// A server player named a mob with a name tag, after its name and persistence changed and the tag
+    /// was consumed. Server-side. 267.
     pub(super) fn native_player_name_entity(
         &mut self,
         player: u128,
@@ -5024,10 +4969,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_name_entity(self, player, name, entity_id, entity_name);
     }
-    /// A server player opened a sign for editing, after the editor state was
-    /// made. `front` selects the front or back side. Guest lookup helpers may
-    /// find nothing during packet handling. Server-side.
-    /// 268.
+    /// A server player opened a sign for editing, after the editor state was made. `front` selects the
+    /// front or back side. Server-side. 268.
     pub(super) fn native_player_open_sign(
         &mut self,
         player: u128,
@@ -5037,10 +4980,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_open_sign(self, player, name, pos, front);
     }
-    /// A server player picked up an arrow after it was removed and its pickup
-    /// was applied. `item` is the arrow's pickup item id. Guest lookup helpers
-    /// may find nothing during packet handling. Server-side.
-    /// 270.
+    /// A server player picked up an arrow after it was removed and its pickup was applied. `item` is
+    /// the arrow's pickup item id. Server-side. 270.
     pub(super) fn native_player_pickup_arrow(
         &mut self,
         player: u128,
@@ -5051,9 +4992,7 @@ impl Game<'_> {
         mod_api::dispatch_player_pickup_arrow(self, player, name, entity_id, item);
     }
     /// A server player selected a stonecutter recipe, after the menu accepted
-    /// its button. `recipe` is the zero-based button index. Guest lookup
-    /// helpers may find nothing during packet handling. Server-side.
-    /// 278.
+    /// its button. `recipe` is the zero-based button index. Server-side. 278.
     pub(super) fn native_player_stonecutter_recipe_select(
         &mut self,
         player: u128,
@@ -5062,9 +5001,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_stonecutter_recipe_select(self, player, name, recipe);
     }
-    /// A server player stopped spectating `entity_id`, after their camera
-    /// returned to the player. Guest lookup helpers may find nothing.
-    /// 279.
+    /// A server player stopped spectating `entity_id`, after their camera returned to the player. 279.
     pub(super) fn native_player_stop_spectating_entity(
         &mut self,
         player: u128,
@@ -5073,15 +5010,12 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_stop_spectating_entity(self, player, name, entity_id);
     }
-    /// A server applied `velocity` to a player, when syncing changed motion to
-    /// that player's client. Guest lookup helpers may find nothing.
+    /// A server applied `velocity` to a player, when syncing changed motion to that player's client.
     /// 285.
     pub(super) fn native_player_velocity(&mut self, player: u128, name: &str, velocity: [f64; 3]) {
         mod_api::dispatch_player_velocity(self, player, name, velocity);
     }
-    /// A server player removed an entity's leash, after it was cleared.
-    /// Guest lookup helpers may find nothing during packet handling.
-    /// 284.
+    /// A server player removed an entity's leash, after it was cleared. 284.
     pub(super) fn native_player_unleash_entity(
         &mut self,
         player: u128,
@@ -5101,9 +5035,8 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_toggle_entity_age_lock(self, player, name, entity_id, locked);
     }
-    /// A server player swapped their main and off hands, after both inventory
-    /// slots changed. Guest lookup helpers may find nothing during packet
-    /// handling. Server-side. 280.
+    /// A server player swapped their main and off hands, after both inventory slots changed.
+    /// Server-side. 280.
     pub(super) fn native_player_swap_with_equipment_slot(
         &mut self,
         player: u128,
@@ -5112,16 +5045,14 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_swap_with_equipment_slot(self, player, name, slot);
     }
-    /// A server player filled an empty map, after the filled map and its saved
-    /// data were created. Guest lookup helpers may find nothing during packet
-    /// handling. Server-side. 266.
+    /// A server player filled an empty map, after the filled map and its saved data were created.
+    /// Server-side. 266.
     pub(super) fn native_player_map_filled(&mut self, player: u128, name: &str, map_id: i32) {
         mod_api::dispatch_player_map_filled(self, player, name, map_id);
     }
-    /// A server player is about to travel through an End gateway at `gateway`.
-    /// Set `cancel` to leave them at the entrance; the gateway is not consumed
-    /// and its cooldown does not start. Helpers may find no guest through
-    /// `self.lan` during its packet. Server-side. 281.
+    /// A server player is about to travel through an End gateway at `gateway`. Set `cancel` to leave
+    /// them at the entrance; the gateway is not consumed and its cooldown does not start. Server-side.
+    /// 281.
     pub(super) fn native_player_teleport_end_gateway(
         &mut self,
         player: u128,
@@ -5133,8 +5064,7 @@ impl Game<'_> {
     }
     /// A server player's recipe book requested a known recipe be placed in
     /// their crafting grid. `recipe` is the recipe id; `all` is the shift
-    /// click form. The player's state may not be available through `self.lan`
-    /// while a guest packet is handled. Server-side. 272.
+    /// click form. Server-side. 272.
     pub(super) fn native_player_recipe_book_click(
         &mut self,
         player: u128,
@@ -5145,9 +5075,7 @@ impl Game<'_> {
         mod_api::dispatch_player_recipe_book_click(self, player, name, recipe, all);
     }
     /// A server player's XP orb pickup cooldown changed to `ticks`. It is
-    /// reported after the value changes; the player's state may not be found
-    /// through `self.lan` while a guest packet is handled. Server-side.
-    /// 261.
+    /// reported after the value changes. Server-side. 261.
     pub(super) fn native_player_exp_cooldown_change(
         &mut self,
         player: u128,
@@ -5358,10 +5286,8 @@ impl Game<'_> {
     pub(super) fn native_furnace_smelt(&self, pos: [i32; 3], item: &str, result: &str) {
         mod_api::dispatch_furnace_smelt(self, pos, item, result);
     }
-    /// A server player took an output from a furnace at `pos`; `item` is the
-    /// output item id and `count` is how many were taken. The player's state is
-    /// not swapped in, so helpers that look them up through `self.lan` may find
-    /// nothing during guest packet handling. 228.
+    /// A server player took an output from a furnace at `pos`; `item` is the output item id and
+    /// `count` is how many were taken. The player's state is not swapped in. 228.
     pub(super) fn native_furnace_extract(
         &mut self,
         player: u128,
@@ -5885,17 +5811,13 @@ impl Game<'_> {
         mod_api::dispatch_entity_enter_block(self, entity, kind, pos, block);
     }
 
-    /// A server player finished loading the world around them after joining,
-    /// respawning or changing dimension. The guest's state is not swapped in,
-    /// so helpers that look them up through `self.lan` may find nothing while
-    /// a guest packet is handled. Server-side. 342.
+    /// A server player finished loading the world around them after joining, respawning or changing
+    /// dimension. The guest's state is not swapped in. Server-side. 342.
     pub(super) fn native_player_client_loaded_world(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_client_loaded_world(self, player, name);
     }
-    /// A server player released the use-item key before the item finished
-    /// being used. The guest's state is not swapped in, so helpers that look
-    /// them up through `self.lan` may find nothing during packet handling.
-    /// 350.
+    /// A server player released the use-item key before the item finished being used. The guest's
+    /// state is not swapped in. 350.
     pub(super) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_stop_using_item(self, player, name);
     }
