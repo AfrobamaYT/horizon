@@ -57,34 +57,29 @@ impl Game<'_> {
             .unwrap_or_default();
     }
 
-    /// Whether entity `id` is in the level, as a holder of attachments.
+    /// Whether entity `id` is in the level, as a holder of attachments: one walk
+    /// over the entity lists (a kind added there holds attachments too), then the
+    /// kinds that are not on it.
     fn attachment_entity_exists(&self, id: u32) -> bool {
-        use super::commands::Target;
-        match i32::try_from(id).ok().and_then(|id| self.level_entity(id)) {
-            Some(Target::Mob(_)) => self.mobs.iter().any(|e| e.id == id && !e.removed),
-            Some(
-                Target::Item(_)
-                | Target::Boat(_)
-                | Target::Cart(_)
-                | Target::Stand(_)
-                | Target::Frame(_)
-                | Target::Painting(_)
-                | Target::Other(_),
-            ) => true,
-            _ => self.cushions.iter().any(|e| e.id == id),
-        }
+        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
+        let mut found = false;
+        for_each_entity!(entity_lists_of!(self), entity => {
+            found |= entity.id() == id && !entity.is_removed();
+        });
+        found || self.entity_ids_off_walk().any(|e| e == id)
     }
 
     /// The attachments of entities that left the level, dropped: each tick
     /// while any entity has some. Only those entities are looked at, and
     /// nothing else of the entities' memory changes.
     pub(super) fn prune_entity_attachments(&mut self) {
+        let alive = self.live_entity_ids();
         let gone: Vec<[i32; 4]> = self
             .persist
             .uuids
             .iter()
             .filter(|(id, uuid)| {
-                self.entity_attachments.contains_key(*uuid) && !self.attachment_entity_exists(**id)
+                self.entity_attachments.contains_key(*uuid) && !alive.contains(*id)
             })
             .map(|(_, uuid)| *uuid)
             .collect();
@@ -147,12 +142,16 @@ impl Game<'_> {
                 .get_mut(&uuid)
                 .ok_or(AttachmentError::MissingHolder);
         }
+        if let horizon_client::mod_api::Holder::BlockEntity([x, y, z]) = holder {
+            self.journal_block_entity((x, y, z));
+        }
         world_attachments(&mut self.world, holder)
     }
 }
 
-#[path = "mod_api_host_generated.rs"]
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_host_generated.rs"));
+}
 
 impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
@@ -160,6 +159,9 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     }
     fn is_client_side(&self) -> bool {
         horizon_world::level::LevelAccess::is_client_side(self)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.native_state_block(state)
     }
     fn state_with_property(
         &self,
@@ -201,6 +203,9 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     }
     fn is_client_side(&self) -> bool {
         horizon_client::mod_api::LevelHost::is_client_side(&*self.level)
+    }
+    fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.level.registry.state(state).map(|s| &*s.name)
     }
     fn state_with_property(
         &self,

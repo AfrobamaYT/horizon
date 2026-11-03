@@ -12,6 +12,7 @@ pub mod anim;
 pub mod animal_brain;
 pub mod aquatic;
 pub mod armadillo;
+pub mod armor;
 pub mod axolotl;
 pub mod bat;
 pub mod bee;
@@ -391,7 +392,7 @@ pub struct MobType {
     pub model: Arc<Part>,
     /// Every baked layer of this entity's models keyed by `model#layer`
     /// (e.g. `sheep#wool`, `zombie_baby#main`).
-    pub layers: HashMap<String, Arc<Part>>,
+    pub layers: crate::fast_hash::FxHashMap<String, Arc<Part>>,
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
@@ -465,7 +466,7 @@ impl MobTypes {
             };
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
-            let mut layers = HashMap::new();
+            let mut layers = crate::fast_hash::FxHashMap::default();
             if let Some(all) = models.as_object() {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
@@ -830,6 +831,13 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
+    /// Command-created armor instances, shared by commands and runtime damage.
+    pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
+    /// `Mob.lootTable`: the table its death rolls instead of its type's
+    /// (saved as `DeathLootTable`).
+    pub death_loot_table: Option<String>,
+    /// `Mob.lootTableSeed` (`DeathLootTableSeed`): 0 for none.
+    pub death_loot_seed: i64,
     /// `Rabbit.moreCarrotTicks`: how long it is full of carrots (saved as `MoreCarrotTicks`).
     pub more_carrot_ticks: i32,
     /// `Ocelot.DATA_TRUSTING`: it no longer runs from players.
@@ -887,7 +895,7 @@ pub struct Extra {
     /// `Mob.canPickUpLoot` (also lets dispensers equip it).
     pub pick_up_loot: bool,
     pub saddled: bool,
-    /// The durability a wolf's body armor (`extra.head`) has lost.
+    /// The durability a wolf's body armor has lost.
     pub body_damage: i32,
     /// The components (dye, name...) of that armor stack.
     pub body_extra: Option<Box<crate::item_data::StackData>>,
@@ -932,6 +940,8 @@ pub struct Extra {
     main_hand_stack: Option<crate::items::ItemStack>,
     pub off_hand: Option<Arc<str>>,
     pub head: Option<Arc<str>>,
+    /// Equipment in the separate body slot (horse armour, wolf armour, harnesses).
+    pub body: Option<Arc<str>>,
     /// Worn armour below the head (humanoid mobs).
     pub chest: Option<Arc<str>>,
     pub legs: Option<Arc<str>>,
@@ -1151,6 +1161,10 @@ pub struct Mob {
     /// `Entity.needsSync`: knocked back, pushed or jumped since its server
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
+    /// `getAttributeValue(KNOCKBACK_RESISTANCE)` with the modifiers of the
+    /// items it wears or holds, which the game works out each tick for a mob
+    /// that has any (the mob itself knows no item): `None` for the rest.
+    pub gear_knockback_resistance: Option<f64>,
     pub health: f32,
     pub hurt_time: i32,
     pub invulnerable: i32,
@@ -1161,6 +1175,8 @@ pub struct Mob {
     pub previous_limb_speed: f32,
     pub swell: i32,
     pub previous_swell: i32,
+    /// Creeper.maxSwell (`Fuse`): local NBT state, not synced entity data.
+    pub max_swell: i32,
     pub ambient_timer: i32,
     pub fall_distance: f64,
     /// `Entity.stuckSpeedMultiplier`: the next move is scaled by it.
@@ -1332,12 +1348,15 @@ pub enum MobEvent {
     BubbleColumnParticles {
         pos: [i32; 3],
     },
-    /// `LivingEntity.checkFallDamage`: `count` crumbs of the block `state` a mob
-    /// landed on, thrown up at `at`.
+    /// A `BlockParticleOption` of `state` drawn `count` times at `at`, each crumb
+    /// leaving at `speed`: the dust `LivingEntity.checkFallDamage` throws up from
+    /// the block a mob landed on, and the puffs `Breeze.emitGroundParticles`
+    /// leaves at a breeze's feet (which it draws at rest).
     LandingDust {
         state: horizon_world::registry::BlockStateId,
         at: [f64; 3],
         count: i32,
+        speed: f64,
     },
     /// `UseBonemeal`: the villager's bone meal grows the crop at `pos`
     /// (`BoneMealItem.growCrop`, then level event 1505).
@@ -1545,6 +1564,18 @@ pub enum MobEvent {
         amount: f32,
         source: Damage,
     },
+    /// A melee hit on another mob whose effect rides the hit:
+    /// `CaveSpider`, `Husk` and `WitherSkeleton.doHurtTarget` add it inside
+    /// the `super.doHurtTarget` branch, to any `LivingEntity`, so a mob the
+    /// hit lands on gets it too.
+    AttackMobWithEffect {
+        target: u32,
+        amount: f32,
+        source: Damage,
+        effect: &'static str,
+        ticks: i32,
+        amplifier: i32,
+    },
     /// `AbstractCubeMob.dealDamage` on the player (`playerTouch`): the hit,
     /// then, only when `hurtServer` let it land, the cube's
     /// `entity.slime.attack` with its pitch drawn from the cube's random.
@@ -1613,6 +1644,27 @@ pub enum MobEvent {
         vehicle: u32,
     },
     Projectile(crate::projectiles::Projectile),
+    /// An arrow `mob` shot with `weapon` (`AbstractSkeleton.performRangedAttack`):
+    /// the game asks for the ammunition (`getProjectile`) before it flies.
+    BowShot {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
+    /// `mob` finished charging `weapon` (`CrossbowItem.onUseTick`): the game
+    /// asks for the ammunition (`getProjectile`), and plays the end sound
+    /// at `at` only when the crossbow loaded.
+    CrossbowLoad {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        at: [f64; 3],
+        pitch: f32,
+    },
+    /// `arrow` shot from the `ammo` a mob's crossbow was charged with.
+    CrossbowShot {
+        ammo: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
     /// Spawn a new mob (breeding, slime splitting, chicken eggs...).
     Spawn(Box<Mob>),
     /// Spawn a mob by type id at a position (conversions, splits).
@@ -2050,6 +2102,7 @@ pub struct Seen {
     pub lying: bool,
     /// `Entity.isVehicle` or `isPassenger`.
     pub ridden: bool,
+    pub is_vehicle: bool,
     /// `Attributes.KNOCKBACK_RESISTANCE`.
     pub knockback_resistance: f64,
     /// The active effects, without namespace (`slowness`, `poison`...).
@@ -2072,22 +2125,14 @@ impl Mob {
     pub fn equipment_stacks(&self) -> [Option<crate::items::ItemStack>; 8] {
         use crate::items::ItemStack;
         let e = &self.extra;
-        // A horse's armour, a llama's carpet, a harness: Horizon keeps the body
-        // slot's item (6) in `head`.
-        let body = drops::head_is_body(self.species());
-        let wolf = self.species() == Species::Wolf;
         let slots = [
             (0usize, &e.main_hand, e.main_hand_stack()),
             (1, &e.off_hand, None),
             (2, &e.feet, e.armor[3].as_ref()),
             (3, &e.legs, e.armor[2].as_ref()),
             (4, &e.chest, e.armor[1].as_ref()),
-            // The body slot's item is no worn armour.
-            (
-                if body { 6 } else { 5 },
-                &e.head,
-                e.armor[0].as_ref().filter(|_| !body),
-            ),
+            (5, &e.head, e.armor[0].as_ref()),
+            (6, &e.body, None),
         ];
         let mut out: [Option<ItemStack>; 8] = Default::default();
         for (slot, item, worn) in slots {
@@ -2099,13 +2144,13 @@ impl Mob {
             out[slot] = Some(worn.cloned().unwrap_or_else(|| ItemStack {
                 item: item.clone(),
                 count: 1,
-                // A wolf's armor shows its cracks.
-                damage: if slot == 6 && wolf {
+                // Body equipment retains its damage and components.
+                damage: if slot == 6 {
                     e.body_damage.max(0) as u32
                 } else {
                     0
                 },
-                extra: if slot == 6 && wolf {
+                extra: if slot == 6 {
                     e.body_extra.clone()
                 } else {
                     None
@@ -2230,6 +2275,7 @@ impl Mob {
             silent: m.silent,
             lying: m.species() == Species::Cat && (m.extra.flag || m.extra.relax_one),
             ridden: m.rider.is_some() || m.extra.rider.is_some() || m.extra.mount.is_some(),
+            is_vehicle: equine::is_vehicle(m),
             knockback_resistance: m.attrs.knockback_resistance,
             effects: m
                 .extra
@@ -2260,6 +2306,13 @@ impl Mob {
 /// `events[from..]` into `pending`, which the caller adds to each mob's
 /// velocity before its tick (and to every mob once all have ticked). The
 /// other events keep their order.
+/// The part of `Entity.canUsePortal` a mob's own state decides: it is alive,
+/// it is not a boss that never travels, and — over `Monster.canUsePortal` —
+/// it is not a creaking bound to a heart (`Creaking.canUsePortal`). The
+/// rides and the players a side carries are the caller's half.
+pub fn mob_can_use_portal(m: &Mob) -> bool {
+    m.alive() && m.species() != Species::Wither && creaking::can_use_portal(m)
+}
 pub fn take_mob_pushes(events: &mut Vec<MobEvent>, from: usize, pending: &mut PendingPushes) {
     // One pass: a crowd's tick holds a push per neighbour, and removing each
     // in place would shift the rest every time.
@@ -2552,7 +2605,8 @@ pub struct MobWorld<'a> {
 /// `shouldApplyEffectTickThisTick` and `applyEffectTick`, which the game's
 /// native mods answer. False removes the effect.
 pub trait ModEffectTicks {
-    fn tick_mod_effect(&self, effect: &str, mob: u32, tick_count: i32, amplifier: i32) -> bool;
+    fn tick_mod_effect(&self, effect: &str, mob: &mut Mob, tick_count: i32, amplifier: i32)
+    -> bool;
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
 #[derive(Clone, Debug, Default)]
@@ -2594,6 +2648,7 @@ impl Mob {
             horizontal_collision: false,
             vertical_collision_below: false,
             needs_sync: false,
+            gear_knockback_resistance: None,
             hurt_time: 0,
             invulnerable: 0,
             death_time: 0,
@@ -2603,6 +2658,7 @@ impl Mob {
             previous_limb_speed: 0.0,
             swell: 0,
             previous_swell: 0,
+            max_swell: 30,
             // Mob.ambientSoundTime starts at 0.
             ambient_timer: 0,
             fall_distance: 0.0,
@@ -2743,15 +2799,14 @@ impl Mob {
     /// the last-hurt-by bookkeeping goals read.
     /// The `armor` and `armor_toughness` modifiers of worn humanoid armour.
     pub fn worn_armor(&self) -> (f32, f32) {
-        // An equine keeps its horse armor in `extra.head`: the item's `armor`
-        // and `armor_toughness` modifiers of the body slot.
-        if equine::is_equine(self.species()) {
-            return self
-                .extra
-                .head
+        let body = if equine::is_equine(self.species()) {
+            self.extra
+                .body
                 .as_deref()
-                .map_or((0.0, 0.0), spawning::horse_armor_stats);
-        }
+                .map_or((0.0, 0.0), spawning::horse_armor_stats)
+        } else {
+            (0.0, 0.0)
+        };
         [
             &self.extra.head,
             &self.extra.chest,
@@ -2761,7 +2816,7 @@ impl Mob {
         .into_iter()
         .flatten()
         .map(|i| spawning::armor_stats(i))
-        .fold((0.0, 0.0), |(a, t), (x, y)| (a + x, t + y))
+        .fold(body, |(a, t), (x, y)| (a + x, t + y))
     }
     /// `damage` of a blow whose causing entity is `aim` (`SulfurCube.knockback` reads it).
     pub fn damage_aimed(&mut self, amount: f32, source: Damage, aim: Option<Aim>) -> bool {
@@ -2843,12 +2898,24 @@ impl Mob {
         if amount < 0.0 {
             amount = 0.0;
         }
+        // LivingEntity.applyItemBlocking: no mob raises a blocking item, but a native
+        // mod may block for it.
+        let blocked = if amount > 0.0 {
+            crate::health::shield_block(
+                crate::health::Hurting::Mob(self, &source),
+                amount,
+                crate::health::no_block(amount),
+            )
+            .map_or(0.0, |b| b.blocked_damage)
+        } else {
+            0.0
+        };
+        amount -= blocked;
         // #damages_helmet: falling anvils, blocks and stalactites.
         if matches!(
             source.kind,
             DamageKind::FallingBlock | DamageKind::FallingAnvil | DamageKind::FallingStalactite
-        ) && !species::body_slot(self.species())
-            && self.extra.head.is_some()
+        ) && self.extra.head.is_some()
         {
             amount *= 0.75;
         }
@@ -2864,28 +2931,23 @@ impl Mob {
         if !amount.is_finite() {
             amount = f32::MAX;
         }
-        let (worn, worn_toughness) = self.worn_armor();
-        // Shulker.setRawPeekAmount: a closed shell adds the covered armor modifier.
-        let covered = if self.species() == Species::Shulker && self.extra.counter == 0 {
-            20.0
-        } else {
-            0.0
-        };
         // LivingEntity.getDamageAfterArmorAbsorb asks `hurtArmor` *before*
         // `CombatRules.getDamageAfterAbsorb`, so a worn piece wears by the
         // damage the armour, toughness and enchantment reductions have not
         // touched yet, and only a hit outside `#bypasses_armor` asks at all.
         let armor_hit = (!source.bypasses_armor() && amount > 0.0).then_some(amount);
-        if !source.bypasses_armor() && self.kind.armor + worn + covered > 0.0 {
-            // CombatRules.getDamageAfterAbsorb
-            let armor = self.kind.armor + worn + covered;
-            let toughness = 2.0 + (self.kind.armor_toughness + worn_toughness) / 4.0;
-            let effective = (armor - amount / toughness).clamp(armor * 0.2, 20.0);
-            let mut fraction = effective / 25.0;
-            if let Some(modify) = armor_effectiveness {
-                fraction = modify(fraction).clamp(0.0, 1.0);
+        if !source.bypasses_armor() {
+            let (armor, armor_toughness) = armor::values(self);
+            if armor > 0.0 {
+                // CombatRules.getDamageAfterAbsorb
+                let toughness = 2.0 + armor_toughness / 4.0;
+                let effective = (armor - amount / toughness).clamp(armor * 0.2, 20.0);
+                let mut fraction = effective / 25.0;
+                if let Some(modify) = armor_effectiveness {
+                    fraction = modify(fraction).clamp(0.0, 1.0);
+                }
+                amount *= 1.0 - fraction;
             }
-            amount *= 1.0 - fraction;
         }
         // CombatRules.getDamageAfterMagicAbsorb: enchantment protection.
         let epf = gear::protection(self, source.kind);
@@ -2962,11 +3024,10 @@ impl Mob {
         // it hands `doHurtEquipment` the body slot alone. A wolf's armour has
         // its own rule (`Wolf.actuallyHurt`, `hurt_wolf_armor`) and a player's
         // four pieces theirs, so the other "body slot" species — donkey, mule,
-        // llama, camel, the skeleton and zombie horses — wear nothing, whatever
-        // `drops::head_is_body` says about where the item lives.
+        // llama, camel, the skeleton and zombie horses — wear nothing.
         if let Some(damage) = armor_hit
             && self.species() == Species::Horse
-            && self.extra.head.is_some()
+            && self.extra.body.is_some()
         {
             self.outbox.push(MobEvent::ArmorHurt {
                 mob: self.id,
@@ -2978,7 +3039,12 @@ impl Mob {
         if drops::is_animal(self.species()) {
             self.extra.in_love = 0;
         }
-        self.last_damage = Some((source, i64::from(self.age)));
+        // A hit blocked whole is not a success: vanilla records the source and runs the
+        // effects' `onMobHurt` only for a success.
+        let success = blocked <= 0.0 || amount > 0.0;
+        if success {
+            self.last_damage = Some((source, i64::from(self.age)));
+        }
         if let Some(who) = source.attacker {
             self.ai.last_hurt_by = Some(who);
             self.ai.last_hurt_by_time = self.age as i32;
@@ -2986,9 +3052,10 @@ impl Mob {
                 self.ai.last_hurt_by_player = 100;
             }
         }
-        // dealDefaultKnockback, unless the damage type is tagged no_knockback;
-        // a source without a position knocks in a random direction.
-        if knock && !source.no_knockback() {
+        // dealDefaultKnockback, unless the damage type is tagged no_knockback or
+        // the hit was blocked whole; a source without a position knocks in a
+        // random direction.
+        if knock && !source.no_knockback() && !(blocked > 0.0 && amount <= 0.0) {
             // dealDefaultKnockback: a projectile knocks the way it travelled
             // (`calculateHorizontalHurtKnockbackDirection`), else from the source's position.
             let (dx, dz) = match self.projectile_motion {
@@ -3037,7 +3104,7 @@ impl Mob {
             self.outbox
                 .push(MobEvent::Sound("entity.iron_golem.damage", at, 1.0, 1.0));
         }
-        if self.has_effect("minecraft:infested") {
+        if success && self.has_effect("minecraft:infested") {
             self.outbox.push(MobEvent::Infested { mob: self.id });
         }
         // Squid.hurtServer: a squid hurt after a living entity hit it squirts ink.
@@ -3053,7 +3120,7 @@ impl Mob {
         if self.species() == Species::GlowSquid {
             aquatic::hurt_server(self);
         }
-        true
+        success
     }
     /// A splash or cloud's harming effect on this mob: the potion's
     /// `indirect_magic` is in `#witch_resistant_to`, so a witch takes 15%.
@@ -3069,7 +3136,7 @@ impl Mob {
     /// the world and the untyped kills).
     fn wolf_armor_absorbs(&self, source: &Damage) -> bool {
         self.species() == Species::Wolf
-            && self.extra.head.as_deref() == Some("minecraft:wolf_armor")
+            && self.extra.body.as_deref() == Some("minecraft:wolf_armor")
             && !matches!(
                 source.kind,
                 DamageKind::Drown
@@ -3097,7 +3164,7 @@ impl Mob {
         let after = before + damage.ceil() as i32;
         let at = [self.position.x, self.position.y, self.position.z];
         if after >= WOLF_ARMOR_DURABILITY {
-            self.extra.head = None;
+            self.extra.body = None;
             self.extra.body_damage = 0;
             self.extra.body_extra = None;
             self.outbox
@@ -3132,6 +3199,11 @@ impl Mob {
     pub fn knockback_effect(&mut self, power: f64, xd: f64, zd: f64, source: &Damage, damage: f32) {
         self.knockback_by(power, xd, zd, source, Some(damage));
     }
+    /// `getAttributeValue(KNOCKBACK_RESISTANCE)`: the mob's own, and what its gear adds.
+    pub fn knockback_resistance(&self) -> f64 {
+        self.gear_knockback_resistance
+            .unwrap_or(self.attrs.knockback_resistance)
+    }
     fn knockback_by(&mut self, power: f64, xd: f64, zd: f64, source: &Damage, effect: Option<f32>) {
         if let Some(damage) = effect
             && self.species() == Species::SulfurCube
@@ -3160,7 +3232,7 @@ impl Mob {
             x: mut xd,
             z: mut zd,
         } = knock;
-        let power = power * (1.0 - self.attrs.knockback_resistance);
+        let power = power * (1.0 - self.knockback_resistance());
         if power <= 0.0 {
             return;
         }
@@ -3968,7 +4040,7 @@ pub(crate) mod sensor_scan_tests {
                 ..Default::default()
             },
             model: Arc::new(Part::parse("root", &json!({}))),
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Rabbit,
@@ -4442,7 +4514,7 @@ mod armor_hurt_tests {
             from: None,
         };
         let mut m = horse();
-        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
         assert!(m.damage(6.0, hit), "the hit landed");
         let owed = m.outbox.iter().find_map(|e| match e {
             MobEvent::ArmorHurt { amount, .. } => Some(*amount),
@@ -4466,13 +4538,11 @@ mod armor_hurt_tests {
     /// `Horse` is the only mob that overrides `LivingEntity.hurtArmor` (the
     /// base one is empty, `LivingEntity.java:1887`), so a donkey wearing a body
     /// item — `/item replace entity @e[type=minecraft:donkey,limit=1]
-    /// armor.body with minecraft:wolf_armor` — wears nothing, even though
-    /// `drops::head_is_body` stores a donkey's body item in the slot a horse's
-    /// goes in.
+    /// armor.body with minecraft:wolf_armor` — wears nothing.
     #[test]
     fn a_donkey_wearing_a_body_item_wears_nothing() {
         let mut donkey = mob("minecraft:donkey", Species::Donkey);
-        donkey.extra.head = Some("minecraft:wolf_armor".into());
+        donkey.extra.body = Some("minecraft:wolf_armor".into());
         assert!(
             donkey.damage(6.0, Damage::of(DamageKind::MobAttack)),
             "the hit landed"
@@ -4492,7 +4562,7 @@ mod armor_hurt_tests {
     #[test]
     fn a_fall_does_not_wear_the_body_piece() {
         let mut m = horse();
-        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
         assert!(
             m.damage(6.0, Damage::of(DamageKind::Fall)),
             "the fall landed"
@@ -4514,7 +4584,7 @@ mod armor_hurt_tests {
         let mut m = horse();
         let k = Arc::make_mut(&mut m.kind);
         k.armor = 20.0;
-        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
         let before = m.health;
         assert!(m.damage(8.0, Damage::of(DamageKind::MobAttack)));
         assert!(m.health < before, "the hit reached the health");

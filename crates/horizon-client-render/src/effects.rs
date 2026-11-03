@@ -249,7 +249,7 @@ impl PlayerEffects {
     /// ticked; the next tick refreshes Raid Omen and drops Bad Omen.
     pub fn tick_with(
         &mut self,
-        omen: &mut dyn FnMut(&EffectInstance, i32) -> OmenTick,
+        omen: &mut dyn FnMut(&EffectInstance, i32, &mut Vec<EffectAction>, bool) -> OmenTick,
         absorption_empty: bool,
     ) -> (Vec<EffectAction>, bool) {
         self.tick_count = self.tick_count.wrapping_add(1);
@@ -270,10 +270,11 @@ impl PlayerEffects {
             if let Some(a) = periodic(e.id, t, e.amplifier) {
                 actions.push(a);
             }
+            omen(e, t, &mut actions, false);
             let answer = match e.id {
-                "bad_omen" => omen(e, t),
-                "raid_omen" if t == 1 => omen(e, t),
-                id if potions::is_mod_effect(id) => omen(e, t),
+                "bad_omen" => omen(e, t, &mut actions, true),
+                "raid_omen" if t == 1 => omen(e, t, &mut actions, true),
+                id if potions::is_mod_effect(id) => omen(e, t, &mut actions, true),
                 "absorption" if absorption_empty => OmenTick::Remove,
                 _ => OmenTick::Continue,
             };
@@ -421,31 +422,33 @@ impl StatusFlags {
 
 /// The attribute modifier an effect adds at amplifier 0
 /// (`MobEffect.addAttributeModifier`): (attribute, id, amount, operation).
-/// Each level multiplies the amount (`amplifier + 1`).
+/// Each level multiplies the amount (`amplifier + 1`). Vanilla's amounts are
+/// `float` literals widened to the modifier's `double`, so `f64::from` the
+/// `f32` to keep the low digits.
 pub fn effect_modifier(effect: &str) -> Option<(&'static str, &'static str, f64, &'static str)> {
     match effect {
         "speed" => Some((
             "minecraft:movement_speed",
             "minecraft:effect.speed",
-            0.2,
+            f64::from(0.2f32),
             "add_multiplied_total",
         )),
         "slowness" => Some((
             "minecraft:movement_speed",
             "minecraft:effect.slowness",
-            -0.15,
+            f64::from(-0.15f32),
             "add_multiplied_total",
         )),
         "haste" => Some((
             "minecraft:attack_speed",
             "minecraft:effect.haste",
-            0.1,
+            f64::from(0.1f32),
             "add_multiplied_total",
         )),
         "mining_fatigue" => Some((
             "minecraft:attack_speed",
             "minecraft:effect.mining_fatigue",
-            -0.1,
+            f64::from(-0.1f32),
             "add_multiplied_total",
         )),
         "strength" => Some((
@@ -511,8 +514,11 @@ mod tests {
         let mut fx = PlayerEffects::default();
         fx.add(EffectInstance::new("bad_omen", 100, 1));
         fx.add(EffectInstance::new("speed", 50, 0));
-        let mut convert = |e: &EffectInstance, _: i32| match e.id {
-            "bad_omen" => OmenTick::Add(EffectInstance::new("raid_omen", 600, e.amplifier)),
+        let mut convert = |e: &EffectInstance,
+                           _: i32,
+                           _: &mut Vec<EffectAction>,
+                           dispatch: bool| match (dispatch, e.id) {
+            (true, "bad_omen") => OmenTick::Add(EffectInstance::new("raid_omen", 600, e.amplifier)),
             _ => OmenTick::Continue,
         };
         // The first tick adds Raid Omen and stops there (the iterator's
@@ -546,6 +552,27 @@ mod tests {
         let saved = fx.saved();
         assert_eq!(saved, [("ruby:glow".to_owned(), 600, 1, false, true)]);
         assert_eq!(PlayerEffects::from_saved(&saved).list, fx.list);
+        let mut ordered = PlayerEffects::default();
+        ordered.add(EffectInstance::new("regeneration", 50, 0));
+        ordered.add(EffectInstance::new("ruby:glow", 10, 0));
+        ordered.add(EffectInstance::new("wither", 40, 0));
+        let (actions, _) = ordered.tick_with(
+            &mut |_, _, actions, dispatch| {
+                if dispatch {
+                    actions.push(EffectAction::Eat(2, 0.5));
+                }
+                OmenTick::Continue
+            },
+            false,
+        );
+        assert_eq!(
+            actions,
+            [
+                EffectAction::Heal(1.0),
+                EffectAction::Eat(2, 0.5),
+                EffectAction::Hurt("minecraft:wither", 1.0)
+            ]
+        );
         // Without its mod the saved effect is dropped, as an unknown id is.
         assert!(
             PlayerEffects::from_saved(&[("gone:glow".into(), 600, 1, false, true)])
@@ -561,7 +588,10 @@ mod tests {
         fx.add(EffectInstance::new("ruby:glow", 3, 1));
         fx.add(EffectInstance::new("ruby:bleed", -1, 0));
         let mut seen = Vec::new();
-        let mut answer = |e: &EffectInstance, t: i32| {
+        let mut answer = |e: &EffectInstance, t: i32, _: &mut Vec<EffectAction>, dispatch: bool| {
+            if !dispatch {
+                return OmenTick::Continue;
+            }
             seen.push((e.id, t));
             match (e.id, t) {
                 ("ruby:glow", 2) => OmenTick::Remove,
@@ -585,7 +615,10 @@ mod tests {
         let mut fx = PlayerEffects::default();
         fx.add(EffectInstance::new("raid_omen", 2, 0));
         let mut seen = Vec::new();
-        let mut watch = |e: &EffectInstance, _: i32| {
+        let mut watch = |e: &EffectInstance, _: i32, _: &mut Vec<EffectAction>, dispatch: bool| {
+            if !dispatch {
+                return OmenTick::Continue;
+            }
             seen.push(e.duration);
             OmenTick::Remove
         };

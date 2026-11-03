@@ -21,7 +21,7 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-use std::{fs, io, path::Path, sync::OnceLock};
+use std::{cell::Cell, fs, io, path::Path, sync::OnceLock};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
@@ -45,6 +45,8 @@ pub enum Hurting<'a> {
     Mob(&'a crate::mobs::Mob, &'a crate::mobs::Damage),
     /// The ender dragon, by its entity id.
     Dragon(i32, HurtSource<'a>),
+    /// An armor stand, by its entity id, for sweep knockback.
+    ArmorStand(i32, HurtSource<'a>),
 }
 /// The game's native damage hook (`native_living_incoming_damage`), set once by the
 /// game: `LivingEntity.hurtServer` once its guards passed. It may change the
@@ -55,7 +57,7 @@ pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
 }
 /// A knockback's strength and direction, as `LivingEntity.knockback` has them
-/// once the knockback resistance is applied. The entity is pushed away from
+/// before knockback resistance is applied. The entity is pushed away from
 /// the direction (`x`, `z`), which vanilla points at the source of the hit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Knock {
@@ -68,6 +70,92 @@ pub struct Knock {
 /// and before the knockback resistance and the motion change. It may change the [`Knock`]; true
 /// cancels it.
 pub static KNOCKBACK: OnceLock<fn(Hurting<'_>, &mut Knock) -> bool> = OnceLock::new();
+/// What a player's raised blocking item does to a hit, as `native_living_shield_block`
+/// may change it (`LivingShieldBlockEvent`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShieldBlock {
+    /// The player counts as blocking.
+    pub blocked: bool,
+    /// The damage the item stops, kept within 0 and the hit's damage.
+    pub blocked_damage: f32,
+    /// The durability the item loses (`ItemDamageFunction` of what it stops). Below 0,
+    /// vanilla's `ItemDamageFunction` of the final `blocked_damage` applies.
+    pub shield_damage: i32,
+}
+/// The game's native shield hook (`native_living_shield_block`), set once by the game:
+/// `LivingEntity.applyItemBlocking` of a hit with damage, for what it hurts, the damage
+/// and whether vanilla blocks. It may change the [`ShieldBlock`]; true cancels the block.
+pub static SHIELD_BLOCK: OnceLock<fn(Hurting<'_>, f32, bool, &mut ShieldBlock) -> bool> =
+    OnceLock::new();
+/// What `applyItemBlocking` stops of `damage` (above 0) once [`SHIELD_BLOCK`] had its say
+/// on `vanilla`, the block vanilla resolved: none when the hook cancels or unblocks it.
+pub fn shield_block(
+    hurting: Hurting<'_>,
+    damage: f32,
+    vanilla: ShieldBlock,
+) -> Option<ShieldBlock> {
+    let mut block = vanilla;
+    let canceled = SHIELD_BLOCK
+        .get()
+        .is_some_and(|hook| hook(hurting, damage, vanilla.blocked, &mut block));
+    if canceled || !block.blocked {
+        return None;
+    }
+    // A value a mod leaves that is not a number stops nothing.
+    block.blocked_damage = if block.blocked_damage.is_nan() {
+        0.0
+    } else {
+        block.blocked_damage.clamp(0.0, damage)
+    };
+    Some(block)
+}
+/// The block an entity with no raised item is asked about: none, and one a mod forces
+/// stops the whole hit.
+pub fn no_block(damage: f32) -> ShieldBlock {
+    ShieldBlock {
+        blocked: false,
+        blocked_damage: damage,
+        shield_damage: 0,
+    }
+}
+
+thread_local! {
+    static KNOCKBACK_ATTACKER: Cell<i32> = const { Cell::new(0) };
+    static KNOCKBACK_HELD: std::cell::RefCell<[Option<crate::items::ItemStack>; 2]> =
+        const { std::cell::RefCell::new([None, None]) };
+}
+
+/// The entity behind the synchronous attack, or 0 outside an attack scope.
+pub fn knockback_attacker() -> i32 {
+    KNOCKBACK_ATTACKER.get()
+}
+
+/// What the attacker holds in the main and off hand, or none when it is not known (or no
+/// native mod listens: the game only records it then).
+pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
+    KNOCKBACK_HELD.with(|held| held.borrow().clone())
+}
+
+/// Restore the previous attacker on return or unwind, including nested guest actions.
+pub fn knockback_from(entity: i32) -> impl Drop {
+    knockback_from_holding(entity, [None, None])
+}
+
+/// [`knockback_from`] that also records the attacker's held stacks (main hand, off hand).
+pub fn knockback_from_holding(
+    entity: i32,
+    held: [Option<crate::items::ItemStack>; 2],
+) -> impl Drop {
+    struct Restore(i32, [Option<crate::items::ItemStack>; 2]);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            KNOCKBACK_ATTACKER.set(self.0);
+            KNOCKBACK_HELD.with(|held| *held.borrow_mut() = std::mem::take(&mut self.1));
+        }
+    }
+    let held = KNOCKBACK_HELD.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), held));
+    Restore(KNOCKBACK_ATTACKER.replace(entity), held)
+}
 /// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
 /// value it leaves that is not a finite number is put back as it was.
 pub fn knockback_canceled(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
@@ -174,6 +262,8 @@ pub enum HealthEvent {
         source: DamageTypeId,
     },
     Criterion {
+        /// The hit's damage type, for the responsible player of an accepted hit.
+        source: DamageTypeId,
         original: f32,
         amount: f32,
         blocked: bool,
@@ -421,6 +511,7 @@ impl PlayerMotion {
             status: self.status.clone(),
             blocking,
             blocked: 0.0,
+            shield_damage: 0,
             fully_blocked: false,
             block_sound: false,
             knocked: false,
@@ -439,6 +530,7 @@ impl PlayerMotion {
         let outcome = BlockOutcome {
             hurt,
             blocked: environment.blocked,
+            shield_damage: environment.shield_damage,
             fully_blocked: environment.fully_blocked,
             sound: environment.block_sound,
             knockback: environment.knocked,
@@ -517,6 +609,8 @@ pub(crate) struct Environment<'a> {
     /// The raised blocking item, if any, and what it blocked.
     pub(crate) blocking: Option<Blocking>,
     pub(crate) blocked: f32,
+    /// The durability the blocking item loses.
+    pub(crate) shield_damage: i32,
     /// What it blocked covers the whole hit, as difficulty scaled it.
     pub(crate) fully_blocked: bool,
     pub(crate) block_sound: bool,
@@ -584,6 +678,9 @@ pub struct AttackRecord {
 pub struct BlockOutcome {
     pub hurt: bool,
     pub blocked: f32,
+    /// The durability the blocking item loses (`ItemDamageFunction`, or what a
+    /// native mod set).
+    pub shield_damage: i32,
     /// `applyItemBlocking`'s `damageBlocked >= damage`, against the damage
     /// `Player.hurtServer` scaled with the difficulty.
     pub fully_blocked: bool,
@@ -798,13 +895,53 @@ impl HurtWorld for Environment<'_> {
         Ok(())
     }
     fn apply_blocking(&mut self, _: &mut State, damage: f32) -> io::Result<f32> {
-        let Some(b) = &self.blocking else {
-            return Ok(0.0);
-        };
-        if damage <= 0.0 || b.bypassed || b.pierce {
+        if damage <= 0.0 {
             return Ok(0.0);
         }
-        self.blocked = b.rules.resolve(&mut MatchedSets, damage, b.angle)?;
+        // Nothing is stopped without a raised item, or when its `bypassed_by` or a
+        // piercing arrow skips it; a native mod may still force a block.
+        let vanilla = match &self.blocking {
+            Some(b) if !b.bypassed && !b.pierce => {
+                b.rules.resolve(&mut MatchedSets, damage, b.angle)?
+            }
+            _ => 0.0,
+        };
+        let shield_damage = self
+            .blocking
+            .as_ref()
+            .map_or(0, |b| b.rules.item_damage.apply(vanilla));
+        let block = if vanilla > 0.0 {
+            ShieldBlock {
+                blocked: true,
+                blocked_damage: vanilla,
+                shield_damage,
+            }
+        } else {
+            ShieldBlock {
+                shield_damage,
+                ..no_block(damage)
+            }
+        };
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: 0,
+        };
+        let Some(block) = shield_block(Hurting::Player(self.entity, source), damage, block) else {
+            return Ok(0.0);
+        };
+        self.blocked = block.blocked_damage;
+        // `setShieldDamage` is what the item loses if `blocked` holds, whatever
+        // `blocked_damage` says; below 0, the item's own `itemDamage` of what is stopped.
+        self.shield_damage = if !block.blocked {
+            0
+        } else if block.shield_damage < 0 {
+            self.blocking
+                .as_ref()
+                .map_or(0, |b| b.rules.item_damage.apply(block.blocked_damage))
+        } else {
+            block.shield_damage
+        };
         self.fully_blocked = self.blocked >= damage;
         Ok(self.blocked)
     }
@@ -897,6 +1034,7 @@ impl HurtWorld for Environment<'_> {
         blocked: bool,
     ) -> io::Result<()> {
         self.event(HealthEvent::Criterion {
+            source: self.source.type_id(),
             original,
             amount,
             blocked,
@@ -948,6 +1086,27 @@ impl ServerPlayerHurtWorld for Environment<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn knockback_attacker_scopes_restore_on_return_and_unwind() {
+        assert_eq!(super::knockback_attacker(), 0);
+        {
+            let _outer = super::knockback_from(7);
+            let panic = std::panic::catch_unwind(|| {
+                let _inner = super::knockback_from(9);
+                assert_eq!(super::knockback_attacker(), 9);
+                panic!("test unwind");
+            });
+            assert!(panic.is_err());
+            assert_eq!(super::knockback_attacker(), 7);
+            assert_eq!(
+                std::thread::spawn(super::knockback_attacker)
+                    .join()
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(super::knockback_attacker(), 0);
+    }
     #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1064,7 +1223,7 @@ mod tests {
         use super::Hurting;
         fn hook(hurting: Hurting<'_>, amount: &mut f32) -> bool {
             let (entity, seen) = match hurting {
-                Hurting::Player(e, s) | Hurting::Dragon(e, s) => {
+                Hurting::Player(e, s) | Hurting::Dragon(e, s) | Hurting::ArmorStand(e, s) => {
                     (e, format!("{} {}", s.damage_type, s.causing))
                 }
                 Hurting::Mob(mob, source) => (mob.id as i32, format!("{:?}", source.kind)),
@@ -1211,8 +1370,33 @@ mod tests {
         }
     }
 
-    /// `LivingEntity.knockback`: the hook runs once the knockback resistance
-    /// took its share and before the motion changes; a mod's strength or
+    /// A zombie in full netherite (0.1 a piece) is pushed 60 % as far as one
+    /// with no armour: `knockback` scales by the attribute's value with the
+    /// gear's modifiers, which the game hands the mob as `gear_knockback_resistance`.
+    #[test]
+    fn a_mobs_gear_resists_knockback() {
+        use crate::mobs::{Damage, Mob};
+        let hit = Damage::player([3.0, 0.0, 0.0]);
+        let pushed = |gear: Option<f64>, own: f64| {
+            let mut m = Mob::new(
+                9200,
+                crate::mobs::sensor_scan_tests::kind(),
+                Default::default(),
+                0.0,
+            );
+            m.on_ground = true;
+            m.attrs.knockback_resistance = own;
+            m.gear_knockback_resistance = gear;
+            m.knockback(0.4, 3.0, 0.0, &hit);
+            m.velocity.x
+        };
+        assert_eq!(pushed(None, 0.0), -0.4);
+        assert!((pushed(Some(0.4), 0.0) - -0.4 * 0.6).abs() < 1e-12);
+        // The gear's value is the whole attribute: it replaces the mob's own.
+        assert!((pushed(Some(0.4), 0.5) - -0.4 * 0.6).abs() < 1e-12);
+    }
+    /// `LivingEntity.knockback`: the hook runs before knockback resistance
+    /// takes its share and before motion changes; a mod's strength or
     /// direction is what pushes, a cancel pushes nothing, and with no mod in
     /// the way the push is vanilla's. Expected values are worked out by hand
     /// from vanilla's formula: the horizontal speed halves and the push is
@@ -1258,6 +1442,7 @@ mod tests {
         // A stronger push the other way: twice the strength, x turned around.
         let turned = push(9102, 0.0);
         assert_eq!(velocity(&turned), (0.8, 0.4, 0.0));
+        assert_eq!(velocity(&push(9102, 0.5)), (0.4, 0.4, 0.0));
         // Numbers that are not finite are put back as the game made them.
         assert_eq!(velocity(&push(9103, 0.0)), (-0.4, 0.4, 0.0));
         // Before the resistance (`LivingKnockBackEvent`): the hook is handed the raw 0.4, and

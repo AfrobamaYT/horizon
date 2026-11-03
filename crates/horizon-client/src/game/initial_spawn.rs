@@ -28,6 +28,9 @@ struct Columns<'a, 'r> {
     world: &'a World,
     properties: &'a Properties,
     binding: &'a BlockCollisionRegistry<'r>,
+    has_ceiling: bool,
+    /// `ChunkGenerator.getSpawnHeight` (64 for the vanilla generators).
+    spawn_height: i32,
 }
 impl SpawnLevel for Columns<'_, '_> {
     fn min_y(&self) -> i32 {
@@ -66,6 +69,12 @@ impl SpawnLevel for Columns<'_, '_> {
                 .is_ok_and(|differs| !differs)
         })
     }
+    fn has_ceiling(&self) -> bool {
+        self.has_ceiling
+    }
+    fn spawn_height(&self) -> i32 {
+        self.spawn_height
+    }
 }
 
 impl Game<'_> {
@@ -74,6 +83,10 @@ impl Game<'_> {
             world: &self.world,
             properties: &self.pack.assets.properties,
             binding: self.collision,
+            // The spawn searches are the overworld's (PlayerSpawnFinder); a
+            // ceiling starts them at the generator's spawn height.
+            has_ceiling: self.level_shapes.overworld.has_ceiling,
+            spawn_height: self.spawn_origin.map_or(64, |(_, height)| height),
         }
     }
     /// ChunkGenerator.getOrigin and getSpawnHeight of the overworld.
@@ -103,6 +116,19 @@ impl Game<'_> {
     /// valid respawn column gives the world spawn, else the origin chunk's
     /// centre at the spawn height. None while a chunk to test is loading.
     pub(super) fn find_world_spawn(&mut self) -> Result<Option<[i32; 3]>> {
+        if !self.spawn_hook_fired {
+            self.spawn_hook_fired = true;
+            let mut position = self.level.world_spawn.unwrap_or([0, 0, 0]);
+            let mut rotation = self.level.world_spawn_angle;
+            let mut cancel = false;
+            self.native_create_spawn_position(&mut position, &mut rotation, &mut cancel);
+            if cancel {
+                self.spawn_hook_cancelled = true;
+                self.level.world_spawn = Some(position);
+                self.level.world_spawn_angle = rotation;
+                return Ok(Some(position));
+            }
+        }
         let ((ox, oz), height) = match self.spawn_origin {
             Some(origin) => origin,
             None => *self.spawn_origin.insert(self.spawn_origin()?),

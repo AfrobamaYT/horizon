@@ -87,6 +87,16 @@ fn place_back(menu: &mut Menu, env: &Env, stacks: Vec<ItemStack>) {
 impl Game<'_> {
     pub(super) fn menu_env(&self) -> Env<'_> {
         Env {
+            player: self
+                .lan_acting_uuid
+                .or_else(|| self.remote.as_ref().map(|r| r.profile())),
+            player_entity_id: Some(self.own_entity_id()),
+            // The server thread's and a dedicated server's menus are the server's.
+            side: if self.native_authoritative() {
+                horizon_client::menu::LogicalSide::Server
+            } else {
+                horizon_client::menu::LogicalSide::Client
+            },
             items: self.items(),
             recipes: self.recipes(),
             brewing: &self.stations().brewing,
@@ -118,10 +128,15 @@ impl Game<'_> {
             self.level_maps(&held)
         });
         let env = Env {
+            player: Some(host.hub.guests[gi].uuid),
+            player_entity_id: Some(host.hub.guests[gi].entity_id),
+            side: horizon_client::menu::LogicalSide::Server,
             maps: maps.as_ref().map(|m| m as &dyn horizon_client::menu::Maps),
             ..self.menu_env()
         };
         load_player(menu, &host.hub.guests[gi]);
+        menu.brewed_potion_hook = !horizon_client::mod_api::mods().is_empty();
+        menu.item_smelted_hook = menu.brewed_potion_hook;
         let result = op(menu, &env);
         if let Some(maps) = maps {
             self.register_made_maps(maps);
@@ -135,13 +150,20 @@ impl Game<'_> {
         };
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
+        let brewed_potion_takes = std::mem::take(&mut menu.brewed_potion_takes);
         let crafted = std::mem::take(&mut menu.crafted);
         let item_crafted = std::mem::take(&mut menu.item_crafted);
         menu.drops.clear();
         store_player(menu, &mut host.hub.guests[gi]);
-        if !brewed.is_empty() {
-            let conn = host.hub.guests[gi].conn;
+        if !brewed.is_empty() || !brewed_potion_takes.is_empty() {
+            let (conn, uuid, entity_id) = {
+                let guest = &host.hub.guests[gi];
+                (guest.conn, guest.uuid, guest.entity_id)
+            };
             self.as_guest(host, conn, |g| {
+                for stack in &brewed_potion_takes {
+                    g.native_player_brewed_potion(uuid, entity_id, stack);
+                }
                 for stack in &brewed {
                     g.trigger_brewed_potion(stack);
                 }
@@ -351,19 +373,25 @@ impl Game<'_> {
             }
             _ => {}
         }
-        // FurnaceResultSlot.checkTakeAchievements: the guest took from the output.
+        // FurnaceResultSlot.checkTakeAchievements, each as the click made it.
+        let guest = &host.hub.guests[gi];
+        for (stack, removed) in std::mem::take(&mut menu.item_smelted) {
+            self.native_item_smelted(guest.uuid, guest.entity_id, stack.as_ref(), removed);
+        }
+        // The guest took from the output.
         let count = |s: Option<&ItemStack>| s.map_or(0, |s| s.count);
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let at = host.hub.guests[gi].position;
             let guest = &host.hub.guests[gi];
             let output = items[2].as_ref();
             if let Some(output) = output {
+                let taken = output.count - count(menu.slot(2));
                 self.native_furnace_extract(
                     guest.uuid,
                     &guest.name,
                     [pos.0, pos.1, pos.2],
                     &output.item,
-                    output.count - count(menu.slot(2)),
+                    taken,
                 );
             }
             self.award_furnace_recipes(pos, at);

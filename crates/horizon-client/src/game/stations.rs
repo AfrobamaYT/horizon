@@ -977,16 +977,44 @@ impl Game<'_> {
             self.throw_from_eyes(rest, eye, false);
         }
     }
-    /// `Player.giveExperienceLevels`.
+    /// `Player.giveExperienceLevels`, and the level change reported to the mods.
     pub(super) fn give_levels(&mut self, levels: i32) {
         let old_level = self.experience.level;
-        let xp = &mut self.experience;
-        xp.level = xp.level.saturating_add(levels);
-        if xp.level < 0 {
-            xp.level = 0;
-            xp.progress = 0.0;
-            xp.total = 0;
+        self.add_experience_levels(levels);
+        self.native_player_level_changed(old_level);
+    }
+    /// `ServerPlayer.giveExperienceLevels`: the mods of a server player may change
+    /// or cancel the levels, and every fifth level gained plays the level-up sound
+    /// (at most every 100 ticks).
+    pub(super) fn add_experience_levels(&mut self, mut levels: i32) {
+        // ServerPlayer.giveExperienceLevels
+        if levels == 0 {
+            return;
         }
+        if !horizon_client::mod_api::mods().is_empty()
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let mut cancel = false;
+            self.native_player_xp_level_change(player, &name, &mut levels, &mut cancel);
+            if cancel {
+                return;
+            }
+        }
+        self.experience.add_levels(levels);
+        let level = self.experience.level;
+        if levels > 0 && level % 5 == 0 && self.ticks > self.last_level_up + 100 {
+            self.last_level_up = self.ticks;
+            let volume = if level > 30 { 1.0 } else { level as f32 / 30.0 };
+            let at = self.eye_position();
+            self.audio
+                .play("minecraft:entity.player.levelup", at, volume * 0.75, 1.0);
+        }
+    }
+    /// `Player.onEnchantmentPerformed`: the cost leaves the level directly, not
+    /// through `giveExperienceLevels`, and the mods hear of the level change.
+    pub(super) fn enchantment_performed(&mut self, cost: i32) {
+        let old_level = self.experience.level;
+        self.experience.add_levels(-cost);
         self.native_player_level_changed(old_level);
     }
     /// Whether the result slot may be taken (`mayPickup`).
@@ -1038,8 +1066,7 @@ impl Game<'_> {
         };
         let pos = s.pos;
         let enchanted_item = enchanted.clone();
-        // Player.onEnchantmentPerformed
-        self.give_levels(-(lapis_needed as i32));
+        self.enchantment_performed(lapis_needed as i32);
         self.level.xp_seed = self.world.random.next_int();
         if let Some(s) = self.station.as_mut() {
             s.inputs[0] = Some(enchanted);
@@ -2565,7 +2592,7 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let (x, y, w, h) =
             Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
     /// A tooltip's lines with their legacy codes resolved and their colours.
@@ -2605,47 +2632,43 @@ impl Game<'_> {
     }
     /// The box and its frame sprites.
     pub(super) fn tooltip_box(
+        &self,
         batch: &mut HudBatch,
-        atlas: &horizon_client::hud::HudAtlas,
+        stack: Option<&ItemStack>,
         x: f32,
         y: f32,
         w: f32,
         h: f32,
     ) {
-        batch.fill(atlas, x - 3.0, y - 4.0, w + 6.0, 1.0, rgba(16, 0, 16, 240));
-        batch.fill(
-            atlas,
-            x - 3.0,
-            y + h + 3.0,
-            w + 6.0,
-            1.0,
-            rgba(16, 0, 16, 240),
+        let (mut background, mut border_top, mut border_bottom) =
+            (0xf0100010, 0x505000ff, 0x5028007f);
+        self.native_tooltip_color(stack, &mut background, &mut border_top, &mut border_bottom);
+        let convert = |color: u32| {
+            let [a, r, g, b] = color.to_be_bytes();
+            rgba(r, g, b, a)
+        };
+        let (background, border_top, border_bottom) = (
+            convert(background),
+            convert(border_top),
+            convert(border_bottom),
         );
-        batch.fill(
+        let atlas = &self.gui.atlas;
+        batch.fill(atlas, x - 3.0, y - 4.0, w + 6.0, 1.0, background);
+        batch.fill(atlas, x - 3.0, y + h + 3.0, w + 6.0, 1.0, background);
+        batch.fill(atlas, x - 4.0, y - 3.0, w + 8.0, h + 6.0, background);
+        batch.fill(atlas, x - 3.0, y - 3.0, w + 6.0, 1.0, border_top);
+        batch.fill(atlas, x - 3.0, y + h + 2.0, w + 6.0, 1.0, border_bottom);
+        batch.fill_gradient(
             atlas,
-            x - 4.0,
-            y - 3.0,
-            w + 8.0,
-            h + 6.0,
-            rgba(16, 0, 16, 240),
+            (x - 3.0, y - 2.0, 1.0, h + 4.0),
+            border_top,
+            border_bottom,
         );
-        batch.fill(atlas, x - 3.0, y - 3.0, w + 6.0, 1.0, rgba(80, 0, 255, 80));
-        batch.fill(
+        batch.fill_gradient(
             atlas,
-            x - 3.0,
-            y + h + 2.0,
-            w + 6.0,
-            1.0,
-            rgba(40, 0, 127, 80),
-        );
-        batch.fill(atlas, x - 3.0, y - 2.0, 1.0, h + 4.0, rgba(60, 0, 190, 80));
-        batch.fill(
-            atlas,
-            x + w + 2.0,
-            y - 2.0,
-            1.0,
-            h + 4.0,
-            rgba(60, 0, 190, 80),
+            (x + w + 2.0, y - 2.0, 1.0, h + 4.0),
+            border_top,
+            border_bottom,
         );
     }
     pub(super) fn tooltip_text(
@@ -2709,7 +2732,7 @@ impl Game<'_> {
             (batch.width, batch.height),
             [min_width, extra],
         );
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, Some(stack), x, y, w, h);
         let text_h = h - extra;
         Self::tooltip_text(batch, atlas, &lines, x, y);
         if let Some(layout) =
@@ -2756,7 +2779,7 @@ impl Game<'_> {
         if py + 8.0 + 3.0 > batch.height {
             py = batch.height - 8.0 - 3.0;
         }
-        Self::tooltip_box(batch, atlas, px, py, tw, 8.0);
+        self.tooltip_box(batch, Some(stack), px, py, tw, 8.0);
         Self::tooltip_text(batch, atlas, &lines, px, py);
     }
     /// `ClientBundleTooltip.extractImage`: the slots, the count past them and
@@ -2912,7 +2935,7 @@ impl Game<'_> {
         let fuel_item = was_unfueled
             .then(|| b.items[4].as_ref().map(|s| s.item.clone()))
             .flatten();
-        let out = b.tick(
+        let (mut out, due) = b.tick_to_brew(
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
@@ -2920,24 +2943,60 @@ impl Game<'_> {
         let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
         let ingredient = started.then(|| b.ingredient.clone()).flatten();
+        let hooked = !horizon_client::mod_api::mods().is_empty();
+        let stacks = (due && hooked).then(|| b.items.clone());
+        let at = [pos.0, pos.1, pos.2];
+        let mut post = false;
+        if due {
+            // `doBrew`, with PotionBrewEvent.Pre before it and .Post after.
+            let asked = stacks.map(|mut stacks| {
+                let mut cancel = false;
+                self.native_potion_brew_pre(at, &mut stacks, &mut cancel);
+                (stacks, cancel)
+            });
+            // A cancelled Pre fires Post itself, with the slots the mods left.
+            let cancelled = matches!(asked, Some((_, true)));
+            let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+                return Ok(());
+            };
+            b.brew_after_pre(
+                asked,
+                &world_stations!(self).brewing,
+                world_items!(self),
+                &mut out,
+            );
+            self.world.modified.insert((pos.0 >> 4, pos.2 >> 4));
+            post = hooked && (out.brewed || cancelled);
+        }
         if consumed_fuel && let Some(item) = fuel_item {
-            let (x, y, z) = pos;
-            self.native_brewing_fuel([x, y, z], &item);
+            self.native_brewing_fuel(at, &item);
         }
         if let Some(ingredient) = ingredient {
-            let (x, y, z) = pos;
-            self.native_brewing_start([x, y, z], &ingredient);
+            self.native_brewing_start(at, &ingredient);
         }
+        let (x, y, z) = pos;
+        if out.brewed {
+            self.native_brewing_complete(at);
+            self.play_at("minecraft:block.brewing_stand.brew", at, 1.0, 1.0);
+        }
+        for d in std::mem::take(&mut out.drops) {
+            self.pop_resource(at, d);
+        }
+        // PotionBrewEvent.Post ends `doBrew`, after its sound and the
+        // ingredient's remainder; the bottles' block state follows it.
+        if post && let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get(&pos) {
+            let mut stacks = b.items.clone();
+            self.native_potion_brew_post(at, &mut stacks);
+            if let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) {
+                b.items = stacks;
+            }
+        }
+        let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
+            return Ok(());
+        };
+        b.sync_bottles(&mut out);
         if out != brewing::BrewTick::default() {
-            let (x, y, z) = pos;
             self.world.modified.insert((x >> 4, z >> 4));
-            if out.brewed {
-                self.native_brewing_complete([x, y, z]);
-                self.play_at("minecraft:block.brewing_stand.brew", [x, y, z], 1.0, 1.0);
-            }
-            for d in out.drops {
-                self.pop_resource([x, y, z], d);
-            }
             if let Some(bottles) = out.bottles {
                 let state = self.world.block(x, y, z);
                 if let Some(mut s) = self.pack.assets.registry.state(state).cloned()

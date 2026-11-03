@@ -21,6 +21,10 @@ pub mod place;
 
 /// What a menu needs to know about items and recipes.
 pub struct Env<'a> {
+    /// UUID of the player operating this menu, when a player is available.
+    pub player: Option<u128>,
+    pub player_entity_id: Option<i32>,
+    pub side: LogicalSide,
     pub items: &'a Items,
     pub recipes: &'a Recipes,
     pub brewing: &'a Brewing,
@@ -235,6 +239,90 @@ struct Slot {
     role: Role,
 }
 
+/// The logical side on which a menu click runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogicalSide {
+    Client,
+    Server,
+}
+
+/// Operations on the clicked slot, including its placement and take rules.
+pub trait SlotView {
+    fn item(&self) -> Option<ItemStack>;
+    fn may_place(&self, stack: &ItemStack) -> bool;
+    fn may_pickup(&self) -> bool;
+    fn allow_modification(&self) -> bool;
+    fn safe_insert(&mut self, stack: Option<ItemStack>, count: u32) -> Option<ItemStack>;
+    fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack>;
+}
+
+struct MenuSlotView<'a, 'e> {
+    menu: &'a mut Menu,
+    env: &'a Env<'e>,
+    slot: usize,
+}
+
+impl SlotView for MenuSlotView<'_, '_> {
+    fn item(&self) -> Option<ItemStack> {
+        self.menu.slot(self.slot).cloned()
+    }
+    fn may_place(&self, stack: &ItemStack) -> bool {
+        self.menu.may_place(self.env, self.slot, stack)
+    }
+    fn may_pickup(&self) -> bool {
+        self.menu.may_pickup(self.env, self.slot)
+    }
+    fn allow_modification(&self) -> bool {
+        if self.menu.slot(self.slot).is_some() {
+            self.menu.allow_modification(self.env, self.slot)
+        } else {
+            let empty = ItemStack::new("minecraft:air", 0);
+            self.may_pickup() && self.may_place(&empty)
+        }
+    }
+    fn safe_insert(&mut self, mut stack: Option<ItemStack>, count: u32) -> Option<ItemStack> {
+        self.menu
+            .safe_insert(self.env, self.slot, &mut stack, count);
+        stack
+    }
+    fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack> {
+        self.menu.safe_take(self.env, self.slot, count, max)
+    }
+}
+
+/// Access to the carried stack, as `createCarriedSlotAccess`.
+pub struct CarriedAccess<'a>(pub(crate) &'a mut Option<ItemStack>);
+
+impl CarriedAccess<'_> {
+    pub fn get(&self) -> Option<&ItemStack> {
+        self.0.as_ref()
+    }
+    pub fn set(&mut self, stack: Option<ItemStack>) {
+        *self.0 = stack;
+    }
+}
+
+/// A pickup click's slot and cursor, including empty stacks.
+pub struct StackedOnOther<'a> {
+    pub player: Option<u128>,
+    pub player_entity_id: Option<i32>,
+    pub slot: usize,
+    pub container: usize,
+    pub container_slot: usize,
+    pub primary: bool,
+    pub side: LogicalSide,
+    pub carried: CarriedAccess<'a>,
+    pub clicked: &'a mut dyn SlotView,
+    pub cancellation_result: bool,
+}
+
+/// NeoForge's `ItemStackedOnOtherEvent`, before either item override.
+/// @API:item_stacked_on_other@.
+#[inline(never)]
+pub fn native_item_stacked_on_other(event: &mut StackedOnOther<'_>, canceled: &mut bool) {
+    crate::native_client_hooks::item_stacked_on_other(event, canceled);
+}
+
 /// `BeaconBlockEntity.BEACON_EFFECTS`: the powers of each pyramid level.
 pub const BEACON_EFFECTS: [&[&str]; 4] = [
     &["minecraft:speed", "minecraft:haste"],
@@ -262,8 +350,8 @@ pub fn fits_inside_container_items(stack: &ItemStack) -> bool {
 }
 
 /// The containers a menu spans.
-const PLAYER: usize = 0;
-const MAIN: usize = 1;
+pub(crate) const PLAYER: usize = 0;
+pub(crate) const MAIN: usize = 1;
 const GRID: usize = 2;
 const RESULT: usize = 3;
 /// `Container.getMaxStackSize`.
@@ -303,6 +391,21 @@ pub struct Menu {
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
+    /// Set by a server caller when a mod listens: every stack taken from a
+    /// brewing stand's bottle slots then goes to `brewed_potion_takes`.
+    pub brewed_potion_hook: bool,
+    /// Stacks taken from brewing stand bottle slots, for
+    /// `PlayerBrewedPotionEvent`.
+    pub brewed_potion_takes: Vec<ItemStack>,
+    /// Set by a server caller when a mod listens: every
+    /// `FurnaceResultSlot.checkTakeAchievements` then goes to `item_smelted`.
+    pub item_smelted_hook: bool,
+    /// What each `checkTakeAchievements` of a furnace's result slot passed,
+    /// for `ItemSmeltedEvent`: the stack (`None` for vanilla's empty one)
+    /// and `removeCount`.
+    pub item_smelted: Vec<(Option<ItemStack>, u32)>,
+    /// `FurnaceResultSlot.removeCount`.
+    output_removed: u32,
     /// `LivingEntity.onEquipItem` calls that change the item: the
     /// `EquipmentSlot` name and the new stack, in order, for the caller.
     pub equipped: Vec<(&'static str, Option<ItemStack>)>,
@@ -762,6 +865,11 @@ impl Menu {
             crafted: Vec::new(),
             item_crafted: Vec::new(),
             brewed: Vec::new(),
+            brewed_potion_hook: false,
+            brewed_potion_takes: Vec::new(),
+            item_smelted_hook: false,
+            item_smelted: Vec::new(),
+            output_removed: 0,
             equipped: Vec::new(),
             merchant: None,
             stone: Stonecutter::default(),
@@ -1597,6 +1705,10 @@ impl Menu {
             .filter(|c| c.count > 0)
             .map(|c| split(c, amount));
         tidy(cell);
+        // FurnaceResultSlot.remove counts what it gave.
+        if slot.role == Role::Output {
+            self.output_removed += out.as_ref().map_or(0, |o| o.count);
+        }
         // LecternBlockEntity: an emptied book slot is onBookItemRemove (page 0).
         if self.kind == Kind::Lectern && slot.container == MAIN && cell.is_none() {
             self.data[0] = 0;
@@ -1691,9 +1803,27 @@ impl Menu {
         self.containers[RESULT][0] = result;
     }
 
+    /// `FurnaceResultSlot.checkTakeAchievements`: what `carried` and
+    /// `removeCount` were, kept for `ItemSmeltedEvent` when a server caller
+    /// listens; the count starts again.
+    fn furnace_take(&mut self, env: &Env, carried: &ItemStack) {
+        let removed = std::mem::take(&mut self.output_removed);
+        if self.item_smelted_hook && env.side == LogicalSide::Server {
+            let carried = (carried.count > 0).then(|| carried.clone());
+            self.item_smelted.push((carried, removed));
+        }
+    }
+
     /// `ResultSlot.onTake` and the other `Slot.onTake` overrides.
     fn on_take(&mut self, env: &Env, s: usize, taken: &ItemStack) {
+        if self.slots[s].role == Role::Output {
+            self.furnace_take(env, taken);
+            return;
+        }
         if self.slots[s].role == Role::Potion {
+            if self.brewed_potion_hook && env.side == LogicalSide::Server {
+                self.brewed_potion_takes.push(taken.clone());
+            }
             // BrewingStandMenu.PotionSlot.onTake: a stack with potion contents.
             if matches!(
                 &*taken.item,
@@ -2490,6 +2620,13 @@ impl Menu {
                     if !self.move_to(env, &mut stack, 3, 39, true) {
                         return None;
                     }
+                    // Slot.onQuickCraft -> FurnaceResultSlot.onQuickCraft:
+                    // the moved count, with the stack as it was.
+                    let moved = clicked.count - stack.count;
+                    if moved > 0 {
+                        self.output_removed += moved;
+                        self.furnace_take(env, &clicked);
+                    }
                 } else if index != 1 && index != 0 {
                     let smelts = env
                         .recipes
@@ -2587,7 +2724,13 @@ impl Menu {
             return None;
         }
         if after_take || matches!(self.kind, Kind::Inventory | Kind::Crafting) {
-            self.on_take(env, index, &clicked);
+            // AbstractFurnaceMenu passes what stayed in the slot.
+            let taken = if matches!(self.kind, Kind::Furnace(_)) {
+                &stack
+            } else {
+                &clicked
+            };
+            self.on_take(env, index, taken);
         }
         // What the result slot's move left over is dropped.
         if (index == 0 && matches!(self.kind, Kind::Inventory | Kind::Crafting))
@@ -2813,7 +2956,38 @@ impl Menu {
     /// The PICKUP branch of `doClick`: a bundle's override, else the
     /// plain click, ending with `slot.setChanged()`.
     fn pickup(&mut self, env: &Env, s: usize, primary: bool) {
-        if !self.bundle_click(env, s, primary) {
+        let mut canceled = false;
+        let mut handled = false;
+        if crate::native_client_hooks::has_mods() {
+            let slot = self.slots[s];
+            let mut carried = self.carried.take();
+            let mut view = MenuSlotView {
+                menu: self,
+                env,
+                slot: s,
+            };
+            let mut event = StackedOnOther {
+                player: env.player,
+                player_entity_id: env.player_entity_id,
+                slot: s,
+                container: slot.container,
+                container_slot: slot.index,
+                primary,
+                side: env.side,
+                carried: CarriedAccess(&mut carried),
+                clicked: &mut view,
+                cancellation_result: false,
+            };
+            native_item_stacked_on_other(&mut event, &mut canceled);
+            handled = event.cancellation_result;
+            self.carried = carried;
+        }
+        let handled = if canceled {
+            handled
+        } else {
+            self.bundle_click(env, s, primary)
+        };
+        if !handled {
             self.pickup_inner(env, s, primary);
         }
         self.slot_changed(env, s);
@@ -3284,6 +3458,9 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            player: None,
+            player_entity_id: None,
+            side: LogicalSide::Server,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -3322,6 +3499,63 @@ pub(crate) mod tests {
             // Out of the fuel slot: moveItemStackTo(3, 39, false).
             assert_eq!(landing("coal", 5, 1), [3]);
         });
+    }
+
+    /// `FurnaceResultSlot.checkTakeAchievements` as `ItemSmeltedEvent` sees
+    /// it: a pickup passes the taken stack and its count; a shift-click with
+    /// room for 2 of 64 passes the 64 with 2 removed (`onQuickCraft`), then
+    /// the 62 left with 0 (`onTake`); nothing is kept without a listener.
+    #[test]
+    fn a_furnace_take_keeps_what_check_take_achievements_passes() {
+        let root = std::env::temp_dir().join(format!("horizon-smelted-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = Items::for_tests(Default::default());
+        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Default::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            player: Some(7),
+            player_entity_id: Some(41),
+            side: LogicalSide::Server,
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        let furnace = |hook: bool| {
+            let mut menu = Menu::new(Kind::Furnace("smelting"));
+            menu.item_smelted_hook = hook;
+            menu.set_slot(env, 2, stack("iron_ingot", 64));
+            menu
+        };
+
+        let mut menu = furnace(true);
+        menu.click(env, 2, 0, Input::Pickup).unwrap();
+        assert_eq!(menu.item_smelted, [(stack("iron_ingot", 64), 64)]);
+
+        // The inventory full of dirt but for one stack with room for 2.
+        let mut menu = furnace(true);
+        for s in 3..39 {
+            menu.set_slot(env, s, stack("dirt", 64));
+        }
+        menu.set_slot(env, 3, stack("iron_ingot", 62));
+        menu.click(env, 2, 0, Input::QuickMove).unwrap();
+        assert_eq!(menu.slot(2), stack("iron_ingot", 62).as_ref());
+        assert_eq!(
+            menu.item_smelted,
+            [(stack("iron_ingot", 64), 2), (stack("iron_ingot", 62), 0),]
+        );
+
+        let mut menu = furnace(false);
+        menu.click(env, 2, 0, Input::Pickup).unwrap();
+        assert!(menu.item_smelted.is_empty());
     }
 
     #[test]
@@ -3378,6 +3612,42 @@ pub(crate) mod tests {
             menu.set_slot(env, 1, stack("oak_log", 1));
             menu.settle(env);
             menu.click(env, 0, 0, Input::Pickup).unwrap();
+            assert_eq!(
+                menu.item_crafted,
+                vec![(
+                    "minecraft:oak_planks".to_owned(),
+                    stack("oak_planks", 4).unwrap()
+                )]
+            );
+        });
+    }
+
+    #[test]
+    fn listener_safe_take_consumes_crafting_inputs() {
+        with_menu(Kind::Crafting, |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 1, stack("oak_log", 1));
+            menu.settle(env);
+            let mut view = MenuSlotView { menu, env, slot: 0 };
+            let mut carried = None;
+            let mut event = StackedOnOther {
+                player: None,
+                player_entity_id: None,
+                slot: 0,
+                container: MAIN,
+                container_slot: 0,
+                primary: true,
+                side: LogicalSide::Server,
+                carried: CarriedAccess(&mut carried),
+                clicked: &mut view,
+                cancellation_result: false,
+            };
+            let listener = |event: &mut StackedOnOther<'_>| {
+                event.carried.set(event.clicked.safe_take(4, 4));
+            };
+            listener(&mut event);
+            assert_eq!(carried, stack("oak_planks", 4));
+            assert!(menu.slot(1).is_none());
             assert_eq!(
                 menu.item_crafted,
                 vec![(
@@ -3540,12 +3810,18 @@ pub(crate) mod tests {
                         *max_stack = 7;
                     }
                 },
+                item_stacked_on_other: |_, _| {},
                 living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
+                farmland_trample: |_, _, _, _, _| {},
+                has_mods: || false,
+                player_name_format: |_, _| {},
+                player_tab_list_name_format: |_, _, _| {},
                 living_drown: |_, _, _, _, _, _| {},
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
                 ingredient: |_, _, _| {},
+                ingredient_test: |_, _, _, _| {},
             });
         assert!(installed.is_ok());
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
@@ -3574,6 +3850,9 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            player: None,
+            player_entity_id: None,
+            side: LogicalSide::Server,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,
@@ -3649,6 +3928,9 @@ pub(crate) mod tests {
         let (banners, station_recipes) = (Banners::default(), Default::default());
         let (enchantments, names) = (Default::default(), Default::default());
         let env = &Env {
+            player: None,
+            player_entity_id: None,
+            side: LogicalSide::Server,
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

@@ -53,6 +53,18 @@ pub fn bookshelf_offsets() -> Vec<[i32; 3]> {
     }
     v
 }
+/// One offer row as `EnchantmentLevelSetEvent` reports it: the server player
+/// whose table it is (UUID and entity id), the row (0 to 2), the power (the
+/// bookshelves counted), the item and the level `getEnchantmentCost` drew.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnchantmentRow<'a> {
+    pub player: u128,
+    pub player_entity_id: i32,
+    pub row: i32,
+    pub power: i32,
+    pub item: &'a ItemStack,
+    pub original_level: i32,
+}
 /// The three offers of `EnchantmentMenu.slotsChanged`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EnchantOffers {
@@ -86,6 +98,20 @@ pub fn enchant_offers(
     bookcases: i32,
     stack: Option<&ItemStack>,
 ) -> EnchantOffers {
+    enchant_offers_leveled(e, items, seed, bookcases, stack, |_, cost| cost)
+}
+/// [`enchant_offers`], with `level_set` given each row and its cost as
+/// `getEnchantmentCost` drew it, before a cost below the row is cleared:
+/// what it returns is the row's cost (NeoForge's `EnchantmentLevelSetEvent`).
+/// It is not asked for an item the table can't enchant.
+pub fn enchant_offers_leveled(
+    e: &Enchantments,
+    items: &Items,
+    seed: i32,
+    bookcases: i32,
+    stack: Option<&ItemStack>,
+    mut level_set: impl FnMut(usize, i32) -> i32,
+) -> EnchantOffers {
     let mut offers = EnchantOffers::default();
     let Some(stack) = stack else { return offers };
     // ItemStack.isEnchantable: enchantable component and no enchantments yet.
@@ -94,7 +120,8 @@ pub fn enchant_offers(
     }
     let mut random = LegacyRandom::new(i64::from(seed));
     for i in 0..3 {
-        offers.costs[i] = e.enchantment_cost(&mut random, i, bookcases, &stack.item);
+        let cost = e.enchantment_cost(&mut random, i, bookcases, &stack.item);
+        offers.costs[i] = level_set(i, cost);
         if offers.costs[i] < i as i32 + 1 {
             offers.costs[i] = 0;
         }
@@ -708,7 +735,7 @@ impl StationRecipes {
                 addition,
                 pattern,
                 ..
-            } if i == id => Some((&base.1, &addition.1, pattern)),
+            } if i == id => Some((&base.order, &addition.order, pattern)),
             _ => None,
         })?;
         if base.is_empty() || addition.is_empty() {
@@ -768,6 +795,35 @@ mod tests {
         let o = bookshelf_offsets();
         assert_eq!(o.len(), 32);
         assert!(o.contains(&[-2, 0, -2]) && o.contains(&[2, 1, 0]) && !o.contains(&[1, 0, 1]));
+    }
+
+    /// `EnchantmentLevelSetEvent`: each row is asked once, in order, with the
+    /// level `getEnchantmentCost` drew; a level below the row offers nothing,
+    /// and a changed level shows the clue of the list it gives.
+    #[test]
+    fn a_set_enchantment_level_makes_the_offer() {
+        let e = sample();
+        let items = sample_items();
+        let s = ItemStack::new("minecraft:diamond_sword", 1);
+        let plain = enchant_offers(&e, &items, 1234, 15, Some(&s));
+        let mut asked = Vec::new();
+        let set = enchant_offers_leveled(&e, &items, 1234, 15, Some(&s), |row, cost| {
+            asked.push((row, cost));
+            [cost, 1, 10][row]
+        });
+        assert_eq!(asked.iter().map(|a| a.0).collect::<Vec<_>>(), [0, 1, 2]);
+        assert_eq!(asked[2].1, plain.costs[2]);
+        assert_eq!(set.costs, [plain.costs[0], 0, 10]);
+        assert_eq!(
+            (set.clues[0].clone(), set.clues[1].clone()),
+            (plain.clues[0].clone(), None)
+        );
+        assert_eq!(set.clues[2], enchant_clue(&e, &items, 1234, 2, 10, &s));
+        // An item the table can't enchant isn't asked about.
+        let enchanted = sword(&[("minecraft:sharpness", 1)]);
+        enchant_offers_leveled(&e, &items, 1234, 15, Some(&enchanted), |_, _| {
+            panic!("asked about an item the table can't enchant")
+        });
     }
 
     #[test]
@@ -1041,13 +1097,13 @@ mod tests {
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
         let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
-        assert_eq!(a.1, vec!["minecraft:diamond_sword"]);
+        assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
         let b = ingredient(
             &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
             &items,
         );
         assert_eq!(
-            b.1,
+            b.order,
             vec!["minecraft:diamond_sword", "minecraft:diamond_axe"]
         );
     }

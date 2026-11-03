@@ -295,6 +295,20 @@ impl World {
     pub fn top_y(&self) -> i32 {
         self.layout().max_y()
     }
+    /// Writes the stored state at a resident position and nothing else: no remesh, relight,
+    /// block log, path or watched write, and no block entity change. A transaction's tentative
+    /// write, which `set` makes real at the root commit or which this takes back on an abort,
+    /// so nothing outside sees it. False outside the resident chunks or the world's height.
+    pub fn set_stored(&mut self, x: i32, y: i32, z: i32, state: BlockStateId) -> bool {
+        let Some(chunk) = self.chunks.get_mut(&(x >> 4, z >> 4)) else {
+            return false;
+        };
+        if chunk.section_index(y).is_none() {
+            return false;
+        }
+        Arc::make_mut(chunk).set(x & 15, y, z & 15, state.0);
+        true
+    }
     /// Resident storage write; marks the touched sections (and neighbours on
     /// section borders) for remeshing and the surrounding chunks for relighting.
     /// Neighbour updates, drops and block entities belong to the gameplay layer.

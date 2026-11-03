@@ -328,6 +328,15 @@ pub trait LevelAccess {
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
     }
+    /// Returns the state to place for a liquid conversion, or None to cancel.
+    fn fluid_place_block(
+        &self,
+        _pos: BlockPos,
+        _liquid_pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<BlockStateId> {
+        Some(state)
+    }
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,
@@ -342,6 +351,15 @@ pub trait LevelAccess {
     }
     fn allow_block_burn(&self, _pos: BlockPos) -> bool {
         true
+    }
+    /// Select or cancel the feature a block is about to grow into; `None` when
+    /// vanilla has none to place.
+    fn block_grow_feature<'a>(
+        &mut self,
+        _pos: BlockPos,
+        feature: Option<&'a str>,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        feature.map(std::borrow::Cow::Borrowed)
     }
     fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
         true
@@ -797,9 +815,10 @@ impl Behaviours {
         data::load_with_behaviour_json(registry, resources_dir, behaviour)
     }
 
-    /// Keep a snapshot of the resolved tables in `dir` (a game folder's
-    /// `.horizon-cache`), so later launches of the same build restore it instead
-    /// of resolving the resources again. Without it, [`Self::load`] never caches.
+    /// Keep snapshots of the resolved tables and the block-state registry in
+    /// `dir` (a game folder's `.horizon-cache`), so later launches of the same
+    /// build restore them instead of resolving the resources again. Without
+    /// it, [`Self::load`] and `data::load_registry` never cache.
     pub fn set_cache_dir(dir: std::path::PathBuf) {
         data::set_cache_dir(dir);
     }
@@ -1156,6 +1175,16 @@ impl Behaviours {
     ) {
         self.sim(level, ticks)
             .big_dripleaf_entity_inside(pos, on_ground, feet_y);
+    }
+    /// `BigDripleafBlock.onProjectileHit`: true when a projectile hit a leaf.
+    /// Unlike entityInside, this tilts powered leaves too.
+    pub fn big_dripleaf_projectile_hit<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+    ) -> bool {
+        self.sim(level, ticks).big_dripleaf_projectile_hit(pos)
     }
     /// `BellBlock.onProjectileHit` for a projectile that hit `face` of the
     /// block at `pos` at height `hit_y`. False when the block is not a bell
