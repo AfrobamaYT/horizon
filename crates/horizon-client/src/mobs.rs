@@ -1043,6 +1043,8 @@ pub struct Extra {
     pub vector: [f64; 3],
     /// Active status effects: (effect id, ticks left, amplifier).
     pub effects: Vec<(&'static str, i32, i32)>,
+    /// Hidden effect instances behind an active effect, keyed by effect id.
+    pub effect_chains: Vec<crate::effects::EffectInstance>,
     /// The effects above given with `hideParticles`: no swirls for them.
     pub hidden_effects: Vec<&'static str>,
     /// The effects above that are ambient (`MobEffectInstance.isAmbient`: a beacon's), whose swirls
@@ -3527,14 +3529,37 @@ impl Mob {
         self.invisible
     }
     /// Removes effects and schedules the effect-status update when needed.
-    pub fn retain_effects(&mut self, keep: impl FnMut(&(&'static str, i32, i32)) -> bool) {
+    pub fn retain_effects(
+        &mut self,
+        mut keep: impl FnMut(&(&'static str, i32, i32)) -> bool,
+    ) -> bool {
         let before = self.extra.effects.len();
-        self.extra.effects.retain(keep);
-        self.effects_dirty |= self.extra.effects.len() != before;
+        self.extra.effects.retain(|e| {
+            let keep = keep(e);
+            if !keep && e.0 == "minecraft:absorption" {
+                self.absorption = (self.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
+            }
+            keep
+        });
+        let changed = self.extra.effects.len() != before;
+        if changed {
+            let effects = &self.extra.effects;
+            self.extra
+                .effect_chains
+                .retain(|e| effects.iter().any(|x| x.0 == e.id));
+            self.extra
+                .hidden_effects
+                .retain(|e| effects.iter().any(|x| x.0 == *e));
+            self.extra
+                .ambient_effects
+                .retain(|e| effects.iter().any(|x| x.0 == *e));
+        }
+        self.effects_dirty |= changed;
+        changed
     }
     /// Loads an effect without applying its attribute modifiers a second time.
     pub fn load_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
-        self.retain_effects(|e| e.0 != effect);
+        self.extra.effects.retain(|e| e.0 != effect);
         self.extra.effects.push((effect, ticks, amplifier));
         self.effects_dirty = true;
     }
@@ -3549,40 +3574,49 @@ impl Mob {
         amplifier: i32,
         ambient: bool,
         visible: bool,
-    ) {
+    ) -> bool {
         let effect = horizon_client_core::potions::namespaced(effect);
-        let before = self
-            .extra
-            .effects
-            .iter()
-            .find(|e| e.0 == effect)
-            .map(|e| (e.1, e.2));
-        self.add_effect(effect, ticks, amplifier);
-        let after = self
-            .extra
-            .effects
-            .iter()
-            .find(|e| e.0 == effect)
-            .map(|e| (e.1, e.2));
-        let present_ambient = self.extra.ambient_effects.contains(&effect);
-        let present_hidden = self.extra.hidden_effects.contains(&effect);
-        // A new effect takes its flags as they are; one already there by update's rules.
-        let take_ambient = match before {
-            None => true,
-            Some(_) => (!ambient && present_ambient) || before != after,
-        };
-        if take_ambient {
-            self.extra.ambient_effects.retain(|h| *h != effect);
-            if ambient {
-                self.extra.ambient_effects.push(effect);
+        let mut incoming = crate::effects::EffectInstance::new(effect, ticks, amplifier);
+        incoming.ambient = ambient;
+        incoming.visible = visible;
+        let index = self.extra.effects.iter().position(|e| e.0 == effect);
+        let old_amp = index.map(|i| self.extra.effects[i].2);
+        let mut active = if let Some(i) = index {
+            let (_, duration, amp) = self.extra.effects[i];
+            let mut active = crate::effects::EffectInstance::new(effect, duration, amp);
+            active.ambient = self.extra.ambient_effects.contains(&effect);
+            active.visible = !self.extra.hidden_effects.contains(&effect);
+            if let Some(i) = self.extra.effect_chains.iter().position(|e| e.id == effect) {
+                active.hidden = Some(Box::new(self.extra.effect_chains.remove(i)));
             }
+            active
+        } else {
+            incoming.clone()
+        };
+        let changed = index.is_none() || active.update(&incoming);
+        if let Some(hidden) = active.hidden.take() {
+            self.extra.effect_chains.push(*hidden);
+        }
+        if let Some(i) = index {
+            self.extra.effects[i] = (effect, active.duration, active.amplifier);
+        } else {
+            self.extra
+                .effects
+                .push((effect, active.duration, active.amplifier));
+        }
+        self.extra.ambient_effects.retain(|h| *h != effect);
+        if active.ambient {
+            self.extra.ambient_effects.push(effect);
         }
         self.extra.hidden_effects.retain(|h| *h != effect);
-        if !visible {
+        if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
-        self.effects_dirty |= present_ambient != self.extra.ambient_effects.contains(&effect)
-            || present_hidden != self.extra.hidden_effects.contains(&effect);
+        if effect == "minecraft:absorption" && old_amp.is_none_or(|amp| active.amplifier > amp) {
+            self.absorption = self.absorption.max(4.0 * (active.amplifier + 1) as f32);
+        }
+        self.effects_dirty |= changed;
+        changed
     }
     /// `LivingEntity.actuallyHurt`: the absorption amount takes the damage first;
     /// what is left reaches the health.
@@ -3661,33 +3695,7 @@ impl Mob {
         }
     }
     pub fn add_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
-        let effect = horizon_client_core::potions::namespaced(effect);
-        // AbsorptionMobEffect.addAttributeModifiers: at least 4 hearts-halves per level.
-        if effect == "minecraft:absorption"
-            && self
-                .extra
-                .effects
-                .iter()
-                .find(|e| e.0 == effect)
-                .is_none_or(|e| amplifier > e.2)
-        {
-            self.absorption = self.absorption.max(4.0 * (amplifier + 1) as f32);
-        }
-        let before = self.extra.effects.iter().find(|e| e.0 == effect).copied();
-        if let Some(e) = self.extra.effects.iter_mut().find(|e| e.0 == effect) {
-            // MobEffectInstance.update: a stronger effect replaces with its
-            // own duration, an equal one only extends it; a weaker one is
-            // ignored (vanilla keeps it hidden behind the active one).
-            if amplifier > e.2 {
-                e.1 = ticks;
-                e.2 = amplifier;
-            } else if amplifier == e.2 && e.1 != -1 && (ticks == -1 || e.1 < ticks) {
-                e.1 = ticks;
-            }
-        } else {
-            self.extra.effects.push((effect, ticks, amplifier));
-        }
-        self.effects_dirty |= before != self.extra.effects.iter().find(|e| e.0 == effect).copied();
+        self.add_effect_with(effect, ticks, amplifier, false, true);
     }
     pub fn speed_bonus(&self) -> f64 {
         ai::speed_bonus(self)
@@ -4759,6 +4767,17 @@ mod magic_absorb_tests {
         m.add_effect_with("speed", 900, 0, true, true);
         assert!(m.extra.ambient_effects.contains(&speed));
         assert_eq!(m.extra.effects, vec![(speed, 900, 0)]);
+    }
+
+    #[test]
+    fn stronger_effect_restores_its_hidden_predecessor_after_expiry() {
+        let mut m = witch();
+        m.add_effect_with("speed", 200, 0, false, true);
+        m.add_effect_with("speed", 90, 1, false, true);
+        for _ in 0..90 {
+            ai::tick_effects(&mut m, None);
+        }
+        assert_eq!(m.extra.effects, vec![("minecraft:speed", 110, 0)]);
     }
 
     /// `Witch.getDamageAfterMagicAbsorb`: `#witch_resistant_to` (`magic`,

@@ -60,9 +60,8 @@ impl Game<'_> {
     /// (a spider shrugs off poison) into its effects with the same hooks.
     /// The amplifier is cut to 0..=255 and the duration is -1 (infinite) or
     /// ticks. False for an unknown effect id, a duration below -1, an armor
-    /// stand, the dragon, a stale handle or a client. True means accepted,
-    /// as vanilla's `addEffect` does: whether it replaced one already there
-    /// or only extended it is `MobEffectInstance.update`'s business.
+    /// stand, the dragon, a stale handle or a client, or when the active
+    /// instance did not change, as in vanilla's `addEffect`.
     pub(super) fn native_living_add_effect(
         &mut self,
         living: LivingRef,
@@ -81,7 +80,7 @@ impl Game<'_> {
                 instance.ambient = effect.ambient;
                 instance.visible = effect.visible;
                 self.for_player(t, |g| g.add_player_effect(instance))
-                    .is_some()
+                    .unwrap_or(false)
             }
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
@@ -97,7 +96,7 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
                     return false;
                 };
-                m.add_effect_with(
+                let changed = m.add_effect_with(
                     name,
                     effect.duration,
                     amplifier,
@@ -105,7 +104,7 @@ impl Game<'_> {
                     effect.visible,
                 );
                 self.mod_effect_added(name, Some(id as i32), amplifier, new);
-                true
+                changed
             }
             _ => false,
         }
@@ -157,8 +156,7 @@ impl Game<'_> {
         }
     }
 
-    /// Whether the entity has `effect` (`LivingEntity.hasEffect`; Paper's
-    /// `LivingEntity#hasPotionEffect`). A bare vanilla id reads as
+    /// Whether the entity has `effect` (`LivingEntity.hasEffect`). A bare vanilla id reads as
     /// `minecraft:`'s. False for an unknown id, an armor stand, the dragon,
     /// a stale handle or a client.
     pub(super) fn native_living_potion_affected(&self, living: LivingRef, effect: &str) -> bool {
@@ -192,23 +190,14 @@ impl Game<'_> {
         };
         match self.native_living_target(living) {
             Some(t @ (Target::Player | Target::Guest(_))) => self
-                .for_player(t, |g| {
-                    let before = g.potions.effects.list.len();
-                    g.potions.effects.list.retain(|x| x.id != def.id);
-                    g.apply_effect_status();
-                    g.potions.effects.list.len() != before
-                })
+                .for_player(t, |g| g.remove_player_effects(Some(def.id)))
                 .unwrap_or(false),
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
                 let name = brewing::namespaced(def.id);
-                if !m.extra.effects.iter().any(|e| e.0 == name) {
-                    return false;
-                }
-                native_mob_remove_effects(m, [name]);
-                true
+                m.retain_effects(|e| e.0 != name)
             }
             _ => false,
         }
@@ -221,48 +210,17 @@ impl Game<'_> {
     pub(super) fn native_living_remove_all_effects(&mut self, living: LivingRef) -> bool {
         match self.native_living_target(living) {
             Some(t @ (Target::Player | Target::Guest(_))) => self
-                .for_player(t, |g| {
-                    let any = !g.potions.effects.list.is_empty();
-                    g.potions.effects.clear();
-                    g.apply_effect_status();
-                    any
-                })
+                .for_player(t, |g| g.remove_player_effects(None))
                 .unwrap_or(false),
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                let any = !m.extra.effects.is_empty();
-                let names: Vec<&'static str> = m.extra.effects.iter().map(|e| e.0).collect();
-                native_mob_remove_effects(m, names);
-                any
+                m.retain_effects(|_| false)
             }
             _ => false,
         }
     }
-}
-
-/// A mob's effects taken away the way their expiry takes them
-/// (`Mob.tickEffects`): absorption's hearts go with theirs
-/// (`AbsorptionMobEffect.removeAttributeModifiers`), the effects themselves
-/// drop, and the hidden and ambient lists keep only what stays.
-fn native_mob_remove_effects(m: &mut Mob, names: impl IntoIterator<Item = &'static str>) {
-    let names: Vec<&'static str> = names.into_iter().collect();
-    for name in &names {
-        if *name == "minecraft:absorption"
-            && let Some((_, _, amp)) = m.extra.effects.iter().find(|e| e.0 == *name)
-        {
-            m.absorption = (m.absorption - 4.0 * (amp + 1) as f32).max(0.0);
-        }
-    }
-    m.extra.effects.retain(|x| !names.contains(&x.0));
-    let left = &m.extra.effects;
-    m.extra
-        .hidden_effects
-        .retain(|h| left.iter().any(|x| x.0 == *h));
-    m.extra
-        .ambient_effects
-        .retain(|h| left.iter().any(|x| x.0 == *h));
 }
 
 #[cfg(test)]
@@ -313,7 +271,7 @@ mod tests {
             // A re-add is `MobEffectInstance.update`: a weaker or shorter
             // one changes nothing, a stronger replaces with its own
             // duration, an equal one only extends.
-            assert!(game.native_living_add_effect(zombie, &effect("minecraft:speed", 100, 0)));
+            assert!(!game.native_living_add_effect(zombie, &effect("minecraft:speed", 100, 0)));
             assert_eq!(
                 game.native_living_effect(zombie, "minecraft:speed"),
                 Some(effect("minecraft:speed", 200, 0))

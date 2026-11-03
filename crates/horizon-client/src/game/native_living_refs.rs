@@ -205,7 +205,11 @@ impl Game<'_> {
     /// entity isn't healed, and health stops at the maximum. False for a stale
     /// handle, a non-finite amount, a zero-health entity, an armor stand or the dragon.
     pub(super) fn native_living_heal(&mut self, living: LivingRef, amount: f32) -> bool {
-        if !amount.is_finite() || !self.native_living_health(living).is_some_and(|health| health > 0.0) {
+        if !amount.is_finite()
+            || !self
+                .native_living_health(living)
+                .is_some_and(|health| health > 0.0)
+        {
             return false;
         }
         match self.native_living_target(living) {

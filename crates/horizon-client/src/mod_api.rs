@@ -784,6 +784,7 @@ impl From<LivingRef> for EntityRef {
 /// particles) and `visible` (whether its particles show). Horizon keeps no
 /// separate show-icon flag: the icon always shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NativeActiveEffect {
     /// The effect's namespaced id.
     pub id: &'static str,
@@ -795,6 +796,25 @@ pub struct NativeActiveEffect {
     pub ambient: bool,
     /// `MobEffectInstance.isVisible`: whether its particles show.
     pub visible: bool,
+}
+
+impl NativeActiveEffect {
+    /// Construct an effect with its duration, amplifier and visual flags.
+    pub fn new(
+        id: &'static str,
+        duration: i32,
+        amplifier: i32,
+        ambient: bool,
+        visible: bool,
+    ) -> Self {
+        Self {
+            id,
+            duration,
+            amplifier,
+            ambient,
+            visible,
+        }
+    }
 }
 
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
