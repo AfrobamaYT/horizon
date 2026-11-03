@@ -845,6 +845,21 @@ pub(super) mod tests {
             .unwrap();
             let mut host = game.lan.take().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
+            host.hub.guests[1].position = [1600.0, 64.0, 0.0];
+            game.lan_update_streaming(&host);
+            assert!(
+                game.streaming
+                    .extra
+                    .iter()
+                    .any(|(chunk, _)| *chunk == (0, 0))
+            );
+            assert!(
+                !game
+                    .streaming
+                    .extra
+                    .iter()
+                    .any(|(chunk, _)| *chunk == (100, 0))
+            );
             game.lan = Some(host);
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);

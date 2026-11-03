@@ -4417,6 +4417,28 @@ mod tests {
         fake.kind = super::super::guest::GuestKind::Fake;
         fake.placed = true;
         hub.guests.push(fake);
+        hub.guests[0].sent_chunks.insert((2, 0));
+        let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 100;
+        let border = crate::worldborder::WorldBorder::default();
+        let mut ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        hub.track_entities(&mut ctx);
+        assert!(!hub.guests[0].tracker.is_tracking(2));
+        assert!(hub.guests[1].tracker.ids().is_empty());
         hub.ticks = 601;
         hub.end_tick();
         let crate::lan::Out::Packet(body) =
