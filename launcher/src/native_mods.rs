@@ -805,7 +805,7 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     let list: Vec<String> = mods
         .iter()
         .map(|b| (b, &b.native().horizon))
-        .filter(|(_, r)| *r != revision)
+        .filter(|(_, r)| !r.is_empty() && *r != revision)
         .map(|(b, r)| format!("{} → {}", b.manifest.id, &r[..r.len().min(7)]))
         .collect();
     (!list.is_empty()).then(|| {
@@ -2544,14 +2544,31 @@ mod tests {
         crate::browser::java::set_enabled(&home, "veinminer", true).unwrap();
         let out = installed_mods(&home).unwrap();
         let found = bundles(&out).unwrap();
-        let staged = d.join("tool-input");
-        stage_mixins(&found, &staged).unwrap();
-        assert!(staged.join("veinminer/horizon-mixin.toml").is_file());
         assert_eq!(
-            fs::read(staged.join("veinminer/src/lib.rs")).unwrap(),
+            fs::read(found[0].dir.join("src/lib.rs")).unwrap(),
             b"pub fn marker() {}\n"
         );
-        assert!(!staged.join("veinminer/native").exists());
+        let injected = d.join("injected-project");
+        write_native(&injected, "injected", A, B);
+        fs::write(
+            injected.join(NATIVE_MANIFEST),
+            project_manifest("injected", "0.3.0", A, B)
+                + "[[native.injection]]\nid='marker'\ntarget='game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
+        )
+        .unwrap();
+        let mut mods = found.clone();
+        mods.push(bundle_in(&injected).unwrap().unwrap());
+        let staged = d.join("tool-input");
+        let tool_mods = stage_mixins(&mods, &staged).unwrap();
+        assert_eq!(tool_mods.len(), 1);
+        assert_eq!(tool_mods[0].manifest.id, "injected");
+        assert!(!staged.join("veinminer").exists());
+        assert!(staged.join("injected/horizon-mixin.toml").is_file());
+        assert_eq!(
+            fs::read(staged.join("injected/src/lib.rs")).unwrap(),
+            b"pub fn marker() {}\n"
+        );
+        assert!(!staged.join("injected/native").exists());
         assert_eq!(
             (
                 found[0].manifest.id.as_str(),
