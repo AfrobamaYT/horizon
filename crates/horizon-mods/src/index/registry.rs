@@ -18,7 +18,7 @@ pub const REVOKED: &str = "revoked.toml";
 /// Ids the site uses for its own pages (`/mods/submit`).
 const RESERVED: [&str; 1] = ["submit"];
 /// The biggest icon, a PNG in `icons/`.
-const MAX_ICON: u64 = 256 << 10;
+const MAX_ICON: u64 = crate::icon::MAX_ICON as u64;
 
 /// `mods/<id>.toml`.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -441,7 +441,6 @@ fn version_at(
         api: facts.api,
         side: facts.side,
         capabilities: facts.capabilities,
-        api_level: facts.api_level,
         game: v.game.clone(),
         requires: facts.requires,
         file: File {

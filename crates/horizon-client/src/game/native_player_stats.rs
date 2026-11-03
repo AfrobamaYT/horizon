@@ -18,7 +18,7 @@ fn qualified(id: &str) -> String {
 impl Game<'_> {
     /// Whether `player` still names the same player on this server.
     fn native_player_current(&self, player: PlayerRef) -> bool {
-        self.native_player_ref(player.uuid()) == Some(player)
+        self.player_handle_read(player).is_some()
     }
     /// The guest record `player` reads from outside their turn, or None
     /// when their state is in the game (they act, or they are the host).
@@ -26,13 +26,10 @@ impl Game<'_> {
         &self,
         player: PlayerRef,
     ) -> Option<&horizon_client::lan::guest::Guest> {
-        if self.lan_acting_uuid == Some(player.uuid()) {
-            return None;
+        match self.player_handle_read(player)? {
+            super::native_server::PlayerRead::Guest(guest) => Some(guest),
+            super::native_server::PlayerRead::Acting { .. } => None,
         }
-        self.lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .find(|g| g.placed && g.uuid == player.uuid())
     }
     /// The player's statistics, where they are kept now.
     fn native_player_stats(&self, player: PlayerRef) -> Option<Option<&Stats>> {
@@ -47,7 +44,7 @@ impl Game<'_> {
 
     /// The value of statistic `stat_type` for `key` (`minecraft:stone`,
     /// `minecraft:jump`...), as `ServerStatsCounter.getValue`: 0 when never
-    /// counted. API @API:player_stats@.
+    /// counted.
     pub(super) fn native_player_stat(
         &self,
         player: PlayerRef,
@@ -61,7 +58,7 @@ impl Game<'_> {
     /// `Player.awardStat(stat, amount)`: adds `amount`, as the game does
     /// for its own counts, so `player_stat_award` hears it and may cancel
     /// it, and scoreboard criteria follow. False for a player it can't
-    /// reach. API @API:player_stats@.
+    /// reach.
     pub(super) fn native_player_award_stat(
         &mut self,
         player: PlayerRef,
@@ -72,10 +69,10 @@ impl Game<'_> {
         let ty = stat_type.path();
         let key = qualified(key);
         self.native_player_current(player)
-            && self.native_as_player(player.uuid(), |game| game.award_stat(ty, &key, amount))
+            && self.native_as_player_handle(player, |game| game.award_stat(ty, &key, amount))
     }
     /// `Player.resetStat`: sets the statistic back to 0, which scoreboard
-    /// criteria follow. False for a player it can't reach. API @API:player_stats@.
+    /// criteria follow. False for a player it can't reach.
     pub(super) fn native_player_reset_stat(
         &mut self,
         player: PlayerRef,
@@ -85,11 +82,11 @@ impl Game<'_> {
         let ty = stat_type.path();
         let key = qualified(key);
         self.native_player_current(player)
-            && self.native_as_player(player.uuid(), |game| game.stats.reset(ty, &key))
+            && self.native_as_player_handle(player, |game| game.stats.reset(ty, &key))
     }
 
     /// Whether the player's recipe book knows `recipe`
-    /// (`ServerRecipeBook.contains`). API @API:player_stats@.
+    /// (`ServerRecipeBook.contains`).
     pub(super) fn native_player_has_discovered_recipe(
         &self,
         player: PlayerRef,
@@ -108,7 +105,7 @@ impl Game<'_> {
     /// unlock in the player's book, with their toasts and the
     /// `player_recipe_discovered` hook, and the client hears of them.
     /// Unknown ids are skipped. The number of recipe displays added, None
-    /// for a player it can't reach. API @API:player_stats@.
+    /// for a player it can't reach.
     pub(super) fn native_player_award_recipes(
         &mut self,
         player: PlayerRef,
@@ -117,8 +114,7 @@ impl Game<'_> {
         self.native_player_change_recipes(player, true, recipes)
     }
     /// `ServerPlayer.resetRecipes`, as `/recipe take` does. The number of
-    /// recipe displays taken out, None for a player it can't reach. API
-    /// @API:player_stats@.
+    /// recipe displays taken out, None for a player it can't reach.
     pub(super) fn native_player_reset_recipes(
         &mut self,
         player: PlayerRef,
@@ -144,7 +140,7 @@ impl Game<'_> {
             .filter(|id| index.contains(id))
             .collect();
         let mut count = 0;
-        self.native_as_player(player.uuid(), |game| {
+        self.native_as_player_handle(player, |game| {
             count = game.change_recipes(give, &ids);
         })
         .then_some(count)

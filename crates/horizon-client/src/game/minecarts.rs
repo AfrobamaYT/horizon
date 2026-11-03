@@ -15,7 +15,7 @@ use horizon_client::{
     mobs::{Part, Species, Who, anim::Poses, riders},
     particles::{ParticleOptions, ParticleType},
     scoreboard::pushable_by,
-    sound_engine::{CartSound, SoundEngine, SoundInstance, Sounds},
+    sound_engine::{CartSound, PlayResult, SoundEngine, SoundInstance, Sounds},
 };
 use horizon_core::{
     geometry::{Aabb, Vec3, trig},
@@ -93,6 +93,8 @@ impl CartKind {
 }
 #[derive(Clone, Debug)]
 pub(super) struct Minecart {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
     pub kind: CartKind,
     pub position: Vec3,
@@ -110,7 +112,7 @@ pub(super) struct Minecart {
     pub lerp_steps: Vec<horizon_protocol::packets::play::MinecartStep>,
     pub flipped: bool,
     /// `AbstractMinecart.onRails`: transitions into rails need a position snap.
-    on_rails: bool,
+    pub(super) on_rails: bool,
     pub(super) on_ground: bool,
     horizontal_collision: bool,
     /// The horizontal speed the cart wanted when the collision stopped it:
@@ -322,6 +324,7 @@ impl Minecart {
     }
     pub fn new(id: u32, kind: CartKind, position: Vec3) -> Self {
         Self {
+            join: Default::default(),
             id,
             kind,
             position,
@@ -606,10 +609,15 @@ impl Game<'_> {
     }
     fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if c.in_water { 0.2 } else { 0.4 };
-        if c.kind == CartKind::Furnace {
-            base * if c.in_water { 0.75 } else { 0.5 }
+        furnace_speed(c, base)
+    }
+    /// `AbstractMinecart.getMaxSpeed`: the behavior's, which a furnace
+    /// minecart cuts (`MinecartFurnace.getMaxSpeed`).
+    pub(super) fn cart_max_speed(&self, c: &Minecart) -> f64 {
+        if self.minecart_improvements() {
+            furnace_speed(c, self.max_speed_new(c))
         } else {
-            base
+            self.max_speed(c)
         }
     }
     /// `applyNaturalSlowdown` (with `MinecartFurnace`'s push); `factor` is
@@ -781,7 +789,7 @@ impl Game<'_> {
             .any(|f| f == "minecraft:minecart_improvements")
     }
     /// `NewMinecartBehavior.getMaxSpeed`: the game rule over water's half,
-    /// every cart alike (the old behavior's furnace bonus is its own).
+    /// every cart alike (`cart_max_speed` cuts a furnace minecart's).
     fn max_speed_new(&self, c: &Minecart) -> f64 {
         f64::from(self.ui.rules.int("max_minecart_speed")) * if c.in_water { 0.5 } else { 1.0 }
             / 20.0
@@ -999,7 +1007,7 @@ impl Game<'_> {
                 c.velocity = v;
                 v = self.natural_slowdown(c, ridden, 0.975);
                 if v.length_squared() > 0.0 {
-                    let speed = v.length().min(self.max_speed_new(c));
+                    let speed = v.length().min(self.cart_max_speed(c));
                     v = v.normalize().scale(speed);
                 }
             }
@@ -1134,11 +1142,7 @@ impl Game<'_> {
     }
     /// `comeOffTrack`.
     fn come_off_track(&self, c: &mut Minecart) {
-        let max = if self.minecart_improvements() {
-            self.max_speed_new(c)
-        } else {
-            self.max_speed(c)
-        };
+        let max = self.cart_max_speed(c);
         c.velocity.x = c.velocity.x.clamp(-max, max);
         c.velocity.z = c.velocity.z.clamp(-max, max);
         if c.on_ground {
@@ -1146,6 +1150,16 @@ impl Game<'_> {
         }
         let v = c.velocity;
         self.move_cart(c, v);
+        // Entity.move's last step: soul sand and honey slow a derailed cart.
+        // The rail paths set the track's velocity again after their move, so
+        // the factor changes nothing there (measured on a rail over soul sand).
+        let factor = crate::motion::block_speed_factor_at(
+            &self.world,
+            &self.motion.blocks,
+            c.position,
+            None,
+        );
+        c.velocity = horizon_world::entity_move::scale_by_block_speed(c.velocity, factor);
         // `comeOffTrack` moves the cart and keeps the delta the move resolved
         // (then scales it by the air drag), so a cart an obstacle stopped here
         // is not moving any more and `MinecartTNT.tick` does not detonate it -
@@ -1192,8 +1206,13 @@ impl Game<'_> {
         c.previous = c.position;
         c.previous_yaw = c.yaw;
         c.previous_pitch = c.pitch;
-        c.hurt_time = (c.hurt_time - 1).max(0);
-        c.damage = (c.damage - 1.0).max(0.0);
+        // AbstractMinecart.tick: each counts down only while positive.
+        if c.hurt_time > 0 {
+            c.hurt_time -= 1;
+        }
+        if c.damage > 0.0 {
+            c.damage -= 1.0;
+        }
         // NewMinecartBehavior.tick snaps a newly created cart before gravity.
         if self.minecart_improvements() && c.first_tick {
             let pos = self.rail_block(c.position);
@@ -1342,12 +1361,14 @@ impl Game<'_> {
             _ => {}
         }
     }
-    fn prime_cart(&mut self, c: &mut Minecart) {
+    pub(super) fn prime_cart(&mut self, c: &mut Minecart) {
         if !self.ui.rules.bool("tnt_explodes") {
             return;
         }
         c.fuse = 80;
         let at = [c.position.x, c.position.y, c.position.z];
+        // MinecartTNT.primeFuse: clients start their own countdown.
+        self.lan_entity_event(c.id as i32, 70, at);
         self.audio
             .play("minecraft:entity.tnt.primed", Some(at), 1.0, 1.0);
     }
@@ -1683,25 +1704,28 @@ impl Game<'_> {
             let Some(i) = cart_at(&self.carts, id, i) else {
                 continue;
             };
-            let mut c = self.carts[i].clone();
-            let alive = self.tick_cart(&mut c, [0.0; 2]);
-            if c.kind == CartKind::Hopper && c.enabled {
-                self.hopper_cart_suck(&mut c);
-            }
-            let Some(i) = cart_at(&self.carts, id, i) else {
-                self.native_tick_post_one(&round, id, kind);
-                continue;
-            };
-            if alive {
-                let due = std::mem::take(&mut c.command_due);
-                self.carts[i] = c;
-                if due {
-                    self.perform_cart_command(id);
+            let due = self.with_entity_held_out(id, |game| {
+                let mut c = game.carts[i].clone();
+                let alive = game.tick_cart(&mut c, [0.0; 2]);
+                if c.kind == CartKind::Hopper && c.enabled {
+                    game.hopper_cart_suck(&mut c);
                 }
-            } else {
-                self.eject_cart_mobs(i);
-                self.release_vehicle_container(id);
-                self.carts.remove(i);
+                let Some(i) = cart_at(&game.carts, id, i) else {
+                    return false;
+                };
+                if alive {
+                    let due = std::mem::take(&mut c.command_due);
+                    game.carts[i] = c;
+                    due
+                } else {
+                    game.eject_cart_mobs(i);
+                    game.release_vehicle_container(id);
+                    game.carts.remove(i);
+                    false
+                }
+            });
+            if due {
+                self.perform_cart_command(id);
             }
             // After the ticked cart is stored: a mod reads and changes the cart as it is now.
             self.native_tick_post_one(&round, id, kind);
@@ -1757,22 +1781,33 @@ impl Game<'_> {
         self.cart_sounds
             .retain(|id| carts.iter().any(|c| c.id == *id));
         for cart in &carts {
-            if self.cart_sounds.insert(cart.id) {
+            if !self.cart_sounds.contains(&cart.id) {
                 let instance = SoundInstance::minecart(cart, SoundEngine::unseeded());
-                self.audio.play_instance(instance, false);
+                let (_, res) = self.audio.play_instance(instance, false);
+                if res != PlayResult::NotStarted {
+                    self.cart_sounds.insert(cart.id);
+                }
             }
         }
         let vehicle = self.riding.filter(|id| carts.iter().any(|c| c.id == *id));
         if vehicle != self.riding_cart_sounds
             && let Some(cart) = carts.iter().find(|c| Some(c.id) == vehicle)
         {
+            let mut started = true;
             for underwater in [true, false] {
                 let instance =
                     SoundInstance::riding_minecart(cart, underwater, SoundEngine::unseeded());
-                self.audio.play_instance(instance, false);
+                let (_, res) = self.audio.play_instance(instance, false);
+                if res == PlayResult::NotStarted {
+                    started = false;
+                }
             }
+            if started {
+                self.riding_cart_sounds = vehicle;
+            }
+        } else if vehicle.is_none() {
+            self.riding_cart_sounds = None;
         }
-        self.riding_cart_sounds = vehicle;
         (vehicle, carts)
     }
     /// The rider's tick: the cart moves with the rider's input as its push.
@@ -1796,26 +1831,33 @@ impl Game<'_> {
         let r = self.yaw.to_radians();
         let (s, co) = (f64::from(r.sin()), f64::from(r.cos()));
         let intent = [left * co - forward * s, forward * co + left * s];
-        let mut c = self.carts[i].clone();
-        let alive = self.tick_cart(&mut c, intent);
-        if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
-            p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
-            p.velocity = Vec3::ZERO;
-            p.fall_distance = 0.0;
-        }
-        let Some(i) = self.carts.iter().position(|x| x.id == c.id) else {
-            self.riding = None;
+        let id = self.carts[i].id;
+        let result = self.with_entity_held_out(id, |game| {
+            let mut c = game.carts[i].clone();
+            let alive = game.tick_cart(&mut c, intent);
+            if let Some(p) = game.player.as_mut() {
+                game.previous_position = p.position;
+                p.position = Vec3::new(c.position.x, c.position.y + SEAT, c.position.z);
+                p.velocity = Vec3::ZERO;
+                p.fall_distance = 0.0;
+            }
+            let Some(i) = game.carts.iter().position(|x| x.id == c.id) else {
+                game.riding = None;
+                return None;
+            };
+            if alive {
+                game.carts[i] = c;
+            } else {
+                game.eject_cart_mobs(i);
+                game.release_vehicle_container(c.id);
+                game.carts.remove(i);
+                game.riding = None;
+            }
+            Some((i, alive))
+        });
+        let Some((i, alive)) = result else {
             return true;
         };
-        if alive {
-            self.carts[i] = c;
-        } else {
-            self.eject_cart_mobs(i);
-            self.release_vehicle_container(c.id);
-            self.carts.remove(i);
-            self.riding = None;
-        }
         // AbstractMinecart.activateMinecart: a powered activator rail ejects
         // the rider, and getDismountLocationForPassenger places it beside the
         // cart instead of leaving it at the seat.
@@ -1996,10 +2038,11 @@ impl Game<'_> {
                 if sneaking || self.riding.is_some() || self.ridden_by_guest(id) || has_mob {
                     return false;
                 }
-                if !self.native_may_board(id) {
-                    return true;
-                }
-                self.riding = Some(id);
+                self.start_riding_target(
+                    super::commands::Target::Player,
+                    super::commands::Target::Cart(id),
+                    false,
+                );
             }
             // AbstractMinecartContainer.interact: no sneak check.
             CartKind::Chest | CartKind::Hopper => self.open_cart_container(i),
@@ -2008,10 +2051,13 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|s| matches!(&*s.item, "minecraft:coal" | "minecraft:charcoal"));
                 let c = &mut self.carts[i];
-                if fuel && c.fuel + 3600 <= 32000 {
-                    c.fuel += 3600;
-                    let p = self.player.as_ref().map_or(c.position, |p| p.position);
-                    c.push = Vec3::new(c.position.x - p.x, 0.0, c.position.z - p.z);
+                // Java int arithmetic: a mod can set any fuel.
+                if fuel && let Some(next) = furnace_fuel_after(c.fuel) {
+                    c.fuel = next;
+                    if c.fuel > 0 {
+                        let p = self.player.as_ref().map_or(c.position, |p| p.position);
+                        c.push = Vec3::new(c.position.x - p.x, 0.0, c.position.z - p.z);
+                    }
                     if !self.creative {
                         self.consume_held();
                     }
@@ -2675,8 +2721,77 @@ fn java_degrees(y: f64, x: f64) -> f64 {
     horizon_core::jmath::atan2(y, x) * 180.0 / std::f64::consts::PI
 }
 
+/// `MinecartFurnace.addFuel`: Java int arithmetic, so a fuel a mod set near
+/// `i32::MAX` wraps negative and takes more.
+pub(super) fn furnace_fuel_after(fuel: i32) -> Option<i32> {
+    let next = fuel.wrapping_add(3600);
+    (next <= 32000).then_some(next)
+}
+
+/// `MinecartFurnace.getMaxSpeed`: half the behavior's speed, three quarters
+/// in water.
+fn furnace_speed(c: &Minecart, base: f64) -> f64 {
+    if c.kind == CartKind::Furnace {
+        base * if c.in_water { 0.75 } else { 0.5 }
+    } else {
+        base
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// `NewMinecartBehavior` caps the first track step with
+    /// `AbstractMinecart.getMaxSpeed`, which `MinecartFurnace` halves, and
+    /// `comeOffTrack` clamps with it too.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_furnace_cart_is_capped_at_half_the_rule_speed_under_the_new_physics() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.level
+                .enabled_features
+                .push("minecraft:minecart_improvements".into());
+            game.ui.rules =
+                horizon_client::gamerules::GameRules::with_features(&game.level.enabled_features);
+            let rule = f64::from(game.ui.rules.int("max_minecart_speed")) / 20.0;
+            assert_eq!(rule, 0.4);
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let rail = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:rail")
+                .unwrap();
+            for z in 0..16 {
+                game.world.set(0, 64, z, rail).unwrap();
+            }
+            let speed_after = |game: &mut Game<'_>, kind: CartKind, on_rail: bool| {
+                let at = if on_rail {
+                    Vec3::new(0.5, 64.0625, 2.5)
+                } else {
+                    Vec3::new(8.5, 80.0, 8.5)
+                };
+                let mut cart = Minecart::new(1, kind, at);
+                cart.velocity = Vec3::new(0.0, 0.0, 1.0);
+                cart.first_tick = false;
+                game.tick_cart(&mut cart, [0.0; 2]);
+                cart.velocity.horizontal_distance()
+            };
+            // On a rail, the first iteration's cap.
+            let furnace = speed_after(game, CartKind::Furnace, true);
+            let plain = speed_after(game, CartKind::Rideable, true);
+            assert!(furnace <= 0.2 + 1e-9, "{furnace}");
+            assert!(plain > 0.2 + 1e-9 && plain <= 0.4 + 1e-9, "{plain}");
+            // Off the rails, comeOffTrack's clamp (and the same cut in water).
+            let furnace = speed_after(game, CartKind::Furnace, false);
+            assert!(furnace <= 0.2 + 1e-9, "{furnace}");
+            let plain = speed_after(game, CartKind::Rideable, false);
+            assert!(plain > 0.2 + 1e-9, "{plain}");
+        });
+    }
+
     #[test]
     fn mob_walking_into_a_cart_pushes_it_by_a_twentieth() {
         // Issue #6776: a villager at x=0.13 next to a cart at x=0.5 east-west.
@@ -2910,3 +3025,4 @@ mod tests {
         assert_eq!(loaded.push, Vec3::new(0.5, 0.0, 0.25));
     }
 }
+horizon_client::impl_joined!(Minecart);

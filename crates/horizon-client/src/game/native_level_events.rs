@@ -5,9 +5,10 @@
 //! place, the one the hook runs in; a parked level, a stale handle or a
 //! client returns false. Reaching a parked level, as `play_sound` and the
 //! reads do through `native_level_world`, is a follow-up.
-use super::{Game, native_explosions::NativeBlast};
+use super::{Game, GameLevel, native_explosions::NativeBlast};
 use horizon_client::mod_api::{LevelRef, NativeExplosionInteraction};
 use horizon_client::sculk::Context;
+use horizon_world::level::LevelEvent;
 
 /// A position inside the world's horizontal and vertical bounds.
 fn in_bounds(at: [f64; 3]) -> bool {
@@ -17,20 +18,40 @@ fn in_bounds(at: [f64; 3]) -> bool {
         && at[1].abs() < 20_000_000.0
 }
 
-impl Game<'_> {
-    /// Whether `level` is this open's level in place, on the server.
-    fn native_level_in_place(&self, level: LevelRef) -> bool {
-        self.remote.is_none()
-            && (self.serving.is_some() || self.options.dedicated.is_some())
-            && self.native_lifecycle.epoch() == Some(level.epoch())
-            && self.dim.id() == level.dimension()
+/// Whether level event `id` can play with `data`: the events that carry a
+/// block state (2001, 2014, 3008) need `data` to be one of the `states`.
+fn level_event_data_ok(id: i32, data: i32, states: usize) -> bool {
+    !matches!(id, 2001 | 2014 | 3008) || usize::try_from(data).is_ok_and(|d| d < states)
+}
+
+impl GameLevel<'_> {
+    /// `Level.levelEvent(null, id, pos, data)` for a hook that holds the
+    /// level's write host: the event joins the ones the block behaviour
+    /// emits, in order, and plays when the write that runs the hook is
+    /// done (`process_level_events`), with the guests told as for any event
+    /// the behaviour raises. False off an authoritative server, or for an
+    /// event that carries a block state (see `native_level_level_event`)
+    /// when `data` isn't one.
+    pub(super) fn native_level_event(&mut self, id: i32, pos: [i32; 3], data: i32) -> bool {
+        if !self.native_authoritative || !level_event_data_ok(id, data, self.facts.states.len()) {
+            return false;
+        }
+        self.events.push(LevelEvent::LevelEvent {
+            id,
+            pos: horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
+            data,
+        });
+        true
     }
+}
+
+impl Game<'_> {
     /// Plays level event `id` at `pos` with `data` for the players near it
     /// (`Level.levelEvent(null, id, pos, data)`): `1000`s are sounds, `2000`s
     /// particles, as vanilla's `LevelEvent` numbers them (`2001` breaks a
     /// block with state id `data`). No player is left out, the acting one
     /// included. False for an event that carries a block state (2001, 2014,
-    /// 3008) when `data` isn't one. API @API:level_events@.
+    /// 3008) when `data` isn't one.
     pub(super) fn native_level_level_event(
         &mut self,
         level: LevelRef,
@@ -41,10 +62,7 @@ impl Game<'_> {
         if !self.native_level_in_place(level) {
             return false;
         }
-        let states = self.res.facts().states.len();
-        if matches!(id, 2001 | 2014 | 3008)
-            && usize::try_from(data).ok().is_none_or(|d| d >= states)
-        {
+        if !level_event_data_ok(id, data, self.res.facts().states.len()) {
             return false;
         }
         let sent = self.lan_events.len();
@@ -60,7 +78,7 @@ impl Game<'_> {
     /// Sends game event `event` (`minecraft:block_change`...) from `at`, as
     /// `Level.gameEvent(null, event, at)` does: sculk sensors, shriekers,
     /// wardens and allays in range hear it. False for an event vanilla
-    /// doesn't have. API @API:level_events@.
+    /// doesn't have.
     pub(super) fn native_level_game_event(
         &mut self,
         level: LevelRef,
@@ -81,7 +99,7 @@ impl Game<'_> {
     /// lights some of the air around, `interaction` says what happens to
     /// blocks: `None`, `Block` or `Tnt` (vanilla's `Mob` and `Trigger` aren't
     /// offered yet). False for a chunk that isn't loaded or a radius outside
-    /// `0 < radius <= 32`. API @API:level_events@.
+    /// `0 < radius <= 32`.
     pub(super) fn native_level_explode(
         &mut self,
         level: LevelRef,
@@ -106,7 +124,6 @@ impl Game<'_> {
     /// `visual_only` it only flashes and sounds (`setVisualOnly`). The
     /// `lightning_strike` hook hears it first with the cause `mod` and may
     /// cancel it. False for a chunk that isn't loaded or a canceled strike.
-    /// API @API:level_events@.
     pub(super) fn native_level_strike_lightning(
         &mut self,
         level: LevelRef,
@@ -130,5 +147,68 @@ impl Game<'_> {
         }
         self.spawn_bolt(at, visual_only);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::game::LevelDimension;
+    use horizon_client::mod_api::{self, Flow, Hooks, RandomTickEvent};
+    use horizon_world::level::LevelEvent;
+
+    /// A mod whose random-tick hook plays level events through the write host.
+    struct Events;
+    #[mod_api::__subscriptions]
+    impl Hooks for Events {
+        fn random_tick(
+            &self,
+            level: &mut dyn mod_api::LevelWriteHost,
+            event: &mut RandomTickEvent,
+        ) -> Flow {
+            // 2001 carries a block state: `data` -1 is none, so it is refused.
+            assert!(!level.level_event(2001, [1, 64, 1], -1));
+            assert!(level.level_event(1500, [1, 64, 1], 0));
+            assert!(level.level_event(2005, [2, 64, 2], 7));
+            let _ = event;
+            Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn a_level_event_in_a_write_hook_joins_the_events_in_order() {
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("level-events", Box::new(Events))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let before = LevelEvent::LevelEvent {
+                    id: 1000,
+                    pos: horizon_core::position::BlockPos::new(0, 64, 0),
+                    data: 0,
+                };
+                game.level_events.push(before.clone());
+                let state = game.world.block(0, 64, 0);
+                let mut handled = false;
+                game.with_level(|_, level, ticks| {
+                    level.native_random_tick(
+                        ticks,
+                        LevelDimension::Overworld,
+                        horizon_core::position::BlockPos::new(0, 64, 0),
+                        state,
+                        &mut handled,
+                    );
+                });
+                let at = |id, x, z, data| LevelEvent::LevelEvent {
+                    id,
+                    pos: horizon_core::position::BlockPos::new(x, 64, z),
+                    data,
+                };
+                assert_eq!(
+                    game.level_events,
+                    [before, at(1500, 1, 1, 0), at(2005, 2, 2, 7)]
+                );
+            });
+        });
     }
 }

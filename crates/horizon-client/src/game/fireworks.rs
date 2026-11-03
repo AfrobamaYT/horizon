@@ -29,6 +29,8 @@ enum RocketHit {
 }
 
 pub(super) struct Rocket {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     /// Its entity id: from the entity counter on the server, the server's on
     /// a client.
     pub id: u32,
@@ -55,6 +57,8 @@ pub(super) struct Rocket {
     pub(super) angled: bool,
     /// `DATA_ID_FIREWORKS_ITEM`: the stack it was launched from.
     pub(super) item: ItemStack,
+    /// `Entity.random`: what a mod's `Projectile.deflect` draws from.
+    pub(super) random: horizon_core::random::LegacyRandom,
 }
 impl Rocket {
     /// A rocket a server sent (`handleAddEntity`): placed and moved by it.
@@ -62,6 +66,7 @@ impl Rocket {
         let item = ItemStack::new("minecraft:firework_rocket", 1);
         let (_, explosions) = fireworks_of(&item);
         Self {
+            join: Default::default(),
             id,
             position,
             previous: position,
@@ -76,6 +81,7 @@ impl Rocket {
             attached_to: None,
             angled: false,
             item,
+            random: horizon_client::projectiles::unique_random(position),
         }
     }
     /// `FireworkRocketEntity.addAdditionalSaveData`; the owner only when it is `player`.
@@ -111,6 +117,7 @@ impl Rocket {
             .unwrap_or_else(|| ItemStack::new("minecraft:firework_rocket", 1));
         let (_, explosions) = fireworks_of(&item);
         Self {
+            join: Default::default(),
             id: 0,
             position: r.position,
             previous: r.position,
@@ -125,6 +132,7 @@ impl Rocket {
             attached_to: None,
             angled: r.angled,
             item,
+            random: horizon_client::projectiles::unique_random(r.position),
         }
     }
     /// One tick of a server's client: the rocket flies on by itself between
@@ -218,7 +226,8 @@ impl Game<'_> {
     pub(super) fn new_rocket(&mut self, at: Vec3, stack: &ItemStack, attached: bool) -> Rocket {
         let (flight, explosions) = fireworks_of(stack);
         // FireworkRocketEntity: motion and lifetime come from the rocket's own random.
-        let r = &mut super::dispenser::entity_random();
+        let mut random = super::dispenser::entity_random();
+        let r = &mut random;
         let tri = |r: &mut horizon_core::random::LegacyRandom| r.triangle(0.0, 0.002297);
         let velocity = Vec3::new(tri(r), 0.05, tri(r));
         let lifetime = 10 * (1 + i32::from(flight))
@@ -227,6 +236,7 @@ impl Game<'_> {
         // Entity.<init>: the id comes from the one counter at construction.
         let id = self.take_entity_id();
         Rocket {
+            join: Default::default(),
             id,
             position: at,
             previous: at,
@@ -241,6 +251,7 @@ impl Game<'_> {
             attached_to: None,
             angled: false,
             item: stack.clone(),
+            random,
         }
     }
     /// `FireworkRocketItem.useOn`: launch from the clicked point.
@@ -462,11 +473,8 @@ impl Game<'_> {
             } else {
                 self.rocket_blast_player(from, damage);
             }
-            if let Some(conn) = boosted
-                && let Some(mut host) = self.lan.take()
-            {
-                self.as_guest(&mut host, conn, |g| g.rocket_hurt_player(from, damage));
-                self.lan = Some(host);
+            if let Some(conn) = boosted {
+                self.as_guest(conn, |g| g.rocket_hurt_player(from, damage));
             }
             // Every other player in the level (LAN guests, the players of a
             // server thread), each swapped in as the player.
@@ -497,20 +505,23 @@ impl Game<'_> {
             // damageSources().fireworks(this, getOwner()): a guest's rocket
             // hurts as theirs, and the mobs it hit answer to them.
             let owner = r.owner;
-            if let Some(conn) = r.guest.filter(|_| owner.is_some())
-                && let Some(mut host) = self.lan.take()
-            {
+            if let Some(conn) = r.guest.filter(|_| owner.is_some()) {
                 let ran = self
-                    .as_guest(&mut host, conn, |g| g.rocket_hurt_mobs(&hits, owner, at))
+                    .as_guest(conn, |g| g.rocket_hurt_mobs(&hits, owner, at))
                     .is_some();
-                if ran {
+                if ran
+                    && let Some(host) = self.lan.as_mut()
+                    && host
+                        .hub
+                        .guest(conn)
+                        .is_some_and(|guest| guest.participates_online())
+                {
                     for (id, _) in &hits {
                         if self.mobs.iter().any(|m| m.id == *id) {
                             host.mob_players.insert(*id, conn);
                         }
                     }
                 }
-                self.lan = Some(host);
                 if !ran {
                     self.rocket_hurt_mobs(&hits, owner, at);
                 }
@@ -739,3 +750,4 @@ mod tests {
         assert!(!super::use_on_passes(false));
     }
 }
+horizon_client::impl_joined!(Rocket);

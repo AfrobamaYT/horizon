@@ -1010,6 +1010,7 @@ fn guests_see_each_other_and_the_world_entities() {
         minecart_steps: None,
         data: 0,
         meta: Vec::new(),
+        forced_meta: [0; 4],
         defaults: Vec::new(),
         equipment: Vec::new(),
         attributes: Vec::new(),
@@ -1129,6 +1130,9 @@ fn a_spectators_container_click_is_taken_back() {
     struct NoRules;
     impl horizon_client::lan::menu::Rules for NoRules {
         fn items(&self) -> &horizon_client::items::Items {
+            unreachable!("a spectator's click never reaches the menu")
+        }
+        fn enchantments(&self) -> &horizon_client::enchant::Enchantments {
             unreachable!("a spectator's click never reaches the menu")
         }
         fn max_stack(&self, _: &str) -> u32 {
@@ -1291,6 +1295,9 @@ fn a_click_past_the_menu_is_ignored() {
         fn items(&self) -> &horizon_client::items::Items {
             unreachable!("a click past the menu never reaches it")
         }
+        fn enchantments(&self) -> &horizon_client::enchant::Enchantments {
+            unreachable!("a click past the menu never reaches it")
+        }
         fn max_stack(&self, _: &str) -> u32 {
             64
         }
@@ -1436,7 +1443,7 @@ fn the_prediction_records_each_client_tick_and_the_server_ticks_it_had_seen() {
 /// with no `BlockEntityData` for one whose mod gives no tag.
 #[test]
 fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
-    use horizon_client::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use horizon_client::containers::{BlockEntity, ModBlockEntity};
     use horizon_world::nbt::{Compound, JavaString, Tag};
     let Some(resources) = resources() else {
         return;
@@ -1465,10 +1472,7 @@ fn a_synced_mod_block_entity_reaches_the_chunks_players_once_a_tick() {
         s.world
             .set(pos.0, pos.1, pos.2, BlockStateId(MACHINE))
             .unwrap();
-        let mut machine = ModBlockEntity::new(ModBlockEntityFields {
-            id: "test:machine".into(),
-            ..Default::default()
-        });
+        let mut machine = ModBlockEntity::new("test:machine".into(), Default::default());
         if let Some(on) = on {
             machine.nbt.insert("on".into(), Tag::Byte(on));
         }

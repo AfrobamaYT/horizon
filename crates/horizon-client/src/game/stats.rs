@@ -211,8 +211,11 @@ impl Game<'_> {
     /// `ServerPlayer.awardStat`: `n` more of the statistic `ty` (a bare type
     /// such as `used`) and `key`, unless a native mod cancels the award.
     pub(super) fn award_stat(&mut self, ty: &str, key: &str, n: i32) {
+        if self.lan_acting_fake {
+            return;
+        }
         // No mod, no name copied: the per-tick counters come through here.
-        let acting = if horizon_client::mod_api::mods().is_empty() {
+        let acting = if !crate::mod_api::listened(crate::mod_api::HookId::PlayerStatAward) {
             None
         } else {
             self.lan_acting_uuid.zip(self.lan_acting_name.clone())
@@ -401,6 +404,7 @@ impl Game<'_> {
             let level = self.dim.id();
             for g in host.hub.guests.iter().filter(|g| {
                 g.placed
+                    && g.participates_online()
                     && g.dimension == level
                     && g.game_mode != horizon_client::lan::guest::SPECTATOR
             }) {
@@ -496,6 +500,47 @@ fn phantom_group_size(random: &mut impl RandomSource, difficulty_id: i32) -> i32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fake_players_do_not_advance_phantom_rng() {
+        use horizon_core::random::RandomSource;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            super::super::bossbars::audience_tests::add_real_and_fake(game);
+            game.player = None;
+            game.world.day_time = 18000;
+            let host = game.lan.as_mut().unwrap();
+            host.hub
+                .guests
+                .iter_mut()
+                .find(|g| g.uuid == 2)
+                .unwrap()
+                .position = [1000.0, 100.0, 0.0];
+            for guest in &host.hub.guests {
+                let mut play = super::super::lan_actions::GuestPlay::default();
+                play.stats.custom("time_since_rest", 200_000);
+                host.play.insert(guest.conn, play);
+            }
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.spawn_phantoms();
+            assert!(
+                game.mobs
+                    .iter()
+                    .all(|mob| (mob.position.x - 1000.0).abs() > 20.0)
+            );
+            let with_fake = game.world.random.next_int();
+            game.world.random = horizon_core::random::LegacyRandom::new(12345);
+            game.stats.phantom_tick = 0;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .retain(|g| g.uuid != 2);
+            game.spawn_phantoms();
+            assert_eq!(with_fake, game.world.random.next_int());
+        });
+    }
 
     /// ServerPlayer.die zeroes the two timers (and only them) and sends the new zero.
     #[test]

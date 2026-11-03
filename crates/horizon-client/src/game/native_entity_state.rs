@@ -71,7 +71,7 @@ impl Game<'_> {
         })
     }
     /// Whether the player holds the sneak key (`Entity.isShiftKeyDown`);
-    /// false for the other kinds. API @API:entity_state@.
+    /// false for the other kinds.
     pub(super) fn native_entity_is_shift_key_down(&self, entity: EntityRef) -> Option<bool> {
         Some(match self.native_entity_body(entity)? {
             Body::Player(p) => p.shift_key_down,
@@ -79,13 +79,13 @@ impl Game<'_> {
         })
     }
     /// Whether the entity crouches (`Entity.isCrouching`: the crouching
-    /// pose). API @API:entity_state@.
+    /// pose).
     pub(super) fn native_entity_is_crouching(&self, entity: EntityRef) -> Option<bool> {
         Some(self.native_entity_pose(entity)? == "crouching")
     }
     /// Whether the entity sprints (`Entity.isSprinting`): a player, or a
     /// cat or ocelot dashing after its target (their shared sprinting flag);
-    /// false for the other kinds. API @API:entity_state@.
+    /// false for the other kinds.
     pub(super) fn native_entity_is_sprinting(&self, entity: EntityRef) -> Option<bool> {
         Some(match self.native_entity_body(entity)? {
             Body::Player(p) => p.sprinting,
@@ -94,7 +94,7 @@ impl Game<'_> {
         })
     }
     /// Whether the entity touched water at its last fluid update
-    /// (`Entity.isInWater`): players and mobs. API @API:entity_state@.
+    /// (`Entity.isInWater`): players and mobs.
     pub(super) fn native_entity_is_in_water(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_body(entity)? {
             Body::Player(p) => Some(p.fluids.was_touching_water),
@@ -103,7 +103,6 @@ impl Game<'_> {
         }
     }
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
-    /// API @API:entity_state@.
     pub(super) fn native_entity_is_in_lava(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_body(entity)? {
             Body::Player(p) => Some(p.is_in_lava()),
@@ -112,7 +111,7 @@ impl Game<'_> {
         }
     }
     /// Whether the entity's type never burns (`EntityType.fireImmune`):
-    /// players and mobs. API @API:entity_state@.
+    /// players and mobs.
     pub(super) fn native_entity_fire_immune(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_body(entity)? {
             Body::Player(_) => Some(false),
@@ -121,7 +120,7 @@ impl Game<'_> {
         }
     }
     /// The ticks the entity burns for (`Entity.getRemainingFireTicks`):
-    /// players, mobs, armor stands and items. API @API:entity_state@.
+    /// players, mobs, armor stands and items.
     pub(super) fn native_entity_fire_ticks(&self, entity: EntityRef) -> Option<i32> {
         match self.native_entity_body(entity)? {
             Body::Player(p) => Some(p.fire_ticks),
@@ -135,8 +134,59 @@ impl Game<'_> {
             Body::Other(_) => None,
         }
     }
-    /// The entity's air (`Entity.getAirSupply`): players and mobs. API
-    /// @API:entity_state@.
+    /// Sets the remaining fire ticks (`Entity.setRemainingFireTicks`).
+    pub(super) fn native_entity_set_remaining_fire_ticks(
+        &mut self,
+        entity: EntityRef,
+        ticks: i32,
+    ) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => self.player.as_mut().is_some_and(|p| {
+                p.fire_ticks = ticks;
+                true
+            }),
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guest_mut(conn))
+                .and_then(|guest| guest.motion.as_deref_mut())
+                .is_some_and(|p| {
+                    p.fire_ticks = ticks;
+                    true
+                }),
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.fire_ticks = ticks;
+                m.needs_sync = true;
+                true
+            }),
+            Some(Target::Stand(id)) => self
+                .armor_stands
+                .iter_mut()
+                .find(|s| s.id == id)
+                .is_some_and(|s| {
+                    s.fire_ticks = ticks;
+                    true
+                }),
+            Some(Target::Item(id)) => {
+                self.dropped
+                    .iter_mut()
+                    .find(|i| i.id == id)
+                    .is_some_and(|i| {
+                        i.fire_ticks = ticks;
+                        true
+                    })
+            }
+            _ => false,
+        }
+    }
+    /// Clears positive fire ticks while retaining fire immunity (`Entity.clearFire`).
+    pub(super) fn native_entity_clear_fire(&mut self, entity: EntityRef) -> bool {
+        let Some(ticks) = self.native_entity_fire_ticks(entity) else {
+            return false;
+        };
+        self.native_entity_set_remaining_fire_ticks(entity, ticks.min(0))
+    }
+    /// The entity's air (`Entity.getAirSupply`): players and mobs.
     pub(super) fn native_entity_air_supply(&self, entity: EntityRef) -> Option<i32> {
         match self.native_entity_body(entity)? {
             Body::Player(p) => Some(p.air),
@@ -144,8 +194,41 @@ impl Game<'_> {
             Body::Other(_) => None,
         }
     }
+    /// Sets the entity's air (`Entity.setAirSupply`).
+    pub(super) fn native_entity_set_air_supply(&mut self, entity: EntityRef, air: i32) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => match self.player.as_mut() {
+                Some(player) => {
+                    player.air = air;
+                    true
+                }
+                None => false,
+            },
+            Some(Target::Guest(conn)) => match self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guest_mut(conn))
+                .and_then(|guest| guest.motion.as_deref_mut())
+            {
+                Some(player) => {
+                    player.air = air;
+                    true
+                }
+                None => false,
+            },
+            Some(Target::Mob(id)) => match self.mobs.iter_mut().find(|mob| mob.id == id) {
+                Some(mob) => {
+                    mob.air = air;
+                    mob.needs_sync = true;
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        }
+    }
     /// The most air the entity holds (`Entity.getMaxAirSupply`): 300, a
-    /// dolphin's 4800, an axolotl's 6000. API @API:entity_state@.
+    /// dolphin's 4800, an axolotl's 6000.
     pub(super) fn native_entity_max_air_supply(&self, entity: EntityRef) -> Option<i32> {
         match self.native_entity_body(entity)? {
             Body::Mob(m) => Some(max_air(Some(m.species()))),
@@ -153,7 +236,7 @@ impl Game<'_> {
         }
     }
     /// Whether the mob makes no sounds (`Entity.isSilent`, its `Silent`
-    /// tag); false for a player. API @API:entity_state@.
+    /// tag); false for a player.
     pub(super) fn native_entity_is_silent(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_body(entity)? {
             Body::Player(_) => Some(false),
@@ -162,7 +245,7 @@ impl Game<'_> {
         }
     }
     /// Silences the mob or lets it make sounds again (`Entity.setSilent`).
-    /// False for the other kinds. API @API:entity_state@.
+    /// False for the other kinds.
     pub(super) fn native_entity_set_silent(&mut self, entity: EntityRef, silent: bool) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
             return false;
@@ -178,7 +261,6 @@ impl Game<'_> {
     /// Whether the entity's model is hidden (`Entity.isInvisible`): the
     /// invisibility effect on a player or a mob, a mob's or an armor stand's
     /// flag.
-    /// API @API:entity_state@.
     pub(super) fn native_entity_is_invisible(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_target(entity)? {
             Target::Player => Some(self.potions.effects.get("invisibility").is_some()),
@@ -190,15 +272,110 @@ impl Game<'_> {
             ),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id)?;
-                Some(m.invisible || m.has_effect("minecraft:invisibility"))
+                Some(m.is_invisible())
             }
             Target::Stand(id) => Some(self.armor_stands.iter().find(|s| s.id == id)?.invisible),
             _ => None,
         }
     }
+    /// Sets the entity's frozen ticks (`Entity.setTicksFrozen`).
+    pub(super) fn native_entity_set_ticks_frozen(&mut self, entity: EntityRef, ticks: i32) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Player) => self.player.as_mut().is_some_and(|p| {
+                p.ticks_frozen = ticks;
+                true
+            }),
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|lan| lan.hub.guest_mut(conn))
+                .and_then(|guest| guest.motion.as_deref_mut())
+                .is_some_and(|p| {
+                    p.ticks_frozen = ticks;
+                    true
+                }),
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.ticks_frozen = ticks;
+                m.needs_sync = true;
+                true
+            }),
+            _ => false,
+        }
+    }
+    /// Returns the mob's persistent glowing tag (`Entity.hasGlowingTag`).
+    pub(super) fn native_entity_glowing(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_entity_body(entity)? {
+            Body::Mob(m) => Some(m.glowing),
+            _ => None,
+        }
+    }
+    /// Returns the mob's no-gravity flag (`Entity.isNoGravity`).
+    pub(super) fn native_entity_no_gravity(&self, entity: EntityRef) -> Option<bool> {
+        match self.native_entity_body(entity)? {
+            Body::Mob(m) => Some(m.no_gravity),
+            _ => None,
+        }
+    }
+    /// Returns the entity's frozen ticks (`Entity.getTicksFrozen`).
+    pub(super) fn native_entity_ticks_frozen(&self, entity: EntityRef) -> Option<i32> {
+        match self.native_entity_body(entity)? {
+            Body::Player(p) => Some(p.ticks_frozen),
+            Body::Mob(m) => Some(m.ticks_frozen),
+            _ => None,
+        }
+    }
+    /// Sets the mob's persistent glowing tag (`Entity.setGlowingTag`). Returns false for players and guests.
+    pub(super) fn native_entity_set_glowing(&mut self, entity: EntityRef, glowing: bool) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
+            return false;
+        };
+        self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+            m.glowing = glowing;
+            m.needs_sync = true;
+            true
+        })
+    }
+    /// Sets the mob's no-gravity flag (`Entity.setNoGravity`). Returns false for players and guests.
+    pub(super) fn native_entity_set_no_gravity(
+        &mut self,
+        entity: EntityRef,
+        no_gravity: bool,
+    ) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(entity) else {
+            return false;
+        };
+        self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+            m.no_gravity = no_gravity;
+            m.needs_sync = true;
+            true
+        })
+    }
+    /// Sets the entity's shared invisibility flag (`Entity.setInvisible`). Returns false for players and guests.
+    pub(super) fn native_entity_set_invisible(
+        &mut self,
+        entity: EntityRef,
+        invisible: bool,
+    ) -> bool {
+        match self.native_entity_target(entity) {
+            Some(Target::Mob(id)) => self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                m.invisible = invisible;
+                m.needs_sync = true;
+                true
+            }),
+            Some(Target::Stand(id)) => self
+                .armor_stands
+                .iter_mut()
+                .find(|s| s.id == id)
+                .is_some_and(|s| {
+                    s.invisible = invisible;
+                    true
+                }),
+            _ => false,
+        }
+    }
     /// The entity's pose (`Entity.getPose`) as `Pose` names it: `standing`,
     /// `crouching`, `swimming`, `sleeping`, a warden's `roaring`... Kinds
-    /// with no pose stand. API @API:entity_state@.
+    /// with no pose stand.
     pub(super) fn native_entity_pose(&self, entity: EntityRef) -> Option<&'static str> {
         Some(match self.native_entity_body(entity)? {
             Body::Player(p) => player_pose(p.pose),
@@ -227,6 +404,85 @@ mod tests {
             let id = POSES.iter().position(|p| *p == player_pose(pose));
             assert_eq!(id.map(|i| Pose::from_id(i as i32)), Some(pose));
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_setters_update_stored_state() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(42, kind, Vec3::ZERO, 0.0));
+            let entity = game.native_entity(42).unwrap();
+            assert!(entity.set_air_supply(game, -7));
+            assert_eq!(game.mobs[0].air, -7);
+            assert!(entity.set_remaining_fire_ticks(game, 37));
+            assert_eq!(game.mobs[0].fire_ticks, 37);
+            assert!(entity.clear_fire(game));
+            assert_eq!(game.mobs[0].fire_ticks, 0);
+            assert!(game.native_entity_set_remaining_fire_ticks(entity, -12));
+            assert!(game.native_entity_clear_fire(entity));
+            assert_eq!(game.mobs[0].fire_ticks, -12);
+            assert!(entity.set_ticks_frozen(game, 31));
+            assert_eq!(game.mobs[0].ticks_frozen, 31);
+            assert!(entity.set_invisible(game, true));
+            assert!(game.mobs[0].invisible);
+            game.mobs[0].add_effect("minecraft:invisibility", 100, 0);
+            assert!(entity.set_invisible(game, false));
+            assert_eq!(entity.is_invisible(game), Some(false));
+            assert!(entity.set_glowing(game, true));
+            assert!(game.mobs[0].glowing);
+            assert!(entity.set_no_gravity(game, true));
+            assert!(game.mobs[0].no_gravity);
+            assert!(game.mobs[0].needs_sync);
+        });
+    }
+
+    fn with_player(test: impl FnOnce(&mut Game<'_>, EntityRef)) {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.native_entity(20).unwrap();
+            test(game, player);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_invisibility_write_is_refused() {
+        with_player(|game, player| assert!(!player.set_invisible(game, true)));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_glowing_write_is_refused() {
+        with_player(|game, player| assert!(!player.set_glowing(game, true)));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_no_gravity_write_is_refused() {
+        with_player(|game, player| assert!(!player.set_no_gravity(game, true)));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn player_frozen_write_updates_server_state() {
+        with_player(|game, player| {
+            assert!(player.set_ticks_frozen(game, 53));
+            assert_eq!(game.player.as_ref().unwrap().ticks_frozen, 53);
+        });
     }
 
     #[test]

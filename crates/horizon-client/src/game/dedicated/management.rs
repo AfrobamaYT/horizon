@@ -203,6 +203,54 @@ impl Game<'_> {
                 self.set_force_game_mode(force);
                 return json!({ "value": state.force_game_mode });
             }
+            "serversettings/allow_flight" => {
+                return json!({
+                    "value": self.lan.as_ref().is_some_and(|host| host.hub.config.allow_flight)
+                });
+            }
+            "serversettings/allow_flight/set" => {
+                let Some(allow) = body["value"].as_bool() else {
+                    return json!({ "error": "allow flight must be a boolean" });
+                };
+                let current = self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|host| host.hub.config.allow_flight);
+                rpc(format!("Update allow flight from {current} to {allow}"));
+                self.set_allow_flight(allow);
+                self.store_property("allow-flight", allow.to_string());
+                return json!({
+                    "value": self.lan.as_ref().is_some_and(|host| host.hub.config.allow_flight)
+                });
+            }
+            "serversettings/hide_online_players" => {
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.hide_online_players())
+                });
+            }
+            "serversettings/hide_online_players/set" => {
+                let Some(hide) = body["value"].as_bool() else {
+                    return json!({ "error": "hide online players must be a boolean" });
+                };
+                let current = self
+                    .lan
+                    .as_ref()
+                    .is_some_and(|host| host.hub.lan.shared.hide_online_players());
+                rpc(format!(
+                    "Update hide online players from {current} to {hide}"
+                ));
+                self.set_hide_online_players(hide);
+                self.store_property("hide-online-players", hide.to_string());
+                return json!({
+                    "value": self
+                        .lan
+                        .as_ref()
+                        .is_some_and(|host| host.hub.lan.shared.hide_online_players())
+                });
+            }
             "serversettings/player_idle_timeout" => {
                 return json!({ "value": state.lists.lock().unwrap().player_idle_timeout });
             }
@@ -444,8 +492,16 @@ impl Game<'_> {
                 }
             }
             "operators/remove" => {
-                for user in entries.iter().filter_map(|e| self.management_user(e)) {
+                let users: Vec<_> = entries
+                    .iter()
+                    .filter_map(|e| self.management_user(e))
+                    .collect();
+                for user in users {
                     rpc(format!("Deop '{}'", shown(&user)));
+                    let known = lists.lock().unwrap().ops.contains(&user);
+                    if known && self.permission_change(&lists, &user, 0) {
+                        continue;
+                    }
                     lists.lock().unwrap().ops.remove(&user);
                 }
                 self.sync_ops(&lists);
@@ -469,6 +525,9 @@ impl Game<'_> {
                     .collect();
                 for op in current.iter().filter(|o| !wanted.contains(o)) {
                     rpc(format!("Deop '{}'", shown(&op.user)));
+                    if self.permission_change(&lists, &op.user, 0) {
+                        continue;
+                    }
                     lists.lock().unwrap().ops.remove(&op.user);
                 }
                 for op in wanted.into_iter().filter(|o| !current.contains(o)) {
@@ -505,14 +564,7 @@ impl Game<'_> {
         rpc(format!("Add ip '{}' to ban list", ban.user));
         let ip = ban.user.clone();
         state.lists.lock().unwrap().ip_bans.add(ban);
-        let banned: Vec<u128> = self.lan.as_ref().map_or_else(Vec::new, |h| {
-            h.hub
-                .guests
-                .iter()
-                .filter(|g| g.address.ip().to_string() == ip)
-                .map(|g| g.uuid)
-                .collect()
-        });
+        let banned = self.ip_ban_players(&ip);
         for uuid in banned {
             self.kick_uuid(uuid, translatable("multiplayer.disconnect.ip_banned", &[]));
         }
@@ -522,6 +574,12 @@ impl Game<'_> {
     /// the player had. The commands an online player may run follow (`sync_ops`, after the edit).
     fn management_add_op(&mut self, rpc: &impl Fn(String), state: &ServerState, op: Op) {
         rpc(format!("Op '{}'", shown(&op.user)));
+        let level = op
+            .level
+            .unwrap_or_else(|| state.lists.lock().unwrap().op_level);
+        if self.permission_change(&state.lists, &op.user, level) {
+            return;
+        }
         let mut lists = state.lists.lock().unwrap();
         let had = lists
             .ops
@@ -558,6 +616,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
+            .filter(|g| g.participates_online())
             .find(|g| match (id, name) {
                 (Some(id), _) => g.uuid == id,
                 (None, Some(name)) => g.name.eq_ignore_ascii_case(name),
@@ -613,6 +672,30 @@ fn management_ip_ban(entry: &Value, ip: String) -> IpBan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn management_online_skips_fake_players_by_name_and_id() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            let level = game.native_level("minecraft:overworld").unwrap();
+            game.native_fake_player(level, 100, "robot").unwrap();
+            assert_eq!(game.management_online(&json!({"name": "robot"})), None);
+            assert_eq!(game.management_online(&json!({"id": "64"})), None);
+            assert_eq!(
+                game.management_online(&json!({"name": "GUEST12"})),
+                Some((12, "127.0.0.1".into()))
+            );
+            // Id takes precedence, with no fallback from a fake id to a real name.
+            assert_eq!(
+                game.management_online(&json!({"id": "c", "name": "robot"})),
+                Some((12, "127.0.0.1".into()))
+            );
+            assert_eq!(
+                game.management_online(&json!({"id": "64", "name": "guest12"})),
+                None
+            );
+        });
+    }
 
     #[test]
     fn a_game_rule_is_written_as_vanillas_typed_codec_does() {

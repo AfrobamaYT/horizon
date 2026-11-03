@@ -89,7 +89,7 @@ impl TraitInjection {
             .map(|((n, _), _)| quote!(*#n = event.#n;));
         let call = quote! {
             let mut event = crate::mod_api::#event { #(#inits),* };
-            let _flow = owner.#name(&mut event);
+            let _flow = owner.hooks.#name(&mut event);
             #(#write_back)*
         };
         // Before the mods are installed (an injection into code `main_with` runs first), or
@@ -121,6 +121,9 @@ impl TraitInjection {
                 let Some(owner) = crate::mod_api::mods().get(#owner) else {
                     return #absent;
                 };
+                if !crate::mod_api::subscribed_by(#owner, crate::mod_api::hook_ids::#name) {
+                    return #absent;
+                }
                 #result
             }
         }

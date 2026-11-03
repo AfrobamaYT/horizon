@@ -1,4 +1,7 @@
 //! `horizon-mod.toml`, a mod's manifest, and the `.hmod` file around it.
+//!
+//! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
+//! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -6,28 +9,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// The manifest's file name, beside `mod.wasm`.
+/// The manifest's file name in a `.hmod` or a mod folder.
 pub const MANIFEST: &str = "horizon-mod.toml";
-/// The component's file name in a `.hmod` or a mod folder.
+/// Executable components are not content and are refused in a `.hmod`.
 pub const WASM: &str = "mod.wasm";
-/// The API (WIT package `horizon:mods`) versions this build runs: a mod
-/// built for any 0.1.x SDK.
-pub const API: &str = "0.1";
-/// The manifest `api` lines this build loads. 0.2 is 0.1 plus content:
-/// `assets/` and `data/` in the `.hmod`, with blocks, items, creative tabs, mob effects,
-/// entity types and menu types declared in `data/<id>/horizon/` (docs/mods.md). Code still links API 0.1.
-/// 0.3 is a server mod (experimental): the `horizon-server-mod` world.
-pub const APIS: [&str; 3] = [API, "0.2", SERVER_API];
-/// The line of server mods, experimental: `side = "server"`.
-pub const SERVER_API: &str = "0.3";
+/// The content manifest API this build loads.
+pub const API: &str = "0.2";
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
 /// to those, docs/mods.md) and the game's own.
 const RESERVED_NAMESPACES: [&str; 3] = ["minecraft", "c", "horizon"];
-/// A mod's data (capability `storage`), in `horizon-mods/` beside the mods
-/// (`find` never mistakes it for a mod: it has no manifest).
+/// A mod's saved settings, shared by native mods and modpack overrides.
 pub const STORAGE_DIR: &str = ".horizon-mod-data";
-/// The biggest `mod.wasm` a mod may ship.
-const MAX_WASM: u64 = 32 << 20;
+/// The largest manifest this build reads.
+const MAX_MANIFEST: u64 = 32 << 20;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -40,11 +34,10 @@ pub struct Manifest {
     pub description: String,
     #[serde(default)]
     pub authors: Vec<String>,
-    /// The API line the mod was built for: `0.1`, or `0.2` for content.
+    /// The content API line: `0.2`.
     pub api: String,
     #[serde(default)]
     pub side: Side,
-    #[serde(default)]
     pub capabilities: Vec<Capability>,
     /// Namespaces besides `id` that the mod's `assets/` and `data/` use, for
     /// a content mod whose files sit under other names than its id (Towns
@@ -52,170 +45,163 @@ pub struct Manifest {
     /// that are on may share one (`content::clash`).
     #[serde(default)]
     pub namespaces: Vec<String>,
-    /// The experimental capabilities the mod opts into (`["ui"]`): each one
-    /// it lists in `capabilities` must be named here too, since it may change
-    /// in any release (docs/api/stability.md). One no longer experimental is
-    /// accepted here, so the manifest keeps loading once it is promoted.
+    /// Other native mods whose hooks must be available before this one.
     #[serde(default)]
-    pub experimental: Vec<Capability>,
+    pub dependencies: std::collections::BTreeMap<String, Dependency>,
+    /// Exact build pins and optional raw injections for a code mod.
+    pub native: Option<Native>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Dependency {
+    Version(semver::VersionReq),
+    Detailed(DependencyDetails),
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyDetails {
+    pub version: semver::VersionReq,
+    #[serde(default)]
+    pub optional: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Native {
+    pub game: String,
+    pub horizon: String,
+    pub mixins: String,
+    #[serde(default)]
+    pub injection: Vec<Injection>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Injection {
+    pub id: String,
+    pub target: Option<String>,
+    pub hook: Option<String>,
+    pub hook_version: Option<u32>,
+    pub kind: InjectionKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub helper: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trait_method: Option<String>,
+    #[serde(default)]
+    pub cancellable: bool,
+    pub argument: Option<usize>,
+    #[serde(default)]
+    pub bindings: Vec<Binding>,
+    pub priority: Option<i32>,
+    pub selector: Option<String>,
+    pub ordinal: Option<usize>,
+    pub require: Option<usize>,
+    pub fingerprint: Option<String>,
+    pub slice: Option<Slice>,
+    pub variable: Option<Variable>,
+    pub result: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum InjectionKind {
+    Head,
+    BeforeCall,
+    Overwrite,
+    Return,
+    ModifyArg,
+    ModifyConstant,
+    WrapOperation,
+    ModifyArgs,
+    ModifyVariable,
+    ModifyExpressionValue,
+    AfterCall,
+    AfterAssign,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    pub name: String,
+    pub ty: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Slice {
+    pub from: Option<Anchor>,
+    pub to: Option<Anchor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Anchor {
+    pub selector: String,
+    pub ordinal: usize,
+    pub require: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Variable {
+    pub name: String,
+    pub ordinal: usize,
+    pub at: Access,
+    #[serde(default)]
+    pub parameter: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Access {
+    Store,
+    Load,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Side {
-    /// Runs in the player's game only (HUD, keys, chat commands).
+    /// Local content, not compared with the server's mods when joining.
     #[default]
     Client,
-    /// Runs where the world is simulated (rules, blocks): `api = "0.3"`.
-    Server,
     /// Both, and the server tells clients which version it expects.
     Both,
 }
 
-/// What a mod may do beyond writing its log. Each is a WIT interface the
-/// component imports; the player sees them before turning the mod on.
+/// What a content mod adds; the player sees it before turning the mod on.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum Capability {
-    GameRead,
-    Chat,
-    Hud,
-    Storage,
-    /// Runs vanilla commands as the player, with the player's permissions.
-    Command,
-    /// New blocks, items and mob effects from the mod's `data/` (API 0.2): no WIT
-    /// interface, the game reads them before the world loads.
+    /// New blocks, items and mob effects from the mod's `data/` (API 0.2).
     Registries,
-    /// A screen the mod owns and a settings page in Options > Mods, drawn
-    /// with the menus' own widgets (interface `ui`, calls `ui-events`).
-    Ui,
-    /// Shapes on the HUD and the camera's shake, drawn by the game's own
-    /// renderer (interface `render`).
-    Render,
-    /// The use button on items the mod claims, and its own keys
-    /// (interface `input`).
-    Input,
-    /// The players on the server and messages to them (server mods).
-    Players,
-    /// Blocks in the server's loaded chunks, and changes to them (server
-    /// mods; client mods later, where the game runs the world).
-    World,
-    /// The recipes and items the game knows, for recipe viewers
-    /// (interface `recipes`).
-    Recipes,
 }
 impl Capability {
-    pub const ALL: [Capability; 12] = [
-        Capability::GameRead,
-        Capability::Chat,
-        Capability::Hud,
-        Capability::Storage,
-        Capability::Command,
-        Capability::Registries,
-        Capability::Ui,
-        Capability::Render,
-        Capability::Input,
-        Capability::Players,
-        Capability::World,
-        Capability::Recipes,
-    ];
-    /// Whether a server mod may have it: the others act on a local player.
-    pub fn on_server(self) -> bool {
-        matches!(
-            self,
-            Capability::Storage | Capability::Players | Capability::World
-        )
-    }
-    /// The WIT interface it grants, in `horizon:mods`.
-    pub fn interface(self) -> &'static str {
-        match self {
-            Capability::GameRead => "game",
-            Capability::Chat => "chat",
-            Capability::Hud => "hud",
-            Capability::Storage => "storage",
-            Capability::Command => "command",
-            Capability::Registries => "registries",
-            Capability::Ui => "ui",
-            Capability::Render => "render",
-            Capability::Input => "input",
-            Capability::Players => "players",
-            Capability::World => "world",
-            Capability::Recipes => "recipes",
-        }
-    }
-    /// May change in any release: a mod uses it only with
-    /// `experimental = ["<name>"]` in its manifest.
-    pub fn is_experimental(self) -> bool {
-        matches!(
-            self,
-            Capability::Ui | Capability::Render | Capability::Input | Capability::Recipes
-        )
-    }
     /// What the player reads before turning the mod on: "May <this>".
     pub fn describe(self) -> &'static str {
         match self {
-            Capability::GameRead => "see your position, health and the time",
-            Capability::Chat => "show you chat messages",
-            Capability::Hud => "draw text on your screen",
-            Capability::Storage => "save its own settings to disk",
-            Capability::Command => "run commands as you, with your permissions",
             Capability::Registries => {
                 "add blocks, items, mob effects and entity types to your worlds"
             }
-            Capability::Ui => "show its own screens and a settings page",
-            Capability::Render => "draw on your screen, shake and zoom the camera",
-            Capability::Input => {
-                "see the keys you hold and your clicks, take over the use button on its own items and the mouse wheel, and add keys"
-            }
-            Capability::Players => "see who is on the server and message them",
-            Capability::World => "read and change the world's blocks",
-            Capability::Recipes => {
-                "read the game's recipes and items and which recipes you know, place recipes in your crafting grid and, in creative mode, give you items"
-            }
         }
-    }
-    /// The capability a component import needs, `Ok(None)` for one every
-    /// mod has; `Err` for an import Horizon does not offer.
-    pub fn of_import(name: &str) -> Result<Option<Capability>, String> {
-        let unknown = || format!("imports {name}, which Horizon does not offer");
-        let rest = name.strip_prefix("horizon:mods/").ok_or_else(unknown)?;
-        let (interface, version) = rest.split_once('@').ok_or_else(unknown)?;
-        if !version.starts_with("0.1.") {
-            return Err(format!("needs API {version}; this Horizon runs {API}"));
-        }
-        if interface == "log" {
-            return Ok(None);
-        }
-        // A recipe viewer's panel is part of capability `ui`.
-        if interface == "browser" {
-            return Ok(Some(Capability::Ui));
-        }
-        Capability::ALL
-            .into_iter()
-            .filter(|c| *c != Capability::Registries)
-            .find(|c| c.interface() == interface)
-            .map(Some)
-            .ok_or_else(unknown)
     }
 }
 impl fmt::Display for Capability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Capability::GameRead => "game-read",
-            Capability::Chat => "chat",
-            Capability::Hud => "hud",
-            Capability::Storage => "storage",
-            Capability::Command => "command",
-            Capability::Registries => "registries",
-            Capability::Ui => "ui",
-            Capability::Render => "render",
-            Capability::Input => "input",
-            Capability::Players => "players",
-            Capability::World => "world",
-            Capability::Recipes => "recipes",
-        };
-        f.write_str(name)
+        match self {
+            Capability::Registries => f.write_str("registries"),
+        }
     }
+}
+
+/// Whether a source pin is an exact lowercase Git object id.
+pub fn revision(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 impl Manifest {
@@ -231,45 +217,65 @@ impl Manifest {
                 m.id
             ));
         }
-        if !APIS.contains(&m.api.as_str()) {
+        for id in m.dependencies.keys() {
+            if !(1..=64).contains(&id.len())
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            {
+                return Err(format!("{MANIFEST}: invalid dependency id {id:?}"));
+            }
+        }
+        if m.native.is_none() && !m.dependencies.is_empty() {
             return Err(format!(
-                "built for API {}; this Horizon runs {}",
-                m.api,
-                APIS.join(" and ")
+                "{MANIFEST}: content mod dependencies are not supported yet"
             ));
         }
-        if m.capabilities.contains(&Capability::Registries) && m.api == API {
+        if let Some(native) = &m.native {
+            let mut ids = std::collections::HashSet::new();
+            for injection in &native.injection {
+                if injection.id.is_empty() || !ids.insert(&injection.id) {
+                    return Err(format!("{MANIFEST}: empty or duplicate injection id"));
+                }
+                if injection.hook.is_some() == injection.target.is_some() {
+                    return Err(format!(
+                        "{MANIFEST}: injection needs exactly one hook or target"
+                    ));
+                }
+                match (&injection.helper, &injection.trait_method) {
+                    (Some(helper), None) if plain_path(helper) && source_file(helper) => {}
+                    (None, Some(method))
+                        if !method.is_empty()
+                            && method
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                            && !method.as_bytes()[0].is_ascii_digit() => {}
+                    _ => {
+                        return Err(format!(
+                            "{MANIFEST}: injection needs one source helper or trait_method"
+                        ));
+                    }
+                }
+            }
+            if m.version.is_empty()
+                || native.game.is_empty()
+                || !revision(&native.horizon)
+                || !revision(&native.mixins)
+            {
+                return Err(format!(
+                    "{MANIFEST}: native requires game and exact revisions"
+                ));
+            }
+        }
+        if m.api != API {
             return Err(format!(
-                "{MANIFEST}: capability registries needs api = \"0.2\""
+                "unsupported content API {}; this Horizon reads {API}",
+                m.api
             ));
         }
-        let server = m.side == Side::Server;
-        if server != (m.api == SERVER_API) {
+        if m.capabilities != [Capability::Registries] {
             return Err(format!(
-                "{MANIFEST}: a server mod is side = \"server\" with api = \"{SERVER_API}\", and only it"
-            ));
-        }
-        if let Some(c) = m
-            .capabilities
-            .iter()
-            .find(|c| c.on_server() != server && **c != Capability::Storage)
-        {
-            let side = if server { "client" } else { "server" };
-            return Err(format!("{MANIFEST}: capability {c} is for {side} mods"));
-        }
-        if let Some(c) = m
-            .capabilities
-            .iter()
-            .find(|c| c.is_experimental() && !m.experimental.contains(c))
-        {
-            return Err(format!(
-                "{MANIFEST}: capability {c} is experimental and may change in any release: \
-                 add experimental = [\"{c}\"] to use it"
-            ));
-        }
-        if !m.namespaces.is_empty() && !m.capabilities.contains(&Capability::Registries) {
-            return Err(format!(
-                "{MANIFEST}: namespaces are for content, which needs capability registries"
+                "{MANIFEST}: a content mod has capabilities = [\"registries\"]"
             ));
         }
         for (i, ns) in m.namespaces.iter().enumerate() {
@@ -298,72 +304,230 @@ impl Manifest {
     pub fn owned_namespaces(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.id.as_str()).chain(self.namespaces.iter().map(String::as_str))
     }
-    /// Checks that the component's imports need only declared capabilities.
-    pub fn check_imports<'a>(
-        &self,
-        imports: impl IntoIterator<Item = &'a str>,
-    ) -> Result<(), String> {
-        for name in imports {
-            if let Some(c) = Capability::of_import(name)?
-                && !self.capabilities.contains(&c)
-            {
-                return Err(format!("uses capability {c}, missing from {MANIFEST}"));
-            }
-        }
-        Ok(())
-    }
 }
 
-/// A mod as found on disk: its manifest and component bytes.
+/// A source file that belongs to the flat Cargo project, not its resource packs.
+pub fn source_file(name: &str) -> bool {
+    if name
+        .split('/')
+        .any(|part| matches!(part, ".git" | "target"))
+    {
+        return false;
+    }
+    name == "Cargo.toml"
+        || name == "build.rs"
+        || (name.starts_with("src/") && (name.ends_with(".rs") || name.ends_with(".toml")))
+        || (!name.contains('/')
+            && ["README", "LICENSE", "LICENCE", "COPYING", "NOTICE"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix)))
+}
+
+fn plain_path(name: &str) -> bool {
+    !name.starts_with('/')
+        && !name.contains(['\\', ':'])
+        && !name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+/// A mod as found on disk.
 pub struct Package {
     pub manifest: Manifest,
-    /// None for a content-only mod (capability `registries`, no code).
-    pub wasm: Option<Vec<u8>>,
+    pub icon: Option<crate::icon::Icon>,
 }
 impl Package {
-    /// A `.hmod` (a zip holding `horizon-mod.toml`, `mod.wasm` and, for
-    /// content, `assets/` and `data/`) or a folder holding the same.
+    /// Read a flat `.hmod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
-        let (toml, wasm) = if path.is_dir() {
-            let toml = std::fs::read_to_string(path.join(MANIFEST));
-            let wasm = path.join(WASM);
-            let wasm = match wasm.exists() {
-                true => Some(std::fs::read(wasm).map_err(|e| format!("{WASM}: {e}"))?),
-                false => None,
-            };
-            (toml.map_err(|e| format!("{MANIFEST}: {e}"))?, wasm)
+        let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        let mut icon = None;
+        let mut has_cargo = false;
+        let mut has_source = false;
+        let toml = if metadata.is_dir() {
+            for old in [
+                "horizon-native.json",
+                "horizon-mixin.toml",
+                "native",
+                "rust",
+            ] {
+                if std::fs::symlink_metadata(path.join(old)).is_ok() {
+                    return Err(format!("{old}: unsupported package path"));
+                }
+            }
+            if std::fs::symlink_metadata(path.join("Cargo.toml")).is_ok() {
+                check_folder_file(path, "Cargo.toml")?;
+                has_cargo = true;
+            }
+            if let Ok(source) = std::fs::symlink_metadata(path.join("src")) {
+                if !source.is_dir() {
+                    return Err("src: unsupported package path".into());
+                }
+                has_source = true;
+            }
+            let icon_path = path.join("icon.png");
+            match std::fs::symlink_metadata(&icon_path) {
+                Ok(metadata) => {
+                    check_folder_file(path, "icon.png")?;
+                    if metadata.len() > crate::icon::MAX_ICON as u64 {
+                        return Err("icon.png exceeds 256 KiB".into());
+                    }
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(&icon_path)
+                        .map_err(|e| format!("icon.png: {e}"))?
+                        .take(crate::icon::MAX_ICON as u64 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(|e| format!("icon.png: {e}"))?;
+                    icon = Some(crate::icon::Icon::parse(bytes)?);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("icon.png: {e}")),
+            }
+            check_folder_file(path, MANIFEST)?;
+            for (name, _) in crate::content::folder_files(path)? {
+                check_folder_file(path, &name)?;
+            }
+            let mut text = String::new();
+            std::fs::File::open(path.join(MANIFEST))
+                .map_err(|e| format!("{MANIFEST}: {e}"))?
+                .take(MAX_MANIFEST + 1)
+                .read_to_string(&mut text)
+                .map_err(|e| format!("{MANIFEST}: {e}"))?;
+            if text.len() as u64 > MAX_MANIFEST {
+                return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
+            }
+            text
         } else {
+            if !metadata.is_file() {
+                return Err(format!(
+                    "{}: unsupported file type in a content mod",
+                    path.display()
+                ));
+            }
             let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
             let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            let mut entry = |name: &str| -> Result<Option<Vec<u8>>, String> {
-                let f = match zip.by_name(name) {
-                    Ok(f) => f,
-                    Err(zip::result::ZipError::FileNotFound) => return Ok(None),
-                    Err(e) => return Err(format!("{name}: {e}")),
-                };
-                let mut out = Vec::new();
-                f.take(MAX_WASM + 1)
-                    .read_to_end(&mut out)
-                    .map_err(|e| e.to_string())?;
-                Ok(Some(out))
-            };
-            let toml = entry(MANIFEST)?.ok_or_else(|| format!("{MANIFEST}: missing"))?;
-            let toml = String::from_utf8(toml).map_err(|_| format!("{MANIFEST}: not UTF-8"))?;
-            (toml, entry(WASM)?)
+            return Self::read_zip(&mut zip);
         };
-        if wasm.as_ref().is_some_and(|w| w.len() as u64 > MAX_WASM) {
-            return Err(format!("{WASM} is over {} MiB", MAX_WASM >> 20));
-        }
-        let manifest = Manifest::parse(&toml)?;
-        if wasm.is_none() && !manifest.capabilities.contains(&Capability::Registries) {
-            return Err(format!(
-                "{WASM}: missing (only a content mod, with capability registries, may have no code)"
-            ));
-        }
-        Ok(Package { manifest, wasm })
+        Self::from_parts(&toml, icon, has_cargo, has_source)
     }
-    /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`]: content, or a legacy
-    /// WebAssembly mod. A `.hmod` holding only native code has none.
+
+    /// Read and validate an archive, including all selected source and resource entries.
+    pub fn read_zip<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>) -> Result<Self, String> {
+        let mut icon = None;
+        let mut has_cargo = false;
+        let mut has_source = false;
+        let mut entries = Vec::new();
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().map_err(|e| e.to_string())?.into_owned();
+            let mode = entry.unix_mode().unwrap_or_default();
+            entries.push((name.clone(), entry.size(), entry.is_dir()));
+            let first = name.split('/').next().unwrap_or("");
+            if matches!(
+                first,
+                "horizon-native.json" | "horizon-mixin.toml" | "native" | "rust"
+            ) {
+                return Err(format!("{name}: unsupported package path"));
+            }
+            has_source |= first == "src";
+            if entry.is_dir() && matches!(mode & 0o170000, 0 | 0o040000) {
+                continue;
+            }
+            has_cargo |= name == "Cargo.toml";
+            check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
+            if name == "icon.png" {
+                if icon.is_some() {
+                    return Err("duplicate icon.png".into());
+                }
+                if entry.size() > crate::icon::MAX_ICON as u64 {
+                    return Err("icon.png exceeds 256 KiB".into());
+                }
+                let mut bytes = Vec::new();
+                drop(entry);
+                zip.by_index(i)
+                    .map_err(|e| e.to_string())?
+                    .take(crate::icon::MAX_ICON as u64 + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| format!("icon.png: {e}"))?;
+                icon = Some(crate::icon::Icon::parse(bytes)?);
+            }
+        }
+        let mut toml = String::new();
+        zip.by_name(MANIFEST)
+            .map_err(|e| format!("{MANIFEST}: {e}"))?
+            .take(MAX_MANIFEST + 1)
+            .read_to_string(&mut toml)
+            .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if toml.len() as u64 > MAX_MANIFEST {
+            return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
+        }
+        let package = Self::from_parts(&toml, icon, has_cargo, has_source)?;
+        if package.manifest.native.is_some() {
+            let mut names = std::collections::HashSet::new();
+            let mut source_count = 0usize;
+            let mut source_bytes = 0u64;
+            let mut resource_count = 0usize;
+            let mut resource_bytes = 0u64;
+            for (name, size, directory) in entries {
+                let path = if directory {
+                    name.trim_end_matches('/')
+                } else {
+                    &name
+                };
+                if !plain_path(path) || !names.insert(name.clone()) {
+                    return Err(format!("invalid or duplicate package path: {name}"));
+                }
+                if !directory {
+                    if name != MANIFEST
+                        && name != "icon.png"
+                        && !name.starts_with("assets/")
+                        && !name.starts_with("data/")
+                        && !source_file(&name)
+                    {
+                        return Err(format!("unexpected package path: {name}"));
+                    }
+                    if source_file(&name) {
+                        source_count += 1;
+                        source_bytes = source_bytes
+                            .checked_add(size)
+                            .ok_or("native package too large")?;
+                    } else if name.starts_with("assets/") || name.starts_with("data/") {
+                        crate::content::check_path(&name)?;
+                        crate::content::check_namespace(&name, &package.manifest)?;
+                        if size > crate::content::MAX_FILE {
+                            return Err(format!("{name} exceeds the content file size limit"));
+                        }
+                        resource_count += 1;
+                        resource_bytes = resource_bytes
+                            .checked_add(size)
+                            .ok_or("content too large")?;
+                    }
+                }
+            }
+            if source_count > 511 || source_bytes > 64 << 20 {
+                return Err("native package exceeds its entry or size limit".into());
+            }
+            if resource_count > crate::content::MAX_FILES
+                || resource_bytes > crate::content::MAX_TOTAL
+            {
+                return Err("content exceeds its entry or size limit".into());
+            }
+        }
+        Ok(package)
+    }
+
+    fn from_parts(
+        text: &str,
+        icon: Option<crate::icon::Icon>,
+        has_cargo: bool,
+        has_source: bool,
+    ) -> Result<Self, String> {
+        let manifest = Manifest::parse(text)?;
+        if has_cargo != manifest.native.is_some() || has_source != has_cargo {
+            return Err("inconsistent native package declaration and source".into());
+        }
+        Ok(Package { manifest, icon })
+    }
+    /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
     pub fn has_manifest(path: &Path) -> bool {
         if path.is_dir() {
             return path.join(MANIFEST).is_file();
@@ -373,19 +537,89 @@ impl Package {
             .and_then(|f| zip::ZipArchive::new(f).ok())
             .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
     }
-    /// The `.hmod` bytes for `manifest_text` and a component.
-    pub fn write(manifest_text: &str, wasm: &[u8]) -> Result<Vec<u8>, String> {
-        Self::write_files(manifest_text, Some(wasm), &[])
+    /// Select and validate a flat project's source and resource files deterministically.
+    pub fn directory_files(
+        &self,
+        root: &Path,
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, String> {
+        let content = crate::Content::read(root, &self.manifest)?;
+        let mut files = std::collections::BTreeMap::new();
+        let mut reader = content.reader()?;
+        for name in &content.files {
+            files.insert(name.clone(), reader.read(name)?);
+        }
+        if let Some(icon) = &self.icon {
+            files.insert("icon.png".to_string(), icon.bytes().to_vec());
+        }
+        if self.manifest.native.is_some() {
+            fn walk(
+                root: &Path,
+                dir: &Path,
+                files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+                source_bytes: &mut u64,
+                source_count: &mut usize,
+            ) -> Result<(), String> {
+                for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    let path = entry.path();
+                    let relative = path.strip_prefix(root).map_err(|e| e.to_string())?;
+                    let name = relative
+                        .to_str()
+                        .ok_or("non-UTF-8 package path")?
+                        .replace('\\', "/");
+                    let kind = entry.file_type().map_err(|e| e.to_string())?;
+                    if kind.is_dir() {
+                        if matches!(entry.file_name().to_str(), Some(".git" | "target"))
+                            || matches!(name.as_str(), "assets" | "data")
+                        {
+                            continue;
+                        }
+                        walk(root, &path, files, source_bytes, source_count)?;
+                    } else if source_file(&name) {
+                        check_folder_file(root, &name)?;
+                        let size = entry.metadata().map_err(|e| e.to_string())?.len();
+                        *source_bytes = source_bytes
+                            .checked_add(size)
+                            .ok_or("native package too large")?;
+                        *source_count += 1;
+                        if *source_bytes > 64 << 20 || *source_count > 511 {
+                            return Err("native package exceeds its entry or size limit".into());
+                        }
+                        files.insert(name, std::fs::read(path).map_err(|e| e.to_string())?);
+                    } else if name.ends_with(".rs") || (name.ends_with(".toml") && name != MANIFEST)
+                    {
+                        return Err(format!("unexpected package path: {name}"));
+                    }
+                }
+                Ok(())
+            }
+            let (mut source_bytes, mut source_count) = (0, 0);
+            walk(root, root, &mut files, &mut source_bytes, &mut source_count)?
+        }
+        files.insert(
+            MANIFEST.to_owned(),
+            std::fs::read(root.join(MANIFEST)).map_err(|e| e.to_string())?,
+        );
+        Ok(files)
     }
-    /// The `.hmod` bytes for `manifest_text`, a component if the mod has
-    /// code, and content `files` (`assets/...`, `data/...`) by path.
-    pub fn write_files(
-        manifest_text: &str,
-        wasm: Option<&[u8]>,
-        files: &[(&str, &[u8])],
-    ) -> Result<Vec<u8>, String> {
+
+    /// Pack a flat project, selecting its source and resource files deterministically.
+    pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
+        let package = Self::read(root)?;
+        let mut files = package.directory_files(root)?;
+        let text = String::from_utf8(files.remove(MANIFEST).expect("selected manifest"))
+            .map_err(|e| e.to_string())?;
+        let files: Vec<_> = files
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+            .collect();
+        Self::write_files(&text, &files)
+    }
+
+    /// The `.hmod` bytes for `manifest_text` and selected project files.
+    pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
-        Manifest::parse(manifest_text)?;
+        let manifest = Manifest::parse(manifest_text)?;
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         let err = |e: zip::result::ZipError| e.to_string();
@@ -394,15 +628,128 @@ impl Package {
             zip.write_all(bytes).map_err(|e| e.to_string())
         };
         put(MANIFEST, manifest_text.as_bytes())?;
-        if let Some(wasm) = wasm {
-            put(WASM, wasm)?;
-        }
         for (name, bytes) in files {
-            crate::content::check_path(name)?;
+            let source = manifest.native.is_some() && source_file(name) && plain_path(name);
+            if *name != "icon.png" && !source {
+                crate::content::check_path(name)?;
+            }
+            check_file(name, 0, || Ok(*bytes)).map_err(|e| e.to_string())?;
             put(name, bytes)?;
         }
-        Ok(zip.finish().map_err(err)?.into_inner())
+        let bytes = zip.finish().map_err(err)?.into_inner();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).map_err(err)?;
+        Self::read_zip(&mut archive)?;
+        Ok(bytes)
     }
+}
+
+/// A content entry that cannot be safely loaded as data.
+#[derive(Debug)]
+pub enum ContentFileError {
+    UnsupportedType(String),
+    Executable(String),
+    Read {
+        name: String,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for ContentFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedType(name) => {
+                write!(f, "{name}: unsupported file type in a content mod")
+            }
+            Self::Executable(name) => {
+                write!(f, "{name}: unsupported executable file in a content mod")
+            }
+            Self::Read { name, source } => write!(f, "{name}: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for ContentFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// The shared content-file boundary. Refuse type/mode before opening a file,
+/// then inspect its header even when its name has no executable extension.
+pub(crate) fn check_file<R: Read>(
+    name: &str,
+    mode: u32,
+    open: impl FnOnce() -> std::io::Result<R>,
+) -> Result<(), ContentFileError> {
+    if !matches!(mode & 0o170000, 0 | 0o100000) {
+        return Err(ContentFileError::UnsupportedType(name.into()));
+    }
+    let extension = name
+        .rsplit(['/', '\\'])
+        .next()
+        .and_then(|n| n.rsplit_once('.'));
+    let executable = extension.is_some_and(|(_, ext)| {
+        [
+            "wasm", "exe", "dll", "so", "dylib", "class", "jar", "com", "bat", "cmd", "ps1",
+        ]
+        .iter()
+        .any(|kind| ext.eq_ignore_ascii_case(kind))
+    });
+    if executable || mode & 0o111 != 0 {
+        return Err(ContentFileError::Executable(name.into()));
+    }
+    let error = |source| ContentFileError::Read {
+        name: name.into(),
+        source,
+    };
+    let mut file = open().map_err(error)?;
+    let mut header = [0; 4];
+    let mut read = 0;
+    while read < header.len() {
+        let size = file.read(&mut header[read..]).map_err(error)?;
+        if size == 0 {
+            break;
+        }
+        read += size;
+    }
+    let executable = matches!(
+        &header,
+        b"\0asm"
+            | b"\x7fELF"
+            | b"\xfe\xed\xfa\xce"
+            | b"\xce\xfa\xed\xfe"
+            | b"\xfe\xed\xfa\xcf"
+            | b"\xcf\xfa\xed\xfe"
+            | b"\xca\xfe\xba\xbe"
+            | b"\xbe\xba\xfe\xca"
+    ) || header.starts_with(b"MZ")
+        || (header.starts_with(b"#!") && header[2] != b'[');
+    if executable {
+        return Err(ContentFileError::Executable(name.into()));
+    }
+    Ok(())
+}
+
+fn check_folder_file(root: &Path, name: &str) -> Result<(), String> {
+    let path = root.join(name);
+    let metadata = std::fs::symlink_metadata(&path).map_err(|e| format!("{name}: {e}"))?;
+    let mode = if metadata.is_file() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            metadata.mode()
+        }
+        #[cfg(not(unix))]
+        {
+            0
+        }
+    } else {
+        0o120000
+    };
+    check_file(name, mode, || std::fs::File::open(&path)).map_err(|e| e.to_string())
 }
 
 /// The `.hmod` files and mod folders in `dir`, by name.
@@ -424,120 +771,384 @@ mod tests {
     use super::*;
 
     const EXAMPLE: &str = r#"
-id = "coords_hud"
-name = "Coordinates HUD"
+id = "ruby"
+name = "Ruby"
 version = "0.1.0"
-api = "0.1"
-capabilities = ["game-read", "hud"]
+api = "0.2"
+capabilities = ["registries"]
 "#;
 
     #[test]
-    fn parses_and_checks_imports() {
-        let m = Manifest::parse(EXAMPLE).unwrap();
-        assert_eq!(m.side, Side::Client);
-        assert_eq!(m.capabilities, [Capability::GameRead, Capability::Hud]);
-        let ok = [
-            "horizon:mods/log@0.1.0",
-            "horizon:mods/game@0.1.0",
-            "horizon:mods/hud@0.1.2",
-        ];
-        assert_eq!(m.check_imports(ok), Ok(()));
-        let chat = m.check_imports(["horizon:mods/chat@0.1.0"]);
-        assert_eq!(
-            chat,
-            Err("uses capability chat, missing from horizon-mod.toml".into())
-        );
-        assert!(m.check_imports(["wasi:filesystem/types@0.2.0"]).is_err());
-        assert!(m.check_imports(["horizon:mods/game@0.2.0"]).is_err());
-        let storage = m.check_imports(["horizon:mods/storage@0.1.0"]);
-        assert_eq!(
-            storage,
-            Err("uses capability storage, missing from horizon-mod.toml".into())
-        );
-        assert_eq!(
-            m.check_imports(["horizon:mods/command@0.1.0"]),
-            Err("uses capability command, missing from horizon-mod.toml".into())
-        );
-        let with_storage = EXAMPLE.replace("\"hud\"", "\"hud\", \"storage\"");
-        let m = Manifest::parse(&with_storage).unwrap();
-        assert_eq!(m.check_imports(["horizon:mods/storage@0.1.0"]), Ok(()));
-    }
-
-    #[test]
-    fn refuses_bad_ids_and_apis() {
-        let bad_id = EXAMPLE.replace("coords_hud", "Coords HUD");
+    fn refuses_bad_ids_and_retired_manifests() {
+        let bad_id = EXAMPLE.replace("ruby", "Ruby!");
         assert!(Manifest::parse(&bad_id).unwrap_err().contains("is not"));
-        let bad_api = EXAMPLE.replace("api = \"0.1\"", "api = \"0.4\"");
-        assert!(Manifest::parse(&bad_api).unwrap_err().contains("API 0.4"));
-        let unknown = format!("{EXAMPLE}network = true\n");
-        assert!(Manifest::parse(&unknown).is_err());
+        for api in ["0.1", "0.3", "0.4"] {
+            let text = EXAMPLE.replace("api = \"0.2\"", &format!("api = \"{api}\""));
+            assert!(
+                Manifest::parse(&text)
+                    .unwrap_err()
+                    .contains("unsupported content API")
+            );
+        }
+        for caps in ["[]", "[\"hud\"]", "[\"registries\", \"registries\"]"] {
+            let text = EXAMPLE.replace("[\"registries\"]", caps);
+            assert!(Manifest::parse(&text).is_err());
+        }
+        for field in ["network = true", "experimental = []", "side = \"server\""] {
+            assert!(Manifest::parse(&format!("{EXAMPLE}{field}\n")).is_err());
+        }
+        assert_eq!(Manifest::parse(EXAMPLE).unwrap().side, Side::Client);
+        assert_eq!(
+            Manifest::parse(&format!("{EXAMPLE}side = \"both\"\n"))
+                .unwrap()
+                .side,
+            Side::Both
+        );
     }
 
     #[test]
-    fn server_mods_are_api_0_3_with_server_capabilities() {
-        let server = |api: &str, side: &str, caps: &str| {
+    fn native_manifest_requires_exact_pins_and_known_fields() {
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        Manifest::parse(&format!("{EXAMPLE}{native}")).unwrap();
+        assert!(
             Manifest::parse(&format!(
-                "id = \"w\"\nname = \"W\"\nversion = \"1\"\napi = \"{api}\"\nside = \"{side}\"\ncapabilities = [{caps}]\n"
+                "{EXAMPLE}{}",
+                native.replace(&"a".repeat(40), "main")
             ))
-        };
-        let m = server("0.3", "server", "\"players\", \"storage\"").unwrap();
-        let imports = ["horizon:mods/players@0.1.0", "horizon:mods/storage@0.1.0"];
-        assert_eq!(m.check_imports(imports), Ok(()));
-        for (api, side) in [("0.3", "client"), ("0.3", "both"), ("0.1", "server")] {
-            let e = server(api, side, "").unwrap_err();
-            assert!(e.contains("a server mod is side"), "{e}");
+            .is_err()
+        );
+        for unsupported in ["unexpected = true", "[[native.post_build]]\nbin = 'bake'"] {
+            assert!(Manifest::parse(&format!("{EXAMPLE}{native}{unsupported}\n")).is_err());
         }
-        let e = server("0.3", "server", "\"hud\"").unwrap_err();
-        assert!(e.contains("capability hud is for client mods"), "{e}");
-        let e = server("0.1", "client", "\"players\"").unwrap_err();
-        assert!(e.contains("capability players is for server mods"), "{e}");
+    }
+
+    #[test]
+    fn dependencies_are_typed_and_content_dependencies_are_refused() {
+        let deps =
+            "[dependencies]\ncreate = '^6.0'\naddon = { version = '^1.2', optional = true }\n";
+        assert!(
+            Manifest::parse(&format!("{EXAMPLE}{deps}"))
+                .unwrap_err()
+                .contains("not supported")
+        );
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let text = format!("{EXAMPLE}{deps}{native}");
+        let manifest = Manifest::parse(&text).unwrap();
+        assert!(
+            matches!(&manifest.dependencies["addon"], Dependency::Detailed(details) if details.optional)
+        );
+        assert!(matches!(
+            &manifest.dependencies["create"],
+            Dependency::Version(_)
+        ));
+        for bad in [
+            text.replace("^6.0", "not semver"),
+            text.replace("create =", "\"not-valid\" ="),
+            text.replace("optional = true", "unexpected = true"),
+        ] {
+            assert!(Manifest::parse(&bad).is_err());
+        }
+    }
+
+    #[test]
+    fn flat_native_archive_round_trips_through_shared_writer() {
+        let manifest = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let files: &[(&str, &[u8])] = &[
+            (
+                "Cargo.toml",
+                b"[package]\nname = 'other'\nversion = '2.0.0'\n",
+            ),
+            ("src/lib.rs", b"pub fn hooks() {}"),
+        ];
+        let bytes = Package::write_files(&manifest, files).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let package = Package::read_zip(&mut zip).unwrap();
+        assert_eq!(package.manifest.id, "ruby");
+        assert_eq!(package.manifest.version, "0.1.0");
+        assert_eq!(package.manifest.native.unwrap().game, "26.3");
+        assert!(
+            Package::write_files(&manifest, &[("Cargo.toml", b""), ("src/../bad.rs", b"")])
+                .is_err()
+        );
+        assert!(
+            Package::write_files(
+                &manifest,
+                &[
+                    ("Cargo.toml", b""),
+                    ("src/lib.rs", b""),
+                    ("src/lib.rs", b"")
+                ]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn flat_project_packs_only_selected_safe_files() {
+        let root = std::env::temp_dir().join(format!("horizon-flat-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(root.join("target/generated")).unwrap();
+        let manifest = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), manifest).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = 'other'\nversion = '2.0.0'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn hooks() {}\n").unwrap();
+        std::fs::write(root.join(".git/hooks/pre-commit"), "#!/bin/sh\n").unwrap();
+        std::fs::write(root.join("target/generated/bad.rs"), "#!/bin/sh\n").unwrap();
+        let bytes = Package::pack_directory(&root).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
+        assert!(zip.by_name("Cargo.toml").is_ok());
+        assert!(zip.by_name("src/lib.rs").is_ok());
+        assert!(zip.by_name(".git/hooks/pre-commit").is_err());
+        assert!(zip.by_name("target/generated/bad.rs").is_err());
+        std::fs::write(root.join("src/lib.rs"), b"MZ executable").unwrap();
+        assert!(
+            Package::pack_directory(&root)
+                .unwrap_err()
+                .contains("unsupported executable")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_kind_requires_matching_source_and_native_declaration() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-package-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        assert!(Package::read(&root).is_ok());
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = 'unrelated'\nversion = '7.0.0'\n",
+        )
+        .unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        assert!(Package::read(&root).is_err());
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), format!("{EXAMPLE}{native}")).unwrap();
+        assert_eq!(Package::read(&root).unwrap().manifest.id, "ruby");
+        std::fs::create_dir(root.join("native")).unwrap();
+        assert!(Package::read(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn checks_extra_namespaces() {
-        let content = "id = \"t_and_t\"\nname = \"T\"\nversion = \"1\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n";
-        let with = |list: &str| Manifest::parse(&format!("{content}namespaces = [{list}]\n"));
+        let with = |list: &str| Manifest::parse(&format!("{EXAMPLE}namespaces = [{list}]\n"));
         let m = with("\"kaisyn\", \"towns_and_towers\"").unwrap();
         let owned: Vec<&str> = m.owned_namespaces().collect();
-        assert_eq!(owned, ["t_and_t", "kaisyn", "towns_and_towers"]);
+        assert_eq!(owned, ["ruby", "kaisyn", "towns_and_towers"]);
         for reserved in ["minecraft", "c", "horizon"] {
             let e = with(&format!("\"{reserved}\"")).unwrap_err();
             assert!(e.contains("not a mod's to claim"), "{e}");
         }
-        assert!(with("\"t_and_t\"").unwrap_err().contains("twice"));
+        assert!(with("\"ruby\"").unwrap_err().contains("twice"));
         assert!(with("\"a\", \"a\"").unwrap_err().contains("twice"));
         assert!(with("\"Kaisyn\"").unwrap_err().contains("is not"));
         assert!(with("\"\"").unwrap_err().contains("is not"));
-        let code = format!("{EXAMPLE}namespaces = [\"kaisyn\"]\n");
-        assert!(Manifest::parse(&code).unwrap_err().contains("registries"));
     }
 
     #[test]
-    fn hmod_round_trips() {
-        let dir = std::env::temp_dir().join(format!("horizon-mods-{}", std::process::id()));
+    fn content_round_trips_and_executable_files_are_refused() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("horizon-mods-{}", std::process::id()));
+        let dir = root.join("folder");
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("coords_hud.hmod");
-        std::fs::write(&path, Package::write(EXAMPLE, b"\0asm").unwrap()).unwrap();
-        let p = Package::read(&path).unwrap();
-        assert_eq!(p.manifest.id, "coords_hud");
-        assert_eq!(p.wasm.as_deref(), Some(&b"\0asm"[..]));
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(MANIFEST), EXAMPLE).unwrap();
+        let archive = root.join("ruby.hmod");
+        std::fs::write(&archive, Package::write_files(EXAMPLE, &[]).unwrap()).unwrap();
+        assert_eq!(Package::read(&archive).unwrap().manifest.id, "ruby");
+        assert_eq!(Package::read(&dir).unwrap().manifest.id, "ruby");
+        let cases: &[(&str, &[u8])] = &[
+            ("mod.wasm", b""),
+            ("./mod.wasm", b"\0asm"),
+            ("MOD.WASM", b""),
+            ("sub/mod.wasm", b""),
+            ("assets/ruby/CODE.WaSm", b""),
+            ("assets/ruby/model.bin", b"\0asm"),
+            ("assets/ruby/native.bin", b"\x7fELF"),
+            ("assets/ruby/windows.bin", b"MZ"),
+            ("assets/ruby/mac.bin", b"\xcf\xfa\xed\xfe"),
+            ("assets/ruby/script", b"#!/bin/sh"),
+            ("assets/ruby/program.EXE", b""),
+        ];
+        for (name, bytes) in cases {
+            let file = dir.join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, bytes).unwrap();
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file(MANIFEST, options).unwrap();
+            zip.write_all(EXAMPLE.as_bytes()).unwrap();
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+            zip.finish().unwrap();
+            let error = Package::read(&archive).err().unwrap();
+            assert!(
+                error.contains("unsupported executable file"),
+                "{name}: {error}"
+            );
+            if name.starts_with("assets/") {
+                let error = Package::read(&dir).err().unwrap();
+                assert!(
+                    error.contains("unsupported executable file"),
+                    "{name}: {error}"
+                );
+            } else {
+                assert!(Package::read(&dir).is_ok(), "unpackaged {name}");
+            }
+            std::fs::remove_file(file).unwrap();
+        }
+        assert!(Package::write_files(EXAMPLE, &[("assets/ruby/model.bin", b"\0asm")]).is_err());
+        // Native bundle sources can start with Rust inner attributes, not a script shebang.
+        assert!(
+            Package::write_files(
+                EXAMPLE,
+                &[("assets/ruby/source.txt", b"#![allow(dead_code)]")]
+            )
+            .is_ok()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn experimental_capabilities_need_the_opt_in() {
-        let base = "id = \"m\"\nname = \"M\"\nversion = \"1\"\napi = \"0.1\"\n";
-        let err = Manifest::parse(&format!("{base}capabilities = [\"ui\"]\n")).unwrap_err();
-        assert!(err.contains("experimental = [\"ui\"]"), "{err}");
-        let m = Manifest::parse(&format!(
-            "{base}capabilities = [\"ui\"]\nexperimental = [\"ui\"]\n"
-        ))
-        .unwrap();
-        assert_eq!(m.experimental, [Capability::Ui]);
-        // A capability that is (or became) stable is fine in the list.
-        Manifest::parse(&format!(
-            "{base}capabilities = [\"hud\"]\nexperimental = [\"hud\"]\n"
-        ))
-        .unwrap();
+    fn project_folder_loads_without_packaging_git_hooks() {
+        let root = std::env::temp_dir().join(format!("horizon-mod-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::write(root.join(".git/hooks/pre-commit"), b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                root.join(".git/hooks/pre-commit"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir_all(root.join("assets/ruby")).unwrap();
+        std::fs::write(root.join("assets/ruby/icon.png"), b"image").unwrap();
+        assert_eq!(Package::read(&root).unwrap().manifest.id, "ruby");
+        std::fs::write(root.join("assets/ruby/icon.png"), b"\0asm").unwrap();
+        assert!(
+            Package::read(&root)
+                .err()
+                .unwrap()
+                .contains("unsupported executable")
+        );
+        std::fs::remove_file(root.join("assets/ruby/icon.png")).unwrap();
+        std::fs::create_dir_all(root.join("assets/minecraft/lang")).unwrap();
+        std::fs::write(root.join("assets/minecraft/lang/en_us.json"), "{}").unwrap();
+        let package = Package::read(&root).unwrap();
+        assert!(crate::Content::read(&root, &package.manifest).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn archive_links_and_executable_modes_are_refused() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("horizon-mods-kinds-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("ruby.hmod");
+        for link in [false, true] {
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file(MANIFEST, options).unwrap();
+            zip.write_all(EXAMPLE.as_bytes()).unwrap();
+            if link {
+                zip.add_symlink("assets/ruby/link", "missing", options)
+                    .unwrap();
+            } else {
+                zip.start_file("assets/ruby/program", options.unix_permissions(0o755))
+                    .unwrap();
+                zip.write_all(b"ordinary bytes").unwrap();
+            }
+            zip.finish().unwrap();
+            let error = Package::read(&path).err().unwrap();
+            assert!(
+                error.contains(if link {
+                    "unsupported file type"
+                } else {
+                    "unsupported executable"
+                }),
+                "{error}"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_links_and_executable_modes_are_refused() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root =
+            std::env::temp_dir().join(format!("horizon-mods-folder-kinds-{}", std::process::id()));
+        let dir = root.join("folder");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(MANIFEST), EXAMPLE).unwrap();
+        std::fs::create_dir_all(dir.join("assets/ruby")).unwrap();
+        let file = dir.join("assets/ruby/program");
+        std::fs::write(&file, b"ordinary bytes").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = Package::read(&dir).err().unwrap();
+        assert!(error.contains("unsupported executable"), "{error}");
+        std::fs::remove_file(&file).unwrap();
+        for name in ["assets/ruby/mod.wasm", "assets/ruby/nested/link"] {
+            let link = dir.join(name);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            symlink("missing", &link).unwrap();
+            let error = Package::read(&dir).err().unwrap();
+            assert!(error.contains("unsupported file type"), "{error}");
+            std::fs::remove_file(link).unwrap();
+        }
+        std::fs::remove_dir_all(dir.join("assets")).unwrap();
+        symlink("missing", dir.join("assets")).unwrap();
+        assert!(
+            Package::read(&dir)
+                .err()
+                .unwrap()
+                .contains("unsupported file type")
+        );
+        let link = root.join("linked-folder");
+        symlink(&dir, &link).unwrap();
+        let error = Package::read(&link).err().unwrap();
+        assert!(error.contains("unsupported file type"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

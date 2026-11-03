@@ -676,9 +676,12 @@ impl Mob {
     }
     /// `canAttack` for the player: a golem a player built never attacks
     /// players (`IronGolem.canAttack`), and a pet never attacks its owner
-    /// (`TamableAnimal.canAttack`: `isOwnedBy`).
+    /// (`TamableAnimal.canAttack`: `isOwnedBy`). In Peaceful nothing attacks a
+    /// player (`LivingEntity.canAttack`, `TargetingConditions.test`: combat
+    /// conditions fail when the difficulty is PEACEFUL).
     pub fn spares_players(&self, w: &MobWorld) -> bool {
-        self.built_by_player()
+        (w.difficulty.base == 0 && w.player.is_some())
+            || self.built_by_player()
             || (self.is_tamable_animal()
                 && self.extra.tame
                 && w.player
@@ -2235,20 +2238,18 @@ impl Goal for Breed {
         );
         self.love_time += 1;
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
-            // Llama.getBreedOffspring and finalizeSpawnChildFromBreeding's
-            // experience, from the parent's random. When the game asks
-            // BabyEntitySpawnEvent the experience waits for its answer.
-            let llama = super::llama::is_llama(m.species()).then(|| {
-                let o = super::llama::breed_offspring(m, &p);
-                if !cx.w.ask_mods {
-                    let xp = 1 + m.random.next_int_bound(7).unwrap_or(0);
-                    cx.events.push(MobEvent::Experience {
-                        at: [m.position.x, m.position.y, m.position.z],
-                        amount: xp as u32,
-                    });
-                }
-                Box::new(o)
-            });
+            let llama = super::llama::is_llama(m.species())
+                .then(|| Box::new(super::llama::breed_offspring(m, &p)));
+            let parent_variant =
+                super::draws_parent_variant(m.species()).then(|| m.random.next_boolean());
+            let experience = if (llama.is_some() || parent_variant.is_some())
+                && !cx.w.asks_baby_spawn
+                && !super::orb_after_child(m.species())
+            {
+                super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
+            } else {
+                super::BreedExperience::Deferred
+            };
             m.extra.in_love = 0;
             m.extra.age = 6000;
             // TurtleBreedGoal.breed: the mother carries an egg, not a baby.
@@ -2263,6 +2264,8 @@ impl Goal for Breed {
                 parent: m.id,
                 partner: p.id,
                 llama,
+                parent_variant,
+                experience,
             });
         }
     }
@@ -2469,7 +2472,7 @@ impl Goal for RestrictSun {
         0
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.daylight && m.extra.head.is_none()
+        cx.w.daylight && m.extra.head_id().is_none()
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.ai.nav.avoid_sun = true;
@@ -2522,7 +2525,11 @@ impl Goal for FleeSun {
         MOVE
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        if m.ai.target.is_some() || !cx.w.daylight || m.fire_ticks <= 0 || m.extra.head.is_some() {
+        if m.ai.target.is_some()
+            || !cx.w.daylight
+            || m.fire_ticks <= 0
+            || m.extra.head_id().is_some()
+        {
             return false;
         }
         let (bx, by, bz) = (
@@ -2607,6 +2614,7 @@ impl Goal for EatBlock {
                 if cx.w.mob_griefing {
                     cx.events.push(MobEvent::BreakBlock {
                         pos: [x, y, z],
+                        by: None,
                         drop: false,
                     });
                 }
@@ -2841,6 +2849,163 @@ impl MoveToBlock {
 }
 
 #[cfg(test)]
+mod breeding_variant_tests {
+    use super::*;
+    use crate::mobs::{BreedExperience, world::with_test_world};
+    use horizon_core::{
+        geometry::Vec3,
+        random::{LegacyRandom, RandomSource},
+    };
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn chicken_breeding_coin_precedes_same_tick_egg_with_or_without_listener() {
+        #[derive(Debug, Clone)]
+        struct SeedAtBreed(Breed);
+        impl Goal for SeedAtBreed {
+            goal_clone!();
+            fn flags(&self) -> u8 {
+                MOVE | LOOK
+            }
+            fn can_use(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn can_continue(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
+                true
+            }
+            fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+                m.random = LegacyRandom::new(1);
+                self.0.tick(m, cx);
+            }
+        }
+        assert!(with_test_world(&[], |world, types| {
+            let kind = Arc::new(types.types["minecraft:chicken"].clone());
+            let mut mate = Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0);
+            mate.extra.in_love = 600;
+            let partner = [mate.seen(None)];
+            for asks_baby_spawn in [false, true] {
+                let w = MobWorld {
+                    asks_baby_spawn,
+                    mob_drops: false,
+                    others: &partner,
+                    ..world.clone()
+                };
+                let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                parent.persistent = true;
+                parent.extra.in_love = 600;
+                parent.extra.egg_time = 1;
+                parent.ai.targets.clear();
+                parent.ai.goals = GoalSelector {
+                    goals: vec![Wrapped {
+                        priority: 2,
+                        running: true,
+                        goal: Box::new(SeedAtBreed(Breed {
+                            speed: 1.0,
+                            partner: Some(2),
+                            love_time: reduced(60) - 1,
+                        })),
+                    }],
+                    locked: [Some(0), Some(0), None, None],
+                    disabled: 0,
+                };
+                let mut events = Vec::new();
+                parent.tick(&w, &mut LegacyRandom::new(1), &mut events);
+                assert!(events.iter().any(|event| matches!(
+                    event,
+                    MobEvent::Breed {
+                        parent_variant: Some(true),
+                        ..
+                    }
+                )));
+                assert_eq!(parent.extra.egg_time, 8313);
+                assert_eq!(parent.extra.age, 5999);
+            }
+        }));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn variant_and_experience_are_drawn_in_order_before_later_goal_work() {
+        assert!(with_test_world(&[], |world, types| {
+            for id in [
+                "minecraft:pig",
+                "minecraft:cow",
+                "minecraft:chicken",
+                "minecraft:fox",
+                "minecraft:cat",
+            ] {
+                let kind = Arc::new(types.types[id].clone());
+                let partner =
+                    [Mob::new(2, kind.clone(), Vec3::new(1.0, 64.0, 0.0), 0.0).seen(None)];
+                for (ask_mods, mob_drops) in
+                    [(false, true), (false, false), (true, true), (true, false)]
+                {
+                    let world = MobWorld {
+                        asks_baby_spawn: ask_mods,
+                        mob_drops,
+                        others: &partner,
+                        ..world.clone()
+                    };
+                    let mut parent = Mob::new(1, kind.clone(), Vec3::new(0.0, 64.0, 0.0), 0.0);
+                    parent.random = LegacyRandom::new(0);
+                    let mut goal = Breed {
+                        speed: 1.0,
+                        partner: Some(2),
+                        love_time: reduced(60) - 1,
+                    };
+                    let mut events = Vec::new();
+                    let mut level_random = LegacyRandom::new(1);
+                    let mut cx = Cx {
+                        w: &world,
+                        lr: &mut level_random,
+                        events: &mut events,
+                    };
+                    goal.tick(&mut parent, &mut cx);
+                    let (choice, experience) = events
+                        .iter()
+                        .find_map(|event| match event {
+                            MobEvent::Breed {
+                                parent_variant,
+                                experience,
+                                ..
+                            } => Some((*parent_variant, *experience)),
+                            _ => None,
+                        })
+                        .expect("the animals breed");
+                    assert_eq!(choice, Some(true), "{id}");
+                    assert_eq!(
+                        experience,
+                        if ask_mods || id == "minecraft:fox" {
+                            BreedExperience::Deferred
+                        } else {
+                            BreedExperience::Drawn(mob_drops.then_some(3))
+                        },
+                        "{id}"
+                    );
+                    assert_eq!(
+                        parent.random.state(),
+                        if !ask_mods && mob_drops && id != "minecraft:fox" {
+                            234_029_835_660_143
+                        } else {
+                            205_749_139_540_596
+                        },
+                        "{id}"
+                    );
+                    if !ask_mods && mob_drops && id != "minecraft:fox" {
+                        assert_eq!(
+                            parent.random.next_int(),
+                            1_033_096_058,
+                            "{id}: same-tick later draw"
+                        );
+                    }
+                }
+            }
+        }));
+    }
+}
+
+#[cfg(test)]
 mod eat_block_tests {
     use super::*;
     use crate::mobs::world::with_built_test_world_rules;
@@ -2971,5 +3136,52 @@ mod built_by_player_tests {
         let mut zombie = mob(Species::Zombie);
         zombie.extra.player_created = true;
         assert!(!zombie.built_by_player());
+    }
+}
+
+#[cfg(test)]
+mod peaceful_targets_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+
+    /// `LivingEntity.canAttack` / `TargetingConditions.test`: in Peaceful a
+    /// hurt wolf neither takes its attacker (a player) as target nor picks one
+    /// by sight, while at Normal it does.
+    #[test]
+    fn peaceful_mobs_never_target_the_player() {
+        with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(2.5, 64.0, 0.5)));
+            let kind = Arc::new(types.types["minecraft:wolf"].clone());
+            let mut wolf = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            wolf.ai.last_hurt_by = Some(Who::Player);
+            wolf.ai.last_hurt_by_time = 5;
+            let mut random = LegacyRandom::new(0);
+            let mut events = Vec::new();
+            let mut cx = Cx {
+                w: &w,
+                lr: &mut random,
+                events: &mut events,
+            };
+            assert!(
+                HurtByTarget::default().can_use(&mut wolf, &mut cx),
+                "normal"
+            );
+            assert!(wolf.can_target_player(&w, 16.0, false), "normal");
+
+            let mut peaceful = w.clone();
+            peaceful.difficulty = crate::mobs::spawning::LocalDifficulty::new(0, 18000, 0, 0.0);
+            let mut cx = Cx {
+                w: &peaceful,
+                lr: &mut random,
+                events: &mut events,
+            };
+            assert!(
+                !HurtByTarget::default().can_use(&mut wolf, &mut cx),
+                "peaceful"
+            );
+            assert!(!wolf.can_target_player(&peaceful, 16.0, false), "peaceful");
+            assert!(!wolf.can_keep_target_player(&peaceful, 16.0), "peaceful");
+        });
     }
 }

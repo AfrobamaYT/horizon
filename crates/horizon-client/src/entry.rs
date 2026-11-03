@@ -1,49 +1,54 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging, ram_limit};
+use horizon_mods::selection::{Argument, LaunchArguments};
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
     main_with(Default::default());
 }
 
-/// Start the game with trait mods in dispatch order.
+/// Start the game with named trait mods in dispatch order.
 pub fn main_with(mods: crate::mod_api::Mods) {
     // First: a trait injection into anything below (logging, the crash handler) calls its mod.
-    if crate::mod_api::MODS.set(mods).is_err() {
-        log::warn!("Trait mods already installed; ignoring the second list");
-    }
+    crate::mod_api::install(mods);
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let game_args = args.iter().take_while(|a| *a != "--dedicated");
-    let help = game_args
-        .clone()
-        .any(|a| a == "--help" || a == "-h" || a == "--launch-api");
-    // --home before the log opens in it.
-    if let Some(dir) = game_args.clone().skip_while(|a| *a != "--home").nth(1) {
-        logging::set_game_home(std::path::absolute(dir).unwrap_or_else(|_| dir.into()));
-    }
-    // The dedicated server logs in its own folder (--game-dir's), as vanilla's does; the game in its home.
-    let (home, side, thread) = if args.iter().any(|a| a == "--dedicated") {
-        let folder = game_args
-            .clone()
-            .skip_while(|a| *a != "--game-dir" && *a != "--gameDir")
-            .nth(1)
-            .and_then(|dir| std::path::absolute(dir).ok())
-            .unwrap_or_else(|| ".".into());
-        (folder, "server", "Server thread")
+    let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
+        Ok(LaunchArguments::parse(
+            std::env::args().skip(1),
+            &cwd,
+            &logging::game_home(),
+            std::env::var_os("HORIZON_HOME").as_deref(),
+        )?)
+    });
+    let launch = match launch {
+        Ok(launch) => launch,
+        Err(error) => {
+            eprintln!("Horizon: {error}");
+            std::process::exit(game::exit_code::USAGE);
+        }
+    };
+    let help = launch.rest.iter().any(|arg| {
+        matches!(arg, Argument::Switch(name) if matches!(name.as_str(), "--help" | "-h" | "--launch-api"))
+    });
+    logging::set_game_home(launch.context.home.clone());
+    // The dedicated server logs in its own folder, as vanilla's does; the game in its home.
+    let (home, side, thread) = if launch
+        .rest
+        .iter()
+        .any(|arg| matches!(arg, Argument::Dedicated(_)))
+    {
+        (launch.context.game_dir.clone(), "server", "Server thread")
     } else {
-        // --player-dir too (a game's, not a server's): a player of a shared game folder keeps
-        // its log and crash reports in its own; crash telemetry stays with the home's consent.
-        if let Some(dir) = game_args
-            .clone()
-            .skip_while(|a| *a != "--player-dir")
-            .nth(1)
-        {
+        // A player's own log stays separate; crash telemetry follows the shared home.
+        if let Some(dir) = launch.rest.iter().find_map(|arg| match arg {
+            Argument::Value(name, value) if name == "--player-dir" => Some(value),
+            _ => None,
+        }) {
             logging::set_player_dir(std::path::absolute(dir).unwrap_or_else(|_| dir.into()));
         }
-        (logging::game_home(), "client", "Render thread")
+        (launch.context.home.clone(), "client", "Render thread")
     };
     if !help {
         logging::init(
@@ -57,7 +62,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     }
     let renderers = crate::mod_api::mods()
         .iter()
-        .filter_map(|m| m.render())
+        .filter_map(|m| m.hooks.render())
         .collect();
     if crate::gfx::native_render::install(renderers).is_err() {
         log::warn!("Trait renderers already installed; keeping the first list");
@@ -68,32 +73,16 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |id, table| {
-                crate::mod_api::dispatch_loot_table_load(crate::mod_api::mods(), id, table);
+                crate::mod_api::dispatch_loot_table_load(id, table);
             },
             modify_default_components: |item, components| {
-                crate::mod_api::dispatch_modify_default_components(
-                    crate::mod_api::mods(),
-                    item,
-                    components,
-                );
+                crate::mod_api::dispatch_modify_default_components(item, components);
             },
             loot_function: |kind, data, ctx, stack| {
-                crate::mod_api::dispatch_loot_function(
-                    crate::mod_api::mods(),
-                    kind,
-                    data,
-                    ctx,
-                    stack,
-                );
+                crate::mod_api::dispatch_loot_function(kind, data, ctx, stack);
             },
             loot_condition: |kind, data, ctx, holds| {
-                crate::mod_api::dispatch_loot_condition(
-                    crate::mod_api::mods(),
-                    kind,
-                    data,
-                    ctx,
-                    holds,
-                );
+                crate::mod_api::dispatch_loot_condition(kind, data, ctx, holds);
             },
         },
     )
@@ -103,60 +92,29 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     }
     if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
-            crate::mod_api::dispatch_menu_slot_rules(
-                crate::mod_api::mods(),
-                menu,
-                slot,
-                stack,
-                may_place,
-                max_stack,
-            );
+            crate::mod_api::dispatch_menu_slot_rules(menu, slot, stack, may_place, max_stack);
         },
         item_stacked_on_other: |event, canceled| {
-            crate::mod_api::dispatch_item_stacked_on_other(crate::mod_api::mods(), event, canceled);
+            crate::mod_api::dispatch_item_stacked_on_other(event, canceled);
         },
         living_heal: |entity, amount, cancel| {
-            crate::mod_api::dispatch_living_heal(crate::mod_api::mods(), entity, amount, cancel);
+            crate::mod_api::dispatch_living_heal(entity, amount, cancel);
         },
         living_breathe: |entity, kind, can_breathe, consume, refill| {
-            crate::mod_api::dispatch_living_breathe(
-                crate::mod_api::mods(),
-                entity,
-                kind,
-                can_breathe,
-                consume,
-                refill,
-            );
+            crate::mod_api::dispatch_living_breathe(entity, kind, can_breathe, consume, refill);
         },
         farmland_trample: |entity, pos, state, distance, cancel| {
-            crate::mod_api::dispatch_farmland_trample(
-                crate::mod_api::mods(),
-                entity,
-                pos,
-                state,
-                distance,
-                cancel,
-            );
+            crate::mod_api::dispatch_farmland_trample(entity, pos, state, distance, cancel);
         },
         has_mods: || !crate::mod_api::mods().is_empty(),
         player_name_format: |username, displayname| {
-            crate::mod_api::dispatch_player_name_format(
-                crate::mod_api::mods(),
-                username,
-                displayname,
-            );
+            crate::mod_api::dispatch_player_name_format(username, displayname);
         },
         player_tab_list_name_format: |player, name, display_name| {
-            crate::mod_api::dispatch_player_tab_list_name_format(
-                crate::mod_api::mods(),
-                player,
-                name,
-                display_name,
-            );
+            crate::mod_api::dispatch_player_tab_list_name_format(player, name, display_name);
         },
         living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
             crate::mod_api::dispatch_living_drown(
-                crate::mod_api::mods(),
                 entity,
                 kind,
                 is_drowning,
@@ -166,39 +124,19 @@ pub fn main_with(mods: crate::mod_api::Mods) {
             );
         },
         living_fall: |entity, kind, distance, multiplier, cancel| {
-            crate::mod_api::dispatch_living_fall(
-                crate::mod_api::mods(),
-                entity,
-                kind,
-                distance,
-                multiplier,
-                cancel,
-            );
+            crate::mod_api::dispatch_living_fall(entity, kind, distance, multiplier, cancel);
         },
         living_jump: |entity, kind| {
-            crate::mod_api::dispatch_living_jump(crate::mod_api::mods(), entity, kind);
+            crate::mod_api::dispatch_living_jump(entity, kind);
         },
         ender_entity_teleport: |entity, kind, from, target, cancel| {
-            crate::mod_api::dispatch_ender_entity_teleport(
-                crate::mod_api::mods(),
-                entity,
-                kind,
-                from,
-                target,
-                cancel,
-            );
+            crate::mod_api::dispatch_ender_entity_teleport(entity, kind, from, target, cancel);
         },
         ingredient: |kind, data, items| {
-            crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
+            crate::mod_api::dispatch_ingredient(kind, data, items);
         },
         ingredient_test: |kind, data, stack, accept| {
-            crate::mod_api::dispatch_ingredient_test(
-                crate::mod_api::mods(),
-                kind,
-                data,
-                stack,
-                accept,
-            );
+            crate::mod_api::dispatch_ingredient_test(kind, data, stack, accept);
         },
     })
     .is_err()
@@ -206,7 +144,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
     raise_open_file_limit();
-    if let Err(error) = game::run_with() {
+    if let Err(error) = game::run_with(launch) {
         // A bad command line is the caller's mistake, not a crash: no report.
         let usage = error.is::<game::UsageError>();
         log::error!("Horizon: {error}");

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "clone_item_stack",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_clone_item_stack",
+      "side": "server",
+      "host": "read",
+      "neoforge": "IBlockExtension.getCloneItemStack",
+      "mod_api": {
+        "contract": "replace",
+        "out": "stack",
+        "scope": "block",
+        "key": "state"
+      }
+    }
+  ]
+}

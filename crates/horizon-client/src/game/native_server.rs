@@ -1,29 +1,30 @@
 //! Server commands and players for native mods (docs/native-mods.md,
-//! "Server commands and players", API 8): the commands mods add to the
+//! "Server commands and players"): the commands mods add to the
 //! server's command tree (`native_register_commands`), a player's command
 //! reaching them (`native_perform_command`), and the helpers a server mod
 //! answers with: the players online, a line to one of them or to all, the
-//! command's feedback and the world's folder; and (API 9) the acting
+//! command's feedback and the world's folder; and the acting
 //! player's plain items: count, take, give. They act on the server's own
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
 use super::{Dim, Game, commands::execute, lan::LanHost};
 // Their old home, for mixin code that names them here.
+use horizon_client::mod_api::LevelRef;
 pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{
-    items::ItemStack,
-    lan::{data::component_nbt, guest::Guest},
+    command::{ArgType, Dispatcher},
+    lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     mod_api::{GameMode, NativePlayerAbilities, NativePlayerFood, PlayerRef},
     motion::PlayerMotion,
     text::Text,
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use serde_json::{Map, Value, json};
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 /// A sidebar a server mod shows one player (`native_sidebar`): its title and
 /// up to 15 lines, top first, each a text on the left and, where the score's
-/// number would be, an optional text on the right. API 49.
+/// number would be, an optional text on the right.
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct NativeSidebar {
@@ -35,20 +36,54 @@ pub(crate) struct NativeSidebar {
 /// server's scoreboard never holds it.
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
 
-/// The brigadier parser of an argument kind, and its properties.
-fn parser(kind: &str) -> Option<(&'static str, Value)> {
+/// The argument kinds a native usage may name, each with a [`parser`].
+const KINDS: [&str; 8] = [
+    "word",
+    "text",
+    "integer",
+    "number",
+    "boolean",
+    "player",
+    "item",
+    "block_pos",
+];
+
+/// The brigadier parser of an argument kind, its properties and its dispatcher type.
+fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
     Some(match kind {
-        "word" => ("brigadier:string", json!({"type": "word"})),
-        "text" => ("brigadier:string", json!({"type": "greedy"})),
-        "integer" => ("brigadier:integer", Value::Null),
-        "number" => ("brigadier:double", Value::Null),
-        "boolean" => ("brigadier:bool", Value::Null),
+        "word" => ("brigadier:string", json!({"type": "word"}), ArgType::Word),
+        "text" => (
+            "brigadier:string",
+            json!({"type": "greedy"}),
+            ArgType::Greedy,
+        ),
+        "integer" => (
+            "brigadier:integer",
+            Value::Null,
+            ArgType::Integer {
+                min: i32::MIN,
+                max: i32::MAX,
+            },
+        ),
+        "number" => (
+            "brigadier:double",
+            Value::Null,
+            ArgType::Double {
+                min: f64::MIN,
+                max: f64::MAX,
+            },
+        ),
+        "boolean" => ("brigadier:bool", Value::Null, ArgType::Bool),
         "player" => (
             "minecraft:entity",
             json!({"amount": "single", "type": "players"}),
+            ArgType::Entity {
+                single: true,
+                players: true,
+            },
         ),
-        "item" => ("minecraft:item_stack", Value::Null),
-        "block_pos" => ("minecraft:block_pos", Value::Null),
+        "item" => ("minecraft:item_stack", Value::Null, ArgType::Item),
+        "block_pos" => ("minecraft:block_pos", Value::Null, ArgType::BlockPos),
         _ => return None,
     })
 }
@@ -91,7 +126,7 @@ fn usage_nodes(usage: &str) -> Result<Vec<(String, Value, bool)>, String> {
         if optional_seen && !optional {
             return Err(format!("`{usage}`: `{word}` follows an optional argument"));
         }
-        let Some((parser, properties)) = parser(kind) else {
+        let Some((parser, properties, _)) = parser(kind) else {
             return Err(format!("`{usage}`: unknown kind `{kind}`"));
         };
         optional_seen |= optional;
@@ -141,7 +176,11 @@ pub(super) fn command_tree(
                 n["level"] = 4.into();
                 n
             });
-            if entry["type"] != node["type"] || entry["parser"] != node["parser"] {
+            // `word` and `text` share a parser; their properties tell them apart.
+            if entry["type"] != node["type"]
+                || entry["parser"] != node["parser"]
+                || entry["properties"] != node["properties"]
+            {
                 problems.push(format!(
                     "`{}`: `{name}` is another kind in an earlier usage",
                     command.usage
@@ -201,16 +240,62 @@ fn finish(children: &mut Value) {
     }
 }
 
+/// Add the already validated native report tree to the server's dispatcher.
+fn register_dispatcher(dispatcher: &mut Dispatcher, tree: &Value) {
+    fn add(dispatcher: &mut Dispatcher, parent: usize, children: &Map<String, Value>) {
+        for (name, node) in children {
+            let id = if node["type"] == "literal" {
+                dispatcher.literal(parent, name)
+            } else {
+                let ty = KINDS
+                    .into_iter()
+                    .filter_map(parser)
+                    .find_map(|(id, properties, ty)| {
+                        (node["parser"] == id && node["properties"] == properties).then_some(ty)
+                    })
+                    .expect("native command tree contains registered parsers");
+                dispatcher.argument(parent, name, ty)
+            };
+            let level = node["permissions"]["permission"]["level"]
+                .as_str()
+                .and_then(|level| LEVELS.iter().position(|known| *known == level))
+                .unwrap_or(0) as u8;
+            dispatcher.requires(id, level);
+            if node["executable"] == true {
+                dispatcher.executes(id, "native_mod_command");
+            }
+            if let Some(children) = node["children"].as_object() {
+                add(dispatcher, id, children);
+            }
+        }
+    }
+    if let Some(children) = tree["children"].as_object() {
+        add(dispatcher, 0, children);
+    }
+}
+
 /// The live player body, or a guest record outside a player swap.
-enum PlayerRead<'a> {
+pub(super) enum PlayerRead<'a> {
     Acting {
         mode: i32,
         body: Option<&'a PlayerMotion>,
+        /// The player's stored abilities, when it is a server player's turn.
+        abilities: Option<PlayerAbilities>,
+        /// Where the player last died: the acting guest's record, swapped
+        /// into the level for their turn.
+        last_death: Option<&'a (String, [i32; 3])>,
     },
     Guest(&'a Guest),
 }
 
 impl PlayerRead<'_> {
+    fn last_death(&self) -> Option<&(String, [i32; 3])> {
+        match self {
+            Self::Acting { last_death, .. } => *last_death,
+            Self::Guest(guest) => guest.last_death.as_ref(),
+        }
+    }
+
     fn mode(&self) -> i32 {
         match self {
             Self::Acting { mode, .. } => *mode,
@@ -223,8 +308,13 @@ impl PlayerRead<'_> {
     }
 
     fn may_build(&self) -> bool {
-        let mode = self.mode();
-        mode == 0 || mode == 1
+        match self {
+            Self::Acting {
+                abilities: Some(a), ..
+            } => a.may_build,
+            Self::Guest(guest) => guest.abilities.may_build,
+            Self::Acting { mode, .. } => *mode < 2,
+        }
     }
 
     fn body(&self) -> Option<&PlayerMotion> {
@@ -248,34 +338,32 @@ impl PlayerRead<'_> {
     }
 
     fn abilities(&self) -> Option<NativePlayerAbilities> {
-        let (invulnerable, flying, may_fly, fly_speed) = match self {
-            Self::Acting { body, .. } => {
+        let a = match self {
+            Self::Acting {
+                abilities: Some(a), ..
+            } => *a,
+            Self::Acting { mode, body, .. } => {
+                // No server turn: what the mode gives, with the body's flight.
                 let body = body.as_ref()?;
-                (
-                    body.invulnerable,
-                    body.flying,
-                    body.may_fly,
-                    body.flying_speed,
-                )
+                let mut a = PlayerAbilities {
+                    flying: body.flying,
+                    flying_speed: body.flying_speed,
+                    ..Default::default()
+                };
+                a.update_for_mode(*mode);
+                a.flying = body.flying;
+                a
             }
-            Self::Guest(guest) => {
-                let flags = guest.ability_flags();
-                (
-                    flags & 1 != 0,
-                    flags & 2 != 0,
-                    flags & 4 != 0,
-                    guest.flying_speed,
-                )
-            }
+            Self::Guest(guest) => guest.abilities,
         };
         Some(NativePlayerAbilities {
-            invulnerable,
-            flying,
-            may_fly,
-            instabuild: self.creative(),
-            may_build: self.may_build(),
-            fly_speed,
-            walk_speed: 0.1,
+            invulnerable: a.invulnerable,
+            flying: a.flying,
+            may_fly: a.may_fly,
+            instabuild: a.instabuild,
+            may_build: a.may_build,
+            fly_speed: a.flying_speed,
+            walk_speed: a.walking_speed,
         })
     }
 }
@@ -284,8 +372,138 @@ impl PlayerRead<'_> {
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// Resolve an online UUID on this server. During a nested player swap,
-    /// outer players whose records are displaced return None. API @API:player_read@.
+    /// Create or retrieve a connectionless player for the level currently in place.
+    pub(super) fn native_fake_player(
+        &mut self,
+        level: LevelRef,
+        uuid: u128,
+        name: &str,
+    ) -> Option<PlayerRef> {
+        if !self.native_level_in_place(level)
+            || !self.lan_guest_swaps.is_empty()
+            || !horizon_client::lan::conn::valid_name(name)
+        {
+            return None;
+        }
+        let epoch = self.native_lifecycle.epoch()?;
+        if self
+            .level
+            .player_uuid
+            .map(horizon_client::lan::playerdata::ints_uuid)
+            == Some(uuid)
+        {
+            return None;
+        }
+        let host = self.lan.as_ref()?;
+        if host
+            .hub
+            .guests
+            .iter()
+            .any(|g| g.uuid == uuid && g.participates_online())
+        {
+            return None;
+        }
+        if let Some(g) = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == uuid && g.dimension == level.dimension())
+        {
+            return (g.name == name).then_some(PlayerRef {
+                entity: crate::mod_api::EntityRef::new(epoch, g.entity_id as u32),
+                uuid,
+            });
+        }
+        let id = self.next_entity.checked_add(1)?;
+        let entity_id = i32::try_from(id).ok()?;
+        let motion = PlayerMotion::new(
+            self.motion,
+            horizon_core::geometry::Vec3::new(0.0, 0.0, 0.0),
+        )
+        .ok()?;
+        let host = self.lan.as_mut()?;
+        let conn = host.hub.lan.shared.next_id()?;
+        let mut guest = Guest::connectionless(conn, uuid, name.into(), entity_id, [0.0; 3], motion);
+        guest.dimension = level.dimension().to_owned();
+        host.hub.guests.push(guest);
+        host.play
+            .insert(conn, super::lan_actions::GuestPlay::default());
+        self.next_entity = id;
+        Some(PlayerRef {
+            entity: crate::mod_api::EntityRef::new(epoch, id),
+            uuid,
+        })
+    }
+
+    /// Discard state belonging to an already removed connectionless guest.
+    pub(super) fn cleanup_fake_player(&mut self, host: &mut super::lan::LanHost, guest: &Guest) {
+        host.play.remove(&guest.conn);
+        host.poses.remove(&guest.conn);
+        host.mob_players.retain(|_, conn| *conn != guest.conn);
+        self.destroying.remove(&guest.entity_id);
+        self.guest_combat.remove(&guest.conn);
+        self.guest_attachments.remove(&guest.conn);
+    }
+
+    /// Remove a fake without treating it as a disconnect or saving it.
+    pub(super) fn native_player_remove_fake(&mut self, player: PlayerRef) -> bool {
+        if self.native_lifecycle.epoch() != Some(player.entity.epoch())
+            || !self.lan_guest_swaps.is_empty()
+        {
+            return false;
+        }
+        let Some(mut host) = self.lan.take() else {
+            return false;
+        };
+        let index = host.hub.guests.iter().position(|g| {
+            !g.participates_online()
+                && g.uuid == player.uuid
+                && g.entity_id as u32 == player.entity.id()
+                && host
+                    .hub
+                    .holder_guest(g.uuid, &g.dimension)
+                    .is_some_and(|owner| owner.conn == g.conn)
+        });
+        let removed = if let Some(index) = index {
+            let guest = host.hub.guests.remove(index);
+            self.cleanup_fake_player(&mut host, &guest);
+            true
+        } else {
+            false
+        };
+        self.lan = Some(host);
+        removed
+    }
+
+    /// Drop the fake players belonging to a level as it closes.
+    pub(super) fn remove_level_fake_players(&mut self, dimension: &str) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        let mut i = 0;
+        while i < host.hub.guests.len() {
+            let g = &host.hub.guests[i];
+            if !g.participates_online() && g.dimension == dimension {
+                let guest = host.hub.guests.remove(i);
+                self.cleanup_fake_player(&mut host, &guest);
+            } else {
+                i += 1;
+            }
+        }
+        self.lan = Some(host);
+    }
+
+    /// Whether a live player handle names a connectionless actor.
+    pub(super) fn native_player_is_fake(&self, player: PlayerRef) -> Option<bool> {
+        match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } => Some(self.lan_acting_fake),
+            PlayerRead::Guest(guest) => Some(!guest.participates_online()),
+        }
+    }
+
+    /// Resolve a real online player by UUID, never a fake. A fake is reached
+    /// through the handle returned by its factory. During a nested player swap,
+    /// outer players whose records are displaced return None.
     pub(super) fn native_player_ref(&self, uuid: u128) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let (_, id) = self.player_lookup(uuid)?;
@@ -296,18 +514,23 @@ impl Game<'_> {
     }
 
     fn player_lookup(&self, uuid: u128) -> Option<(PlayerRead<'_>, u32)> {
-        if self.lan_acting_uuid == Some(uuid) {
+        if self.lan_acting_uuid == Some(uuid) && !self.lan_acting_fake {
             return Some((
                 PlayerRead::Acting {
                     mode: self.mode_id(),
                     body: self.player.as_ref(),
+                    abilities: self.acting_abilities,
+                    last_death: self.level.last_death.as_ref(),
                 },
                 self.lan_acting_entity?,
             ));
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
             host.hub.guests.iter().find(|guest| {
-                guest.placed && guest.uuid == uuid && !self.lan_guest_swaps.contains(&guest.conn)
+                guest.placed
+                    && guest.participates_online()
+                    && guest.uuid == uuid
+                    && !self.lan_guest_swaps.contains(&guest.conn)
             })
         }) {
             return Some((PlayerRead::Guest(guest), guest.entity_id as u32));
@@ -325,6 +548,8 @@ impl Game<'_> {
                 PlayerRead::Acting {
                     mode: self.mode_id(),
                     body: Some(body),
+                    abilities: self.acting_abilities,
+                    last_death: self.level.last_death.as_ref(),
                 },
                 body.entity_id as u32,
             ));
@@ -332,10 +557,41 @@ impl Game<'_> {
         None
     }
 
-    fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
+    /// The dimension id and block of the player's last death, through the
+    /// shared player resolver. None for a stale or unavailable player.
+    pub(super) fn native_player_last_death_record(
+        &self,
+        player: PlayerRef,
+    ) -> Option<(String, [i32; 3])> {
+        self.player_handle_read(player)?.last_death().cloned()
+    }
+
+    pub(super) fn player_handle_read(&self, player: PlayerRef) -> Option<PlayerRead<'_>> {
         (self.native_lifecycle.epoch()? == player.entity.epoch()).then_some(())?;
-        let (read, id) = self.player_lookup(player.uuid)?;
-        (id == player.entity.id()).then_some(read)
+        if self.lan_acting_fake
+            && self.lan_acting_uuid == Some(player.uuid)
+            && self.lan_acting_entity == Some(player.entity.id())
+        {
+            return Some(PlayerRead::Acting {
+                mode: self.mode_id(),
+                body: self.player.as_ref(),
+                abilities: self.acting_abilities,
+                last_death: self.level.last_death.as_ref(),
+            });
+        }
+        if let Some((read, id)) = self.player_lookup(player.uuid)
+            && id == player.entity.id()
+        {
+            return Some(read);
+        }
+        let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
+            guest.placed
+                && !guest.participates_online()
+                && guest.uuid == player.uuid
+                && guest.entity_id as u32 == player.entity.id()
+                && !self.lan_guest_swaps.contains(&guest.conn)
+        })?;
+        Some(PlayerRead::Guest(guest))
     }
 
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
@@ -346,9 +602,8 @@ impl Game<'_> {
 
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
     /// `/gamemode` do, including the cancellable change hook and ability
-    /// updates. Returns false for a stale or unavailable player, another
-    /// player during a swap, no change, or a canceled change. API
-    /// @API:player_game_mode_write@.
+    /// updates. Returns false for a stale or unavailable player, an active
+    /// outer guest, no change, or a canceled change.
     pub(super) fn native_player_set_game_mode(
         &mut self,
         player: PlayerRef,
@@ -358,14 +613,65 @@ impl Game<'_> {
             return false;
         }
         let mut changed = false;
-        self.native_as_player(player.uuid, |game| {
+        self.native_as_player_handle(player, |game| {
             changed = game.set_game_mode(super::game_mode::mode_from_id(mode.id()));
         }) && changed
+    }
+
+    /// Stores a server player's `Abilities` and tells their client
+    /// (`ServerPlayer.onUpdateAbilities`). They stay as written until the
+    /// player's game mode changes (`GameType.updatePlayerAbilities`), and are
+    /// saved with the player. A speed that is not finite refuses the write
+    /// (vanilla's setters take any float). Returns false for a
+    /// stale or unavailable player, a displaced outer player, and a speed
+    /// that is not finite.
+    pub(super) fn native_player_set_abilities(
+        &mut self,
+        player: PlayerRef,
+        abilities: NativePlayerAbilities,
+    ) -> bool {
+        if !abilities.fly_speed.is_finite() || !abilities.walk_speed.is_finite() {
+            return false;
+        }
+        let stored = PlayerAbilities {
+            invulnerable: abilities.invulnerable,
+            flying: abilities.flying,
+            may_fly: abilities.may_fly,
+            instabuild: abilities.instabuild,
+            may_build: abilities.may_build,
+            flying_speed: abilities.fly_speed,
+            walking_speed: abilities.walk_speed,
+        };
+        if self.player_handle_read(player).is_none() {
+            return false;
+        }
+        let mut stored_here = false;
+        self.native_as_player_handle(player, |game| {
+            let Some(slot) = game.acting_abilities.as_mut() else {
+                return;
+            };
+            *slot = stored;
+            if let Some(body) = game.player.as_mut() {
+                body.invulnerable = stored.invulnerable;
+                body.may_fly = stored.may_fly;
+                body.flying = stored.flying;
+                body.flying_speed = stored.flying_speed;
+            }
+            stored_here = true;
+        }) && stored_here
     }
 
     /// `Player.isCreative`; Paper `HumanEntity#getGameMode`.
     pub(super) fn native_player_is_creative(&self, player: PlayerRef) -> Option<bool> {
         Some(self.player_handle_read(player)?.creative())
+    }
+
+    /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
+    pub(super) fn native_player_selected_slot(&self, player: PlayerRef) -> Option<usize> {
+        Some(match self.player_handle_read(player)? {
+            PlayerRead::Acting { .. } => self.selected,
+            PlayerRead::Guest(guest) => guest.selected,
+        })
     }
 
     /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.
@@ -386,7 +692,6 @@ impl Game<'_> {
     }
 
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
-    /// Horizon currently keeps no per-player walk speed and sends 0.1.
     pub(super) fn native_player_abilities(
         &self,
         player: PlayerRef,
@@ -401,9 +706,7 @@ impl Game<'_> {
             return Vec::new();
         };
         host.hub
-            .guests
-            .iter()
-            .filter(|g| g.placed)
+            .online_players()
             .map(|g| NativeServerPlayer {
                 uuid: g.uuid,
                 name: g.name.clone(),
@@ -423,7 +726,7 @@ impl Game<'_> {
         self.native_send(uuid, system_chat(&line))
     }
     /// A line over that player's hotbar (the action bar), also inside a
-    /// player's hook for the acting player; false when they aren't on. API 21.
+    /// player's hook for the acting player; false when they aren't on.
     pub(super) fn native_action_bar(&mut self, uuid: u128, line: Text) -> bool {
         let packet = C::SystemChat(play::SystemChat {
             content: component_nbt(&line.component()),
@@ -437,14 +740,14 @@ impl Game<'_> {
         self.native_send_all(uuid, vec![packet])
     }
     fn native_send_all(&mut self, uuid: u128, packets: Vec<C>) -> bool {
-        if self.lan_acting_uuid == Some(uuid) {
+        if self.lan_acting_uuid == Some(uuid) && !self.lan_acting_fake {
             self.guest_packets.extend(packets);
             return true;
         }
         let Some(host) = &self.lan else {
             return false;
         };
-        let Some(g) = host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid) else {
+        let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) else {
             return false;
         };
         for packet in &packets {
@@ -458,7 +761,7 @@ impl Game<'_> {
     /// see it, and it is gone when they leave (a mod sends it again when
     /// they come back). It takes the sidebar's place from an objective the
     /// world shows there, for this player, until they rejoin. False when
-    /// they aren't on. API 49.
+    /// they aren't on.
     pub(super) fn native_sidebar(&mut self, uuid: u128, sidebar: Option<&NativeSidebar>) -> bool {
         let objective = SIDEBAR_OBJECTIVE.to_owned();
         // Removed first, so the new one's lines replace all the old ones.
@@ -500,7 +803,7 @@ impl Game<'_> {
     }
     /// The lines over and under that player's list of players (Tab):
     /// `ClientboundTabListPacket`, an empty text for none. False when they
-    /// aren't on. API 49.
+    /// aren't on.
     pub(super) fn native_tab_list(&mut self, uuid: u128, header: &Text, footer: &Text) -> bool {
         let packet = C::TabList(play::TabList {
             header: component_nbt(&header.component()),
@@ -511,7 +814,7 @@ impl Game<'_> {
     /// The server's tick rate (20 unless `/tick rate` changed it) and the
     /// milliseconds its ticks took on average lately, as `/tick query`
     /// reports them. The ticks a second it keeps up is the rate, or
-    /// 1000 / milliseconds when that is lower. API 49.
+    /// 1000 / milliseconds when that is lower.
     pub(super) fn native_tick_stats(&self) -> (f32, f64) {
         (
             self.clock.rate(),
@@ -523,12 +826,12 @@ impl Game<'_> {
     /// needs asleep, as a spectator is (an away-from-keyboard mod). Kept
     /// until a mod sets it back or the server stops, also if they leave and
     /// come back. Only where no player's state is swapped in, as
-    /// `native_run_command`; false there and when they aren't on. API 49.
+    /// `native_run_command`; false there and when they aren't on.
     pub(super) fn native_sleep_ignored(&mut self, uuid: u128, ignored: bool) -> bool {
         let Some(host) = &mut self.lan else {
             return false;
         };
-        if !host.hub.guests.iter().any(|g| g.placed && g.uuid == uuid) {
+        if !host.hub.online_players().any(|g| g.uuid == uuid) {
             return false;
         }
         if ignored {
@@ -547,7 +850,6 @@ impl Game<'_> {
     /// for a player who is off (who joins hidden), until a mod sets it again
     /// or the server stops. Works anywhere on a server, inside a player's
     /// hook too; false on a client and in a world nobody else can join.
-    /// API 314.
     pub(super) fn native_hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
         let Some(host) = &mut self.lan else {
             return false;
@@ -565,13 +867,12 @@ impl Game<'_> {
     /// sets it again or the server stops (also if they leave and come back).
     /// Plain text: the mod checks it (`native_text_allowed`, its length,
     /// other players' names). Only where no player's state is swapped in,
-    /// as `native_run_command`; false there and when they aren't on. API
-    /// 62.
+    /// as `native_run_command`; false there and when they aren't on.
     pub(super) fn native_set_nickname(&mut self, uuid: u128, nickname: Option<&str>) -> bool {
         let Some(host) = &mut self.lan else {
             return false;
         };
-        if !host.hub.guests.iter().any(|g| g.placed && g.uuid == uuid) {
+        if !host.hub.online_players().any(|g| g.uuid == uuid) {
             return false;
         }
         host.hub.set_nickname(uuid, nickname.map(str::to_owned));
@@ -579,7 +880,7 @@ impl Game<'_> {
     }
     /// Whether the server's chat filter (`server.toml` `[chat_filter]`)
     /// lets `text` through: true without a filter, None inside a player's
-    /// hook (where the server is out of reach). API 62.
+    /// hook (where the server is out of reach).
     pub(super) fn native_text_allowed(&self, text: &str) -> Option<bool> {
         let host = self.lan.as_ref()?;
         Some(
@@ -615,7 +916,6 @@ impl Game<'_> {
     /// `[discord] events` lists `announce`: `name` and `uuid` say who it is
     /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
     /// Only on a dedicated server; false elsewhere and for an empty message.
-    /// API 163.
     pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
         if self.options.dedicated.is_none() || message.trim().is_empty() {
             return false;
@@ -634,8 +934,8 @@ impl Game<'_> {
     }
     /// The player whose action or command a hook hears, as their state is
     /// swapped in (`native_perform_command`, `native_right_click_block`,
-    /// `native_use_item_on`, `native_destroy_block`...): None outside such a
-    /// hook. API 21.
+    /// `native_use_on`, `native_destroy_block`...): None outside such a
+    /// hook.
     pub(super) fn native_acting_player(&self) -> Option<NativeServerPlayer> {
         let p = self.player.as_ref()?;
         Some(NativeServerPlayer {
@@ -654,11 +954,11 @@ impl Game<'_> {
     /// level 4, from the overworld's spawn, with no output. A teleport to
     /// another level (`execute in minecraft:the_nether run tp Alex 0 70 0`)
     /// happens at the next tick's start, as the console's. Whether it ran
-    /// without failing. Only where no player's state is swapped in
-    /// (`native_tick`, `native_menu_clicked`): false inside a player's hook,
-    /// where the other players are out of reach. API 21.
+    /// without failing. During a guest's turn, live players (including the
+    /// acting player) are reachable; displaced outer players are excluded
+    /// from name, UUID and selector resolution on this path only.
     pub(super) fn native_run_command(&mut self, line: &str) -> bool {
-        if self.lan_acting.is_some() || self.lan.is_none() {
+        if self.lan.is_none() {
             return false;
         }
         let server = execute::Source {
@@ -666,7 +966,9 @@ impl Game<'_> {
             ..self.server_source()
         };
         let outer = self.command_source.replace(server);
+        let filter = std::mem::replace(&mut self.native_command_filter, true);
         let ok = self.as_console(|g| g.run_command(line));
+        self.native_command_filter = filter;
         self.command_source = outer;
         ok
     }
@@ -675,269 +977,6 @@ impl Game<'_> {
     /// backups carry it. None when no world is open.
     pub(super) fn native_world_dir(&self) -> Option<PathBuf> {
         (!self.world_root.as_os_str().is_empty()).then(|| self.world_root.clone())
-    }
-}
-
-/// Plain stacks: no components beyond the count (no damage, name,
-/// enchantment...), the only ones the item helpers count, take or give, so
-/// a mod never prices a worn or enchanted item as a new one.
-fn plain(stack: &ItemStack) -> bool {
-    stack.damage == 0 && stack.extra.is_none()
-}
-
-/// The slots the item helpers look at, in `Inventory.add`'s order: the
-/// selected slot, the off hand, then the hotbar and the main inventory.
-fn order(selected: usize) -> impl Iterator<Item = usize> {
-    std::iter::once(selected)
-        .chain(std::iter::once(OFFHAND))
-        .chain((0..36).filter(move |&i| i != selected))
-}
-const OFFHAND: usize = 36;
-
-/// The 36 inventory slots and the off hand as one list ([`OFFHAND`] last).
-fn slots<'a>(
-    inventory: &'a mut [Option<ItemStack>],
-    offhand: &'a mut Option<ItemStack>,
-) -> Vec<&'a mut Option<ItemStack>> {
-    inventory
-        .iter_mut()
-        .take(36)
-        .chain(std::iter::once(offhand))
-        .collect()
-}
-
-/// How many of plain `item` the slots hold.
-fn count_in(slots: &[&mut Option<ItemStack>], item: &str) -> u32 {
-    slots
-        .iter()
-        .filter_map(|s| s.as_ref())
-        .filter(|s| &*s.item == item && plain(s))
-        .map(|s| s.count)
-        .sum()
-}
-
-/// Takes up to `count` plain `item`, selected slot first; what it took.
-fn take_from(
-    mut slots: Vec<&mut Option<ItemStack>>,
-    selected: usize,
-    item: &str,
-    count: u32,
-) -> u32 {
-    let mut taken = 0;
-    for i in order(selected) {
-        let slot = &mut *slots[i];
-        if let Some(s) = slot
-            && &*s.item == item
-            && plain(s)
-        {
-            let n = s.count.min(count - taken);
-            s.count -= n;
-            taken += n;
-            if s.count == 0 {
-                *slot = None;
-            }
-        }
-        if taken == count {
-            break;
-        }
-    }
-    taken
-}
-
-/// How many plain `item` (stacking to `max`) still fit.
-fn room_in(slots: &[&mut Option<ItemStack>], item: &str, max: u32) -> u32 {
-    slots
-        .iter()
-        .enumerate()
-        .map(|(i, s)| match s.as_ref() {
-            // getFreeSlot: never into an empty off hand.
-            None if i == OFFHAND => 0,
-            None => max,
-            Some(s) if &*s.item == item && plain(s) => max.saturating_sub(s.count),
-            Some(_) => 0,
-        })
-        .sum()
-}
-
-/// Adds up to `count` plain `item`, onto its stacks first
-/// (`getSlotWithRemainingSpace`: the off hand's too), then into empty slots
-/// of the inventory (`getFreeSlot`), in [`order`]; what it added. Nothing
-/// is dropped.
-fn add_to(
-    mut slots: Vec<&mut Option<ItemStack>>,
-    selected: usize,
-    item: &str,
-    max: u32,
-    count: u32,
-) -> u32 {
-    let mut added = 0;
-    for pass in 0..2 {
-        for i in order(selected) {
-            let slot = &mut *slots[i];
-            let n = match slot {
-                Some(s) if pass == 0 && &*s.item == item && plain(s) => {
-                    let n = max.saturating_sub(s.count).min(count - added);
-                    s.count += n;
-                    n
-                }
-                None if pass == 1 && i != OFFHAND => {
-                    let n = max.min(count - added);
-                    *slot = Some(ItemStack {
-                        item: item.into(),
-                        count: n,
-                        damage: 0,
-                        extra: None,
-                    });
-                    n
-                }
-                _ => 0,
-            };
-            added += n;
-            if added == count {
-                return added;
-            }
-        }
-    }
-    added
-}
-
-/// The acting player's items, for server mods (API 9): the player whose
-/// action or command a hook hears (`native_perform_command`), as their
-/// state is swapped in. Only plain stacks count; the inventory's 36 slots
-/// and the off hand, never the armour. Each change reaches the player's
-/// screen as any change to their inventory does.
-#[allow(dead_code)]
-impl Game<'_> {
-    /// The main hand's stack: its item, count, and whether it is plain. On a
-    /// client, the player's own.
-    pub(super) fn native_held(&self) -> Option<(String, u32, bool)> {
-        let s = self.inventory.get(self.selected)?.as_ref()?;
-        Some((s.item.to_string(), s.count, plain(s)))
-    }
-    /// How many of plain `item` (`minecraft:diamond`) the player carries.
-    pub(super) fn native_count_items(&mut self, item: &str) -> u32 {
-        count_in(&slots(&mut self.inventory, &mut self.offhand), item)
-    }
-    /// Every plain item the player carries, with how many, by id.
-    pub(super) fn native_carried_items(&self) -> Vec<(String, u32)> {
-        let mut out: Vec<(String, u32)> = Vec::new();
-        let held = self
-            .inventory
-            .iter()
-            .take(36)
-            .chain(std::iter::once(&self.offhand));
-        for s in held.flatten().filter(|s| plain(s)) {
-            match out.iter_mut().find(|(i, _)| *i == *s.item) {
-                Some((_, n)) => *n += s.count,
-                None => out.push((s.item.to_string(), s.count)),
-            }
-        }
-        out
-    }
-    /// Takes up to `count` plain `item`, the main hand first; what it took.
-    pub(super) fn native_take_items(&mut self, item: &str, count: u32) -> u32 {
-        if self.player.is_none() {
-            return 0;
-        }
-        let selected = self.selected;
-        take_from(
-            slots(&mut self.inventory, &mut self.offhand),
-            selected,
-            item,
-            count,
-        )
-    }
-    /// How many plain `item` still fit; 0 for an unknown item.
-    pub(super) fn native_room_for(&mut self, item: &str) -> u32 {
-        let Some(max) = self.res.items().get(item).map(|i| i.max_stack) else {
-            return 0;
-        };
-        room_in(
-            &slots(&mut self.inventory, &mut self.offhand),
-            item,
-            max.max(1),
-        )
-    }
-    /// Gives up to `count` plain `item` where they fit, as `Inventory.add`
-    /// places them; what it gave (nothing is dropped). 0 for an unknown item.
-    pub(super) fn native_give_items(&mut self, item: &str, count: u32) -> u32 {
-        let Some(max) = self.res.items().get(item).map(|i| i.max_stack) else {
-            return 0;
-        };
-        if self.player.is_none() {
-            return 0;
-        }
-        let selected = self.selected;
-        add_to(
-            slots(&mut self.inventory, &mut self.offhand),
-            selected,
-            item,
-            max.max(1),
-            count,
-        )
-    }
-    /// Gives `stack` whole (its damage, name, enchantments... kept) to the
-    /// player `uuid`, as `Inventory.add` places it: onto equal stacks first,
-    /// then into empty inventory slots, never the armour or an empty off
-    /// hand. What did not fit comes back (nothing is dropped): all of it for
-    /// a player who isn't here, is dead, or whose state is swapped out by
-    /// another player's (inside that player's hook, only they are reached).
-    /// The player's screen follows as for any change to their inventory.
-    /// What an auto-pickup or a machine's output to a player needs, from any
-    /// server hook. API 98.
-    pub(super) fn native_give_stack(
-        &mut self,
-        uuid: u128,
-        mut stack: ItemStack,
-    ) -> Option<ItemStack> {
-        if stack.count == 0 {
-            return None;
-        }
-        if uuid == self.native_acting_id() {
-            // Their state is in place: the host's, or a guest's swapped in.
-            if self
-                .player
-                .as_ref()
-                .is_none_or(|p| p.health.health() <= 0.0)
-            {
-                return Some(stack);
-            }
-            return self.give(stack);
-        }
-        // Inside a player's hook their state is in place and the records of
-        // the others may hold swapped state (turns nest): only they are
-        // reached, as the doc says.
-        if self.lan_acting.is_some() {
-            return Some(stack);
-        }
-        let max = self
-            .res
-            .items()
-            .get(&stack.item)
-            .map_or(64, |i| i.max_stack);
-        let Some(host) = self.lan.as_mut() else {
-            return Some(stack);
-        };
-        let Some(g) = host
-            .hub
-            .guests
-            .iter_mut()
-            .find(|g| g.placed && !g.dead && g.uuid == uuid)
-        else {
-            return Some(stack);
-        };
-        // inventory_add indexes the 36 main slots.
-        if g.inventory.len() < 36 {
-            g.inventory.resize(36, None);
-        }
-        let left = super::inventory_add(
-            &mut g.inventory,
-            &mut g.offhand,
-            g.selected,
-            max,
-            &mut stack,
-        );
-        left.then_some(stack)
     }
 }
 
@@ -965,13 +1004,13 @@ fn orb_meets(position: [f64; 3], min: [f64; 3], max: [f64; 3]) -> bool {
         && position[2] + 0.25 > min[2]
 }
 
-/// Experience for server mods. API 101.
+/// Experience for server mods.
 #[allow(dead_code)]
 impl Game<'_> {
     /// The experience orbs of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: what a mod reads before it
     /// cancels an orb in `native_entity_join_level`, to give its points with
-    /// `native_give_experience`. Empty for a level not in place and on a
+    /// `PlayerRef::give_experience_points`. Empty for a level not in place and on a
     /// client of a server.
     pub(super) fn native_experience_orbs(
         &self,
@@ -998,7 +1037,7 @@ impl Game<'_> {
     }
     /// Writes the experience orb `id`'s `value` (the points a pickup gives), `count`
     /// (orbs merged into it, each worth `value`) and `age` (ticks lived; an orb
-    /// despawns at 6000); a `None` is left as it is. API 128.
+    /// despawns at 6000); a `None` is left as it is.
     /// False, and nothing written, for an orb not in the server level `dimension`, a
     /// `value` or `count` of 0, and on a client of a server.
     pub(super) fn native_set_experience_orb(
@@ -1024,36 +1063,36 @@ impl Game<'_> {
         orb.age = age.unwrap_or(orb.age);
         true
     }
-    /// Gives `points` of experience to the player `uuid` as an orb they touch
-    /// does (`ExperienceOrb.playerTouch`): Mending repairs their damaged items
-    /// with it first (`repairPlayerItems`), then the rest goes to their
-    /// experience (`Player.giveExperiencePoints`), with the level-up sound
-    /// every fifth level. No orb pickup sound. False, and nothing given, for
-    /// a player who isn't here or is dead, and for another player than the one
-    /// whose state is swapped in (inside that player's hook, only they are
-    /// reached), and while the server's player list is busy elsewhere in the
-    /// tick: give first, and cancel an orb only when this returned true.
-    /// Their bar follows as for any change to their experience.
-    pub(super) fn native_give_experience(&mut self, uuid: u128, points: u32) -> bool {
-        self.native_as_player(uuid, |game| {
-            let rest = if points > 0 { game.mending(points) } else { 0 };
-            if rest > 0 {
-                game.give_experience_points(rest as i32);
+    pub(super) fn native_as_player_handle(
+        &mut self,
+        player: PlayerRef,
+        f: impl FnOnce(&mut Self),
+    ) -> bool {
+        let Some(read) = self.player_handle_read(player) else {
+            return false;
+        };
+        let conn = match read {
+            PlayerRead::Acting { .. } => None,
+            PlayerRead::Guest(g) if !g.dead => Some(g.conn),
+            PlayerRead::Guest(_) => return false,
+        };
+        let Some(conn) = conn else {
+            if self
+                .player
+                .as_ref()
+                .is_none_or(|p| p.health.health() <= 0.0)
+            {
+                return false;
             }
-        })
+            f(self);
+            return true;
+        };
+        self.as_guest(conn, f).is_some()
     }
-    /// Adds `levels` to the player `uuid`'s level, or takes them off when
-    /// negative (`Player.giveExperienceLevels`): what the anvil and the
-    /// enchanting table charge with, and a mod can charge or reward with.
-    /// Below level 0 the level and the points are 0. The progress toward the
-    /// next level is kept. False, and nothing changed, as for
-    /// `native_give_experience`.
-    pub(super) fn native_give_levels(&mut self, uuid: u128, levels: i32) -> bool {
-        self.native_as_player(uuid, |game| game.give_levels(levels))
-    }
+
     /// Runs `f` with the player `uuid`'s state in place: theirs already when
     /// they are the acting player (the host, or a guest swapped in), else a
-    /// guest's through `as_guest`, only where no other player is swapped in.
+    /// guest's through `as_guest`, including within another guest's turn.
     /// False when it didn't run: no such player here, or dead.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
         if uuid == self.native_acting_id() {
@@ -1067,23 +1106,15 @@ impl Game<'_> {
             f(self);
             return true;
         }
-        if self.lan_acting.is_some() {
-            return false;
-        }
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return false;
         };
         let conn = host
             .hub
-            .guests
-            .iter()
-            .find(|g| g.placed && !g.dead && g.uuid == uuid)
+            .holder_guest(uuid, self.dim.id())
+            .filter(|g| !g.dead)
             .map(|g| g.conn);
-        let ran = conn
-            .and_then(|conn| self.as_guest(&mut host, conn, f))
-            .is_some();
-        self.lan = Some(host);
-        ran
+        conn.and_then(|conn| self.as_guest(conn, f)).is_some()
     }
 }
 
@@ -1094,30 +1125,56 @@ fn system_chat(line: &Text) -> C {
     })
 }
 
+/// Native command metadata and the server dispatcher containing their parsed usages.
+pub(super) struct NativeCommands {
+    levels: HashMap<String, u8>,
+    pub(super) dispatcher: Arc<Dispatcher>,
+}
+
 /// Where the game calls the server hook points.
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
     /// player's command tree.
-    pub(super) fn register_native_commands(&mut self, host: &mut LanHost) {
-        if host.native_commands.is_some() {
+    pub(super) fn register_native_commands(&mut self) {
+        if self
+            .lan
+            .as_ref()
+            .is_none_or(|host| host.native_commands.is_some())
+        {
             return;
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let (tree, levels, problems) =
-            command_tree(&commands, |name| host.hub.vanilla_command(name));
+        let vanilla = horizon_client::command::vanilla::game_dispatcher_with_features(
+            &self.level.enabled_features,
+        );
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        let (tree, levels, problems) = command_tree(&commands, |name| {
+            host.hub.vanilla_command(name) || vanilla.find(name).is_some()
+        });
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree);
+        let dispatcher = Arc::new(dispatcher);
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
         host.hub.set_mod_commands(0, tree);
-        host.native_commands = Some(levels);
+        host.native_commands = Some(NativeCommands { levels, dispatcher });
     }
 
     /// Asks the mods what root commands each player's tree keeps
     /// (`native_player_commands_sent`) and stores the answer in the hub,
     /// which sends the trees without what the mods took out: for `only`, or
     /// for every placed player.
-    pub(super) fn native_filter_commands(&mut self, host: &mut LanHost, only: Option<u32>) {
+    pub(super) fn native_filter_commands(&mut self, only: Option<u32>) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let players: Vec<(u32, u128, String)> = host
             .hub
             .guests
@@ -1126,6 +1183,9 @@ impl Game<'_> {
             .map(|g| (g.conn, g.uuid, g.name.clone()))
             .collect();
         for (conn, uuid, name) in players {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let names = host.hub.command_names(conn);
             let mut kept = names.clone();
             let placed = host.hub.guest(conn).is_some_and(|g| g.placed);
@@ -1135,11 +1195,11 @@ impl Game<'_> {
             } else if self.lan_acting == Some(conn) {
                 self.native_player_commands_sent(uuid, &name, &mut kept);
             } else {
-                self.as_guest(host, conn, |g| {
+                self.as_guest(conn, |g| {
                     g.native_player_commands_sent(uuid, &name, &mut kept);
                 });
             }
-            if let Some(g) = host.hub.guest_mut(conn) {
+            if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
                 g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
             }
         }
@@ -1147,20 +1207,41 @@ impl Game<'_> {
 
     /// `Hub::resend_commands` with the mods' say on each tree.
     pub(super) fn resend_commands_filtered(&mut self) {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
         host.hub.refresh_permissions();
-        self.native_filter_commands(&mut host, None);
-        host.hub.resend_commands();
-        self.lan = Some(host);
+        self.native_filter_commands(None);
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.resend_commands();
+        }
     }
 
     /// The level a guest needs for a mod's command (`line`, without its
     /// slash), when a mod registered it.
     pub(super) fn native_command_level(host: &LanHost, line: &str) -> Option<u8> {
         let name = line.split(' ').next().unwrap_or_default();
-        host.native_commands.as_ref()?.get(name).copied()
+        host.native_commands.as_ref()?.levels.get(name).copied()
+    }
+
+    /// Parse a registered command using the source's permission before dispatching it.
+    fn native_command_valid(&mut self, line: &str, permission: u8) -> bool {
+        let Some(commands) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.native_commands.as_ref())
+        else {
+            return false;
+        };
+        let dispatcher = commands.dispatcher.clone();
+        let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
+        let parse = dispatcher.parse(line, &self.ui.registries);
+        self.ui.registries.permission = previous;
+        if let Err(error) = parse.executable() {
+            self.syntax_failure(&error, line);
+            return false;
+        }
+        true
     }
 
     /// A guest's command for the mods, inside their swap
@@ -1186,6 +1267,9 @@ impl Game<'_> {
             yaw: g.yaw,
             pitch: g.pitch,
         };
+        if !self.native_command_valid(line, permission) {
+            return true;
+        }
         let mut ran = false;
         self.native_perform_command(&player, line, &mut ran);
         if !ran {
@@ -1211,6 +1295,9 @@ impl Game<'_> {
         if Self::native_command_level(host, line).is_none() {
             return false;
         }
+        if !self.native_command_valid(line, 4) {
+            return true;
+        }
         let mut ran = false;
         self.native_perform_console_command(line, &mut ran);
         if !ran {
@@ -1226,6 +1313,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_client::items::ItemStack;
 
     fn player_guest() -> Guest {
         use horizon_client::lan::{Joined, PlayerSender};
@@ -1256,7 +1344,7 @@ mod tests {
     #[test]
     fn player_reads_use_guest_mode_and_abilities() {
         let mut guest = player_guest();
-        guest.flying_speed = 0.08;
+        guest.abilities.flying_speed = 0.08;
         let read = PlayerRead::Guest(&guest);
         assert_eq!(read.mode(), 0);
         assert_eq!(
@@ -1277,7 +1365,8 @@ mod tests {
             })
         );
         guest.game_mode = 1;
-        guest.flying = true;
+        guest.abilities.update_for_mode(1);
+        guest.abilities.flying = true;
         let read = PlayerRead::Guest(&guest);
         assert_eq!(read.mode(), 1);
         assert_eq!(
@@ -1293,6 +1382,7 @@ mod tests {
             })
         );
         guest.game_mode = 3;
+        guest.abilities.update_for_mode(3);
         let abilities = PlayerRead::Guest(&guest).abilities().unwrap();
         assert!(!abilities.may_build && !abilities.instabuild && abilities.may_fly);
     }
@@ -1308,59 +1398,6 @@ mod tests {
             damage: 0,
             extra: None,
         })
-    }
-
-    #[test]
-    fn items_are_taken_from_the_hand_first_and_only_plain() {
-        let mut inv = vec![None; 36];
-        inv[0] = stack("minecraft:diamond", 10);
-        inv[4] = stack("minecraft:diamond", 5);
-        inv[8] = stack("minecraft:diamond", 7);
-        inv[8].as_mut().unwrap().damage = 3;
-        let mut off = stack("minecraft:diamond", 2);
-        assert_eq!(
-            count_in(&slots(&mut inv, &mut off), "minecraft:diamond"),
-            17
-        );
-        assert_eq!(
-            take_from(slots(&mut inv, &mut off), 4, "minecraft:diamond", 6),
-            6
-        );
-        assert!(inv[4].is_none(), "the selected slot first");
-        assert_eq!(off.as_ref().unwrap().count, 1, "then the off hand");
-        assert_eq!(
-            take_from(slots(&mut inv, &mut off), 4, "minecraft:diamond", 100),
-            11
-        );
-        assert_eq!(inv[8].as_ref().unwrap().count, 7, "a damaged stack stays");
-        assert!(inv[0].is_none() && off.is_none());
-    }
-
-    #[test]
-    fn items_are_given_only_where_they_fit() {
-        let mut inv = vec![stack("minecraft:dirt", 64); 36];
-        inv[3] = stack("minecraft:diamond", 60);
-        inv[9] = None;
-        let mut off = None;
-        assert_eq!(
-            room_in(&slots(&mut inv, &mut off), "minecraft:diamond", 64),
-            4 + 64
-        );
-        assert_eq!(
-            add_to(slots(&mut inv, &mut off), 0, "minecraft:diamond", 64, 200),
-            68
-        );
-        assert_eq!(inv[3].as_ref().unwrap().count, 64, "onto its stack first");
-        assert!(off.is_none(), "never into an empty off hand (getFreeSlot)");
-        assert_eq!(inv[9].as_ref().unwrap().count, 64);
-        assert_eq!(
-            room_in(&slots(&mut inv, &mut off), "minecraft:diamond", 64),
-            0
-        );
-        assert_eq!(
-            add_to(slots(&mut inv, &mut off), 0, "minecraft:diamond", 64, 1),
-            0
-        );
     }
 
     #[test]
@@ -1444,6 +1481,102 @@ mod tests {
         assert!(c["pay"].get("permissions").is_none());
         assert_eq!(levels["eco"], 3);
         assert_eq!(levels["pay"], 0);
+    }
+
+    #[test]
+    fn a_usage_with_another_string_kind_is_left_out_in_either_order() {
+        for (first, second, line, other) in [
+            (
+                "foo <value:word>",
+                "foo <value:text>",
+                "foo hello",
+                "foo hello world",
+            ),
+            (
+                "foo <value:text>",
+                "foo <value:word>",
+                "foo hello world",
+                "foo hello",
+            ),
+        ] {
+            let (tree, _, problems) =
+                tree(&[NativeCommand::new(first), NativeCommand::new(second)]);
+            assert_eq!(problems.len(), 1, "{first} then {second}: {problems:?}");
+            assert!(problems[0].starts_with(&format!("`{second}`")));
+            let mut dispatcher = Dispatcher::new();
+            register_dispatcher(&mut dispatcher, &tree);
+            let registries = horizon_client::command::Registries::default();
+            assert!(dispatcher.parse(line, &registries).executable().is_ok());
+            // The kept kind decides: `word` stops at the space, `text` takes it all.
+            let kept_greedy = first.contains(":text");
+            assert_eq!(
+                dispatcher.parse(other, &registries).executable().is_ok(),
+                kept_greedy,
+                "{first} then {second}: {other}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_supported_kind_has_a_parser() {
+        assert!(KINDS.into_iter().all(|kind| parser(kind).is_some()));
+    }
+
+    #[test]
+    fn native_usages_parse_with_their_permissions_in_the_server_dispatcher() {
+        let (tree, _, problems) = tree(&[
+            NativeCommand::new("warp [name:word]"),
+            NativeCommand::op("warp set <amount:integer>", 2),
+            NativeCommand::new("toggle <enabled:boolean>"),
+        ]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree);
+        let mut registries = horizon_client::command::Registries::default();
+        assert!(dispatcher.parse("warp", &registries).executable().is_ok());
+        assert!(
+            dispatcher
+                .parse("warp home", &registries)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            dispatcher
+                .parse("warp set 7", &registries)
+                .executable()
+                .is_err()
+        );
+        registries.permission = 2;
+        assert!(
+            dispatcher
+                .parse("warp set 7", &registries)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            dispatcher
+                .parse("warp set nope", &registries)
+                .executable()
+                .is_err()
+        );
+        assert!(
+            dispatcher
+                .parse("warp set", &registries)
+                .executable()
+                .is_err()
+        );
+        assert!(
+            dispatcher
+                .parse("toggle true", &registries)
+                .executable()
+                .is_ok()
+        );
+        assert!(
+            dispatcher
+                .parse("toggle maybe", &registries)
+                .executable()
+                .is_err()
+        );
     }
 
     #[test]

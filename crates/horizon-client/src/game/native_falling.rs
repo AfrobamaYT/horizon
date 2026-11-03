@@ -54,7 +54,7 @@ impl Game<'_> {
     /// with nothing thrown, on a client's copy of the world, for another
     /// dimension, an air or unknown state, a chunk that isn't loaded, a value
     /// that isn't finite, or with 1024 falling blocks in the level already.
-    /// Each axis of `velocity` is cut to 3.9. API 81.
+    /// Each axis of `velocity` is cut to 3.9.
     pub(super) fn native_spawn_falling_block(
         &mut self,
         dimension: &str,
@@ -93,6 +93,7 @@ impl Game<'_> {
         let at = Vec3::new(pos[0], pos[1], pos[2]);
         self.next_entity += 1;
         self.falling.push(FallingBlock {
+            join: Default::default(),
             id: self.next_entity,
             state,
             start_pos: cell,

@@ -1,0 +1,30 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity_sound_source", "side": "server",
+      "target": "horizon_client::game::native_entity_sounds::Game<'_>::native_entity_sound_source",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_play_sound", "side": "server",
+      "target": "horizon_client::game::native_entity_sounds::Game<'_>::native_entity_play_sound",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_game_event", "side": "server",
+      "target": "horizon_client::game::native_entity_sounds::Game<'_>::native_entity_game_event",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_broadcast_event", "side": "server",
+      "target": "horizon_client::game::native_entity_sounds::Game<'_>::native_entity_broadcast_event",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_spectator", "side": "server",
+      "target": "horizon_client::game::native_entity_sounds::Game<'_>::native_entity_spectator",
+      "receiver": "entity"
+    }
+  ]
+}

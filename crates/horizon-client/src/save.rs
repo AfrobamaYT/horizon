@@ -13,6 +13,7 @@
 //! game rules) is kept from the loaded files and written back unchanged.
 //! Worlds saved by older Horizon builds (`region/`, `DIM-1/`, `Player` in
 //! `level.dat`) are migrated on open.
+use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
 use crate::{
     Result,
     beehive::BeehiveExt,
@@ -270,6 +271,43 @@ pub fn downgraded_from(world: &Path) -> Option<String> {
 }
 /// `LevelStorageAccess.checkForLowDiskSpace`: under 64 MiB usable.
 pub const LOW_DISK_SPACE: u64 = 67_108_864;
+
+/// The `PlayerData::inventory` slots of `EquipmentSlot.BODY` and `SADDLE`.
+/// Vanilla saves them in the `equipment` compound with the armor and off hand.
+pub const BODY_SLOT: u8 = 151;
+pub const SADDLE_SLOT: u8 = 152;
+
+/// The `EquipmentSlot` ordinals a player saves in `equipment`, with the
+/// `PlayerData::inventory` slot each is held in: armor 100 (feet) to 103
+/// (head), the off hand 150, body 151, saddle 152. The main hand is the
+/// selected inventory slot and never in `equipment`.
+const PLAYER_EQUIPMENT_SLOTS: [(usize, u8); 7] = [
+    (horizon_items::equipment::FEET, 100),
+    (horizon_items::equipment::LEGS, 101),
+    (horizon_items::equipment::CHEST, 102),
+    (horizon_items::equipment::HEAD, 103),
+    (horizon_items::equipment::OFFHAND, 150),
+    (horizon_items::equipment::BODY, BODY_SLOT),
+    (horizon_items::equipment::SADDLE, SADDLE_SLOT),
+];
+
+/// The `EquipmentSlot` ordinal a saved slot number stands for, for the
+/// slots a player holder keeps in its `Equipment`.
+pub fn equipment_slot(slot: u8) -> Option<usize> {
+    match slot {
+        BODY_SLOT => Some(horizon_items::equipment::BODY),
+        SADDLE_SLOT => Some(horizon_items::equipment::SADDLE),
+        _ => None,
+    }
+}
+/// The saved slot number of a held `EquipmentSlot` ordinal (the inverse).
+pub fn saved_slot(equipment_slot: usize) -> Option<u8> {
+    match equipment_slot {
+        horizon_items::equipment::BODY => Some(BODY_SLOT),
+        horizon_items::equipment::SADDLE => Some(SADDLE_SLOT),
+        _ => None,
+    }
+}
 /// `LevelStorageAccess.estimateDiskSpace`: the usable bytes of the disk holding `dir`
 /// (`FileStore.getUsableSpace`), `u64::MAX` when it cannot be asked.
 pub fn estimate_disk_space(dir: &Path) -> u64 {
@@ -602,21 +640,21 @@ pub use horizon_items::item_nbt::{
 };
 /// Whether a mod block entity is temporarily out of the world for its tick.
 pub fn block_entity_placeholder(entity: &crate::containers::BlockEntity) -> bool {
-    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id.is_empty())
+    matches!(entity, crate::containers::BlockEntity::Mod(m) if m.id().is_empty())
 }
 
 /// The block entity type ID for the block it sits in (a chest-like container
 /// is a chest, trapped chest or barrel).
-pub fn block_entity_id(e: &crate::containers::BlockEntity, block: &str) -> String {
+pub fn block_entity_id<'a>(e: &'a crate::containers::BlockEntity, block: &'a str) -> &'a str {
     match (e, block) {
         (
             crate::containers::BlockEntity::Chest(_),
             "minecraft:trapped_chest" | "minecraft:barrel" | "minecraft:dropper",
-        ) => block.to_owned(),
+        ) => block,
         (crate::containers::BlockEntity::Chest(_), b) if b.ends_with("shulker_box") => {
-            "minecraft:shulker_box".to_owned()
+            "minecraft:shulker_box"
         }
-        _ => e.id().to_owned(),
+        _ => e.id(),
     }
 }
 pub fn encode_block_entity(
@@ -627,7 +665,7 @@ pub fn encode_block_entity(
     use crate::containers::BlockEntity;
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
-        map.insert("id".into(), string(&m.id));
+        map.insert("id".into(), string(m.id()));
         if m.items.iter().any(Option::is_some) {
             map.insert("Items".into(), encode_items(&m.items));
         }
@@ -641,7 +679,7 @@ pub fn encode_block_entity(
         _ => Compound::new(),
     };
     let mut entries = vec![
-        ("id", string(&block_entity_id(e, block))),
+        ("id", string(block_entity_id(e, block))),
         ("x", Tag::Int(p.0)),
         ("y", Tag::Int(p.1)),
         ("z", Tag::Int(p.2)),
@@ -838,6 +876,7 @@ fn roll_loaded_loot(
     biomes: &Biomes,
     tag: &Tag,
     be: &mut ((i32, i32, i32), crate::containers::BlockEntity),
+    loot: Option<&horizon_world::loot::LootData>,
 ) -> Option<RolledLoot> {
     let crate::containers::BlockEntity::Chest(slots) = &mut be.1 else {
         return None;
@@ -846,13 +885,13 @@ fn roll_loaded_loot(
     if slots.iter().any(Option::is_some) {
         return None;
     }
-    let loot = crate::structure_blocks::loaded_loot_data()?;
+    let loot = loot?;
     let (x, y, z) = be.0;
     let biome = &biomes.get(chunk.biome(x & 15, y, z & 15)).name;
     let seed = crate::structure_blocks::loot_seed(tag);
     Some(crate::structure_blocks::roll_container(
         slots,
-        Some(&loot),
+        Some(loot),
         table,
         seed,
         be.0,
@@ -891,15 +930,14 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     } else {
         items.clear();
     }
-    Some(
+    Some(crate::containers::ModBlockEntity::new(
+        id,
         crate::containers::ModBlockEntityFields {
-            id,
             nbt,
             items,
             data: Vec::new(),
-        }
-        .into(),
-    )
+        },
+    ))
 }
 pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     use crate::containers::BlockEntity;
@@ -1599,10 +1637,21 @@ pub fn decode_with(
     tables: Option<&SaveTables>,
     layout: ColumnLayout,
 ) -> Option<Chunk> {
+    decode_with_loot(root, registry, biomes, tables, layout, None)
+}
+
+fn decode_with_loot(
+    root: &NamedTag,
+    registry: &BlockRegistry,
+    biomes: &Biomes,
+    tables: Option<&SaveTables>,
+    layout: ColumnLayout,
+    loot: Option<&horizon_world::loot::LootData>,
+) -> Option<Chunk> {
     if text(root.tag.get("Status")).is_some_and(|s| s != "minecraft:full" && s != "full") {
         return None;
     }
-    decode_column(root, registry, biomes, tables, layout)
+    decode_column(root, registry, biomes, tables, layout, loot)
 }
 /// A full chunk with the light saved with it (`isLightOn`), as far terrain
 /// reads another client's cache of a server; `None` without its light.
@@ -1625,6 +1674,7 @@ fn decode_column(
     biomes: &Biomes,
     tables: Option<&SaveTables>,
     layout: ColumnLayout,
+    loot: Option<&horizon_world::loot::LootData>,
 ) -> Option<Chunk> {
     let tag = &root.tag;
     let Tag::Int(x) = tag.get("xPos")? else {
@@ -1750,7 +1800,7 @@ fn decode_column(
                     if let Some(name) = text(e.get("CustomName")) {
                         chunk.block_names.push((be.0, name));
                     }
-                    if let Some(rolled) = roll_loaded_loot(&chunk, biomes, e, &mut be) {
+                    if let Some(rolled) = roll_loaded_loot(&chunk, biomes, e, &mut be, loot) {
                         extras.rolled_loot.push(rolled);
                     }
                     extras.block_entity_sources.push((be.0, e.clone()));
@@ -1831,7 +1881,7 @@ pub fn decode_proto(
     if !(ChunkStatus::Terrain..ChunkStatus::Full).contains(&status) {
         return None;
     }
-    let mut column = decode_column(root, registry, biomes, tables, layout)?;
+    let mut column = decode_column(root, registry, biomes, tables, layout, None)?;
     column.block_entities.clear();
     let base = number(root.tag.get("yPos")).map_or(column.min_y(), |y| y as i32 * 16);
     if let Some(Tag::List(sections)) = root.tag.get("PostProcessing") {
@@ -2368,6 +2418,7 @@ pub struct SaveDir {
     outstanding: Arc<Outstanding>,
     /// Set by `Persistent` before the first load.
     pub tables: OnceLock<Arc<SaveTables>>,
+    loot: crate::structure_blocks::LootSnapshot,
     /// The dimension's skylight and height, from its folder name.
     pub shape: LevelShape,
     /// Which chunks each region file holds, for far terrain (`lod_saved`).
@@ -2377,6 +2428,56 @@ pub struct SaveDir {
     lod_decoded: Mutex<LodDecoded>,
     /// What older chunks are upgraded with, found on the first one read.
     datafix_context: OnceLock<Option<DatafixContext>>,
+}
+fn mod_ticket_to_nbt(ticket: &ModTicket, controller: &str) -> Tag {
+    let owner = match ticket.owner {
+        TicketOwner::Block(pos) => ("block", Tag::IntArray(pos.to_vec())),
+        TicketOwner::Entity(uuid) => (
+            "entity",
+            Tag::IntArray((0..4).map(|i| (uuid >> (96 - 32 * i)) as i32).collect()),
+        ),
+    };
+    Tag::compound([
+        ("controller", Tag::String(controller.into())),
+        ("owner", Tag::compound([owner])),
+        (
+            "chunk_pos",
+            Tag::IntArray(vec![ticket.chunk.0, ticket.chunk.1]),
+        ),
+        (
+            "natural_spawning",
+            Tag::Byte(i8::from(ticket.natural_spawning)),
+        ),
+    ])
+}
+/// A saved ticket: the id of the controller that held it, and the ticket without its slot.
+fn mod_ticket_from_nbt(tag: &Tag) -> Option<(String, ModTicket)> {
+    let Some(Tag::String(controller)) = tag.get("controller") else {
+        return None;
+    };
+    let owner = tag.get("owner")?;
+    let owner = match (owner.get("block"), owner.get("entity")) {
+        (Some(Tag::IntArray(p)), _) if p.len() == 3 => TicketOwner::Block([p[0], p[1], p[2]]),
+        (_, Some(Tag::IntArray(u))) if u.len() == 4 => TicketOwner::Entity(
+            u.iter()
+                .fold(0u128, |acc, &n| acc << 32 | u128::from(n as u32)),
+        ),
+        _ => return None,
+    };
+    let Some(Tag::IntArray(pos)) = tag.get("chunk_pos") else {
+        return None;
+    };
+    let controller = controller.to_string().ok()?;
+    (pos.len() == 2).then(|| {
+        let ticket = ModTicket {
+            controller: 0,
+            owner,
+            chunk: (pos[0], pos[1]),
+            // Tickets saved without the flag don't force natural spawning.
+            natural_spawning: matches!(tag.get("natural_spawning"), Some(Tag::Byte(b)) if *b != 0),
+        };
+        (controller, ticket)
+    })
 }
 fn is_forced_ticket(ticket: &Tag) -> bool {
     matches!(ticket.get("type"), Some(Tag::String(t)) if *t == JavaString::from("minecraft:forced"))
@@ -2465,12 +2566,18 @@ impl SaveDir {
             writer: Mutex::new(None),
             outstanding: Default::default(),
             tables: OnceLock::new(),
+            loot: Default::default(),
             shape,
             lod_regions: Default::default(),
             lod_decoded: Default::default(),
             datafix_context: OnceLock::new(),
         }
     }
+    /// Share the world's loot snapshot with this dimension's chunk readers.
+    pub fn set_loot_source(&mut self, loot: crate::structure_blocks::LootSnapshot) {
+        self.loot = loot;
+    }
+
     /// 26.3's TicketStorage: persistent tickets live in each dimension's
     /// data/minecraft/chunk_tickets.dat, with ChunkPos.CODEC's [x, z] int array.
     pub fn load_forced_chunks(&self) -> HashSet<(i32, i32)> {
@@ -2514,6 +2621,74 @@ impl SaveDir {
         }));
         put(&mut data, "tickets", Tag::List(tickets));
         write_saved_data(&self.root, "chunk_tickets", data)
+    }
+    /// The chunk tickets of mods (`data/horizon/mod_chunk_tickets.dat`), kept
+    /// out of vanilla's `chunk_tickets.dat` because vanilla decodes its ticket
+    /// types through a registry. Each is saved under its controller's id;
+    /// `slot_of` gives the slot of an id a loaded mod registered. A ticket of
+    /// any other id (a mod that is gone, or a file from before controllers) is
+    /// dropped with a warning, as NeoForge drops a controller nobody registers,
+    /// and one that doesn't read is skipped.
+    pub fn load_mod_tickets(&self, slot_of: impl Fn(&str) -> Option<u32>) -> Vec<ModTicket> {
+        let Some(root) = read_dat(&self.mod_tickets_path()) else {
+            return Vec::new();
+        };
+        let Some(Tag::List(tickets)) = root.get("data").and_then(|data| data.get("tickets")) else {
+            return Vec::new();
+        };
+        let mut dropped = std::collections::BTreeSet::new();
+        let loaded = tickets
+            .iter()
+            .filter_map(|tag| {
+                let Some((controller, ticket)) = mod_ticket_from_nbt(tag) else {
+                    log::warn!("Dropping a saved mod chunk ticket that has no readable controller");
+                    return None;
+                };
+                let Some(slot) = slot_of(&controller) else {
+                    dropped.insert(controller);
+                    return None;
+                };
+                Some(ModTicket {
+                    controller: slot,
+                    ..ticket
+                })
+            })
+            .collect();
+        for controller in dropped {
+            log::warn!(
+                "Dropping the saved chunk tickets of ticket controller {controller}: no loaded mod registers it"
+            );
+        }
+        loaded
+    }
+    /// Save the tickets of mods under their controllers' ids (`id_of` gives the id of a slot);
+    /// nothing while there are none and never were.
+    pub fn save_mod_tickets(
+        &self,
+        tickets: &ModTickets,
+        id_of: impl Fn(u32) -> Option<&'static str>,
+    ) -> Result<()> {
+        let path = self.mod_tickets_path();
+        let list: Vec<Tag> = tickets
+            .to_save()
+            .filter_map(|t| Some(mod_ticket_to_nbt(t, id_of(t.controller)?)))
+            .collect();
+        if list.is_empty() && !path.exists() {
+            return Ok(());
+        }
+        write_dat(
+            &path,
+            Tag::compound([
+                ("data", Tag::compound([("tickets", Tag::List(list))])),
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+            ]),
+        )
+    }
+    fn mod_tickets_path(&self) -> PathBuf {
+        self.root
+            .join("data")
+            .join("horizon")
+            .join("mod_chunk_tickets.dat")
     }
     /// Whether chunk `x z` is in its region file, from a chunk list kept
     /// `LOD_REGION_TTL`. Far terrain asks for every column of the view: it
@@ -2646,7 +2821,15 @@ impl SaveDir {
     pub fn load(&self, x: i32, z: i32, registry: &BlockRegistry, biomes: &Biomes) -> Option<Chunk> {
         let root = self.read_record("region", x, z)?;
         let tables = self.tables.get().map(|t| &**t);
-        let mut chunk = decode_with(&root, registry, biomes, tables, self.shape.column())?;
+        let loot = self.loot.get();
+        let mut chunk = decode_with_loot(
+            &root,
+            registry,
+            biomes,
+            tables,
+            self.shape.column(),
+            loot.as_deref(),
+        )?;
         load_light(&root.tag, &mut chunk, self.shape.sky_light);
         Some(chunk)
     }
@@ -2681,7 +2864,15 @@ impl SaveDir {
             root
         };
         let tables = self.tables.get().map(|t| &**t);
-        let mut chunk = decode_with(&root, registry, biomes, tables, self.shape.column())?;
+        let loot = self.loot.get();
+        let mut chunk = decode_with_loot(
+            &root,
+            registry,
+            biomes,
+            tables,
+            self.shape.column(),
+            loot.as_deref(),
+        )?;
         load_light(&root.tag, &mut chunk, self.shape.sky_light);
         // Without its saved light (`isLightOn`) it would need the light engine: not one for the far ring.
         chunk.light_loaded.then_some(chunk)
@@ -3607,7 +3798,8 @@ pub struct Level {
     pub absorption: f32,
     pub food: i32,
     pub saturation: f32,
-    /// (slot, item, count, damage): 0..36 inventory, 100..103 armor (feet..head), 150 offhand.
+    /// (slot, item, count, damage): 0..36 inventory, 100..103 armor (feet..head), 150 offhand,
+    /// 151 body and 152 saddle (`BODY_SLOT`).
     pub inventory: Vec<(u8, String, u32, u32)>,
     /// Extra item components of `inventory` entries, by slot.
     pub inventory_components: HashMap<u8, Box<crate::item_data::StackData>>,
@@ -3662,6 +3854,10 @@ pub struct Level {
     pub flying: bool,
     /// Abilities.flyingSpeed, when the file has one (vanilla's is 0.05).
     pub fly_speed: Option<f32>,
+    /// The `abilities` compound of the player file (`Abilities.Packed`), as
+    /// read and as a server player's stored abilities write it. When none,
+    /// `player_tag` derives it from the game mode.
+    pub abilities: Option<crate::lan::abilities::PlayerAbilities>,
     /// The vehicle the player rides, by UUID (`ServerPlayer.saveParentVehicle`'s
     /// "RootVehicle"), so the ride comes back on the next login.
     pub root_vehicle: Option<[i32; 4]>,
@@ -3923,6 +4119,24 @@ impl Level {
             .get("abilities")
             .and_then(|a| float(a.get("flySpeed")))
             .map(|v| v as f32);
+        self.abilities = p.get("abilities").map(|a| {
+            let flag = |key: &str, default: bool| number(a.get(key)).map_or(default, |v| v != 0);
+            let speed = |key: &str, default: f32| {
+                float(a.get(key))
+                    .map(|v| v as f32)
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(default)
+            };
+            crate::lan::abilities::PlayerAbilities {
+                invulnerable: flag("invulnerable", false),
+                flying: flag("flying", false),
+                may_fly: flag("mayfly", false),
+                instabuild: flag("instabuild", false),
+                may_build: flag("mayBuild", true),
+                flying_speed: speed("flySpeed", 0.05),
+                walking_speed: speed("walkSpeed", 0.1),
+            }
+        });
         if let Some(d) = text(p.get("Dimension")) {
             self.dimension = d;
         }
@@ -3963,14 +4177,9 @@ impl Level {
             }
         }
         if let Some(eq) = p.get("equipment") {
-            for (name, slot) in [
-                ("feet", 100u8),
-                ("legs", 101),
-                ("chest", 102),
-                ("head", 103),
-                ("offhand", 150),
-            ] {
-                if let Some(stack) = eq.get(name).and_then(item_from_nbt) {
+            let eq = horizon_items::equipment::Equipment::read(eq);
+            for (ordinal, slot) in PLAYER_EQUIPMENT_SLOTS {
+                if let Some(stack) = eq.get(ordinal) {
                     inventory.retain(|(s, ..)| *s != slot);
                     if let Some(extra) = &stack.extra {
                         inventory_components.insert(slot, extra.clone());
@@ -4028,7 +4237,7 @@ impl Level {
             }
         }
         let mut inventory = Vec::new();
-        let mut equipment = Vec::new();
+        let mut equipment = horizon_items::equipment::Equipment::default();
         for (slot, id, count, damage) in &self.inventory {
             let extra = self.inventory_components.get(slot).cloned();
             let stack = crate::items::ItemStack {
@@ -4037,38 +4246,62 @@ impl Level {
                 damage: *damage,
                 extra,
             };
-            match slot {
+            match *slot {
                 0..=35 => {
                     let mut entries = vec![("Slot", Tag::Byte(*slot as i8))];
                     entries.extend(encode_item(&stack));
                     inventory.push(Tag::compound(entries));
                 }
-                100 => equipment.push(("feet", item_to_nbt(&stack))),
-                101 => equipment.push(("legs", item_to_nbt(&stack))),
-                102 => equipment.push(("chest", item_to_nbt(&stack))),
-                103 => equipment.push(("head", item_to_nbt(&stack))),
-                150 => equipment.push(("offhand", item_to_nbt(&stack))),
-                _ => {}
+                _ => {
+                    if let Some((ordinal, _)) = PLAYER_EQUIPMENT_SLOTS
+                        .iter()
+                        .find(|(_, saved)| saved == slot)
+                    {
+                        equipment.set(*ordinal, Some(stack));
+                    }
+                }
             }
         }
-        // GameType.updatePlayerAbilities.
+        // The stored abilities, else GameType.updatePlayerAbilities.
         let mode = self.mode();
         let (creative, spectator) = (mode == 1, mode == 3);
         let mut abilities = compound_or_empty(p.get("abilities").cloned());
-        for (k, v) in [
-            ("invulnerable", creative || spectator),
-            ("mayfly", creative || spectator),
-            ("instabuild", creative),
-            ("mayBuild", mode < 2),
-        ] {
-            put(&mut abilities, k, Tag::Byte(i8::from(v)));
-        }
-        if spectator {
-            put(&mut abilities, "flying", Tag::Byte(1));
-        } else if creative {
-            put(&mut abilities, "flying", Tag::Byte(i8::from(self.flying)));
+        if let Some(a) = self.abilities {
+            for (k, v) in [
+                ("invulnerable", a.invulnerable),
+                ("flying", a.flying),
+                ("mayfly", a.may_fly),
+                ("instabuild", a.instabuild),
+                ("mayBuild", a.may_build),
+            ] {
+                put(&mut abilities, k, Tag::Byte(i8::from(v)));
+            }
+            put(
+                &mut abilities,
+                "flySpeed",
+                Tag::Float(a.flying_speed.to_bits()),
+            );
+            put(
+                &mut abilities,
+                "walkSpeed",
+                Tag::Float(a.walking_speed.to_bits()),
+            );
         } else {
-            put(&mut abilities, "flying", Tag::Byte(0));
+            for (k, v) in [
+                ("invulnerable", creative || spectator),
+                ("mayfly", creative || spectator),
+                ("instabuild", creative),
+                ("mayBuild", mode < 2),
+            ] {
+                put(&mut abilities, k, Tag::Byte(i8::from(v)));
+            }
+            if spectator {
+                put(&mut abilities, "flying", Tag::Byte(1));
+            } else if creative {
+                put(&mut abilities, "flying", Tag::Byte(i8::from(self.flying)));
+            } else {
+                put(&mut abilities, "flying", Tag::Byte(0));
+            }
         }
         if let Tag::Compound(map) = &mut abilities {
             map.entry("mayBuild".into()).or_insert(Tag::Byte(1));
@@ -4142,8 +4375,10 @@ impl Level {
             .inventory
             .iter()
             .any(|(slot, _, count, _)| i32::from(*slot) == self.selected_slot && *count > 0);
-        if holding || !equipment.is_empty() {
-            entries.push(("equipment", Tag::compound(equipment)));
+        match equipment.write() {
+            Some(tag) => entries.push(("equipment", tag)),
+            None if holding => entries.push(("equipment", Tag::Compound(Default::default()))),
+            None => {}
         }
         if self.active_effects.is_empty() {
             entries.retain(|(key, _)| *key != "active_effects");
@@ -4852,22 +5087,10 @@ fn decode_lod_surfaces(
         }
     }
     // Spans are pushed top down, so the reverse puts the topmost last, as
-    // `Column::from_chunk` leaves them. Open water is then lit as open sky,
-    // exactly as the live path does: without it a saved column kept each
-    // water block's own faded skylight and drew a dark band through the sea
-    // where saved columns met the generator's (`grid`'s stride limit).
-    // Only where there is a sky to be lit by: the Nether's water must not
-    // gain skylight it never had.
-    let is_water = |state| {
-        sky_light
-            && assets
-                .registry
-                .state(state)
-                .is_some_and(|block| block.name == "minecraft:water")
-    };
+    // `Column::from_chunk` leaves them. Water keeps the chunk's own light,
+    // a level less per block, as the generator's far columns shade it.
     for column in &mut *columns {
         column.spans.reverse();
-        column.light_open_water_where(is_water);
     }
     Some(Arc::from(columns))
 }
@@ -5077,10 +5300,9 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
     }
     fn final_block_entities(
         &self,
-        proto: &crate::streaming::Proto,
-        writes: &[([i32; 3], u32)],
+        entries: &[(&crate::streaming::Proto, &[([i32; 3], u32)])],
     ) -> Vec<((i32, i32, i32), crate::chunk::block_entity::BlockEntity)> {
-        self.inner.final_block_entities(proto, writes)
+        self.inner.final_block_entities(entries)
     }
     fn decorate(&self, worker: &mut G::Worker, region: &mut [crate::streaming::Proto; 9]) {
         self.inner.decorate(worker, region);
@@ -5677,20 +5899,6 @@ mod tests {
         let underwater = surfaces[4 * 16 + 4].surface.unwrap();
         assert_eq!((underwater.height, underwater.state), (55, sand));
         assert_eq!(underwater.water, Some((64, water)));
-        // Open water reads as open sky, as the generator's far columns do.
-        // Saved columns that kept each block's own faded skylight drew a dark
-        // band through the sea where the two met.
-        let sea = &surfaces[4 * 16 + 4].spans;
-        let lit: Vec<_> = sea
-            .iter()
-            .filter(|span| span.state == water)
-            .map(|span| span.light & 0xf0)
-            .collect();
-        assert!(!lit.is_empty(), "the column keeps its water spans");
-        assert!(
-            lit.iter().all(|sky| *sky == 0xf0),
-            "saved open water is lit as open sky, got {lit:?}"
-        );
         let chorus_column = &surfaces[2 * 16 + 12];
         assert_eq!(
             chorus_column
@@ -6213,7 +6421,7 @@ mod tests {
         let crate::containers::BlockEntity::Mod(m) = &back else {
             panic!("not a mod's");
         };
-        assert_eq!(m.id, "gtmod:macerator");
+        assert_eq!(m.id(), "gtmod:macerator");
         // The mod sees its own fields only.
         for key in ["id", "x", "y", "z"] {
             assert!(!m.nbt.contains_key(&key.into()), "{key}");

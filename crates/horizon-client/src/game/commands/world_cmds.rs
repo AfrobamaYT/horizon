@@ -85,13 +85,10 @@ impl Game<'_> {
     /// many recipe book displays changed (a transmute recipe has one per
     /// material count).
     pub(in crate::game) fn change_recipes(&mut self, give: bool, recipes: &[String]) -> i32 {
-        let index = &world_stations!(self).recipe_index;
         if give {
-            let (count, unlocked) = self.level.recipe_book.add_recipes(index, recipes);
-            // Displays a mod's `player_recipe_discovered` refused were not added.
-            let refused = self.recipe_unlocked(&unlocked);
-            return count.saturating_sub(refused) as i32;
+            return self.award_recipes(recipes) as i32;
         }
+        let index = &world_stations!(self).recipe_index;
         let removed = self.level.recipe_book.remove_recipes(index, recipes);
         let count = removed.len() as i32;
         // A network player's client drops them from its book.
@@ -234,20 +231,13 @@ impl Game<'_> {
                     _ => None,
                 };
                 if let Some(conn) = guest {
-                    if let Some(mut host) = self.lan.take() {
-                        let hurt = self
-                            .as_guest(&mut host, conn, |g| {
-                                g.command_damage_mob(id, amount, damage)
-                            })
-                            .unwrap_or(false);
-                        if hurt {
-                            host.mob_players.insert(id, conn);
-                        }
-                        self.lan = Some(host);
-                        hurt
-                    } else {
-                        false
+                    let hurt = self
+                        .as_guest(conn, |g| g.command_damage_mob(id, amount, damage))
+                        .unwrap_or(false);
+                    if hurt && let Some(host) = self.lan.as_mut() {
+                        host.mob_players.insert(id, conn);
                     }
+                    hurt
                 } else {
                     self.command_damage_mob(id, amount, damage)
                 }
@@ -440,25 +430,7 @@ impl Game<'_> {
             let Some((at, v)) = playsound_placement(pos, p, range, volume, min_volume) else {
                 continue;
             };
-            // The connection is sent the sound; the window's own player
-            // plays it.
-            let guest = match t {
-                Target::Guest(conn) => Some(conn),
-                _ => self.lan_acting,
-            };
-            match guest.and_then(|conn| Some((conn, self.lan.as_ref()?))) {
-                Some((conn, host)) => {
-                    let packet = host
-                        .hub
-                        .sound_packet(&sound, at, v, pitch, source as i32, seed);
-                    if t == Target::Player {
-                        self.guest_packets.push(packet);
-                    } else {
-                        host.hub.send_to(conn, &packet);
-                    }
-                }
-                None => self.audio.play_on(source, &sound, Some(at), v, pitch),
-            }
+            self.play_sound_to(t, &sound, at, v, pitch, source, seed);
             tracker.mark(&holder(self.target_name(t)));
         }
         let name = Text::literal(sound.clone());
@@ -481,6 +453,65 @@ impl Game<'_> {
         self.feedback(message);
         Ok(total)
     }
+    /// `ClientboundSoundPacket` to one player: a guest's connection is sent
+    /// it; the window's own player plays it. `/playsound` and a native mod's
+    /// `PlayerRef::play_sound` both send through here.
+    pub(in crate::game) fn play_sound_to(
+        &mut self,
+        t: Target,
+        sound: &str,
+        at: [f64; 3],
+        volume: f32,
+        pitch: f32,
+        source: usize,
+        seed: i64,
+    ) {
+        let guest = match t {
+            Target::Guest(conn) => Some(conn),
+            _ => self.lan_acting,
+        };
+        match guest.and_then(|conn| Some((conn, self.lan.as_ref()?))) {
+            Some((conn, host)) => {
+                let packet = host
+                    .hub
+                    .sound_packet(sound, at, volume, pitch, source as i32, seed);
+                if t == Target::Player {
+                    self.guest_packets.push(packet);
+                } else {
+                    host.hub.send_to(conn, &packet);
+                }
+            }
+            None => self.audio.play_on(source, sound, Some(at), volume, pitch),
+        }
+    }
+    /// `StopSoundCommand`: each target's connection gets the packet; the
+    /// window's own player stops its sounds. `/stopsound` and a native mod's
+    /// `PlayerRef::stop_sound` both send through here.
+    pub(in crate::game) fn stop_sound_for(
+        &mut self,
+        targets: &[Target],
+        sound: Option<&str>,
+        source: Option<usize>,
+    ) {
+        let packet = C::StopSound(play::StopSound {
+            source: source.map(|s| s as i32),
+            sound: sound.map(str::to_owned),
+        });
+        for &t in targets {
+            match t {
+                Target::Player if self.lan_acting.is_some() => {
+                    self.guest_packets.push(packet.clone());
+                }
+                Target::Player => self.audio.stop_sounds(sound, source),
+                Target::Guest(conn) => {
+                    if let Some(host) = self.lan.as_ref() {
+                        host.hub.send_to(conn, &packet);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     pub(super) fn cmd_stopsound(&mut self, ctx: &Context) -> R<i32> {
         let targets = self.entities(ctx, "targets", true)?;
         let source = ctx
@@ -491,26 +522,7 @@ impl Game<'_> {
             Some(Arg::Resource(s)) => Some(s.clone()),
             _ => None,
         };
-        // StopSoundCommand: each target's connection gets the packet; the
-        // window's own player stops its sounds.
-        let packet = C::StopSound(play::StopSound {
-            source: source.map(|s| s as i32),
-            sound: sound.clone(),
-        });
-        for &t in &targets {
-            match t {
-                Target::Player if self.lan_acting.is_some() => {
-                    self.guest_packets.push(packet.clone());
-                }
-                Target::Player => self.audio.stop_sounds(sound.as_deref(), source),
-                Target::Guest(conn) => {
-                    if let Some(host) = self.lan.as_ref() {
-                        host.hub.send_to(conn, &packet);
-                    }
-                }
-                _ => {}
-            }
-        }
+        self.stop_sound_for(&targets, sound.as_deref(), source);
         let key = match (source, &sound) {
             (Some(_), Some(_)) => "commands.stopsound.success.source.sound",
             (Some(_), None) => "commands.stopsound.success.source.any",
@@ -674,14 +686,15 @@ impl Game<'_> {
             self.entities(ctx, "viewers", true)?
         } else {
             let acting = self.lan_acting;
-            let guests = self.lan.iter().flat_map(|h| h.hub.guests.iter());
+            let guests = self.lan.iter().flat_map(|h| h.hub.online_players());
             self.player
                 .as_ref()
+                .filter(|_| !self.lan_acting_fake)
                 .map(|_| Target::Player)
                 .into_iter()
                 .chain(
                     guests
-                        .filter(|g| g.placed && Some(g.conn) != acting)
+                        .filter(|g| Some(g.conn) != acting)
                         .map(|g| Target::Guest(g.conn)),
                 )
                 .collect()
@@ -957,10 +970,7 @@ impl Game<'_> {
             }
             Target::Mob(_) | Target::Stand(_)
                 if !(matches!(target, Target::Mob(_))
-                    && matches!(
-                        short.as_str(),
-                        "max_health" | "movement_speed" | "attack_damage"
-                    )) =>
+                    && finalize::command_attr(short.as_str()).is_some()) =>
             {
                 let op = ctx
                     .literals
@@ -979,28 +989,28 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) else {
                     return Ok(0);
                 };
-                // Core mob attributes also have cached gameplay fields.
-                let slot: Option<f64> = match short.as_str() {
-                    "max_health" => Some(if id == "attribute.base.get" {
-                        finalize::base_value(m, Attr::MaxHealth)
-                    } else {
-                        finalize::value(m, Attr::MaxHealth)
-                    }),
-                    "movement_speed" => Some(if id == "attribute.base.get" {
-                        finalize::base_value(m, Attr::MovementSpeed)
-                    } else {
-                        m.attrs.speed
-                    }),
-                    "attack_damage" => Some(if id == "attribute.base.get" {
-                        finalize::base_value(m, Attr::AttackDamage)
-                    } else {
-                        f64::from(m.attrs.attack_damage)
-                    }),
-                    _ => None,
-                };
-                let Some(current) = slot else {
+                // The attributes the mob's gameplay reads live in `finalize`;
+                // the command edits that store, never a copy of it.
+                let Some(attr) = finalize::command_attr(short.as_str())
+                    .filter(|a| finalize::default_value(m, *a).is_some())
+                else {
                     return Err(no_attribute(&name, &description));
                 };
+                let current = if id == "attribute.base.get" {
+                    finalize::base_value(m, attr)
+                } else if attr == Attr::MovementSpeed {
+                    m.attrs.speed
+                } else {
+                    finalize::value(m, attr)
+                };
+                let no_modifier = text_error(
+                    "commands.attribute.failed.no_modifier",
+                    &[
+                        description.clone(),
+                        name.clone(),
+                        Text::literal(modifier_id.clone()),
+                    ],
+                );
                 match id {
                     "attribute.get" | "attribute.base.get" => {
                         let k = if id == "attribute.get" {
@@ -1015,17 +1025,9 @@ impl Game<'_> {
                         Ok((current * scale) as i32)
                     }
                     "attribute.base.set" => {
-                        match short.as_str() {
-                            "max_health" => {
-                                // AttributeInstance keeps the raw base, clamps only
-                                // the effective value, and does not change Health.
-                                finalize::set_base(m, Attr::MaxHealth, value_arg);
-                            }
-                            "movement_speed" => {
-                                finalize::set_base(m, Attr::MovementSpeed, value_arg)
-                            }
-                            _ => finalize::set_base(m, Attr::AttackDamage, value_arg),
-                        }
+                        // AttributeInstance keeps the raw base and clamps only the
+                        // effective value; Health is unchanged.
+                        finalize::set_base(m, attr, value_arg);
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
                             &[description, name, java_double_text(value_arg)],
@@ -1033,39 +1035,60 @@ impl Game<'_> {
                         Ok(1)
                     }
                     "attribute.base.reset" => {
-                        match short.as_str() {
-                            "max_health" => {
-                                let default = f64::from(m.kind.max_health);
-                                finalize::set_base(m, Attr::MaxHealth, default);
-                            }
-                            "movement_speed" => {
-                                let default = m.kind.speed;
-                                finalize::set_base(m, Attr::MovementSpeed, default);
-                            }
-                            _ => {
-                                let default = f64::from(m.kind.attack_damage);
-                                finalize::set_base(m, Attr::AttackDamage, default);
-                            }
-                        }
-                        let v = match short.as_str() {
-                            "max_health" => finalize::base_value(m, Attr::MaxHealth),
-                            "movement_speed" => finalize::base_value(m, Attr::MovementSpeed),
-                            _ => finalize::base_value(m, Attr::AttackDamage),
-                        };
+                        let default = finalize::default_value(m, attr).unwrap_or_default();
+                        finalize::set_base(m, attr, default);
+                        let v = finalize::base_value(m, attr);
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",
                             &[description, name, java_double_text(v)],
                         ));
                         Ok(1)
                     }
-                    _ => Err(text_error(
-                        "commands.attribute.failed.no_modifier",
-                        &[
-                            description.clone(),
-                            name.clone(),
-                            Text::literal(modifier_id.clone()),
-                        ],
-                    )),
+                    "attribute.modifier.add" => {
+                        if finalize::has_modifier(m, attr, &modifier_id) {
+                            return Err(text_error(
+                                "commands.attribute.failed.modifier_already_present",
+                                &[Text::literal(modifier_id.clone()), description, name],
+                            ));
+                        }
+                        let op = match ctx.literals.last().map(String::as_str) {
+                            Some("add_multiplied_base") => finalize::Op::AddMultipliedBase,
+                            Some("add_multiplied_total") => finalize::Op::AddMultipliedTotal,
+                            _ => finalize::Op::AddValue,
+                        };
+                        finalize::add_modifier(m, attr, modifier_id.clone(), value_arg, op);
+                        self.feedback(Text::translate(
+                            "commands.attribute.modifier.add.success",
+                            &[Text::literal(modifier_id.clone()), description, name],
+                        ));
+                        Ok(1)
+                    }
+                    "attribute.modifier.remove" => {
+                        if !finalize::has_modifier(m, attr, &modifier_id) {
+                            return Err(no_modifier);
+                        }
+                        finalize::remove_modifier(m, attr, &modifier_id);
+                        self.feedback(Text::translate(
+                            "commands.attribute.modifier.remove.success",
+                            &[Text::literal(modifier_id.clone()), description, name],
+                        ));
+                        Ok(1)
+                    }
+                    _ => {
+                        let Some(v) = finalize::modifier_amount(m, attr, &modifier_id) else {
+                            return Err(no_modifier);
+                        };
+                        self.feedback(Text::translate(
+                            "commands.attribute.modifier.value.get.success",
+                            &[
+                                Text::literal(modifier_id.clone()),
+                                description,
+                                name,
+                                java_double_text(v),
+                            ],
+                        ));
+                        Ok((v * scale) as i32)
+                    }
                 }
             }
             _ => Err(text_error(
@@ -1289,98 +1312,12 @@ impl Game<'_> {
             }
             up = self.ride_vehicle(v);
         }
-        let rider = match target {
-            Target::Mob(id) => Some(id),
-            _ => None,
-        };
-        let generic = || {
-            err(
+        if !self.start_riding_target(target, vehicle, true) {
+            return Err(err(
                 "commands.ride.mount.failure.generic",
                 &[&name.plain(), &vehicle_name.plain()],
-            )
-        };
-        // Only players and mobs ride.
-        if !(target == Target::Player || rider.is_some()) {
-            return Err(generic());
-        }
-        // `RideCommand.mount` forces the ride (`startRiding(vehicle, true, true)`),
-        // which skips `canRide` and `canAddPassenger`: a boat under water still
-        // takes the rider. Horizon's boats seat at most `max_passengers`, so a
-        // full boat still refuses. Minecarts carry only players here: Horizon's
-        // carts have no mob passengers yet.
-        match vehicle {
-            Target::Boat(id) => {
-                let Some(i) = self.boats.iter().position(|b| b.id == id) else {
-                    return Err(generic());
-                };
-                if self.boat_passengers(id) >= self.boats[i].max_passengers() {
-                    return Err(generic());
-                }
-                if let Some(rider) = rider {
-                    if !self.try_mount_mob(rider, id) {
-                        return Err(generic());
-                    }
-                } else {
-                    if !self.native_may_board(id) {
-                        return Err(generic());
-                    }
-                    self.riding = Some(id);
-                    self.yaw = self.boats[i].yaw;
-                    // sendEventAndTriggers: START_RIDING_TRIGGER.
-                    self.trigger_player("minecraft:started_riding");
-                }
-                self.feedback(Text::translate(
-                    "commands.ride.mount.success",
-                    &[name, vehicle_name],
-                ));
-                return Ok(1);
-            }
-            Target::Cart(id) => {
-                if target != Target::Player
-                    || self.ridden_by_guest(id)
-                    || !self.native_may_board(id)
-                {
-                    return Err(generic());
-                }
-                self.riding = Some(id);
-                self.trigger_player("minecraft:started_riding");
-                self.feedback(Text::translate(
-                    "commands.ride.mount.success",
-                    &[name, vehicle_name],
-                ));
-                return Ok(1);
-            }
-            _ => {}
-        }
-        // Mobs carry players and mobs.
-        let Target::Mob(mob_id) = vehicle else {
-            return Err(generic());
-        };
-        if !self.mobs.iter().any(|m| m.id == mob_id && m.alive()) {
-            return Err(generic());
-        }
-        if let Some(rider) = rider {
-            // Entity.startRiding.
-            if !self.try_mount_mob(rider, mob_id) {
-                return Err(generic());
-            }
-            self.feedback(Text::translate(
-                "commands.ride.mount.success",
-                &[name, vehicle_name],
             ));
-            return Ok(1);
         }
-        if !self.native_may_board(mob_id) {
-            return Err(generic());
-        }
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) {
-            m.extra.flag = false;
-            m.extra.counter = 0;
-            self.yaw = m.yaw;
-        }
-        self.riding = Some(mob_id);
-        self.mount.jump_ticks = 0;
-        self.mount.jump_scale = 0.0;
         self.feedback(Text::translate(
             "commands.ride.mount.success",
             &[name, vehicle_name],
@@ -1392,6 +1329,7 @@ impl Game<'_> {
     pub(super) fn ride_vehicle(&self, t: Target) -> Option<Target> {
         let id = match t {
             Target::Player => self.riding?,
+            Target::Guest(conn) => self.command_guest(conn)?.vehicle?,
             Target::Mob(id) => self.mobs.iter().find(|m| m.id == id)?.extra.mount?,
             _ => return None,
         };
@@ -1609,7 +1547,7 @@ impl Game<'_> {
             let y = self.spread_spawn_y(p, max_y);
             let mut to = [p[0].floor() + 0.5, f64::from(y), p[1].floor() + 0.5];
             let mut skip = false;
-            if !horizon_client::mod_api::mods().is_empty()
+            if crate::mod_api::listened(crate::mod_api::HookId::SpreadPlayersTeleport)
                 && let (Some(entity), Some(from)) =
                     (self.network_entity_id(t), self.target_position(t))
             {

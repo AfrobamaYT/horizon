@@ -14,6 +14,7 @@ autotests = false
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dependencies]
+horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }
@@ -111,6 +112,8 @@ winresource = "0.1"
 
 [features]
 default = ["audio", "controllers"]
+# Scoped trait-mod installation for a mod's own tests.
+testing = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
 audio = ["horizon-client-render/audio", "horizon-client-lib/audio"]

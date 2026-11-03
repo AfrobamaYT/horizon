@@ -3,7 +3,7 @@
 //! pack names a trigger of the mod's (`mymod:pipe_connected`); the tree keeps
 //! it as it keeps vanilla's, and the mod fires it where its event happens, as
 //! a NeoForge mod calls its own `SimpleCriterionTrigger.trigger`.
-use super::{Game, advancements::item_view, commands::Target};
+use super::{Game, advancements::item_view};
 use horizon_client::{
     advancements::{self as adv, EntityView},
     items::ItemStack,
@@ -51,13 +51,12 @@ impl Game<'_> {
     /// granted, and an advancement they complete is awarded with its toast,
     /// chat line and rewards, as the game's own triggers award.
     ///
-    /// The acting player is reached inside their hook; any player on the
-    /// server, in their own level, only where no player's state is swapped in
-    /// (`native_tick`, `native_menu_clicked`), as `native_run_command`. True
+    /// The acting player is reached inside their hook; another live player
+    /// is reached in their own level, including during a guest's turn. An
+    /// outer player displaced by a nested turn is unavailable. True
     /// when the player was reached, whether or not anything was granted;
     /// false off a server, when the player isn't on or can't be reached from
     /// here, and for a `minecraft:` trigger or a name without a namespace.
-    /// API 69.
     pub(super) fn native_trigger_criterion(
         &mut self,
         uuid: u128,
@@ -67,28 +66,16 @@ impl Game<'_> {
         if !mod_trigger(trigger) || self.remote.is_some() {
             return false;
         }
-        if self.lan_acting_uuid == Some(uuid) {
-            self.trigger_mod_criteria(trigger, &test);
-            return true;
-        }
-        if self.lan_acting.is_some() {
-            return false;
-        }
-        let Some(conn) = self.lan.as_ref().and_then(|host| {
-            host.hub
-                .guests
-                .iter()
-                .find(|g| g.placed && g.uuid == uuid)
-                .map(|g| g.conn)
-        }) else {
+        let Some(target) = self
+            .native_player_ref(uuid)
+            .and_then(|player| self.native_entity_target(player.entity()))
+        else {
             return false;
         };
         // In their level: the predicates read where they are, and a reward
         // that doesn't fit drops there.
-        self.for_player(Target::Guest(conn), |g| {
-            g.trigger_mod_criteria(trigger, &test)
-        })
-        .is_some()
+        self.for_player(target, |g| g.trigger_mod_criteria(trigger, &test))
+            .is_some()
     }
 
     /// `trigger` for a mod's trigger, for the player in place.

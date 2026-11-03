@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "menu_slot_backing", "side": "server", "target": "horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_backing", "receiver": "menu"},
+    {"name": "menu_slot_holds", "side": "server", "target": "horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_holds", "receiver": "menu"},
+    {"name": "menu_slot_gives", "side": "server", "target": "horizon_client::game::native_menu_refs::Game<'_>::native_menu_slot_gives", "receiver": "menu"}
+  ]
+}

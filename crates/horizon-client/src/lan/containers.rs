@@ -327,17 +327,6 @@ impl Hub {
         Some(window)
     }
 
-    /// Replaces what a guest's open native menu shows; the changed slots go
-    /// out with the tick's container sync.
-    pub fn set_native_menu(&mut self, conn: u32, mut items: Vec<Option<ItemStack>>) {
-        if let Some(g) = self.guest_mut(conn)
-            && let Some(m) = g.menu.as_ref().filter(|m| m.slots == Slots::Native)
-        {
-            items.resize(m.size, None);
-            g.native_menu = items;
-        }
-    }
-
     /// Open a trading window for a guest (`Merchant.openTradingScreen`):
     /// its id, or None when the menu type is unknown.
     pub fn open_merchant_window(&mut self, conn: u32, title: Tag) -> Option<i32> {
@@ -884,7 +873,7 @@ fn next_sound_seed(g: &mut impl RandomSource) -> i64 {
 
 /// `PlayerList.broadcast`'s distance test: the summed squared axis distances
 /// against the squared radius, and a player exactly at the radius is out.
-fn within_range(at: [f64; 3], pos: [f64; 3], range: f64) -> bool {
+pub fn within_range(at: [f64; 3], pos: [f64; 3], range: f64) -> bool {
     let d: f64 = (0..3).map(|k| (pos[k] - at[k]).powi(2)).sum();
     d < range * range
 }

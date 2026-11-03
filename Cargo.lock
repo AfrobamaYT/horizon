@@ -1213,8 +1213,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash 0.2.0",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -1338,6 +1336,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1470,6 +1469,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -1599,8 +1599,19 @@ dependencies = [
 name = "horizon-mod-api-gen-tests"
 version = "0.1.0"
 dependencies = [
+ "horizon-client-core",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1610,11 +1621,12 @@ dependencies = [
  "horizon-shader-api",
  "log",
  "minisign-verify",
+ "png",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
  "toml",
- "wasmparser",
  "zip",
 ]
 
@@ -1648,8 +1660,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "toml",
  "ureq",
+ "url",
  "zip",
 ]
 
@@ -1963,8 +1977,6 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -3519,6 +3531,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
@@ -4273,19 +4289,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "wasmparser"
-version = "0.254.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5ff8685b587722894b6f25958fc608d315b93b8d23647bfb567664e7006d757"
-dependencies = [
- "bitflags 2.13.2",
- "hashbrown 0.17.1",
- "indexmap",
- "semver",
- "serde",
 ]
 
 [[package]]

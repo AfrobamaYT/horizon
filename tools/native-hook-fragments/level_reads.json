@@ -3,7 +3,7 @@
   "helpers": [
     {
       "name": "level_block_state", "side": "server",
-      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block_state",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_state",
       "receiver": "level"
     },
     {
@@ -15,6 +15,12 @@
       "name": "level_block_property", "side": "server",
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_block_property",
       "receiver": "level"
+    },
+    {
+      "name": "level_in_place",
+      "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_in_place",
+      "receiver": "level",
+      "side": "server"
     },
     {
       "name": "level_is_loaded", "side": "server",
@@ -36,10 +42,5 @@
       "target": "horizon_client::game::native_level_refs::Game<'_>::native_level_day_time",
       "receiver": "level"
     }
-  ],
-  "rust_summary": "a level's blocks and time through a `LevelRef`: block state, block, property, whether a chunk is loaded, height, game time and day time.",
-  "doc_summary": "`level.block_state(host, pos)`, `block`, `block_property`, `is_loaded`, `height`, `game_time` and `day_time` read any level the server has loaded. Bundles need \"hooks\": @API:level_reads@.",
-  "comments": [
-    "crates/horizon-client/src/game/native_level_refs.rs"
   ]
 }

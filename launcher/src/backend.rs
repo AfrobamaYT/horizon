@@ -36,6 +36,8 @@ pub struct Release {
     pub name: String,
     pub body: String,
     pub date: String,
+    /// When it was published, `HH:MM` UTC (empty if GitHub didn't say).
+    pub time: String,
     pub asset: Option<(String, u64)>,
     /// Listed and installed by hand, never as an update: a GitHub pre-release of the old Alpha
     /// channel (v0.2.1 on), or a Nightly older than the current one.
@@ -352,6 +354,11 @@ pub(crate) fn parse_releases(
                 .chars()
                 .take(10)
                 .collect(),
+            time: r["published_at"]
+                .as_str()
+                .and_then(|d| d.get(11..16))
+                .unwrap_or_default()
+                .into(),
             asset: found,
             prerelease: r["prerelease"].as_bool().unwrap_or(false),
             nightly: None,
@@ -641,37 +648,6 @@ pub fn version_dir(tag: &str) -> PathBuf {
 }
 
 const COMPLETE: &str = ".installed";
-
-/// The mod API level of the game players run: the selected version's, else the newest installed
-/// one's. None with no version installed: the launcher doesn't know yet which game will run mods.
-pub fn game_mod_api_level() -> Option<u32> {
-    let installed = installed();
-    let tag = Settings::load()
-        .selected
-        .filter(|s| installed.contains(s))
-        .or_else(|| installed.into_iter().next())?;
-    Some(mod_api_level(&tag))
-}
-
-/// A game version's mod API level, read once from the mark its program carries
-/// (`horizon_mods::api_level::MARK`). A program from before the mark serves level 0, the
-/// contract of Horizon 0.2.67 and 0.2.68.
-pub fn mod_api_level(tag: &str) -> u32 {
-    static LEVELS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
-    let mut levels = LEVELS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(&(_, level)) = levels.iter().find(|(t, _)| t == tag) {
-        return level;
-    }
-    let level = program_mod_api_level(&version_dir(tag).join(CLIENT));
-    levels.push((tag.to_owned(), level));
-    level
-}
-
-/// The mod API level in the game program at `path`: its mark's, else 0.
-fn program_mod_api_level(path: &Path) -> u32 {
-    let program = fs::read(path).unwrap_or_default();
-    horizon_mods::api_level::read_mark(&program).unwrap_or(0)
-}
 
 /// Installed versions, newest tag first.
 pub fn installed() -> Vec<String> {
@@ -2245,10 +2221,28 @@ pub fn append_game_args(cmd: &mut Command) {
     cmd.args(game_args());
 }
 
+/// Renderer workarounds a player may have exported to start the launcher itself (a transparent
+/// window on old Mesa drivers): they belong to the launcher's own webview and must not reach the
+/// game, which picks its own backend. Inherited, they left the client on CPU rendering at 2-3 FPS
+/// (#7832).
+pub const LAUNCHER_RENDER_ENV: [&str; 4] = [
+    "LIBGL_ALWAYS_SOFTWARE",
+    "GALLIUM_DRIVER",
+    "WEBKIT_DISABLE_DMABUF_RENDERER",
+    "WEBKIT_DISABLE_COMPOSITING_MODE",
+];
+
+fn strip_launcher_render_env(cmd: &mut Command) {
+    for key in LAUNCHER_RENDER_ENV {
+        cmd.env_remove(key);
+    }
+}
+
 pub fn client_command(tag: &str) -> Command {
     let home = game_home();
     let _ = fs::create_dir_all(&home);
     let mut cmd = Command::new(client_program(tag));
+    strip_launcher_render_env(&mut cmd);
     cmd.current_dir(home).arg("--resources").arg(resources(tag));
     // How the game asks for a renewed session (`account session`) while it runs.
     if let Ok(exe) = std::env::current_exe() {
@@ -3342,13 +3336,9 @@ pub struct Settings {
     /// Native mods are always on: an older file's `native_mods` switch is ignored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods_noticed: bool,
-    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the
-    /// default, or the release's own while `native_release` is on.
+    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_profile: Option<crate::native_mods::Profile>,
-    /// An older file's switch for the release profile, read when `native_profile` is unset.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub native_release: bool,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
     /// offline names play without an account that owns the game, in the window only
     /// (`account::Accounts::play_as_with`, `account::launch_for_game`). Never a download: the game still
@@ -3447,6 +3437,7 @@ mod java_tests;
 mod tests {
     use super::*;
     use std::cmp::Ordering::*;
+    use std::ffi::OsStr;
 
     #[test]
     #[cfg(windows)]
@@ -3550,24 +3541,6 @@ mod tests {
             assert_eq!(dir.parent(), Some(default.as_path()));
             assert!(ascii(&dir));
         }
-    }
-
-    /// The game program's mod API level is its mark's; a program from before the mark (0.2.68
-    /// and older) or none at all serves level 0.
-    #[test]
-    fn a_game_program_says_its_mod_api_level() {
-        let dir = std::env::temp_dir().join(format!("horizon-api-level-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let marked = dir.join("marked");
-        let mut program = b"\x7fELF code code".to_vec();
-        program.extend_from_slice(b"horizon-mod-api-level:0007;");
-        fs::write(&marked, &program).unwrap();
-        let old = dir.join("old");
-        fs::write(&old, b"\x7fELF code without a mark").unwrap();
-        assert_eq!(program_mod_api_level(&marked), 7);
-        assert_eq!(program_mod_api_level(&old), 0);
-        assert_eq!(program_mod_api_level(&dir.join("missing")), 0);
-        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The launcher downloads Mojang's game files (client jar, libraries, assets) only for an
@@ -4126,6 +4099,7 @@ pub fn {f}("
             name: String::new(),
             body: String::new(),
             date: String::new(),
+            time: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -4167,6 +4141,7 @@ pub fn {f}("
             name: String::new(),
             body: String::new(),
             date: String::new(),
+            time: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -4389,6 +4364,7 @@ pub fn {f}("
             name: String::new(),
             body: String::new(),
             date: String::new(),
+            time: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -5179,6 +5155,26 @@ pub fn {f}("
         assert_eq!(
             text,
             "Title\n\nSome words and a link (https://x.y).\n\n- one\n- two\n"
+        );
+    }
+
+    #[test]
+    fn the_game_does_not_inherit_the_launchers_renderer_workarounds() {
+        let mut cmd = Command::new("true");
+        cmd.env("GALLIUM_DRIVER", "llvmpipe")
+            .env("LIBGL_ALWAYS_SOFTWARE", "1")
+            .env("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+            .env("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+            .env("PIPEWIRE_PROPS", "kept");
+        strip_launcher_render_env(&mut cmd);
+        let envs = cmd.get_envs().collect::<std::collections::HashMap<_, _>>();
+        for key in LAUNCHER_RENDER_ENV {
+            assert_eq!(envs.get(OsStr::new(key)), Some(&None), "{key} is removed");
+        }
+        // Only the launcher's own workarounds go: the rest of the environment still reaches the game.
+        assert_eq!(
+            envs.get(OsStr::new("PIPEWIRE_PROPS")),
+            Some(&Some(OsStr::new("kept")))
         );
     }
 }

@@ -283,7 +283,7 @@ fn drowned_throw(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
     let zd = t.position.z - m.position.z;
     let dist = (xd * xd + zd * zd).sqrt();
     let mut trident = crate::items::ItemStack::new("minecraft:trident", 1);
-    if m.extra.main_hand.as_deref() == Some("minecraft:trident")
+    if m.extra.main_hand_id() == Some("minecraft:trident")
         && let Some(g) = super::gear::gear(m)
     {
         for (e, l) in &g.slots[super::gear::MAIN] {
@@ -321,7 +321,7 @@ impl Goal for DrownedTridentAttack {
         "DrownedTridentAttackGoal"
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        self.0.can_use(m, cx) && m.extra.main_hand.as_deref() == Some("minecraft:trident")
+        self.0.can_use(m, cx) && m.extra.main_hand_id() == Some("minecraft:trident")
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         self.0.can_continue(m, cx)
@@ -760,8 +760,8 @@ impl BowAttack {
 }
 /// `LivingEntity.isHolding(Items.BOW)`: the bow can sit in either hand.
 fn holding_bow(m: &Mob) -> bool {
-    m.extra.main_hand.as_deref() == Some("minecraft:bow")
-        || m.extra.off_hand.as_deref() == Some("minecraft:bow")
+    m.extra.main_hand_id() == Some("minecraft:bow")
+        || m.extra.off_hand_id() == Some("minecraft:bow")
 }
 impl Goal for BowAttack {
     goal_clone!();
@@ -857,7 +857,7 @@ impl Goal for BowAttack {
                 // mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand):
                 // the off hand when the main one doesn't hold the bow.
                 m.extra.using_item = 1;
-                m.extra.using_off_hand = m.extra.main_hand.as_deref() != Some("minecraft:bow");
+                m.extra.using_off_hand = m.extra.main_hand_id() != Some("minecraft:bow");
             }
         }
     }
@@ -911,9 +911,8 @@ pub fn perform_ranged_attack(m: &mut Mob, who: Who, cx: &mut Cx, power: f32) {
         // ProjectileUtil.getWeaponHoldingHand(this, Items.BOW).
         weapon: if m.extra.using_off_hand {
             m.extra
-                .off_hand
-                .as_ref()
-                .map(|item| crate::items::ItemStack::new(item, 1))
+                .slot_stack(horizon_items::equipment::OFFHAND)
+                .cloned()
         } else {
             m.extra.main_hand_stack().cloned()
         }
@@ -1241,7 +1240,10 @@ impl Goal for AttackTurtleEgg {
             cx.events.push(MobEvent::BreakBlock {
                 pos: eat,
                 drop: false,
+                by: Some(m.id),
             });
+            // The egg's particles and sound follow only a destruction.
+            let effects = cx.events.len();
             // `sendParticles(POOF, ..., 1, xa, ya, za, 0.15)`, twenty times.
             for _ in 0..20 {
                 let spread = [
@@ -1268,6 +1270,7 @@ impl Goal for AttackTurtleEgg {
                 0.7,
                 1.0,
             ));
+            super::after_break(cx.events, m.id, effects);
         }
         self.since_reached += 1;
     }
@@ -1340,8 +1343,10 @@ mod conversion_tests {
             m.custom_name = Some("Bob".into());
             m.name_visible = true;
             m.persistent = true;
-            m.extra.head = Some("minecraft:iron_helmet".into());
-            m.extra.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
+            m.extra.set_slot_stack(
+                horizon_items::equipment::HEAD,
+                Some(ItemStack::new("minecraft:iron_helmet", 1)),
+            );
             m.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_sword", 1)));
             m.extra.drop_chances = Some(Box::new([2.0; 8]));
@@ -1353,9 +1358,9 @@ mod conversion_tests {
         assert_eq!(d.species(), Species::Drowned);
         assert_eq!(d.custom_name.as_deref(), Some("Bob"));
         assert!(d.name_visible && d.persistent);
-        assert_eq!(d.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(d.extra.head_id(), Some("minecraft:iron_helmet"));
         assert_eq!(
-            d.extra.armor[0].as_ref().map(|s| &*s.item),
+            d.extra.slot_id(horizon_items::equipment::HEAD),
             Some("minecraft:iron_helmet")
         );
         assert_eq!(
@@ -1375,8 +1380,10 @@ mod conversion_tests {
             m.no_ai = false;
             m.silent = true;
             m.extra.age = i32::MIN / 2;
-            m.extra.feet = Some("minecraft:golden_boots".into());
-            m.extra.armor[3] = Some(ItemStack::new("minecraft:golden_boots", 1));
+            m.extra.set_slot_stack(
+                horizon_items::equipment::FEET,
+                Some(ItemStack::new("minecraft:golden_boots", 1)),
+            );
             m.extra.left_handed = true;
         }) else {
             return;
@@ -1384,7 +1391,10 @@ mod conversion_tests {
         assert_eq!(z.species(), Species::Zombie);
         assert_eq!(z.custom_name.as_deref(), Some("Dusty"));
         assert!(z.silent && z.is_baby() && z.extra.left_handed);
-        assert_eq!(z.extra.feet.as_deref(), Some("minecraft:golden_boots"));
+        assert_eq!(
+            z.extra.slot_id(horizon_items::equipment::FEET),
+            Some("minecraft:golden_boots")
+        );
     }
 }
 
@@ -1558,7 +1568,9 @@ mod wither_arrow_tests {
                 let arrow = events
                     .iter()
                     .find_map(|e| match e {
-                        MobEvent::Projectile(p) => p.arrow.as_ref(),
+                        MobEvent::Projectile(p) | MobEvent::BowShot { arrow: p, .. } => {
+                            p.arrow.as_ref()
+                        }
                         _ => None,
                     })
                     .unwrap_or_else(|| panic!("{name} shot nothing"));

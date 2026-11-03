@@ -93,6 +93,8 @@ pub use fluids::update_entity_fluids;
 
 #[derive(Clone, Debug)]
 pub struct ItemEntity {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub health: i32,
     pub fire_ticks: i32,
     pub id: u32,
@@ -836,6 +838,8 @@ pub fn merge_with_neighbours(
 /// ExperienceOrb: gravity 0.03, homing towards the player within 8 blocks.
 #[derive(Clone, Debug)]
 pub struct ExperienceOrb {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     /// The entity id servers track it by.
     pub id: u32,
     pub position: Vec3,
@@ -1187,6 +1191,7 @@ impl Experience {
 /// 2D data value of the direction it faces, and its variant.
 #[derive(Clone, Debug)]
 pub struct Painting {
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
     /// Direction.get2DDataValue: south 0, west 1, north 2, east 3.
@@ -1249,6 +1254,7 @@ pub fn dye_index(name: &str) -> u8 {
 /// height, and is coloured by its `DyeColor`.
 #[derive(Clone, Debug)]
 pub struct Cushion {
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     /// `Entity.position`: the bottom centre of the cushion.
     pub position: Vec3,
@@ -1290,6 +1296,7 @@ impl Cushion {
 /// An item frame or glow item frame (`ItemFrame`).
 #[derive(Clone, Debug)]
 pub struct ItemFrame {
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
     /// Direction.get3DDataValue: down 0, up 1, north 2, south 3, west 4, east 5.
@@ -1335,6 +1342,8 @@ impl ItemFrame {
 /// An armor stand (`ArmorStand`).
 #[derive(Clone, Debug)]
 pub struct ArmorStand {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub fire_ticks: i32,
     pub health: f32,
     pub id: u32,
@@ -1348,8 +1357,10 @@ pub struct ArmorStand {
     pub yaw: f32,
     /// `yBodyRotO`: the body's yaw at the start of the tick.
     pub previous_yaw: f32,
-    /// mainhand, offhand, feet, legs, chest, head (EquipmentSlot order).
-    pub equipment: [Option<crate::items::ItemStack>; 6],
+    /// Every `EquipmentSlot`, by ordinal: mainhand, offhand, feet, legs, chest,
+    /// head, body, saddle. Vanilla's `canUseSlot` refuses body and saddle only
+    /// for interaction; `setItemSlot` and the save keep them.
+    pub equipment: horizon_items::equipment::Equipment,
     pub small: bool,
     pub show_arms: bool,
     pub no_base_plate: bool,
@@ -1380,7 +1391,9 @@ pub struct ArmorStand {
     /// Travel accumulated for `LivingEntity.checkFallDamage`'s landing callback.
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
-    pub enchantment_equipment: [Option<ItemStack>; 6],
+    pub enchantment_equipment: horizon_items::equipment::Equipment,
+    /// `Entity.firstTick`: true until its first tick has run.
+    pub first_tick: bool,
     /// `Entity.mainSupportingBlockPos` after the last move.
     pub support: horizon_world::ground_support::GroundState,
 }
@@ -1527,6 +1540,7 @@ impl ArmorStand {
     }
     pub fn new(id: u32, position: Vec3, yaw: f32) -> Self {
         Self {
+            join: Default::default(),
             fire_ticks: 0,
             health: 20.0,
             id,
@@ -1552,6 +1566,7 @@ impl ArmorStand {
             enchantment_block: None,
             enchantment_fall_distance: 0.0,
             enchantment_equipment: Default::default(),
+            first_tick: true,
             support: Default::default(),
         }
     }
@@ -1595,8 +1610,10 @@ impl ArmorStand {
         world: &World,
         facts: &BlockFacts,
         registry: &horizon_world::registry::BlockRegistry,
-    ) -> bool {
+    ) -> Option<&'static str> {
         let (lo, hi) = (self.bounds().min_position(), self.bounds().max_position());
+        // The damage type of the last hit that lowered its health.
+        let mut hit_by = None;
         let mut water = false;
         let mut lava = false;
         for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
@@ -1621,6 +1638,7 @@ impl ArmorStand {
                 && self.health > 0.5
             {
                 self.health -= 4.0;
+                hit_by = Some("minecraft:on_fire");
             }
             self.fire_ticks -= 1;
         }
@@ -1633,11 +1651,14 @@ impl ArmorStand {
         if fire && !self.invisible && !self.marker && !self.no_gravity {
             if self.fire_ticks > 0 {
                 self.health -= 0.15;
+                hit_by = Some("minecraft:in_fire");
             } else {
                 self.fire_ticks = 100;
             }
         }
-        self.health > 0.5
+        // Dead: the damage type that ran its health out, which vanilla's
+        // `brokenByAnything` receives as the `DamageSource`.
+        (self.health <= 0.5).then(|| hit_by.unwrap_or("minecraft:generic"))
     }
     /// EntityType.ARMOR_STAND dimensions (0.5 x 1.975, half for small).
     pub fn bounds(&self) -> Aabb {
@@ -1899,6 +1920,7 @@ mod fire_environment_tests {
             )
             .unwrap();
         let make = |id: &str| ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -1989,9 +2011,28 @@ mod fire_environment_tests {
             )
             .unwrap();
         for _ in 0..150 {
-            assert!(stand.environment_tick(&world, &facts, assets.registry));
+            assert!(
+                stand
+                    .environment_tick(&world, &facts, assets.registry)
+                    .is_none()
+            );
         }
         assert_eq!(stand.health, 20.0, "lava does not hurt armor stands");
+        // A stand the flames run out of health names the damage that did it.
+        world
+            .set(
+                20,
+                4,
+                20,
+                assets.registry.default_state("minecraft:air").unwrap(),
+            )
+            .unwrap();
+        stand.health = 4.0;
+        stand.fire_ticks = 20;
+        assert_eq!(
+            stand.environment_tick(&world, &facts, assets.registry),
+            Some("minecraft:on_fire")
+        );
     }
 }
 #[cfg(test)]
@@ -2031,6 +2072,7 @@ mod destroyed_bundle_environment_tests {
             ItemStack::new("minecraft:diamond", 1),
         ];
         let mut bundle = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -2127,6 +2169,7 @@ mod merge_tests {
     fn item(id: &str, count: u32, x: f64, age: i32) -> ItemEntity {
         let at = Vec3::new(x, 64.0, 0.5);
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             thrower: None,
@@ -2342,6 +2385,7 @@ mod world_border_tests {
                 border,
             );
             let mut orb = ExperienceOrb {
+                join: Default::default(),
                 no_gravity: false,
                 id: 2,
                 position: Vec3::new(24.0, 4.0, 20.5),
@@ -2549,6 +2593,7 @@ mod honey_slide_tests {
     pub(super) fn falling_item(x: f64, y: f64, z: f64, vx: f64, vy: f64, vz: f64) -> ItemEntity {
         let at = Vec3::new(x, y, z);
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -2697,6 +2742,7 @@ mod slime_bounce_tests {
     fn grounded_item() -> ItemEntity {
         let at = Vec3::new(0.5, 2.0, 0.5);
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -3402,6 +3448,7 @@ mod item_destroyed_tests {
             .map(|(id, count)| ItemStack::new(id, *count))
             .collect();
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -3509,3 +3556,11 @@ mod experience_cost_tests {
         );
     }
 }
+crate::impl_joined!(
+    ItemEntity,
+    ExperienceOrb,
+    ArmorStand,
+    Painting,
+    Cushion,
+    ItemFrame
+);

@@ -1,4 +1,5 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
+mod host;
 use heck::ToSnakeCase;
 use quote::ToTokens;
 use std::{
@@ -231,6 +232,7 @@ fn matching_helper_signatures(server: &str, client: &str, name: &str) -> Result<
 fn host_method(
     method: &syn::ItemFn,
     name: &str,
+    trait_name: &str,
     exports: &HashSet<String>,
 ) -> Result<(String, String), String> {
     struct Types<'a> {
@@ -383,7 +385,7 @@ fn host_method(
         .collect::<String>();
     Ok((
         format!(
-            "{docs}{} {{ {unused} unimplemented!(\"Host::{name}\") }}\n",
+            "{docs}{} {{ {unused} unimplemented!(\"{trait_name}::{name}\") }}\n",
             sig.to_token_stream()
         ),
         format!(
@@ -402,6 +404,7 @@ fn handle_method<'a>(
     method: &syn::ItemFn,
     name: &str,
     receiver: &str,
+    side: HelperSide,
     handles: &'a BTreeMap<String, String>,
 ) -> Result<(&'a str, String), String> {
     let handle = handles
@@ -416,9 +419,24 @@ fn handle_method<'a>(
     sig.ident =
         syn::parse_str(short).map_err(|_| format!("{name}: {short} is not a method name"))?;
     let mut inputs = sig.inputs.iter();
+    let mutable = matches!(inputs.next(), Some(FnArg::Receiver(r)) if r.mutability.is_some());
+    if mutable {
+        match side {
+            HelperSide::Server => {}
+            HelperSide::Both => {
+                return Err(format!("{name}: a both-side handle write is not allowed"));
+            }
+            HelperSide::Client => {
+                return Err(format!(
+                    "{name}: client handle writes need a client backend accessor; add it with the first one"
+                ));
+            }
+        }
+    }
+    let mut inputs = sig.inputs.iter();
     let host: FnArg = match inputs.next() {
         Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() => {
-            syn::parse_quote!(host: &mut dyn Host)
+            syn::parse_quote!(host: &mut dyn ServerHost)
         }
         Some(FnArg::Receiver(r)) if r.reference.is_some() => syn::parse_quote!(host: &dyn Host),
         _ => return Err(format!("{name}: a {receiver} helper borrows Game")),
@@ -448,12 +466,28 @@ fn handle_method<'a>(
     }
     sig.inputs = rest.into_iter().collect();
     let docs = doc_comments(&method.attrs, name, true)?;
+    let backend = if mutable {
+        "backend_mut_of"
+    } else {
+        "backend_of"
+    };
+    let returns = |ident: &str| {
+        matches!(&sig.output, syn::ReturnType::Type(_, ty) if matches!(&**ty, syn::Type::Path(path)
+            if path.path.segments.last().is_some_and(|seg| seg.ident == ident)))
+    };
+    let call = format!("{name}(self{args})");
+    let body = if returns("Option") {
+        format!("{backend}(host)?.{call}")
+    } else if returns("bool") {
+        format!("{backend}(host).map(|backend| backend.{call}).unwrap_or(false)")
+    } else {
+        return Err(format!(
+            "{name}: a {receiver} helper returns Option or bool, the value a host without a backend refuses"
+        ));
+    };
     Ok((
         handle,
-        format!(
-            "{docs}pub {} {{ host.{name}(self{args}) }}\n",
-            sig.to_token_stream()
-        ),
+        format!("{docs}pub {} {{ {body} }}\n", sig.to_token_stream()),
     ))
 }
 
@@ -576,30 +610,6 @@ impl VisitMut for EventLifetimes {
     }
 }
 
-fn host_for(is_level: bool, mutable: Option<bool>, ticks: bool) -> Option<(&'static str, String)> {
-    mutable.map(|mutable| {
-        let (name, kind) = if is_level {
-            (
-                "level",
-                match (mutable, ticks) {
-                    (true, true) => "LevelWriteHost",
-                    (false, true) => "LevelTicksHost",
-                    (true, false) => "LevelRandomHost",
-                    (false, false) => "LevelHost",
-                },
-            )
-        } else {
-            ("host", "Host")
-        };
-        let mutable = if mutable || (is_level && ticks) {
-            "mut "
-        } else {
-            ""
-        };
-        (name, format!("&{mutable}dyn {kind}"))
-    })
-}
-
 #[derive(Debug)]
 struct CatalogHook {
     entry: serde_json::Value,
@@ -612,6 +622,59 @@ impl std::ops::Deref for CatalogHook {
     fn deref(&self) -> &Self::Target {
         &self.entry
     }
+}
+
+fn hook_id(name: &str) -> String {
+    name.split('_')
+        .map(|word| word[..1].to_uppercase() + &word[1..])
+        .collect()
+}
+
+fn complete_hook_constants(
+    code: String,
+    trait_name: &str,
+    module: &str,
+    id: &str,
+) -> Result<String, String> {
+    let file = syn::parse_file(&code).map_err(|e| e.to_string())?;
+    let methods = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Trait(item) if item.ident == trait_name => Some(&item.items),
+            _ => None,
+        })
+        .ok_or("generated hook trait missing")?;
+    let existing: HashSet<_> = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Mod(item) if item.ident == module => {
+                item.content.as_ref().map(|(_, items)| items)
+            }
+            _ => None,
+        })
+        .ok_or("generated hook constants missing")?
+        .iter()
+        .filter_map(|item| match item {
+            Item::Const(item) => Some(item.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    let mut defaults = String::new();
+    for method in methods {
+        if let syn::TraitItem::Fn(method) = method {
+            let name = method.sig.ident.to_string();
+            if !existing.contains(&name) {
+                defaults.push_str(&format!("pub const {name}: Option<super::{id}> = None;\n"));
+            }
+        }
+    }
+    Ok(code.replacen(
+        &format!("pub mod {module} {{"),
+        &format!("pub mod {module} {{\n{defaults}"),
+        1,
+    ))
 }
 
 fn catalog_hooks(root: &Path, catalog: &serde_json::Value) -> Result<Vec<CatalogHook>, String> {
@@ -823,494 +886,43 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
             methods.extend(impl_functions(item));
         }
     }
-    let mut traits = String::new();
-    let mut dispatch = String::new();
-    let mut render_traits = String::new();
-    let mut render_dispatch = String::new();
-    let mut part_traits: BTreeMap<&str, String> = BTreeMap::new();
     let hooks = catalog_hooks(root, &catalog)?;
-    let mut fills = Vec::new();
-    for hook in &hooks {
-        let name = hook["name"].as_str().ok_or("hook name missing")?;
-        let api = hook
-            .get("mod_api")
-            .ok_or_else(|| format!("hook {name} has no mod_api entry: add one"))?;
-        let native = format!("native_{name}");
-        let target = hook["target"].as_str().ok_or("target missing")?;
-        let is_render = target.starts_with("horizon_client_render::");
-        let external = free_function_source(target);
-        let in_game = external.is_none();
-        let (method, call) = if let Some((krate, path)) = external {
-            let Some((module, function)) = path.rsplit_once("::") else {
-                return Err(format!("wrong target for {name}"));
-            };
-            if function != native {
-                return Err(format!("wrong target for {name}"));
-            }
-            let path = root
-                .join("crates")
-                .join(krate)
-                .join("src")
-                .join(format!("{}.rs", module.replace("::", "/")));
-            let source =
-                fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
-            let functions: Vec<_> = file
-                .items
-                .into_iter()
-                .filter_map(|item| match item {
-                    Item::Fn(function) => Some(function),
-                    _ => None,
-                })
-                .collect();
-            (
-                one_function(functions.iter(), &native)?.clone(),
-                if is_render {
-                    format!("dispatch_{name}")
-                } else {
-                    name.to_owned()
-                },
-            )
-        } else {
-            if !target.starts_with("horizon_client::game::native_hooks::")
-                || !target.ends_with(&format!("::{native}"))
-            {
-                return Err(format!("wrong target for {name}"));
-            }
-            (
-                one_function(methods.iter(), &native)?.clone(),
-                format!("dispatch_{name}"),
-            )
-        };
-        let fill = needs_fill(&method, &call, in_game)?;
-        let sig = &method.sig;
-        let mut args = Vec::new();
-        let mut receiver_mut = None;
-        for arg in &sig.inputs {
-            match arg {
-                FnArg::Receiver(r) => {
-                    receiver_mut = Some(r.mutability.is_some());
-                }
-                FnArg::Typed(arg) => {
-                    let Pat::Ident(pat) = &*arg.pat else {
-                        return Err(format!("unsupported argument in {name}"));
-                    };
-                    args.push((pat.ident.to_string(), &*arg.ty));
-                }
-            }
-        }
-        let is_level = hook["target"]
-            .as_str()
-            .is_some_and(|target| target.contains("::GameLevel<"));
-        let ticks = is_level
-            && args.iter().any(|(name, ty)| {
-                name == "ticks" && ty.to_token_stream().to_string() == "& mut Ticks"
-            });
-        if ticks {
-            args.retain(|(name, _)| name != "ticks");
-        }
-        let mut used: HashSet<_> = args.iter().map(|(name, _)| name.clone()).collect();
-        let mod_list = fresh_name("mods", &mut used);
-        let mod_item = fresh_name("mod_hook", &mut used);
-        let part_list = fresh_name("parts", &mut used);
-        let part_item = fresh_name("part", &mut used);
-        let part_table = fresh_name("part_table", &mut used);
-        let replacement = fresh_name("replacement", &mut used);
-        let contract = api["contract"].as_str().ok_or("contract missing")?;
-        let out = api.get("out").and_then(|v| v.as_str());
-        if !matches!(
-            (contract, out),
-            ("cancel" | "replace" | "collect", Some(_)) | ("listen", None)
-        ) {
-            return Err(format!("invalid contract for {name}"));
-        }
-        let output = if let Some(out) = out {
-            let index = args
-                .iter()
-                .position(|(n, _)| n == out)
-                .ok_or_else(|| format!("missing output {out} in {name}"))?;
-            Some(args.remove(index))
-        } else {
-            None
-        };
-        let result = if let Some((_, ty)) = &output {
-            let Type::Reference(reference) = ty else {
-                return Err(format!("output must be a mutable reference in {name}"));
-            };
-            if reference.mutability.is_none() {
-                return Err(format!("output must be a mutable reference in {name}"));
-            }
-            match contract {
-                "cancel" if reference.elem.to_token_stream().to_string() == "bool" => {
-                    " -> Flow".to_owned()
-                }
-                "replace" => format!(" -> {}", reference.elem.to_token_stream()),
-                "collect" => String::new(),
-                _ => return Err(format!("unexpected output type for {name}")),
-            }
-        } else {
-            String::new()
-        };
-        let host = host_for(is_level, receiver_mut, ticks)
-            .map(|(name, ty)| (fresh_name(name, &mut used), ty));
-        // A scoped hook's parts: the trait its method goes on, and the lookup
-        // of the parts attached to the thing its `key` argument names.
-        let scoped = match (api.get("scope"), api.get("key")) {
-            (None, None) => None,
-            (Some(scope), Some(key)) => {
-                let key = key.as_str().ok_or("key must be a string")?;
-                let (part_trait, table) = match scope.as_str() {
-                    Some("block") => ("BlockPart", "block"),
-                    Some("block_entity") => ("BlockEntityPart", "block_entity"),
-                    Some("item") => ("ItemPart", "item"),
-                    Some("menu") => ("MenuPart", "menu"),
-                    _ => return Err(format!("unknown scope for {name}")),
-                };
-                if is_render {
-                    return Err(format!("render hook {name} cannot be scoped"));
-                }
-                let (_, ty) = args
-                    .iter()
-                    .find(|(arg, _)| arg == key)
-                    .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
-                let mut table = table;
-                let id = match ty.to_token_stream().to_string().as_str() {
-                    "BlockStateId" => {
-                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
-                            return Err(format!("{name} has no level to name {key}'s block"));
-                        };
-                        format!("{level}.state_block({key})")
-                    }
-                    "& ItemStack" => format!("Some(&*{key}.item)"),
-                    "& str" => format!("Some({key})"),
-                    // An entity's type id need not be its block's: its own table.
-                    "& ModBlockEntity" | "& mut ModBlockEntity" => {
-                        table = "block_entity_kind";
-                        format!("Some(&*{key}.id)")
-                    }
-                    other => return Err(format!("key {key} of {name} has type {other}")),
-                };
-                Some((part_trait, format!("{table}(|| {id})")))
-            }
-            _ => return Err(format!("{name} needs both scope and key, or neither")),
-        };
-        let event = fresh_name("event", &mut used);
-        let event_type = format!(
-            "{}Event",
-            name.split('_')
-                .map(|word| word[..1].to_uppercase() + &word[1..])
-                .collect::<String>()
-        );
-        let mut trait_params = vec!["&self".to_owned()];
-        let mut dispatch_params = Vec::new();
-        let mut call_args = Vec::new();
-        if let Some((name, ty)) = &host {
-            trait_params.push(format!("{name}: {ty}"));
-            dispatch_params.push(format!("{name}: {ty}"));
-            call_args.push(name.clone());
-        }
-        dispatch_params.push(if is_render {
-            format!("{mod_list}: &[&dyn RenderHooks]")
-        } else {
-            format!("{mod_list}: &[Box<dyn Hooks>]")
-        });
-        let mut lifetimes = EventLifetimes::default();
-        let mut fields = String::new();
-        let mut inits = Vec::new();
-        let mut write_back = String::new();
-        let collected = output.as_ref().filter(|_| contract == "collect");
-        for (name, ty) in args.iter().chain(collected) {
-            dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
-            let (field, scalar) = lifetimes.field(ty);
-            let visibility = if event_type == "ApplyEffectTickEvent" && name == "changes" {
-                "pub(super)"
-            } else {
-                "pub"
-            };
-            fields.push_str(&format!(
-                "{visibility} {name}: {},\n",
-                field.to_token_stream()
-            ));
-            if scalar {
-                inits.push(format!("{name}: *{name}"));
-                write_back.push_str(&format!("*{name} = {event}.{name};"));
-            } else {
-                inits.push(name.clone());
-            }
-        }
-        if let Some((name, ty)) = output.as_ref().filter(|_| contract != "collect") {
-            dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
-        }
-        let (generics, elided) = match (lifetimes.a, lifetimes.b) {
-            (_, true) => ("<'a, 'b>", "<'_, '_>"),
-            (true, false) => ("<'a>", "<'_>"),
-            (false, false) => ("", ""),
-        };
-        trait_params.push(format!("{event}: &mut {event_type}{elided}"));
-        call_args.push(format!("&mut {event}"));
-        let unused = trait_params[1..]
-            .iter()
-            .map(|param| format!("let _ = {};", param.split(':').next().unwrap()))
-            .collect::<String>();
-        let default = match contract {
-            "cancel" => "Flow::Continue",
-            "replace" => "None",
-            _ => "",
-        };
-        if fill {
-            // The dispatch's parameters in order: the host, the mods, the
-            // arguments and the output last.
-            let host = host.as_ref().map(|_| {
-                if ticks {
-                    "&mut super::mod_api_host::LevelTicks { level: self, ticks }"
-                } else {
-                    "self"
-                }
-            });
-            let passed = host
-                .into_iter()
-                .chain(["mod_api::mods()"])
-                .chain(args.iter().chain(output.as_ref()).map(|(n, _)| n.as_str()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            fills.push(Fill {
-                native: native.clone(),
-                call: format!("mod_api::{call}({passed});"),
-            });
-        }
-        let invoke = call_args.join(", ");
-        let trait_params = trait_params.join(", ");
-        let dispatch_params = dispatch_params.join(", ");
-        let trait_name = if is_render { "RenderHooks" } else { "Hooks" };
-        let traits = if is_render {
-            &mut render_traits
-        } else {
-            &mut traits
-        };
-        let dispatch = if is_render {
-            &mut render_dispatch
-        } else {
-            &mut dispatch
-        };
-        let mut method_source = doc_comments(&method.attrs, name, false)?;
-        let side = match hook.side {
-            HelperSide::Server => "server",
-            HelperSide::Client => "client",
-            HelperSide::Both => "both",
-        };
-        method_source.push_str(&format!("/// Side: {side}.\n"));
-        match (contract, out) {
-            ("cancel", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped.\n"
-            )),
-            ("replace", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Return `Some` to set `{out}`; the first mod returning `Some` wins.\n"
-            )),
-            ("collect", Some(out)) => method_source.push_str(&format!(
-                "///\n/// Every mod gets `{event}.{out}` in order and may add, change or remove {out}.\n"
-            )),
-            _ => {}
-        }
-        method_source.push_str(&format!(
-            "fn {name}({trait_params}){result} {{ {unused} {default} }}\n"
-        ));
-        traits.push_str(&method_source);
-        if let Some((part_trait, _)) = &scoped {
-            part_traits
-                .entry(*part_trait)
-                .or_default()
-                .push_str(&method_source);
-        }
-        dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
-        ));
-        let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
-        // A trait mod's call is marked with the mod for a panic to name; render hooks are called bare.
-        let each = if is_render {
-            mod_list.clone()
-        } else {
-            format!("super::entered({mod_list}, \"{name}\")")
-        };
-        // One callee's call: a mod's, then a scoped hook's parts' after the mods.
-        let call = |callee: &str, exit: &str| match contract {
-            "cancel" => format!(
-                "if matches!({callee}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; {exit}; }}",
-                o = out.unwrap()
-            ),
-            "replace" => format!(
-                "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
-                o = out.unwrap()
-            ),
-            _ => format!("{callee}.{name}({invoke});"),
-        };
-        let (lookup, calls) = match &scoped {
-            None => (
-                String::new(),
-                format!(
-                    "for {mod_item} in {each} {{ {} }}",
-                    call(&mod_item, "break")
-                ),
-            ),
-            Some((_, lookup)) => {
-                // The parts are looked up first: the key may be moved into the event.
-                let calls = format!(
-                    "for {mod_item} in {each} {{ {} }} for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
-                    call(&mod_item, "break 'hook"),
-                    call(&part_item, "break 'hook"),
-                );
-                (
-                    format!(
-                        "let {part_table} = super::parts(\"{name}\"); let {part_list} = {part_table}.{lookup};"
-                    ),
-                    if matches!(contract, "cancel" | "replace") {
-                        format!("'hook: {{ {calls} }}")
-                    } else {
-                        calls
-                    },
-                )
-            }
-        };
-        let body = match contract {
-            "cancel" => format!(
-                "if *{o} {{ return; }} {lookup} {build} {calls} {write_back}",
-                o = out.unwrap()
-            ),
-            "replace" => format!(
-                "if {o}.is_some() {{ return; }} {lookup} {build} {calls} {write_back}",
-                o = out.unwrap()
-            ),
-            _ => format!("{lookup} {build} {calls} {write_back}"),
-        };
-        dispatch.push_str(&format!(
-            "pub fn dispatch_{name}({dispatch_params}) {{ {body} }}\n"
-        ));
-    }
+    let dispatch::HookSources {
+        traits,
+        dispatch,
+        render_traits,
+        render_dispatch,
+        part_traits,
+        fills,
+        hook_ids,
+        hook_constants,
+        hook_count,
+        render_hook_ids,
+        render_hook_constants,
+        render_hook_count,
+    } = dispatch::emit(root, &hooks, &methods)?;
     if hooks.is_empty() {
         return Err("no native hooks".into());
     }
     let part = |name: &str| part_traits.get(name).map_or("", String::as_str);
     let code = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\npub trait Hooks: Send + Sync {{\nfn render(&self) -> Option<&dyn RenderHooks> {{ None }}\n/// Once, at startup: attach this mod's parts (`r.block_part(\"mymod:shaft\", Shaft)`).\nfn register(&self, r: &mut Registrar) {{ let _ = r; }}\n{traits}}}\n{PART_DOCS}pub trait BlockPart: Send + Sync + 'static {{\n{}}}\n/// A block's part that also answers for its block entity, and for the block like a [`BlockPart`].\npub trait BlockEntityPart: BlockPart {{\n{}}}\n/// An item's part.\npub trait ItemPart: Send + Sync + 'static {{\n{}}}\n/// A mod menu type's part.\npub trait MenuPart: Send + Sync + 'static {{\n{}}}\n{dispatch}",
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\n#[non_exhaustive]\npub enum HookId {{ {hook_ids} }}\n#[doc(hidden)]\n#[allow(non_upper_case_globals)]\npub mod hook_ids {{ {hook_constants} }}\npub(crate) const HOOK_COUNT: usize = {hook_count};\npub trait Hooks: std::any::Any + Send + Sync {{\nfn subscribed(&self) -> &'static [Option<HookId>];\nfn render(&self) -> Option<&dyn RenderHooks> {{ None }}\n/// Once, at startup: attach this mod's parts (`r.block_part(\"mymod:shaft\", Shaft)`).\nfn register(&self, r: &mut Registrar) {{ let _ = r; }}\n{traits}}}\n{PART_DOCS}pub trait BlockPart: Send + Sync + 'static {{\n{}}}\n/// A block's part that also answers for its block entity, and for the block like a [`BlockPart`].\npub trait BlockEntityPart: BlockPart {{\n{}}}\n/// An item's part.\npub trait ItemPart: Send + Sync + 'static {{\n{}}}\n/// A mod menu type's part.\npub trait MenuPart: Send + Sync + 'static {{\n{}}}\n{dispatch}",
         part("BlockPart"),
         part("BlockEntityPart"),
         part("ItemPart"),
         part("MenuPart"),
     );
-    let api_source = fs::read_to_string(root.join("crates/horizon-client/src/mod_api.rs"))
-        .map_err(|e| e.to_string())?;
-    let types = api_types(&api_source, &code)?;
-    let mut game = Vec::new();
-    game_methods(
-        &root.join("crates/horizon-client/src/game"),
-        "horizon_client::game",
-        &mut game,
-    )?;
-    let mut host_traits = String::new();
-    let mut host_impl = String::new();
-    let mut names = HashSet::new();
-    let mut handles = std::collections::BTreeMap::<&str, String>::new();
-    let mut helpers = catalog["helpers"]
-        .as_array()
-        .ok_or("catalog helpers must be an array")?
-        .clone();
-    let mut fragments = fs::read_dir(root.join("tools/native-hook-fragments"))
-        .map_err(|e| e.to_string())?
-        .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
-    fragments.sort();
-    for path in fragments
-        .into_iter()
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-    {
-        let fragment: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&path).map_err(|e| e.to_string())?)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-        if let Some(pending) = fragment.get("helpers") {
-            helpers.extend(
-                pending
-                    .as_array()
-                    .ok_or("fragment helpers must be an array")?
-                    .iter()
-                    .cloned(),
-            );
-        }
-    }
-    for helper in &helpers {
-        let name = helper["name"].as_str().ok_or("helper name missing")?;
-        let side =
-            HelperSide::parse(helper)?.ok_or_else(|| format!("helper {name}: side missing"))?;
-        if !names.insert(name) {
-            return Err(format!("duplicate helper {name}"));
-        }
-        let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let method = helper_target(&game, name, target)?;
-        let (declaration, implementation) = host_method(method, name, &types.exports)?;
-        if let Some(client_target) = helper.get("client_target") {
-            let client_target = client_target
-                .as_str()
-                .ok_or("client_target must be a string")?;
-            let client = helper_target(&game, name, client_target)?;
-            let (_, client_implementation) = host_method(client, name, &types.exports)?;
-            matching_helper_signatures(&implementation, &client_implementation, name)?;
-        }
-        let side_doc = match side {
-            HelperSide::Server => "/// Side: server.\n",
-            HelperSide::Client => "/// Side: client.\n",
-            HelperSide::Both => "/// Side: both.\n",
-        };
-        host_traits.push_str(side_doc);
-        host_traits.push_str(&declaration);
-        host_impl.push_str(&implementation);
-        if let Some(receiver) = helper.get("receiver") {
-            let receiver = receiver
-                .as_str()
-                .ok_or("helper receiver must be a string")?;
-            let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
-            let methods = handles.entry(handle).or_default();
-            methods.push_str(side_doc);
-            methods.push_str(&code);
-        }
-    }
-    let handles = handles
-        .iter()
-        .map(|(handle, methods)| format!("impl {handle} {{\n{methods}}}\n"))
-        .collect::<String>();
-    struct StdTypes {
-        path_buf: bool,
-        arc: bool,
-    }
-    impl<'ast> Visit<'ast> for StdTypes {
-        fn visit_type_path(&mut self, ty: &'ast syn::TypePath) {
-            if ty.path.segments.len() == 1 {
-                self.path_buf |= ty.path.segments[0].ident == "PathBuf";
-                self.arc |= ty.path.segments[0].ident == "Arc";
-            }
-            syn::visit::visit_type_path(self, ty);
-        }
-    }
-    let host_trait: syn::ItemTrait = syn::parse_str(&format!("trait Host {{ {host_traits} }}"))
-        .map_err(|e| format!("generated Host: {e}"))?;
-    let mut std_types = StdTypes {
-        path_buf: false,
-        arc: false,
-    };
-    std_types.visit_item_trait(&host_trait);
-    let mut imports = String::new();
-    if std_types.path_buf {
-        imports.push_str("use std::path::PathBuf;\n");
-    }
-    if std_types.arc {
-        imports.push_str("use std::sync::Arc;\n");
-    }
-    let host = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n{imports}/// Services supplied by the game to trait mods.\n/// Each method's default panics with its name, so a test double implements only what its test calls; the game implements every one.\npub trait Host {{\n{host_traits}}}\n{handles}"
-    );
-    let implementation = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse horizon_client::mod_api::*;\n{imports}impl Host for super::Game<'_> {{\n{host_impl}}}\n"
-    );
+    let code = complete_hook_constants(code, "Hooks", "hook_ids", "HookId")?;
+    let (host, implementation) = host::generate(root, &catalog, &code)?;
     let render_code = format!(
-        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\npub trait RenderHooks: Send + Sync {{\n{render_traits}}}\n{render_dispatch}"
+        "// @generated by cargo run -p xtask -- mod-api; do not edit.\nuse super::*;\n#[doc(hidden)]\n#[repr(usize)]\n#[derive(Clone, Copy)]\n#[non_exhaustive]\npub enum RenderHookId {{ {render_hook_ids} }}\n#[doc(hidden)]\n#[allow(non_upper_case_globals)]\npub mod render_hook_ids {{ {render_hook_constants} }}\npub(crate) const RENDER_HOOK_COUNT: usize = {render_hook_count};\npub trait RenderHooks: std::any::Any + Send + Sync {{\nfn subscribed(&self) -> &'static [Option<RenderHookId>];\n{render_traits}}}\n{render_dispatch}"
     );
+    let render_code = complete_hook_constants(
+        render_code,
+        "RenderHooks",
+        "render_hook_ids",
+        "RenderHookId",
+    )?;
     // A new hook's placeholder body becomes its dispatch call.
     let filled = if fills.is_empty() {
         None
@@ -1354,6 +966,8 @@ enum FillMode {
 }
 
 mod build;
+mod dispatch;
+mod host_param;
 pub use build::{generate, inject};
 mod injection;
 pub use injection::{TraitContract, TraitInjection};
@@ -1529,12 +1143,20 @@ mod tests {
             ("http_request", "HTTPRequestRef"),
         ] {
             let name = format!("{receiver}_kind");
-            let method =
-                syn::parse_str(&format!("fn native_{name}(&self, value: {ty}) {{}}")).unwrap();
-            let (handle, code) =
-                super::handle_method(&method, &name, receiver, &types.handles).unwrap();
+            let method = syn::parse_str(&format!(
+                "fn native_{name}(&self, value: {ty}) -> Option<()> {{}}"
+            ))
+            .unwrap();
+            let (handle, code) = super::handle_method(
+                &method,
+                &name,
+                receiver,
+                super::HelperSide::Server,
+                &types.handles,
+            )
+            .unwrap();
             assert_eq!(handle, ty);
-            assert!(code.contains(&format!("host.{name}(self)")));
+            assert!(code.contains(&format!("backend_of(host)?.{name}(self)")));
         }
         let method = syn::parse_quote! { fn native_hidden_kind(&self, value: HiddenRef) {} };
         for receiver in [
@@ -1547,9 +1169,15 @@ mod tests {
             "missing",
         ] {
             assert!(
-                super::handle_method(&method, "hidden_kind", receiver, &types.handles)
-                    .unwrap_err()
-                    .contains("unknown receiver")
+                super::handle_method(
+                    &method,
+                    "hidden_kind",
+                    receiver,
+                    super::HelperSide::Server,
+                    &types.handles
+                )
+                .unwrap_err()
+                .contains("unknown receiver")
             );
         }
         assert_eq!(
@@ -1567,19 +1195,50 @@ mod tests {
             /// Where it is.
             fn native_entity_position(&self, entity: EntityRef, mut scale: f64) -> Option<[f64; 3]> { todo!() }
         };
-        let (handle, code) =
-            super::handle_method(&read, "entity_position", "entity", &types.handles).unwrap();
+        let (handle, code) = super::handle_method(
+            &read,
+            "entity_position",
+            "entity",
+            super::HelperSide::Server,
+            &types.handles,
+        )
+        .unwrap();
         assert_eq!(handle, "EntityRef");
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
-        assert!(code.contains("host.entity_position(self, scale)"));
+        assert!(code.contains("backend_of(host)?.entity_position(self, scale)"));
         let write: syn::ItemFn = syn::parse_quote! {
-            fn native_level_set(&mut self, level: LevelRef) {}
+            fn native_level_set(&mut self, level: LevelRef) -> bool { todo!() }
         };
-        let (handle, code) =
-            super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
+        let (handle, code) = super::handle_method(
+            &write,
+            "level_set",
+            "level",
+            super::HelperSide::Server,
+            &types.handles,
+        )
+        .unwrap();
         assert_eq!(handle, "LevelRef");
-        assert!(code.contains("host : & mut dyn Host"));
+        for (side, error) in [
+            (
+                super::HelperSide::Both,
+                "level_set: a both-side handle write is not allowed",
+            ),
+            (
+                super::HelperSide::Client,
+                "level_set: client handle writes need a client backend accessor; add it with the first one",
+            ),
+        ] {
+            assert_eq!(
+                super::handle_method(&write, "level_set", "level", side, &types.handles)
+                    .unwrap_err(),
+                error
+            );
+        }
+        assert!(code.contains("host : & mut dyn ServerHost"));
+        assert!(code.contains(
+            "backend_mut_of(host).map(|backend| backend.level_set(self)).unwrap_or(false)"
+        ));
         for (method, name, receiver, error) in [
             (
                 syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
@@ -1600,6 +1259,12 @@ mod tests {
                 "not a method name",
             ),
             (
+                syn::parse_quote! { fn native_entity_x(&self, entity: EntityRef) {} },
+                "entity_x",
+                "entity",
+                "returns Option or bool",
+            ),
+            (
                 syn::parse_quote! { fn native_entity_x(entity: EntityRef) {} },
                 "entity_x",
                 "entity",
@@ -1614,9 +1279,15 @@ mod tests {
         ] {
             let method: syn::ItemFn = method;
             assert!(
-                super::handle_method(&method, name, receiver, &types.handles)
-                    .unwrap_err()
-                    .contains(error),
+                super::handle_method(
+                    &method,
+                    name,
+                    receiver,
+                    super::HelperSide::Server,
+                    &types.handles
+                )
+                .unwrap_err()
+                .contains(error),
                 "{name}"
             );
         }
@@ -1633,42 +1304,48 @@ mod tests {
         for ty in ["Visible", "Renamed", "Defined", "Generated"] {
             let method: syn::ItemFn =
                 syn::parse_str(&format!("fn native_test(&self, value: {ty}) {{ }}")).unwrap();
-            assert!(super::host_method(&method, "test", &exports).is_ok());
+            assert!(super::host_method(&method, "test", "Host", &exports).is_ok());
         }
         let foreign: syn::ItemFn =
             syn::parse_quote! { fn native_foreign(&self, value: elsewhere::Visible) {} };
-        assert!(super::host_method(&foreign, "foreign", &exports).is_err());
+        assert!(super::host_method(&foreign, "foreign", "Host", &exports).is_err());
         let hidden_trait: syn::ItemFn =
             syn::parse_quote! { fn native_hidden(&self, value: &dyn Hidden) {} };
-        assert!(super::host_method(&hidden_trait, "hidden", &exports).is_err());
+        assert!(super::host_method(&hidden_trait, "hidden", "Host", &exports).is_err());
         let read: syn::ItemFn = syn::parse_quote! {
             /// Read a value exactly.
             ///
             /// Keep the blank line too.
             fn native_read(&self, pos: [i32; 3]) -> String { todo!() }
         };
-        let (declaration, implementation) = super::host_method(&read, "read", &exports).unwrap();
+        let (declaration, implementation) =
+            super::host_method(&read, "read", "Host", &exports).unwrap();
         assert!(
             declaration.contains("/// Read a value exactly.\n///\n/// Keep the blank line too.")
         );
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("self.native_read(pos)"));
         let dir: syn::ItemFn = syn::parse_quote! { fn native_dir() -> PathBuf { todo!() } };
-        let (declaration, implementation) = super::host_method(&dir, "dir", &exports).unwrap();
+        let (declaration, implementation) =
+            super::host_method(&dir, "dir", "Host", &exports).unwrap();
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("Self::native_dir()"));
         let owned: syn::ItemFn = syn::parse_quote! { fn native_owned(self) {} };
-        assert!(super::host_method(&owned, "owned", &exports).is_err());
+        assert!(super::host_method(&owned, "owned", "Host", &exports).is_err());
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_write(&mut self, value: i32) { }
         };
-        let (declaration, _) = super::host_method(&write, "write", &exports).unwrap();
+        let (declaration, _) = super::host_method(&write, "write", "Host", &exports).unwrap();
         assert!(declaration.contains("& mut self"));
+        for side in ["ServerHost", "ClientHost"] {
+            let (declaration, _) = super::host_method(&write, "write", side, &exports).unwrap();
+            assert!(declaration.contains(&format!("{side}::write")));
+        }
         let private: syn::ItemFn = syn::parse_quote! {
             fn native_private(&self, value: BinOnly) { }
         };
         assert!(
-            super::host_method(&private, "private", &exports)
+            super::host_method(&private, "private", "Host", &exports)
                 .unwrap_err()
                 .contains("BinOnly")
         );
@@ -1676,7 +1353,7 @@ mod tests {
             fn native_generic<T>(&self, value: T) { }
         };
         assert!(
-            super::host_method(&generic, "generic", &exports)
+            super::host_method(&generic, "generic", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1684,7 +1361,7 @@ mod tests {
             fn native_callback(&self, callback: impl FnOnce()) { }
         };
         assert!(
-            super::host_method(&callback, "callback", &exports)
+            super::host_method(&callback, "callback", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1692,7 +1369,7 @@ mod tests {
             async fn native_async(&self) { }
         };
         assert!(
-            super::host_method(&asynchronous, "async", &exports)
+            super::host_method(&asynchronous, "async", "Host", &exports)
                 .unwrap_err()
                 .contains("object-safe")
         );
@@ -1721,26 +1398,93 @@ mod tests {
 
     #[test]
     fn level_hosts_match_receiver_mutability() {
+        let level = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::GameLevel<'_>::native_test"}),
+            side: super::HelperSide::Server,
+        };
+        let game = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test"}),
+            side: super::HelperSide::Both,
+        };
+        use super::host_param::{HostParam, host_param};
+        let param = |ty: &str, call| {
+            Some(HostParam {
+                ty: ty.into(),
+                call,
+            })
+        };
         assert_eq!(
-            super::host_for(true, Some(false), false),
-            Some(("level", "&dyn LevelHost".into()))
+            host_param(&level, Some(false), false),
+            param("&dyn LevelHost", "self")
         );
         assert_eq!(
-            super::host_for(true, Some(true), false),
-            Some(("level", "&mut dyn LevelRandomHost".into()))
+            host_param(&level, Some(true), false),
+            param("&mut dyn LevelRandomHost", "self")
+        );
+        let ticks = "&mut super::mod_api_host::LevelTicks { level: self, ticks }";
+        assert_eq!(
+            host_param(&level, Some(false), true),
+            param("&mut dyn LevelTicksHost", ticks)
         );
         assert_eq!(
-            super::host_for(true, Some(false), true),
-            Some(("level", "&mut dyn LevelTicksHost".into()))
+            host_param(&level, Some(true), true),
+            param("&mut dyn LevelWriteHost", ticks)
+        );
+        assert_eq!(host_param(&level, None, false), None);
+        let level_both = super::CatalogHook {
+            entry: level.entry.clone(),
+            side: super::HelperSide::Both,
+        };
+        assert_eq!(
+            host_param(&level_both, Some(false), false),
+            param("LevelSide", "super::mod_api_host::level_side(self)")
+        );
+        for (mutable, ticks) in [(Some(true), false), (Some(false), true)] {
+            assert_eq!(
+                super::host_param::validate(&level_both, "test", true, mutable, ticks).unwrap_err(),
+                "test: a both-side level hook takes the read kind until a client level seam exists"
+            );
+        }
+        assert_eq!(
+            host_param(&game, Some(true), false),
+            param("HostSide", "HostSide::of(self)")
         );
         assert_eq!(
-            super::host_for(true, Some(true), true),
-            Some(("level", "&mut dyn LevelWriteHost".into()))
+            super::host_param::validate(&game, "test", false, Some(false), false).unwrap_err(),
+            "test: a both-side hook with a &self target takes host \"read\""
         );
-        assert_eq!(super::host_for(true, None, false), None);
+        let read = super::CatalogHook {
+            entry: serde_json::json!({"target": "horizon_client::game::Game<'_>::native_test", "host": "read"}),
+            side: super::HelperSide::Both,
+        };
         assert_eq!(
-            super::host_for(false, Some(true), false),
-            Some(("host", "&mut dyn Host".into()))
+            host_param(&read, Some(false), false),
+            param("&dyn Host", "&*self")
+        );
+        let client = super::CatalogHook {
+            entry: game.entry.clone(),
+            side: super::HelperSide::Client,
+        };
+        assert_eq!(
+            host_param(&client, Some(false), false),
+            param("&dyn ClientHost", "&*self")
+        );
+        assert_eq!(
+            host_param(&client, Some(true), false),
+            param("&mut dyn ClientHost", "self")
+        );
+        let client_read = super::CatalogHook {
+            entry: read.entry.clone(),
+            side: super::HelperSide::Client,
+        };
+        assert_eq!(
+            super::host_param::validate(&client_read, "test", false, Some(false), false)
+                .unwrap_err(),
+            "test: this entry takes no host marker"
+        );
+        assert_eq!(
+            super::host_param::validate(&read, "test", true, Some(false), false).unwrap_err(),
+            "test: this entry takes no host marker"
         );
     }
 
@@ -1872,7 +1616,7 @@ mod tests {
         std::fs::write(&catalog_path, original_catalog).unwrap();
         let hooks = root.join("crates/horizon-client/src/game/native_hooks.rs");
         let shipped = std::fs::read_to_string(&hooks).unwrap();
-        let call = "mod_api::dispatch_item_damaged(self, mod_api::mods(), player, name, item, amount, cancel);";
+        let call = "mod_api::dispatch_item_damaged(self, player, name, item, amount, cancel);";
         assert_eq!(shipped.matches(call).count(), 1);
         let unfinished = shipped.replace(call, "let _ = (player, name, item, amount);");
         std::fs::write(&hooks, &unfinished).unwrap();

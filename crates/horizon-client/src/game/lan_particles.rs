@@ -2,11 +2,12 @@
 //! `ClientboundLevelParticlesPacket` (`ServerLevel.sendParticles`, which
 //! `/particle` uses) and `ClientboundExplodePacket` (`ServerLevel.explode`).
 use super::{Game, lan::LanHost};
+use horizon_client::lan::containers::within_range;
 use horizon_client::lan::hub::Hub;
 use horizon_client::particles::{ParticleOptions, ParticleType};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_protocol::{
-    entity_data::{MOD_PARTICLE_ID, Particle, ParticleData},
+    entity_data::{MOD_PARTICLE_ID, Particle, ParticleData, PositionSource},
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
@@ -29,14 +30,12 @@ fn send_native_nearby(
     dimension: &str,
     packet: Vec<u8>,
     horizon_only: bool,
+    except: Option<u32>,
     within_range: impl Fn([f64; 3]) -> bool,
 ) {
-    for guest in host
-        .hub
-        .guests
-        .iter()
-        .filter(|g| g.placed && g.dimension == dimension && within_range(g.position))
-    {
+    for guest in host.hub.guests.iter().filter(|g| {
+        g.placed && g.dimension == dimension && Some(g.conn) != except && within_range(g.position)
+    }) {
         // A vanilla client cannot decode a native mod's particle id; see
         // `mod_particle_only_for_horizon`.
         if horizon_only && guest.brand != "horizon" {
@@ -222,11 +221,9 @@ impl Game<'_> {
 
     /// `ServerLevel.sendParticles` of a mob's particles: a packet to each
     /// player within 32 blocks. The window draws its own copy. `state` is the
-    /// block of a block particle. `host` is the hub of a guest's turn, which
-    /// is out of `self.lan` meanwhile.
+    /// block of a block particle.
     pub(super) fn lan_level_particles(
         &self,
-        host: Option<&LanHost>,
         options: &ParticleOptions,
         at: [f64; 3],
         spread: [f64; 3],
@@ -234,7 +231,7 @@ impl Game<'_> {
         count: u32,
         state: Option<BlockStateId>,
     ) {
-        let Some(hub) = host.or(self.lan.as_ref()).map(|h| &h.hub) else {
+        let Some(hub) = self.lan.as_ref().map(|h| &h.hub) else {
             return;
         };
         send_hub_level_particles(hub, options, at, spread, speed, count, state);
@@ -242,16 +239,8 @@ impl Game<'_> {
 
     /// `LivingEntity.checkFallDamage`'s `ServerLevel.sendParticles` of the
     /// landing block's crumbs: drawn in this window, when it has one, and
-    /// sent to each player within 32 blocks. `host` is the hub of a guest's
-    /// turn, which is out of `self.lan` meanwhile.
-    pub(super) fn landing_dust(
-        &mut self,
-        host: Option<&LanHost>,
-        state: BlockStateId,
-        at: Vec3,
-        count: i32,
-        speed: f64,
-    ) {
+    /// sent to each player within 32 blocks.
+    pub(super) fn landing_dust(&mut self, state: BlockStateId, at: Vec3, count: i32, speed: f64) {
         let at = [at.x, at.y, at.z];
         if self.serving.is_none() && self.options.dedicated.is_none() {
             let block = [
@@ -269,7 +258,7 @@ impl Game<'_> {
                 );
             }
         }
-        let Some(hub) = host.or(self.lan.as_ref()).map(|h| &h.hub) else {
+        let Some(hub) = self.lan.as_ref().map(|h| &h.hub) else {
             return;
         };
         let Some(particle) = Self::hub_particle(
@@ -312,8 +301,7 @@ impl Game<'_> {
         Self::hub_particle(&self.lan.as_ref()?.hub, options, state)
     }
 
-    /// `network_particle` for a hub that is out of `self.lan` meanwhile (a
-    /// guest's turn).
+    /// Convert a particle using the hub's registry.
     pub(super) fn hub_particle(
         hub: &Hub,
         options: &ParticleOptions,
@@ -414,8 +402,38 @@ impl Game<'_> {
             Some(ParticleData::Trail(target, color, duration)) => {
                 ParticleOptions::trail(*target, *color as u32 & 0xFF_FFFF, *duration)
             }
+            Some(ParticleData::Vibration { source, ticks }) => {
+                ParticleOptions::vibration(self.vibration_destination(source)?, *ticks)
+            }
             Some(_) => return None,
         })
+    }
+
+    /// `PositionSource.getPosition`: a block's centre, or an entity's feet
+    /// raised by the option's offset. An entity this client does not have is
+    /// no destination at all: vanilla makes the particle and removes it on its
+    /// first tick, so nothing of it is ever drawn.
+    fn vibration_destination(&self, source: &PositionSource) -> Option<[f64; 3]> {
+        match source {
+            PositionSource::Block([x, y, z]) => Some([
+                f64::from(*x) + 0.5,
+                f64::from(*y) + 0.5,
+                f64::from(*z) + 0.5,
+            ]),
+            PositionSource::Entity { id, y_offset } => {
+                let id = u32::try_from(*id).ok()?;
+                self.mobs
+                    .iter()
+                    .find(|m| m.id == id && !m.removed)
+                    .map(|m| {
+                        [
+                            m.position.x,
+                            m.position.y + f64::from(*y_offset),
+                            m.position.z,
+                        ]
+                    })
+            }
+        }
     }
 
     /// `ClientPacketListener.handleParticleEvent`: no count is one particle
@@ -522,7 +540,7 @@ impl Game<'_> {
         .encode();
         // BlockPos.closerToCenterThan(at, 32): from the centre of the
         // player's block.
-        send_native_nearby(host, dimension, body, horizon_only, |position| {
+        send_native_nearby(host, dimension, body, horizon_only, None, |position| {
             let d: f64 = (0..3)
                 .map(|k| (position[k].floor() + 0.5 - at[k]).powi(2))
                 .sum();
@@ -543,22 +561,37 @@ impl Game<'_> {
             {
                 continue;
             }
-            let packet = host
-                .hub
-                .sound_packet(
-                    &sound.sound,
-                    sound.at,
-                    sound.volume,
-                    sound.pitch,
-                    sound.source,
-                    host.hub.next_sound_seed(),
-                )
-                .encode();
+            let packet = host.hub.sound_packet(
+                &sound.sound,
+                sound.at,
+                sound.volume,
+                sound.pitch,
+                sound.source,
+                sound.seed,
+            );
+            // `Level.playSound(except, entity, ...)`: the same sound and
+            // seed, bound to the entity.
+            let packet = match (packet, sound.entity) {
+                (C::Sound(s), Some(id)) => C::SoundEntity(play::SoundEntity {
+                    sound: s.sound,
+                    source: s.source,
+                    id,
+                    volume: s.volume,
+                    pitch: s.pitch,
+                    seed: s.seed,
+                }),
+                (packet, _) => packet,
+            }
+            .encode();
             let range = f64::from(sound.volume.max(1.0)) * 16.0;
-            send_native_nearby(host, sound.dimension, packet, false, |position| {
-                let distance: f64 = (0..3).map(|k| (position[k] - sound.at[k]).powi(2)).sum();
-                distance <= range * range
-            });
+            send_native_nearby(
+                host,
+                sound.dimension,
+                packet,
+                false,
+                sound.except,
+                |position| within_range(sound.at, position, range),
+            );
         }
     }
 

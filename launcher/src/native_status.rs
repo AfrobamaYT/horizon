@@ -4,6 +4,7 @@
 use crate::{backend, browser::java, native_mods};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Shown once, before the first native mod is installed.
 pub const NOTICE: &str = "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; the first build downloads Rust and takes 20 to 30 minutes.";
@@ -15,7 +16,7 @@ pub type Mod = (String, String, Option<String>);
 /// Whether an installed file (`installed::Entry::file`) is a native mod.
 pub fn is_native_file(file: &str) -> bool {
     file.strip_prefix(native_mods::INSTALLED)
-        .is_some_and(|rest| rest.starts_with('/') && rest.ends_with(".hnmod"))
+        .is_some_and(|rest| rest.starts_with('/') && rest.ends_with(".hmod"))
 }
 
 /// Where an instance's native mods stand.
@@ -33,7 +34,7 @@ pub enum State {
 
 /// The state for the mods turned on, `enabled`, and those of the version played, `built` (None
 /// when it is no native build). Order doesn't matter; a mod at another version, or with other
-/// files at the same version (a reinstalled local `.hnmod`), needs a build.
+/// files at the same version (a reinstalled local `.hmod`), needs a build.
 pub fn state(enabled: &[Mod], built: Option<&[Mod]>) -> State {
     if enabled.is_empty() {
         return State::NoMods;
@@ -98,12 +99,12 @@ pub fn horizon_label(version: &str) -> String {
     }
 }
 
-/// The native mods turned on in game folder `home`, read from their `.hnmod`s. One that can't be
+/// The native mods turned on in game folder `home`, read from their `.hmod`s. One that can't be
 /// read always counts, with its file name and no version, so it needs a build (which says why):
 /// the on/off list is keyed by the manifest id, which an unreadable file can't give.
 pub fn enabled(home: &Path) -> Vec<Mod> {
     let mut out = Vec::new();
-    for path in hnmods(home) {
+    for path in hmods(home) {
         match horizon_mods::index::native::Bundle::read(&path) {
             Ok(b) => {
                 if java::is_enabled(home, &b.manifest.id) {
@@ -126,20 +127,24 @@ pub struct Installed {
     pub id: String,
     pub version: String,
     pub origin: Option<crate::github_mods::Origin>,
+    /// The validated package icon, or the package error (the file remains removable).
+    pub icon: Result<Option<Arc<horizon_mods::icon::Icon>>, String>,
 }
 
 /// Discover the actual files, not just GitHub sidecars. Registry files already have a row.
 pub fn untracked(home: &Path) -> Vec<Installed> {
     let tracked = crate::browser::installed::Installed::load(home);
-    hnmods(home)
+    hmods(home)
         .into_iter()
         .filter_map(|path| {
             let file = format!("{}/{}", native_mods::INSTALLED, path.file_name()?.to_str()?);
             if !path.is_file() || tracked.entries.iter().any(|e| e.file == file) {
                 return None;
             }
-            let (id, version) = horizon_mods::index::native::Bundle::read(&path)
-                .map(|b| (b.manifest.id, b.manifest.version))
+            let package = horizon_mods::manifest::Package::read(&path);
+            let (id, version) = package
+                .as_ref()
+                .map(|p| (p.manifest.id.clone(), p.manifest.version.clone()))
                 .unwrap_or_else(|_| (stem(&path), String::new()));
             let origin = (path.file_stem()?.to_str()? == id)
                 .then(|| crate::github_mods::origin(home, &id))
@@ -149,6 +154,7 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
                 id,
                 version,
                 origin,
+                icon: package.map(|p| p.icon.map(Arc::new)),
             })
         })
         .collect()
@@ -179,12 +185,12 @@ fn parse_built(about: &serde_json::Value) -> Vec<Mod> {
 }
 
 /// What [`state`] depends on, cheap to read on every frame: the folder, the version, the on/off
-/// list and each `.hnmod`'s size and time. The Mods page reads the mods again when it changes.
+/// list and each `.hmod`'s size and time. The Mods page reads the mods again when it changes.
 pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut out = format!("{}\n{version:?}\n", home.display());
     // The on/off list (`browser::java::is_enabled`).
     out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
-    for path in hnmods(home)
+    for path in hmods(home)
         .into_iter()
         .flat_map(|p| [p.clone(), p.with_extension("origin.json")])
         .chain([home.join("mod-browser.json")])
@@ -196,11 +202,11 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     out
 }
 
-fn hnmods(home: &Path) -> Vec<std::path::PathBuf> {
+fn hmods(home: &Path) -> Vec<std::path::PathBuf> {
     let mut paths: Vec<_> = fs::read_dir(home.join(native_mods::INSTALLED))
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hnmod"));
+    paths.retain(|p| p.extension().is_some_and(|e| e == "hmod"));
     paths.sort();
     paths
 }
@@ -238,13 +244,16 @@ mod tests {
         ] {
             let path = home
                 .join(native_mods::INSTALLED)
-                .join(format!("{file}.hnmod"));
+                .join(format!("{file}.hmod"));
             let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
-            let manifest = serde_json::json!({"schema":1,"id":id,"version":"1.2","game":"26.3","horizon":pin,"mixins":pin});
-            let source = format!("[mod]\nid = \"{id}\"\nversion = \"1.2\"\n[compatibility]\nhorizon_revision = \"{pin}\"\n");
+            let manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");
             for (name, bytes) in [
-                ("horizon-native.json".into(), manifest.to_string()),
-                (format!("mixins/{id}/horizon-mixin.toml"), source),
+                ("horizon-mod.toml", manifest.as_str()),
+                (
+                    "Cargo.toml",
+                    "[package]\nname = 'unrelated'\nversion = '9'\n",
+                ),
+                ("src/lib.rs", "pub fn hooks() {}\n"),
             ] {
                 zip.start_file(name, zip::write::SimpleFileOptions::default())
                     .unwrap();
@@ -276,7 +285,7 @@ mod tests {
                 kind: Kind::Mod,
                 version: "1.2".into(),
                 number: "1.2".into(),
-                file: format!("{}/registry.hnmod", native_mods::INSTALLED),
+                file: format!("{}/registry.hmod", native_mods::INSTALLED),
                 checksum: String::new(),
                 page: String::new(),
                 dependency: false,
@@ -293,6 +302,7 @@ mod tests {
             .map(|m| (m.id.as_str(), m.version.as_str(), m.origin.is_some()))
             .collect();
         assert_eq!(seen, [("github", "1.2", true), ("local", "1.2", false)]);
+        assert!(files.iter().all(|m| matches!(&m.icon, Ok(None))));
         for id in ["registry", "github", "local"] {
             java::set_enabled(&home, id, true).unwrap();
         }
@@ -315,15 +325,16 @@ mod tests {
             "a stale origin is not an installed mod"
         );
         fs::write(
-            home.join(native_mods::INSTALLED).join("broken.hnmod"),
+            home.join(native_mods::INSTALLED).join("broken.hmod"),
             b"broken",
         )
         .unwrap();
+        let files = untracked(&home);
         assert_eq!(
-            untracked(&home)[0].id,
-            "broken",
+            files[0].id, "broken",
             "unreadable files can still be removed"
         );
+        assert!(files[0].icon.is_err(), "a refusal is not an absent icon");
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -404,9 +415,9 @@ mod tests {
     }
 
     #[test]
-    fn only_hnmods_in_the_native_folder_are_native() {
-        assert!(is_native_file("horizon-native-mods/veinminer.hnmod"));
-        assert!(!is_native_file("horizon-native-mods-old/x.hnmod"));
+    fn only_hmods_in_the_native_folder_are_native() {
+        assert!(is_native_file("horizon-native-mods/veinminer.hmod"));
+        assert!(!is_native_file("horizon-native-mods-old/x.hmod"));
         assert!(!is_native_file("horizon-mods/zoom.hmod"));
         assert!(!is_native_file("resourcepacks/x.zip"));
     }

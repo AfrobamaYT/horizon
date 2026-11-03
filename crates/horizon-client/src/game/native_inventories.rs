@@ -1,4 +1,4 @@
-//! Another player's inventories for server mods (API 132):
+//! Another player's inventories for server mods:
 //! what an operator's `/invsee` or `/endersee` needs. A player online is read
 //! and changed live; a player who isn't on the server is read from, and
 //! written to, their file (`players/data/<uuid>.dat`, as the server saves
@@ -6,7 +6,7 @@
 //! at a time, checked against what the mod last showed, so a menu built on
 //! these never copies or loses an item. Server menus are in `native_menus.rs`;
 //! maps a mod draws in `native_send_map` below.
-use super::Game;
+use super::{Game, commands::Target};
 use horizon_client::{
     items::ItemStack,
     lan::{guest::Guest, playerdata},
@@ -154,13 +154,13 @@ enum Side {
     File(Box<Level>),
 }
 
-/// Another player's inventories, for server mods. API 132.
+/// Another player's inventories, for server mods.
 #[allow(dead_code)]
 impl Game<'_> {
     /// The player `uuid`'s inventory `kind`: the live one when they are on
     /// the server, else their file's. Err while they are logging in, dead,
-    /// swapped in (inside a player's hook: call from `native_menu_clicked` or
-    /// `native_server_tick`), or when they have never played here.
+    /// swapped in or displaced by an inner turn, or when they have never
+    /// played here. Other guests' live inventories remain available.
     pub(super) fn native_inventory(
         &self,
         uuid: u128,
@@ -182,9 +182,6 @@ impl Game<'_> {
     }
 
     fn native_inventory_side(&self, uuid: u128) -> Result<Side, String> {
-        if self.lan_acting.is_some() {
-            return Err("inside a player's turn".into());
-        }
         let Some(host) = self.lan.as_ref() else {
             return Err("no server".into());
         };
@@ -194,6 +191,12 @@ impl Game<'_> {
                 Err("the player is logging in".into())
             } else if g.dead {
                 Err("the player is dead".into())
+            } else if !matches!(
+                self.native_player_ref(uuid)
+                    .and_then(|player| self.native_entity_target(player.entity())),
+                Some(Target::Guest(_))
+            ) {
+                Err("the player's inventory is swapped out".into())
             } else {
                 Ok(Side::Live(i))
             };
@@ -309,7 +312,6 @@ impl Game<'_> {
     /// map is never sent again by the game), so send it again after the
     /// player joins. Use ids far from the world's own (they count up from 0).
     /// False for a player not here, or `colors` not 16384 long.
-    /// API 132.
     pub(super) fn native_send_map(&mut self, uuid: u128, map_id: i32, colors: &[u8]) -> bool {
         use horizon_protocol::packets::play::{Clientbound, MapItemData, MapPatch};
         if colors.len() != 128 * 128 {

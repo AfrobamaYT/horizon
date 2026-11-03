@@ -48,7 +48,6 @@ from tools import parity, release_train  # noqa: E402
 from tools.ci import rust_changes  # noqa: E402
 
 RBUILD = Path.home() / "fleet" / "rbuild"
-LINE_LIMIT = 500
 # What rbuild's login shell needs on each fleet machine before cargo (it adds sccache itself). The ThinkPad no
 # longer builds (2026-10-26: it keeps the AI pool and a few services; Linux work goes to playhorizon's runner).
 HOST_SETUP = {
@@ -77,6 +76,12 @@ in_shell() { if [ "$(uname)" = Linux ] && ! pkg-config --exists xkbcommon 2>/dev
 
 # Build-script inputs outside the crates: catalog-only edits still need to build and test their consumers.
 MOD_API_INPUTS = ("native-hooks.json", "tools/native-hook-fragments/")
+# The generated dispatch surface: edits here change what the dispatch tests compile and run. The registry is its
+# own crate with its own suite; a `--manifest-path` run keeps both out of the workspace selection above.
+DISPATCH_TESTS = "crates/horizon-mod-api-gen/dispatch-tests/Cargo.toml"
+DISPATCH_TEST_INPUTS = ("crates/horizon-mod-api-gen/", "crates/horizon-mod-api-macros/",
+                        "crates/horizon-client/src/mod_api", *MOD_API_INPUTS)
+MOD_REGISTRY = "crates/horizon-mod-registry/Cargo.toml"
 
 def is_doc(path):
     return path.endswith(".md")
@@ -131,16 +136,9 @@ def area(path):
     return "game"
 
 
-def reviewed(path):
-    """Whether a path's lines count towards a pull request's size: documentation and tests don't."""
-    return not is_doc(path) and not path.startswith("tests/") and not re.search(r"(^|/)tests?/|/test_\w+\.py$", path)
-
-
-def scope_warnings(paths, lines):
-    """lines: the changed lines of the reviewed paths (not documentation or tests)."""
+def scope_warnings(paths):
+    """A pull request keeps to one area; its size is its own concern (#385)."""
     warnings = []
-    if lines > LINE_LIMIT:
-        warnings.append(f"{lines} lines of code: over {LINE_LIMIT}, split it if it can ship in parts")
     areas = sorted({area(path) for path in paths} - {None})
     if len(areas) > 1:
         warnings.append("mixes " + ", ".join(areas))
@@ -385,10 +383,24 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
              skip=None if any(p.startswith(("crates/horizon-theme/", "xtask/")) for p in changed)
              else "theme untouched"),
     ]
+    dispatch_skip = None if any(path.startswith(DISPATCH_TEST_INPUTS) for path in changed) \
+        else "dispatch surface untouched"
+    registry_skip = None if any(path.startswith("crates/horizon-mod-registry/") for path in changed) \
+        else "mod registry untouched"
+    for name, manifest, skip in (("dispatch tests", DISPATCH_TESTS, dispatch_skip),
+                                 ("mod registry tests", MOD_REGISTRY, registry_skip)):
+        steps.extend([
+            Step(f"{name} clippy",
+                 f"CARGO_BUILD_JOBS=${{CARGO_BUILD_JOBS:-4}} cargo clippy --manifest-path {manifest}"
+                 " --all-targets --locked -- -D warnings", skip=skip),
+            Step(f"{name} tests",
+                 f"CARGO_BUILD_JOBS=${{CARGO_BUILD_JOBS:-4}} cargo test --manifest-path {manifest}"
+                 " --locked -- --test-threads=4", skip=skip, summary=tests_passed),
+        ])
     launcher_skip = None if launcher else "launcher untouched"
     for name, command in [("launcher rustfmt", "cargo fmt --check"),
                           ("launcher clippy", "cargo clippy --all-targets --locked $features -- -D warnings"),
-                          ("launcher tests", "cargo test --locked --lib $features")]:
+                          ("launcher tests", "cargo test --locked --lib --bins $features")]:
         steps.append(Step(name, f"cd launcher && {LAUNCHER_FEATURES}\nin_shell {shlex.quote(command)}", skip=launcher_skip,
                           summary=tests_passed if name == "launcher tests" else None))
     harness = Step("Parity", summary=parity_summary)
@@ -487,7 +499,7 @@ def run_windows(steps, verbose):
             command = ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"]
             cwd = ROOT / "launcher"
         elif step.name == "launcher tests":
-            command = ["cargo", "test", "--locked", "--lib"]
+            command = ["cargo", "test", "--locked", "--lib", "--bins"]
             cwd = ROOT / "launcher"
         elif step.name == "Parity":
             command = shlex.split(step.command)
@@ -535,7 +547,7 @@ def block(args, base, merge_base, changed, counts, steps, label, elapsed):
     flags = "".join(f" --{flag}" for flag in ("quick",) if getattr(args, flag)) + \
         ("" if args.host == "local" else f" --host {args.host}") + ("" if base == "origin/main" else f" --base {base}")
     added, removed = (sum(count[i] for count in counts.values()) for i in (0, 1))
-    warnings = scope_warnings(changed, sum(sum(count) for path, count in counts.items() if reviewed(path)))
+    warnings = scope_warnings(changed)
     lines = [f"**pr_ready** (`tools/pr_ready.py{flags}` on {where}, against {base} at {merge_base[:9]}, "
              f"{duration(elapsed)})", "", "| Check | Result |", "| --- | --- |",
              f"| Scope | {'⚠️' if warnings else '✅'} {len(changed)} files, +{added} −{removed}"

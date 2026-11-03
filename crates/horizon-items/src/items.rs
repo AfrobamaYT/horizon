@@ -60,7 +60,6 @@ pub enum ConsumeEffect {
     PlaySound(String),
     /// A mod's own kind, kept as the file wrote it (the loader used to drop
     /// it silently): the game hands it to `native_consume_effect`.
-    /// API 74
     Native {
         kind: String,
         data: serde_json::Value,
@@ -374,6 +373,7 @@ thread_local! {
     /// inside itself (`LootContext.pushVisitedElement`).
     static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
+#[derive(Clone)]
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     pub order: Vec<Arc<str>>,
@@ -964,6 +964,11 @@ impl Items {
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(root, overlay)),
         })
     }
+    /// Use the server's loaded loot-table snapshot for item and block drops.
+    pub fn set_loot_tables(&mut self, tables: Arc<horizon_world::loot::LootTables>) {
+        self.loot = tables;
+    }
+
     pub fn get(&self, id: &str) -> Option<&ItemInfo> {
         self.items.get(id)
     }
@@ -1431,7 +1436,7 @@ impl LootContext<'_> {
     /// The context a mod's own loot kind sees in this engine: the block and
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
-    /// rolls; they are None here (docs/native-mods.md, API 133).
+    /// rolls; they are None here (docs/native-mods.md).
     fn native_loot_context<R: RandomSource>(
         &self,
         random: &mut R,

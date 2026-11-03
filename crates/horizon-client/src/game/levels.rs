@@ -14,7 +14,7 @@
 
 use super::{
     Dim, ExperienceOrb, FallingBlock, Game, ItemEntity, Mob, boats, commands,
-    creaking::CreakingState, dragon, fireworks, lan::LanHost, lightning, machines, minecarts,
+    creaking::CreakingState, dragon, fireworks, lightning, machines, minecarts,
     ominous_item_spawner, persist, raids::Raiding, sculk::SculkState, tnt, trident,
 };
 use horizon_client::{
@@ -47,32 +47,32 @@ pub(super) struct Parked {
     level_events: Vec<LevelEvent>,
     /// Entity portal processes and cooldowns belong to this level's entities.
     portal_states: HashMap<u32, horizon_client::nether_portal::PortalState>,
-    falling: Vec<FallingBlock>,
-    paintings: Vec<horizon_client::entities::Painting>,
-    item_frames: Vec<horizon_client::entities::ItemFrame>,
-    armor_stands: Vec<horizon_client::entities::ArmorStand>,
-    cushions: Vec<horizon_client::entities::Cushion>,
+    falling: horizon_client::join_seq::JoinList<FallingBlock>,
+    paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
+    item_frames: horizon_client::join_seq::JoinList<horizon_client::entities::ItemFrame>,
+    armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
+    cushions: horizon_client::join_seq::JoinList<horizon_client::entities::Cushion>,
     others: Vec<commands::OtherEntity>,
     fangs: super::fangs::FangState,
-    pub(super) boats: Vec<boats::Boat>,
-    pub(super) carts: Vec<minecarts::Minecart>,
+    pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat>,
+    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
-    crystals: Vec<dragon::Crystal>,
+    crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
     dragon: Option<dragon::Dragon>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
     breath_clouds: Vec<dragon::Breath>,
-    tridents: Vec<trident::ThrownTrident>,
-    rockets: Vec<fireworks::Rocket>,
+    tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
+    rockets: horizon_client::join_seq::JoinList<fireworks::Rocket>,
     ominous_spawners: Vec<ominous_item_spawner::OminousItemSpawner>,
-    tnts: Vec<tnt::PrimedTnt>,
+    tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
-    pub(super) mobs: Vec<Mob>,
+    pub(super) mobs: horizon_client::join_seq::JoinList<Mob>,
     /// The entity ids of the level's fence knots (`knot_ids`).
     knot_ids: HashMap<[i32; 3], u32>,
-    projectiles: Vec<horizon_client::projectiles::Projectile>,
-    dropped: Vec<ItemEntity>,
-    orbs: Vec<ExperienceOrb>,
+    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile>,
+    dropped: horizon_client::join_seq::JoinList<ItemEntity>,
+    orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
     persist: persist::EntityMemory,
     lectern_pulses: Vec<((i32, i32, i32), i32)>,
     lid_openers: HashMap<(i32, i32, i32), i32>,
@@ -88,6 +88,8 @@ pub(super) struct Parked {
     raiding: Raiding,
     sculk: SculkState,
     creaking: CreakingState,
+    /// Natural spawning's candidate cache: each level keeps its own players' squares.
+    spawn_scratch: super::natural_spawning::SpawnScratch,
     /// Server ticks since a player was last in the level.
     idle: u32,
 }
@@ -132,6 +134,40 @@ impl Levels {
         self.parked.get(&dim).map(|level| &level.world)
     }
 
+    /// The world of the level not in place whose dimension is `dimension`
+    /// (`minecraft:the_nether`), found without collecting the parked levels.
+    pub(super) fn parked_world_of(&self, dimension: &str) -> Option<&World> {
+        self.parked
+            .iter()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &level.world)
+    }
+
+    /// The world of the level not in place whose dimension is `dimension`, to
+    /// change.
+    pub(super) fn parked_world_mut_of(&mut self, dimension: &str) -> Option<&mut World> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &mut level.world)
+    }
+
+    /// The streaming of the level not in place whose dimension is `dimension`.
+    pub(super) fn parked_streaming_of(&self, dimension: &str) -> Option<&Streaming> {
+        self.parked
+            .iter()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &level.streaming)
+    }
+
+    /// The streaming of the level not in place whose dimension is `dimension`, to change.
+    pub(super) fn parked_streaming_of_mut(&mut self, dimension: &str) -> Option<&mut Streaming> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| &mut level.streaming)
+    }
+
     pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
         self.parked.get(&dim).map(|level| &level.anims)
     }
@@ -139,11 +175,6 @@ impl Levels {
     /// The worlds of the levels not in place.
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
-    }
-
-    /// The world of the level not in place, in `dim`, to change.
-    pub(super) fn parked_world_mut(&mut self, dim: Dim) -> Option<&mut World> {
-        self.parked.get_mut(&dim).map(|level| &mut level.world)
     }
 
     /// The level not in place, in `dim`.
@@ -160,7 +191,7 @@ impl Levels {
     /// The forced chunks of every level not in place, released.
     pub(super) fn release_parked_forced_chunks(&mut self) {
         for level in self.parked.values_mut() {
-            level.streaming.forced.clear();
+            level.streaming.clear_forced();
         }
     }
 
@@ -182,6 +213,7 @@ impl Game<'_> {
             self.level_shapes.get(dim.id()),
             self.level.seed,
             &self.level.enabled_features,
+            self.server_loot.clone(),
         )?;
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
@@ -198,31 +230,31 @@ impl Game<'_> {
             random_tick_sections: Default::default(),
             level_events: Vec::new(),
             portal_states: HashMap::new(),
-            falling: Vec::new(),
-            paintings: Vec::new(),
-            item_frames: Vec::new(),
-            armor_stands: Vec::new(),
-            cushions: Vec::new(),
+            falling: Default::default(),
+            paintings: Default::default(),
+            item_frames: Default::default(),
+            armor_stands: Default::default(),
+            cushions: Default::default(),
             others: Vec::new(),
             fangs: Default::default(),
-            boats: Vec::new(),
-            carts: Vec::new(),
+            boats: Default::default(),
+            carts: Default::default(),
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
-            crystals: Vec::new(),
+            crystals: Default::default(),
             dragon: None,
             dragon_fireballs: Vec::new(),
             breath_clouds: Vec::new(),
-            tridents: Vec::new(),
-            rockets: Vec::new(),
+            tridents: Default::default(),
+            rockets: Default::default(),
             ominous_spawners: Vec::new(),
-            tnts: Vec::new(),
+            tnts: Default::default(),
             hoppers: HashMap::new(),
-            mobs: Vec::new(),
+            mobs: Default::default(),
             knot_ids: HashMap::new(),
-            projectiles: Vec::new(),
-            dropped: Vec::new(),
-            orbs: Vec::new(),
+            projectiles: Default::default(),
+            dropped: Default::default(),
+            orbs: Default::default(),
             persist: Default::default(),
             lectern_pulses: Vec::new(),
             lid_openers: HashMap::new(),
@@ -235,6 +267,7 @@ impl Game<'_> {
             raiding: Default::default(),
             sculk: Default::default(),
             creaking: Default::default(),
+            spawn_scratch: Default::default(),
             idle: 0,
         })
     }
@@ -301,6 +334,7 @@ impl Game<'_> {
         self.raiding.swap_level(&mut p.raiding);
         self.sculk.swap_level(&mut p.sculk);
         self.creaking.swap_level(&mut p.creaking);
+        swap(&mut self.spawn_scratch, &mut p.spawn_scratch);
         // What only the client draws starts over.
         self.particles.clear();
         self.pickups.clear();
@@ -308,13 +342,8 @@ impl Game<'_> {
 
     /// Put `target`'s level in place, opening it first if it is not loaded.
     /// The level that was in place is kept with the others; the shared
-    /// clock and weather go with the swap. `host` is the hub when the caller
-    /// holds it (`self.lan` is taken during the network tick).
-    pub(super) fn enter_level(
-        &mut self,
-        mut host: Option<&mut LanHost>,
-        target: Dim,
-    ) -> Result<()> {
+    /// clock and weather go with the swap.
+    pub(super) fn enter_level(&mut self, target: Dim) -> Result<()> {
         // A client holds no levels.
         if self.options.execution_role.is_client() {
             return Ok(());
@@ -336,10 +365,7 @@ impl Game<'_> {
             // The tracked entities go with their level: a level's moves, read before its tick
             // describes its entities again, would otherwise meet the last level's (the anticheat
             // missed the boat under a player while anyone was in another dimension).
-            let states = match host.as_deref_mut() {
-                Some(h) => Some(&mut h.states),
-                None => self.lan.as_mut().map(|h| &mut h.states),
-            };
+            let states = self.lan.as_mut().map(|h| &mut h.states);
             if let Some(states) = states {
                 std::mem::swap(states, &mut p.lan_states);
             }
@@ -349,14 +375,12 @@ impl Game<'_> {
             if opened {
                 // The new streaming's radius and meshing options.
                 self.apply_settings();
+                // ServerLevel's constructor reads the level's raids.
+                self.read_raids();
                 self.native_level_opened(target);
             }
         }
-        let host = match host {
-            Some(h) => Some(h),
-            None => self.lan.as_mut(),
-        };
-        if let Some(h) = host {
+        if let Some(h) = self.lan.as_mut() {
             h.hub.set_dimension(target.id());
         }
         Ok(())
@@ -401,7 +425,7 @@ impl Game<'_> {
             return None;
         }
         let back = self.dim;
-        match self.enter_level(None, dim) {
+        match self.enter_level(dim) {
             Ok(()) => Some(back),
             Err(e) => {
                 log::error!("could not open {}: {e}", dim.id());
@@ -423,8 +447,13 @@ impl Game<'_> {
         // `ServerTickStart` before that level work, where NeoForge fires
         // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
         let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
+        let server = self.serving.is_some() || self.options.dedicated.is_some();
+        // A config edited while the server is paused (empty) still reloads.
+        if server {
+            self.native_configs_poll();
+        }
         if let Some(running) = running
-            && (self.serving.is_some() || self.options.dedicated.is_some())
+            && server
         {
             self.native_lifecycle_server_tick_start(running);
         }
@@ -435,7 +464,7 @@ impl Game<'_> {
         let n = dims.len();
         let mut result = Ok(());
         for (k, dim) in dims.into_iter().enumerate() {
-            if let Err(e) = self.enter_level(None, dim) {
+            if let Err(e) = self.enter_level(dim) {
                 result = Err(e);
                 break;
             }
@@ -479,15 +508,14 @@ impl Game<'_> {
             if running == Some(true) {
                 let mut moved = false;
                 for &earlier in &order[..k] {
-                    if !self.arrival_chunks(earlier).is_empty()
-                        && self.enter_level(None, earlier).is_ok()
+                    if !self.arrival_chunks(earlier).is_empty() && self.enter_level(earlier).is_ok()
                     {
                         self.land_portal_arrivals();
                         moved = true;
                     }
                 }
                 if moved {
-                    self.enter_level(None, dim)?;
+                    self.enter_level(dim)?;
                 }
             }
         }
@@ -561,10 +589,7 @@ impl Game<'_> {
             self.console_broadcast = Some(true);
             self.sprint_report(&report);
             self.console_broadcast = None;
-            if let Some(mut host) = self.lan.take() {
-                self.send_admin_feedback(&mut host, None);
-                self.lan = Some(host);
-            }
+            self.send_admin_feedback(None);
             self.admin_feedback.clear();
         }
         let now = Instant::now();
@@ -608,7 +633,7 @@ impl Game<'_> {
                         .get(d)
                         .is_some_and(|p| !p.streaming.forced.is_empty())
                 };
-                guests.iter().any(|g| g.dimension == d.id())
+                guests.iter().any(|g| g.dimension == d.id() && g.participates_in_player_simulation())
                     // A viewer count not yet told to 0 (`tick_mod_container_viewers`).
                     || self.mod_container_viewers.keys().any(|(k, _)| *k == d.id())
                     || self.player_bed_levels().any(|b| b == *d)
@@ -670,7 +695,7 @@ impl Game<'_> {
         }
         let back = self.dim;
         for dim in closing {
-            self.enter_level(None, dim)?;
+            self.enter_level(dim)?;
             // Vanilla saves the level's chunks before their unload hooks.
             self.native_chunks_loaded();
             self.save_level(true)?;
@@ -680,7 +705,7 @@ impl Game<'_> {
             for uuid in self.persist.uuids.values() {
                 self.entity_attachments.remove(uuid);
             }
-            self.enter_level(None, back)?;
+            self.enter_level(back)?;
             self.levels.parked.remove(&dim);
             self.native_level_closed(dim);
         }
@@ -697,11 +722,13 @@ impl Game<'_> {
         }
         self.levels.heard_open.push(dim);
         self.native_level_load(dim.id());
+        self.validate_mod_chunk_tickets(dim);
     }
 
     /// The mods hear `dim`'s level close (`LevelEvent.Unload`), once for
     /// each open they heard.
     fn native_level_closed(&mut self, dim: Dim) {
+        self.remove_level_fake_players(dim.id());
         let Some(i) = self.levels.heard_open.iter().position(|d| *d == dim) else {
             return;
         };
@@ -727,9 +754,9 @@ impl Game<'_> {
         let back = self.dim;
         let dims: Vec<Dim> = self.levels.parked.keys().copied().collect();
         for dim in dims {
-            self.enter_level(None, dim)?;
+            self.enter_level(dim)?;
             self.save_level(wait)?;
         }
-        self.enter_level(None, back)
+        self.enter_level(back)
     }
 }

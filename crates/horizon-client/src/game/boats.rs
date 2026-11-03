@@ -35,6 +35,8 @@ pub(super) enum Status {
 }
 #[derive(Clone, Debug)]
 pub(super) struct Boat {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
     /// Wood type (`oak`, `bamboo` for the raft).
     pub wood: Arc<str>,
@@ -119,6 +121,7 @@ impl Boat {
 
     pub fn new(id: u32, wood: Arc<str>, position: Vec3, yaw: f32) -> Self {
         Self {
+            join: Default::default(),
             id,
             wood,
             position,
@@ -701,6 +704,14 @@ impl Game<'_> {
                 b.velocity.y = 0.0;
             }
         }
+        // Entity.move's last step: soul sand and honey slow the boat too.
+        let factor = crate::motion::block_speed_factor_at(
+            &self.world,
+            &self.motion.blocks,
+            b.position,
+            None,
+        );
+        b.velocity = horizon_world::entity_move::scale_by_block_speed(b.velocity, factor);
         // Paddle sounds at the top of each stroke.
         for i in 0..2 {
             if b.paddling[i] {
@@ -755,9 +766,11 @@ impl Game<'_> {
                 {
                     // Its rider's client moves it, but the lead still ticks.
                     if ticking(p.x.floor() as i32, p.z.floor() as i32) && self.remote.is_none() {
-                        let mut b = self.boats[i].clone();
-                        self.tick_boat_leash(&mut b);
-                        self.boats[i] = b;
+                        self.with_entity_held_out(id, |game| {
+                            let mut b = game.boats[i].clone();
+                            game.tick_boat_leash(&mut b);
+                            game.boats[i] = b;
+                        });
                     }
                     self.boat_server_passes(id, &driven, &ticking, &round);
                     break 'boat;
@@ -778,8 +791,10 @@ impl Game<'_> {
                 else {
                     break 'boat;
                 };
-                let b = self.boats[i].clone();
-                self.boats[i] = self.tick_boat(b, false);
+                self.with_entity_held_out(id, |game| {
+                    let b = game.boats[i].clone();
+                    game.boats[i] = game.tick_boat(b, false);
+                });
                 self.boat_server_passes(id, &driven, &ticking, &round);
                 self.native_tick_post_one(&round, id, &kind);
             }
@@ -1276,13 +1291,12 @@ impl Game<'_> {
         {
             return false;
         }
-        if !self.native_may_board(self.boats[i].id) {
-            return true;
-        }
-        self.riding = Some(self.boats[i].id);
-        self.yaw = self.boats[i].yaw;
-        // ServerPlayer.startRiding.
-        self.trigger_player("minecraft:started_riding");
+        let id = self.boats[i].id;
+        self.start_riding_target(
+            super::commands::Target::Player,
+            super::commands::Target::Boat(id),
+            false,
+        );
         true
     }
     /// `ContainerEntity.interactWithContainerVehicle` (`AbstractChestBoat`):
@@ -1633,3 +1647,4 @@ mod tests {
         assert_eq!(b.bubble_angle(0.5), 0.0);
     }
 }
+horizon_client::impl_joined!(Boat);

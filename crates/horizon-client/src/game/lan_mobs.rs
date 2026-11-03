@@ -3,7 +3,7 @@
 //! player vanilla's `Level.getNearestPlayer` would give it, and keeps the
 //! guest it targets until it lets go. What it then does to `Who::Player`
 //! (hits, pushes, fire, its projectiles) runs with that guest swapped in.
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_client::{
     mobs::{Mob, MobEvent, PlayerView, Species, Who},
     projectiles::{Hit, Projectile},
@@ -60,6 +60,21 @@ pub(super) fn player_for(
             return None;
         }
         if let Some((conn, _)) = guests.iter().find(|(_, v)| v.alive && v.uuid == owner) {
+            return Some(*conn);
+        }
+    }
+    // A mob on a player's lead follows and measures its rope against the
+    // player who holds it, not whoever is nearest or in survival mode.
+    if m.extra.leash == Some(horizon_client::mobs::leash::Holder::Player)
+        && let Some(holder) = m.extra.leash_player
+    {
+        if host.is_some_and(|v| v.alive && !v.spectator && v.uuid == holder) {
+            return None;
+        }
+        if let Some((conn, _)) = guests
+            .iter()
+            .find(|(_, v)| v.alive && !v.spectator && v.uuid == holder)
+        {
             return Some(*conn);
         }
     }
@@ -150,7 +165,7 @@ impl Game<'_> {
     /// How mobs see each guest in play (`player_view` with the guest swapped
     /// in).
     pub(super) fn lan_guest_views(&mut self) -> GuestViews {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return Vec::new();
         };
         let conns: Vec<(u32, u128, [f64; 3])> = host
@@ -165,11 +180,10 @@ impl Game<'_> {
             .collect();
         let mut views = Vec::new();
         for (conn, uuid, moved) in conns {
-            if let Some(Some(v)) = self.as_guest(&mut host, conn, |g| g.player_view()) {
+            if let Some(Some(v)) = self.as_guest(conn, |g| g.player_view()) {
                 views.push((conn, guest_view(v, uuid, moved)));
             }
         }
-        self.lan = Some(host);
         views
     }
 
@@ -186,7 +200,7 @@ impl Game<'_> {
         except: Option<u32>,
         mut f: impl FnMut(&mut Self),
     ) {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return;
         };
         let conns: Vec<u32> = host
@@ -197,9 +211,8 @@ impl Game<'_> {
             .map(|g| g.conn)
             .collect();
         for conn in conns {
-            self.guest_hit_by(&mut host, conn, &mut f);
+            self.guest_hit_by(conn, &mut f);
         }
-        self.lan = Some(host);
     }
 
     /// Mob events aimed at a guest, run as that guest (`guest_hit_by`).
@@ -207,15 +220,11 @@ impl Game<'_> {
         if events.is_empty() {
             return;
         }
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
         for (conn, e) in events {
-            self.guest_hit_by(&mut host, conn, |g| {
+            self.guest_hit_by(conn, |g| {
                 let _ = g.handle_mob_events(vec![e]);
             });
         }
-        self.lan = Some(host);
     }
 
     /// The guests' boxes for the blocks entities trigger (pressure plates,
@@ -281,7 +290,7 @@ impl Game<'_> {
     /// A projectile that hit a guest: its hit runs as theirs. False when
     /// `id` is not a guest.
     pub(super) fn lan_projectile_hit(&mut self, p: &Projectile, id: u32, at: Vec3) -> bool {
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return false;
         };
         let conn = host
@@ -291,7 +300,7 @@ impl Game<'_> {
             .find(|g| g.entity_id as u32 == id)
             .map(|g| g.conn);
         if let Some(conn) = conn {
-            self.guest_hit_by(&mut host, conn, |g| {
+            self.guest_hit_by(conn, |g| {
                 let hit = Hit::Entity {
                     who: Who::Player,
                     at,
@@ -299,7 +308,6 @@ impl Game<'_> {
                 let _ = g.projectile_hit(p, hit);
             });
         }
-        self.lan = Some(host);
         conn.is_some()
     }
 }
@@ -311,11 +319,10 @@ impl Game<'_> {
     /// a push with no hurt goes out at once.
     pub(super) fn guest_hit_by<R>(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
-        let (result, pushed) = self.as_guest(host, conn, |g| {
+        let (result, pushed) = self.as_guest(conn, |g| {
             let before = g.player.as_ref().map(|p| p.velocity);
             let result = f(g);
             let pushed = g
@@ -325,7 +332,7 @@ impl Game<'_> {
                 .map(|p| p.velocity);
             (result, pushed)
         })?;
-        self.send_guest_motion(host, conn, pushed);
+        self.send_guest_motion(conn, pushed);
         Some(result)
     }
 
@@ -334,11 +341,10 @@ impl Game<'_> {
     /// the server's copy goes back to the velocity it had before the hit.
     pub(super) fn guest_struck_by<R>(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
-        let (result, sent) = self.as_guest(host, conn, |g| {
+        let (result, sent) = self.as_guest(conn, |g| {
             let before = g.player.as_ref().map(|p| p.velocity);
             let result = f(g);
             let sent = g.player.as_mut().zip(before).and_then(|(p, before)| {
@@ -347,13 +353,16 @@ impl Game<'_> {
             });
             (result, sent)
         })?;
-        self.send_guest_motion(host, conn, sent);
+        self.send_guest_motion(conn, sent);
         Some(result)
     }
 
     /// ClientboundSetEntityMotionPacket to a guest about themselves.
-    pub(super) fn send_guest_motion(&self, host: &LanHost, conn: u32, velocity: Option<Vec3>) {
-        if let (Some(v), Some(g)) = (velocity, host.hub.guest(conn)) {
+    pub(super) fn send_guest_motion(&self, conn: u32, velocity: Option<Vec3>) {
+        if let (Some(v), Some(g)) = (
+            velocity,
+            self.lan.as_ref().and_then(|host| host.hub.guest(conn)),
+        ) {
             g.send(&C::SetEntityMotion(play::SetEntityMotion {
                 id: g.entity_id,
                 velocity: [v.x, v.y, v.z],
@@ -510,6 +519,25 @@ mod tests {
         // Without a target the nearest player wins.
         let guests = vec![(7, view(12.0, false))];
         assert_eq!(choose(MOB, false, Some(&host), &guests, Some(7)), None);
+    }
+
+    #[test]
+    fn a_leashed_mob_sees_its_holder_even_when_another_player_is_closer() {
+        let Some(mut cow) = mob_of("minecraft:cow") else {
+            return;
+        };
+        let mut holder = view(10.0, true);
+        holder.uuid = [1, 2, 3, 4];
+        let mut nearby = view(1.0, false);
+        nearby.uuid = [5, 6, 7, 8];
+        cow.extra.leash = Some(horizon_client::mobs::leash::Holder::Player);
+        cow.extra.leash_player = Some(holder.uuid);
+        let guests = vec![(7, holder.clone()), (8, nearby.clone())];
+        assert_eq!(player_for(&cow, None, &guests, None), Some(7));
+        assert_eq!(
+            player_for(&cow, Some(&holder), &vec![(8, nearby)], None),
+            None
+        );
     }
 
     /// The mob of the prepared resources' type `kind` (None without them).

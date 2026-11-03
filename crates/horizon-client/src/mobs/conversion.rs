@@ -39,20 +39,10 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
     to.extra.passenger = from.extra.passenger;
     if params.keep_equipment {
         // Every slot, copyAndClear, and setDropChance from the old mob.
-        to.extra.set_main_hand(from.extra.main_hand.clone());
-        if let Some(stack) = from.extra.main_hand_stack() {
-            to.extra.set_main_hand_stack(Some(stack.clone()));
+        for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::BODY {
+            to.extra
+                .set_slot_stack(slot, from.extra.slot_stack(slot).cloned());
         }
-        to.extra.off_hand = from.extra.off_hand.clone();
-        to.extra.head = from.extra.head.clone();
-        to.extra.body = from.extra.body.clone();
-        to.extra.body_count = from.extra.body_count;
-        to.extra.body_damage = from.extra.body_damage;
-        to.extra.body_extra = from.extra.body_extra.clone();
-        to.extra.chest = from.extra.chest.clone();
-        to.extra.legs = from.extra.legs.clone();
-        to.extra.feet = from.extra.feet.clone();
-        to.extra.armor = from.extra.armor.clone();
         to.extra.gear = from.extra.gear.clone();
         to.extra.drop_chances = from.extra.drop_chances.clone();
     }
@@ -75,7 +65,17 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
 
 /// State shared by single and split conversions, without spawn finalization.
 pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
-    to.extra.effects = from.extra.effects.clone();
+    // setAbsorptionAmount runs before the effects are copied to the fresh mob.
+    let maximum = *to
+        .kind
+        .attributes
+        .get("minecraft:max_absorption")
+        .unwrap_or(&0.0) as f32;
+    to.absorption = from.absorption.clamp(0.0, maximum);
+    // addEffect for each: Absorption's onEffectStarted raises it again.
+    for &(effect, ticks, amplifier) in &from.extra.effects {
+        to.add_effect(effect, ticks, amplifier);
+    }
     to.extra.hidden_effects = from.extra.hidden_effects.clone();
     to.extra.ambient_effects = from.extra.ambient_effects.clone();
     if from.is_baby() {
@@ -111,6 +111,27 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn absorption_is_clamped_then_restarted_by_a_copied_absorption_effect() {
+        with_test_world(&[], |_, types| {
+            let mob =
+                |id, kind: &str| Mob::new(id, Arc::new(types.types[kind].clone()), Vec3::ZERO, 0.0);
+            let mut s = mob(1, "minecraft:skeleton");
+            s.absorption = 3.5;
+            let mut plain = mob(2, "minecraft:stray");
+            single(&s, &mut plain, Params::KEEP_ALL);
+            assert_eq!(plain.absorption, 0.0);
+            // AbsorptionMobEffect.onEffectStarted: 4 per level, amplifier 1.
+            s.extra.effects.push(("minecraft:absorption", 600, 1));
+            let mut boosted = mob(3, "minecraft:stray");
+            single(&s, &mut boosted, Params::KEEP_ALL);
+            assert_eq!(boosted.absorption, 8.0);
+            assert_eq!(
+                boosted.extra.effects,
+                vec![("minecraft:absorption", 600, 1)]
+            );
+        });
+    }
+    #[test]
     fn a_frozen_skeleton_becomes_a_stray_that_keeps_its_bow_and_name() {
         with_test_world(&[], |_, types| {
             let mob = |id, kind: &str| {
@@ -125,9 +146,13 @@ mod tests {
             s.yaw = 90.0;
             s.custom_name = Some("Frosty".into());
             s.no_ai = true;
+            s.absorption = 3.5;
             s.extra
                 .set_main_hand_stack(Some(ItemStack::new("minecraft:bow", 1)));
-            s.extra.chest = Some("minecraft:chainmail_chestplate".into());
+            s.extra.set_slot_id(
+                horizon_items::equipment::CHEST,
+                Some("minecraft:chainmail_chestplate".into()),
+            );
             let mut offhand = ItemStack::new("minecraft:shield", 2);
             offhand.damage = 5;
             crate::mobs::finalize::set_item_stack(
@@ -135,11 +160,10 @@ mod tests {
                 crate::mobs::finalize::OFFHAND,
                 offhand.clone(),
             );
-            s.extra.body = Some("minecraft:wolf_armor".into());
-            s.extra.body_damage = 7;
             let mut armor = ItemStack::new("minecraft:wolf_armor", 1);
+            armor.damage = 7;
             armor.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
-            s.extra.body_extra = armor.extra;
+            s.extra.set_body_stack(Some(armor));
             s.extra.leash = Some(crate::mobs::leash::Holder::Knot([3, 71, -3]));
             s.extra.mount = Some(7);
             s.extra.passenger = true;
@@ -147,13 +171,14 @@ mod tests {
             single(&s, &mut st, Params::KEEP_ALL);
             assert_eq!(st.custom_name.as_deref(), Some("Frosty"));
             assert!(st.no_ai);
+            assert_eq!(st.absorption, 0.0);
             assert_eq!(st.yaw, 90.0);
             assert_eq!(
                 st.extra.main_hand_stack().map(|s| &*s.item),
                 Some("minecraft:bow")
             );
             assert_eq!(
-                st.extra.chest.as_deref(),
+                st.extra.slot_id(horizon_items::equipment::CHEST),
                 Some("minecraft:chainmail_chestplate")
             );
             assert_eq!(
@@ -161,10 +186,10 @@ mod tests {
                 Some(crate::mobs::leash::Holder::Knot([3, 71, -3]))
             );
             assert_eq!(st.extra.mount, Some(7));
-            assert_eq!(st.extra.body.as_deref(), Some("minecraft:wolf_armor"));
-            assert_eq!(st.extra.body_damage, 7);
+            assert_eq!(st.extra.body_id(), Some("minecraft:wolf_armor"));
+            assert_eq!(st.extra.body_damage(), 7);
             assert_eq!(st.equipment_stacks()[1], Some(offhand));
-            assert_eq!(st.extra.body_extra, s.extra.body_extra);
+            assert_eq!(st.extra.body_stack(), s.extra.body_stack());
             // Health is the new type's own, not copied.
             assert_eq!(st.health, mob(3, "minecraft:stray").health);
             // Without keepEquipment the gear stays behind.
@@ -178,9 +203,12 @@ mod tests {
                 },
             );
             assert!(
-                bare.extra.main_hand.is_none()
-                    && bare.extra.chest.is_none()
-                    && bare.extra.body.is_none()
+                bare.extra.main_hand_id().is_none()
+                    && bare
+                        .extra
+                        .slot_stack(horizon_items::equipment::CHEST)
+                        .is_none()
+                    && bare.extra.body_id().is_none()
             );
             assert_eq!(bare.custom_name.as_deref(), Some("Frosty"));
         });

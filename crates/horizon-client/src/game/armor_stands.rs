@@ -198,17 +198,12 @@ impl Game<'_> {
         )
     }
     /// `HumanoidArmorLayer` for another player's model: the armour it wears
-    /// (`extra.head` .. `extra.feet`).
+    /// (`extra.equipment`, head to feet).
     pub(super) fn worn_armor_layers(&self, m: &Mob) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
         let e = &m.extra;
         self.armor_layers(
-            [
-                (e.head.as_deref(), e.armor[0].as_ref()),
-                (e.chest.as_deref(), e.armor[1].as_ref()),
-                (e.legs.as_deref(), e.armor[2].as_ref()),
-                (e.feet.as_deref(), e.armor[3].as_ref()),
-            ]
-            .map(|(item, stack)| item.map(|i| (i, stack))),
+            horizon_items::equipment::ARMOR
+                .map(|slot| e.slot_stack(slot).map(|stack| (&*stack.item, Some(stack)))),
         )
     }
     /// The layers of the armour items `worn` (with their stacks when known,
@@ -301,22 +296,24 @@ impl Game<'_> {
         let items = self.items();
         let mut wanted: Vec<TrimTexture> = Vec::new();
         let guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
-        let stacks = self
-            .armor
-            .iter()
-            .chain(guests.flat_map(|g| g.armor.iter()))
-            .chain(self.mobs.iter().flat_map(|m| m.extra.armor.iter()))
-            .zip(
-                ["helmet", "chestplate", "leggings", "boots"]
-                    .into_iter()
-                    .cycle(),
-            )
-            .chain(self.armor_stands.iter().flat_map(|a| {
-                [5usize, 4, 3, 2]
-                    .map(|slot| &a.equipment[slot])
-                    .into_iter()
-                    .zip(["helmet", "chestplate", "leggings", "boots"])
-            }));
+        let stacks =
+            self.armor
+                .iter()
+                .chain(guests.flat_map(|g| g.armor.iter()))
+                .chain(self.mobs.iter().flat_map(|m| {
+                    horizon_items::equipment::ARMOR.map(|slot| &m.extra.equipment[slot])
+                }))
+                .zip(
+                    ["helmet", "chestplate", "leggings", "boots"]
+                        .into_iter()
+                        .cycle(),
+                )
+                .chain(self.armor_stands.iter().flat_map(|a| {
+                    [5usize, 4, 3, 2]
+                        .map(|slot| &a.equipment[slot])
+                        .into_iter()
+                        .zip(["helmet", "chestplate", "leggings", "boots"])
+                }));
         for (stack, layer) in stacks {
             let Some(stack) = stack.as_ref().filter(|s| s.extra.is_some()) else {
                 continue;
@@ -749,7 +746,7 @@ impl Game<'_> {
         let spread = [width / 4.0, height / 4.0, width / 4.0];
         self.particles
             .send_particles(&options, centre, spread, 0.05, 10);
-        self.lan_level_particles(None, &options, centre, spread, 0.05, 10, Some(state));
+        self.lan_level_particles(&options, centre, spread, 0.05, 10, Some(state));
     }
     /// `ArmorStand.hurtServer` for a player's attack (also a sweep's): a
     /// creative player breaks it, otherwise the first hit wobbles it and a
@@ -787,6 +784,7 @@ impl Game<'_> {
             extra: None,
         };
         self.spawn_item(stand, center, [0.0; 3], 10);
+        self.armor_stand_death_drops(a.id, "minecraft:player_attack", self.own_entity_id() as u32);
         for stack in a.equipment.into_iter().flatten() {
             let r = &mut self.world.random;
             let v = [
@@ -813,6 +811,7 @@ impl Game<'_> {
                 continue;
             }
             self.armor_stand_location_effects(i, false);
+            self.armor_stands[i].first_tick = false;
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
@@ -867,12 +866,14 @@ impl Game<'_> {
             }
             self.armor_stand_turtle_eggs(i, landed)?;
             let a = &mut self.armor_stands[i];
-            if !a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry) {
-                dead.push(i);
+            if let Some(damage_type) =
+                a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry)
+            {
+                dead.push((i, damage_type));
             }
         }
-        for i in dead.into_iter().rev() {
-            self.break_armor_stand_by_anything(i);
+        for (i, damage_type) in dead.into_iter().rev() {
+            self.break_armor_stand_by_anything(i, damage_type, 0);
         }
         Ok(())
     }
@@ -914,12 +915,36 @@ impl Game<'_> {
         }
         Ok(())
     }
+    /// `ArmorStand.brokenByAnything`'s `dropAllDeathLoot`: the stand has no
+    /// loot of its own, so the list is empty and a mod may add to it or hear
+    /// that the stand broke (`native_living_drops`). The stand item and the
+    /// equipment pop outside the list, as in vanilla.
+    fn armor_stand_death_drops(&mut self, id: u32, damage_type: &str, causing: u32) {
+        let source = (!horizon_client::mod_api::mods().is_empty())
+            .then(|| super::creatures::death_hurt_source(damage_type, causing));
+        let dying = super::creatures::DyingDrops {
+            entity: id,
+            kind: "minecraft:armor_stand",
+            player: None,
+            source,
+            recently_hit: false,
+        };
+        self.drop_death_items(&dying, Vec::new(), 10, |_| {
+            super::dispenser::new_item_motion()
+        });
+    }
     /// `ArmorStand.brokenByAnything`, then `kill`, as burning out or a blast
     /// breaks a stand: its equipment pops above its block, the stand item does
     /// not drop.
-    pub(super) fn break_armor_stand_by_anything(&mut self, i: usize) {
+    pub(super) fn break_armor_stand_by_anything(
+        &mut self,
+        i: usize,
+        damage_type: &str,
+        causing: u32,
+    ) {
         let a = self.armor_stands.remove(i);
         let at = [a.position.x, a.position.y, a.position.z];
+        self.armor_stand_death_drops(a.id, damage_type, causing);
         let (pos, drops) = broken_armor_stand_equipment(a);
         for stack in drops {
             self.pop_resource(pos, stack);
@@ -1367,7 +1392,7 @@ impl Game<'_> {
         let current = self.armor[index].clone();
         // PREVENT_ARMOR_CHANGE (Curse of Binding) outside creative, or the same item.
         if current.as_ref().is_some_and(|c| {
-            (c.enchantment_level("minecraft:binding_curse") > 0 && !self.creative)
+            (world_stations!(self).enchantments.prevents_armor_change(c) && !self.creative)
                 || c.same_item_same_components(stack)
         }) {
             return true;
@@ -1667,6 +1692,34 @@ mod burn_drop_tests {
         let (pos, drops) = broken_armor_stand_equipment(stand);
         assert_eq!(pos, [-1, 5, 0]);
         assert_eq!(drops, vec![kept]);
+    }
+    #[test]
+    fn a_broken_stand_pops_body_and_saddle_after_the_other_six_slots() {
+        use horizon_items::equipment::{BODY, HEAD, MAINHAND, SADDLE};
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 4.0, 0.5), 0.0);
+        let stacks: Vec<_> = [SADDLE, BODY, HEAD, MAINHAND]
+            .into_iter()
+            .map(|slot| {
+                let mut stack = ItemStack::new("minecraft:stone", 1 + slot as u32);
+                stack.damage = slot as u32;
+                stand.equipment[slot] = Some(stack.clone());
+                (slot, stack)
+            })
+            .collect();
+        let (_, drops) = broken_armor_stand_equipment(stand);
+        let order = |slots: [usize; 4]| {
+            slots
+                .map(|s| {
+                    stacks
+                        .iter()
+                        .find(|(slot, _)| *slot == s)
+                        .unwrap()
+                        .1
+                        .clone()
+                })
+                .to_vec()
+        };
+        assert_eq!(drops, order([MAINHAND, HEAD, BODY, SADDLE]));
     }
 }
 #[cfg(test)]

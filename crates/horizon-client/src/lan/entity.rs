@@ -54,6 +54,8 @@ pub struct EntityState {
     pub data: i32,
     /// SynchedEntityData entries that differ from the defaults.
     pub meta: Vec<(u8, i32, Value)>,
+    /// Entries marked dirty even if their values have not changed.
+    pub forced_meta: [u64; 4],
     /// The defaults of entries `meta` leaves out while they are at them,
     /// sent when one goes back to its default (a calf grown up, a mob healed
     /// back to 1, wool grown back white) beyond Entity's own below.
@@ -104,6 +106,7 @@ impl EntityState {
         self.minecart_steps = None;
         self.data = 0;
         self.meta.clear();
+        self.forced_meta = [0; 4];
         self.defaults.clear();
         self.equipment.clear();
         self.attributes.clear();
@@ -419,7 +422,7 @@ impl ServerEntity {
             self.leash = e.leash;
         }
         // SynchedEntityData.isDirty: once for every client.
-        let dirty = e.meta != self.meta;
+        let dirty = e.meta != self.meta || e.forced_meta != [0; 4];
         let due = self.interval != 0 && self.tick.is_multiple_of(self.interval);
         if due || dirty || e.needs_sync {
             let rotation = (pack_degrees(e.pitch), pack_degrees(e.yaw));
@@ -606,7 +609,10 @@ impl ServerEntity {
             let mut changed: Vec<_> = e
                 .meta
                 .iter()
-                .filter(|m| !self.meta.contains(m))
+                .filter(|m| {
+                    e.forced_meta[usize::from(m.0) / 64] & (1 << (m.0 % 64)) != 0
+                        || !self.meta.contains(m)
+                })
                 .cloned()
                 .collect();
             // A value back at its default is left out of the state, but the
@@ -629,6 +635,17 @@ impl ServerEntity {
                 };
                 if !e.meta.iter().any(|m| m.0 == *index) {
                     changed.push((*index, *kind, default));
+                }
+            }
+            if e.forced_meta != [0; 4] {
+                for default in &e.defaults {
+                    let index = usize::from(default.0);
+                    if e.forced_meta[index / 64] & (1 << (index % 64)) != 0
+                        && !e.meta.iter().any(|m| m.0 == default.0)
+                        && !changed.iter().any(|m| m.0 == default.0)
+                    {
+                        changed.push(default.clone());
+                    }
                 }
             }
             if !changed.is_empty() {
@@ -1155,9 +1172,12 @@ impl Entities {
             };
             self.packets.clear();
             // Paired as it joined, then its first changes go to everyone
-            // tracking it, those just paired with it included.
+            // tracking it, those just paired with it included. Arrows wait for the
+            // next tick's send_changes so impact updates (e.g. IN_GROUND) arrive after
+            // the client's first tick (#7461).
             let synced = s.added
                 && e.kind != "minecraft:player"
+                && !s.arrow
                 && self
                     .synced
                     .iter()
@@ -1241,6 +1261,7 @@ mod tests {
             minecart_steps: None,
             data: 0,
             meta: Vec::new(),
+            forced_meta: [0; 4],
             defaults: Vec::new(),
             equipment: Vec::new(),
             attributes: Vec::new(),
@@ -1288,6 +1309,27 @@ mod tests {
         let mut out = Vec::new();
         s.send_changes(e, &Riding::default(), &mut out);
         out
+    }
+
+    #[test]
+    fn forced_default_is_sent_on_each_write_but_equal_unforced_is_not() {
+        let mut display = state(0.0);
+        display.kind = "minecraft:block_display".into();
+        display.defaults.push((8, serializer::INT, Value::Int(0)));
+        let mut tracker = added(&display);
+        for _ in 0..2 {
+            display.forced_meta[0] = 1 << 8;
+            let packets = changes(&mut tracker, &display);
+            assert_eq!(packets.iter().filter(|p| matches!(p,
+                play::Clientbound::SetEntityData(data) if data.values == [(8, serializer::INT, Value::Int(0))]
+            )).count(), 1);
+            display.forced_meta = [0; 4];
+            assert!(
+                !changes(&mut tracker, &display)
+                    .iter()
+                    .any(|p| matches!(p, play::Clientbound::SetEntityData(_)))
+            );
+        }
     }
 
     #[test]
@@ -1621,6 +1663,74 @@ mod tests {
     }
 
     #[test]
+    fn a_minecart_wobble_reset_to_zero_is_sent() {
+        let mut e = state(0.0);
+        e.kind = "minecraft:minecart".into();
+        e.defaults = vec![
+            (8, serializer::INT, Value::Int(0)),
+            (9, serializer::INT, Value::Int(1)),
+            (10, serializer::FLOAT, Value::Float(0.0)),
+        ];
+        e.meta = vec![
+            (8, serializer::INT, Value::Int(7)),
+            (10, serializer::FLOAT, Value::Float(12.5)),
+        ];
+        let mut s = added(&e);
+        changes(&mut s, &e);
+        e.meta.clear();
+        let data = changes(&mut s, &e)
+            .into_iter()
+            .find_map(|p| match p {
+                play::Clientbound::SetEntityData(d) => Some(d),
+                _ => None,
+            })
+            .expect("the reset is sent");
+        assert_eq!(
+            data.values,
+            vec![
+                (8, serializer::INT, Value::Int(0)),
+                (10, serializer::FLOAT, Value::Float(0.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dragon_back_at_its_defaults_is_sent() {
+        let mut e = state(0.0);
+        e.kind = "minecraft:ender_dragon".into();
+        // `lan_dragon_state` lists these; the values leave `meta` at them.
+        e.defaults = vec![
+            (9, serializer::FLOAT, Value::Float(1.0)),
+            (15, serializer::BYTE, Value::Byte(0)),
+            (16, serializer::INT, Value::Int(10)),
+        ];
+        e.meta = vec![
+            (9, serializer::FLOAT, Value::Float(150.0)),
+            (15, serializer::BYTE, Value::Byte(4)),
+            (16, serializer::INT, Value::Int(4)),
+        ];
+        let mut s = added(&e);
+        changes(&mut s, &e);
+        e.meta.clear();
+        let sent: Vec<_> = changes(&mut s, &e)
+            .into_iter()
+            .filter_map(|p| match p {
+                play::Clientbound::SetEntityData(d) => Some(d.values),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(
+            sent,
+            vec![
+                (9, serializer::FLOAT, Value::Float(1.0)),
+                (15, serializer::BYTE, Value::Byte(0)),
+                (16, serializer::INT, Value::Int(10)),
+            ]
+        );
+    }
+
+    #[test]
     fn a_value_back_at_a_listed_default_is_sent() {
         let mut e = state(0.0);
         e.defaults = vec![(16, serializer::BOOLEAN, Value::Bool(false))];
@@ -1902,6 +2012,50 @@ mod tests {
         for synced in [vec![], vec![(i32::MIN, 6)], vec![(7, 9)]] {
             assert_eq!(passes(synced), (vec![], vec![move_by(-164)]));
         }
+    }
+
+    /// ChunkMap.addEntity (#7461): a fresh arrow (shot point-blank into a wall)
+    /// is paired with IN_GROUND=false, and its first update is deferred to the
+    /// next tick's send_changes so that IN_GROUND=true arrives after the client's
+    /// first tick has completed, satisfying AbstractArrow.onSyncedDataUpdated's
+    /// !this.firstTick guard and triggering the shake animation.
+    #[test]
+    fn fresh_arrow_pairs_as_joined_and_defers_in_ground_update_to_next_tick() {
+        let mut level = Entities {
+            synced: vec![(i32::MIN, 7)],
+            ..Entities::default()
+        };
+        let mut c = Clients::new();
+        let mut joined = state(0.0);
+        joined.kind = "minecraft:arrow".into();
+        joined.meta = vec![(8, serializer::BYTE, Value::Byte(0))];
+
+        let mut stuck = joined.clone();
+        stuck.meta = vec![(8, serializer::BYTE, Value::Byte(1))];
+
+        let mut entities = vec![&stuck];
+        let joins = level.joined_states(&entities, vec![joined.clone()]);
+        Entities::starting_from(&mut entities, &joins);
+        assert_eq!(
+            entities[0].meta,
+            vec![(8, serializer::BYTE, Value::Byte(0))]
+        );
+
+        // Tick 0: arrow is paired. Because it's an arrow, send_changes does not run on tick 0
+        // even though level.synced contains its id.
+        c.tick(&mut level, &entities);
+        let in_ground_true = body(play::Clientbound::SetEntityData(SetEntityData {
+            id: 7,
+            values: vec![(8, serializer::BYTE, Value::Byte(1))],
+        }));
+        assert!(!c.out[0].contains(&in_ground_true));
+
+        // Tick 1: arrow is in the wall (IN_GROUND = true).
+        let next_entities = vec![&stuck];
+        c.tick(&mut level, &next_entities);
+
+        // Tick 1 sends SetEntityData with IN_GROUND=true.
+        assert!(c.out[0].contains(&in_ground_true), "{:?}", c.out[0]);
     }
 
     #[test]

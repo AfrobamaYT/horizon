@@ -1,11 +1,11 @@
 //! Render hook points for native mods (docs/native-mods.md): empty functions the renderer calls at
 //! fixed places of a frame, which a mod's mixins hook like those of
-//! `horizon-client/src/game/native_hooks.rs`, and listed with them in `native-hooks.json`. API
-//! 58.
+//! `horizon-client/src/game/native_hooks.rs`, and listed with them in `native-hooks.json`.
 
 use super::Vertex;
 use super::pack_draw::EntitySpan;
 use glam::{DVec3, Mat4};
+use horizon_client_core::subscribers::Subscribers;
 use std::sync::{
     OnceLock,
     atomic::{AtomicBool, Ordering},
@@ -14,16 +14,77 @@ use std::sync::{
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/native_render_generated.rs"));
 }
-pub use generated::{HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent};
+pub use generated::{
+    HandDrawnEvent, RenderHookId, RenderHooks, RenderNeedsEvent, WorldDrawnEvent, render_hook_ids,
+};
+#[doc(hidden)]
+pub use horizon_mod_api_macros::__subscriptions;
+pub use horizon_mod_api_macros::horizon_mod;
 pub use wgpu;
 
-static RENDERERS: OnceLock<Box<[&'static dyn RenderHooks]>> = OnceLock::new();
+static RENDERERS: OnceLock<RenderInstalled> = OnceLock::new();
+
+/// The renderers with their per-hook subscriber set, as [`install`] leaves them.
+struct RenderInstalled {
+    renderers: Box<[&'static dyn RenderHooks]>,
+    subscribers: Subscribers,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_RENDERERS: std::cell::Cell<Option<&'static RenderInstalled>> =
+        const { std::cell::Cell::new(None) };
+}
+
+fn render_installed() -> Option<&'static RenderInstalled> {
+    #[cfg(test)]
+    if let Some(installed) = TEST_RENDERERS.get() {
+        return Some(installed);
+    }
+    RENDERERS.get()
+}
+
+fn new_render_installed(renderers: Box<[&'static dyn RenderHooks]>) -> RenderInstalled {
+    let subscriptions = renderers.iter().enumerate().flat_map(|(index, renderer)| {
+        renderer
+            .subscribed()
+            .iter()
+            .flatten()
+            .map(move |hook| (index, *hook as usize))
+    });
+    let subscribers =
+        Subscribers::new(generated::RENDER_HOOK_COUNT, renderers.len(), subscriptions);
+    RenderInstalled {
+        renderers,
+        subscribers,
+    }
+}
 
 /// Install trait mod renderers in dispatch order, once per process.
 pub fn install(
     renderers: Box<[&'static dyn RenderHooks]>,
 ) -> Result<(), Box<[&'static dyn RenderHooks]>> {
-    RENDERERS.set(renderers)
+    match RENDERERS.set(new_render_installed(renderers)) {
+        Ok(()) => Ok(()),
+        Err(installed) => Err(installed.renderers),
+    }
+}
+
+/// The renderers subscribed to `hook`, in installation order.
+fn entered_render(
+    hook_id: generated::RenderHookId,
+) -> impl Iterator<Item = &'static dyn RenderHooks> {
+    render_installed().into_iter().flat_map(move |installed| {
+        installed
+            .subscribers
+            .indices(hook_id as usize)
+            .map(move |index| installed.renderers[index])
+    })
+}
+
+/// Whether a render hook has a subscriber.
+fn render_listened(hook: generated::RenderHookId) -> bool {
+    render_installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
 static MODS_BUILT_IN: AtomicBool = AtomicBool::new(false);
@@ -36,9 +97,7 @@ pub fn set_mods_built_in(on: bool) {
 /// Whether [`native_world_drawn`] may draw ([`set_mods_built_in`]).
 pub fn world_drawn_hooked() -> bool {
     MODS_BUILT_IN.load(Ordering::Relaxed)
-        || RENDERERS
-            .get()
-            .is_some_and(|renderers| !renderers.is_empty())
+        || render_installed().is_some_and(|installed| !installed.renderers.is_empty())
 }
 
 /// What a mod can draw with once the world is drawn: after the sky, terrain, entities,
@@ -76,14 +135,14 @@ pub struct WorldDrawn<'a> {
     /// the run's first vertex and the entity, `(1 << 32) | id` for a mob or a player and
     /// `(2 << 32) | id` for a dropped item (their entity ids), 0 for anything else. A run lasts
     /// until the next. Unlike `spans`, whose ids name a type, these follow one entity from
-    /// frame to frame (API @API:world_drawn_motion@).
+    /// frame to frame.
     pub motion: &'a [(u32, u64)],
     /// The shared atlas entity UVs point into.
     pub atlas: Option<&'a wgpu::Texture>,
     /// Quad indices (0 1 2 0 2 3 for each 4 vertices), for as many quads as `entities` holds.
     pub quad_indices: &'a wgpu::Buffer,
     /// The block textures the terrain samples, for drawing blocks with the player's own
-    /// textures (`native_block_sprites` says where a block's are). API @API:native_block_sprites@.
+    /// textures (`native_block_sprites` says where a block's are).
     pub block_sprites: BlockSpriteArrays<'a>,
 }
 
@@ -150,20 +209,20 @@ pub struct RenderNeeds {
 /// The world is drawn (see [`WorldDrawn`]). Not called on the title screen's panorama.
 #[inline(never)]
 pub fn native_world_drawn(world: &mut WorldDrawn<'_>) {
-    generated::dispatch_world_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), world);
+    generated::dispatch_world_drawn(world);
 }
 
 /// The first-person hand is drawn (see [`HandDrawn`]), on every frame [`native_world_drawn`]
-/// runs, with no hand too. API @API:hand_drawn@.
+/// runs, with no hand too.
 #[inline(never)]
 pub fn native_hand_drawn(hand: &mut HandDrawn<'_>) {
-    generated::dispatch_hand_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), hand);
+    generated::dispatch_hand_drawn(hand);
 }
 
 /// Asked as a frame is built and drawn: set what your mod needs.
 #[inline(never)]
 pub fn native_render_needs(needs: &mut RenderNeeds) {
-    generated::dispatch_render_needs(RENDERERS.get().map_or(&[], |renderers| renderers), needs);
+    generated::dispatch_render_needs(needs);
 }
 
 /// What the mods need this frame ([`native_render_needs`]).
@@ -175,19 +234,202 @@ pub fn render_needs() -> RenderNeeds {
 
 #[cfg(test)]
 mod tests {
+    use super as mod_api;
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Install renderers for this test thread, as [`install`] does once per process.
+    fn install_for_test(renderers: Box<[&'static dyn RenderHooks]>) -> &'static RenderInstalled {
+        let installed = Box::leak(Box::new(new_render_installed(renderers)));
+        TEST_RENDERERS.set(Some(installed));
+        installed
+    }
 
     struct Depth;
+    #[mod_api::__subscriptions]
     impl RenderHooks for Depth {
         fn render_needs(&self, event: &mut RenderNeedsEvent<'_>) {
             event.needs.world_depth = true;
         }
     }
     struct Spans;
+    #[mod_api::__subscriptions]
     impl RenderHooks for Spans {
         fn render_needs(&self, event: &mut RenderNeedsEvent<'_>) {
             event.needs.entity_spans = event.needs.world_depth;
         }
+    }
+    struct Quiet;
+    #[mod_api::__subscriptions]
+    impl RenderHooks for Quiet {}
+    struct CountingNeeds(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl RenderHooks for CountingNeeds {
+        fn render_needs(&self, _event: &mut RenderNeedsEvent<'_>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn needs_accumulate_in_mod_order() {
+        static DEPTH: Depth = Depth;
+        static SPANS: Spans = Spans;
+        install_for_test(Box::new([&DEPTH, &SPANS] as [&dyn RenderHooks; 2]));
+        let mut needs = RenderNeeds::default();
+        native_render_needs(&mut needs);
+        assert_eq!(
+            needs,
+            RenderNeeds {
+                world_depth: true,
+                entity_spans: true
+            }
+        );
+    }
+
+    /// Eight defaults and one override resolve to one subscriber at installation.
+    #[test]
+    fn render_subscribers_are_known_at_install() {
+        let renderers: Vec<&'static dyn RenderHooks> = (0..8)
+            .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
+            .collect();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener: &'static CountingNeeds = Box::leak(Box::new(CountingNeeds(calls.clone())));
+        let renderers = {
+            let mut renderers = renderers;
+            renderers.push(listener);
+            renderers.into_boxed_slice()
+        };
+        let installed = install_for_test(renderers);
+        assert_eq!(
+            installed
+                .subscribers
+                .indices(generated::RenderHookId::RenderNeeds as usize)
+                .collect::<Vec<_>>(),
+            [8]
+        );
+        let mut needs = RenderNeeds::default();
+        native_render_needs(&mut needs);
+        native_render_needs(&mut needs);
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            installed
+                .subscribers
+                .indices(generated::RenderHookId::RenderNeeds as usize)
+                .collect::<Vec<_>>(),
+            [8]
+        );
+    }
+
+    /// Render hooks use the same installed set from another thread.
+    #[test]
+    fn render_dispatch_uses_the_installed_set_on_another_thread() {
+        let renderers: Vec<&'static dyn RenderHooks> = (0..4)
+            .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
+            .collect();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener: &'static CountingNeeds = Box::leak(Box::new(CountingNeeds(calls.clone())));
+        let renderers = {
+            let mut renderers = renderers;
+            renderers.push(listener);
+            renderers.into_boxed_slice()
+        };
+        let installed = install_for_test(renderers);
+        let needs = RenderNeeds::default();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                // The render thread installs nothing itself: it dispatches the process-wide table.
+                TEST_RENDERERS.set(Some(installed));
+                let mut needs = needs;
+                native_render_needs(&mut needs);
+            });
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            installed
+                .subscribers
+                .indices(generated::RenderHookId::RenderNeeds as usize)
+                .collect::<Vec<_>>(),
+            [4]
+        );
+    }
+
+    thread_local! {
+        static NEEDS_EVENTS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    impl Drop for RenderNeedsEvent<'_> {
+        fn drop(&mut self) {
+            NEEDS_EVENTS_BUILT.set(NEEDS_EVENTS_BUILT.get() + 1);
+        }
+    }
+
+    /// With no subscriber, dispatch returns before building its event.
+    #[test]
+    fn empty_render_dispatch_builds_no_event() {
+        let mut needs = RenderNeeds::default();
+        install_for_test(Box::new([]));
+        NEEDS_EVENTS_BUILT.set(0);
+        native_render_needs(&mut needs);
+        assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
+        static QUIET: Quiet = Quiet;
+        install_for_test(Box::new([&QUIET as &dyn RenderHooks]));
+        native_render_needs(&mut needs);
+        assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
+        native_render_needs(&mut needs);
+        native_render_needs(&mut needs);
+        assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
+    }
+
+    #[test]
+    #[ignore = "optimized hot-hook microbenchmark"]
+    fn render_needs_benchmark() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let renderers: Vec<&'static dyn RenderHooks> = (0..8)
+            .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
+            .collect();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener: &'static CountingNeeds = Box::leak(Box::new(CountingNeeds(calls.clone())));
+        let renderers = {
+            let mut renderers = renderers;
+            renderers.push(listener);
+            renderers.into_boxed_slice()
+        };
+        let before: Box<[&'static dyn RenderHooks]> = renderers.clone();
+        install_for_test(renderers);
+        native_render_needs(&mut RenderNeeds::default()); // Warm dispatch outside the timed loop.
+        let iterations = 1_000_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut needs = RenderNeeds::default();
+            let mut event = RenderNeedsEvent { needs: &mut needs };
+            for renderer in black_box(&before) {
+                renderer.render_needs(&mut event);
+            }
+        }
+        let baseline = start.elapsed().as_nanos() as f64 / f64::from(iterations);
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut needs = RenderNeeds::default();
+            native_render_needs(&mut needs);
+        }
+        let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
+        // With no subscriber left, dispatch returns after its count check.
+        let renderers: Box<[&'static dyn RenderHooks]> = (0..9)
+            .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
+            .collect();
+        install_for_test(renderers);
+        native_render_needs(&mut RenderNeeds::default()); // Warm the empty dispatch.
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut needs = RenderNeeds::default();
+            native_render_needs(&mut needs);
+        }
+        let empty = start.elapsed().as_nanos() as f64 / f64::from(iterations);
+        println!(
+            "render_needs dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns, empty {empty:.2} ns per call ({iterations} iterations)"
+        );
     }
 
     /// A mod samples `BlockSpriteArrays` as the renderer hands them over: a layer of the second
@@ -371,18 +613,5 @@ mod tests {
         let mut expected = quad.as_flattened().to_vec();
         expected.extend([0, 0, 0, 0]);
         assert_eq!(texels, expected);
-    }
-
-    #[test]
-    fn needs_accumulate_in_mod_order() {
-        let mut needs = RenderNeeds::default();
-        generated::dispatch_render_needs(&[&Depth, &Spans], &mut needs);
-        assert_eq!(
-            needs,
-            RenderNeeds {
-                world_depth: true,
-                entity_spans: true
-            }
-        );
     }
 }

@@ -38,8 +38,14 @@ impl Game<'_> {
         let acting = self.lan_acting;
         self.lan
             .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .filter(move |g| g.placed && Some(g.conn) != acting)
+            .flat_map(|h| h.hub.online_players())
+            .filter(move |g| Some(g.conn) != acting && self.native_command_player_available(g))
+    }
+
+    /// Native console calls cannot reach an outer turn's displaced player.
+    /// Ordinary command resolution is unchanged, including nested turns.
+    fn native_command_player_available(&self, guest: &Guest) -> bool {
+        !self.native_command_filter || self.native_entity(guest.entity_id as u32).is_some()
     }
 
     /// The entity the command runs as (`CommandSourceStack.getEntity`): a
@@ -67,7 +73,10 @@ impl Game<'_> {
     /// by it, without its `~` or with it (quoted), so `/msg` and `/tell`
     /// reach a player by the name chat shows. No nickname, no change.
     pub(super) fn player_named(&self, name: &str) -> Option<Target> {
-        if self.player.is_some() && name.eq_ignore_ascii_case(self.acting_player_name()) {
+        if !self.lan_acting_fake
+            && self.player.is_some()
+            && name.eq_ignore_ascii_case(self.acting_player_name())
+        {
             return Some(Target::Player);
         }
         self.command_players()
@@ -102,7 +111,7 @@ impl Game<'_> {
             })
         });
         if self.player.is_some() && own == Some(uuid) {
-            return Some(Target::Player);
+            return (!self.lan_acting_fake).then_some(Target::Player);
         }
         if let Some(g) = self.command_players().find(|g| g.uuid == uuid) {
             return Some(Target::Guest(g.conn));
@@ -124,8 +133,8 @@ impl Game<'_> {
         let in_place = self.lan_acting.filter(|_| self.player.is_some());
         self.lan
             .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .filter(|g| g.placed)
+            .flat_map(|h| h.hub.online_players())
+            .filter(|g| self.native_command_player_available(g))
             .filter(|g| !limited || g.dimension == here || Some(g.conn) == in_place)
             .filter(|g| !alive || (!g.dead && g.health > 0.0))
             .map(|g| {
@@ -182,37 +191,32 @@ impl Game<'_> {
             Target::Guest(conn) => conn,
             _ => return None,
         };
-        let mut host = self.lan.take()?;
         let back = self.dim;
-        let theirs = host
+        let theirs = self
+            .lan
+            .as_ref()?
             .hub
             .guest(conn)
             .map(|g| super::super::Dim::from_id(&g.dimension));
         if let Some(dim) = theirs.filter(|d| *d != back)
-            && let Err(e) = self.enter_level(Some(&mut host), dim)
+            && let Err(e) = self.enter_level(dim)
         {
             log::error!("could not open {}: {e}", dim.id());
         }
-        let Some(swap) = self.enter_guest(&mut host, conn) else {
+        let Some(swap) = self.enter_guest(conn) else {
             if self.dim != back
-                && let Err(e) = self.enter_level(Some(&mut host), back)
+                && let Err(e) = self.enter_level(back)
             {
                 log::error!("could not reopen {}: {e}", back.id());
             }
-            self.lan = Some(host);
             return None;
         };
-        self.lan = Some(host);
         let source = self.chat_capture.replace(Vec::new());
         let out = f(self);
         let told = std::mem::replace(&mut self.chat_capture, source).unwrap_or_default();
-        let mut host = self
-            .lan
-            .take()
-            .expect("the hub is back after a player's turn");
-        self.leave_guest(&mut host, swap);
+        self.leave_guest(swap);
         for line in told {
-            host.hub.send_to(
+            self.lan.as_ref()?.hub.send_to(
                 conn,
                 &C::SystemChat(play::SystemChat {
                     content: horizon_client::lan::data::component_nbt(&line.component()),
@@ -221,11 +225,10 @@ impl Game<'_> {
             );
         }
         if self.dim != back
-            && let Err(e) = self.enter_level(Some(&mut host), back)
+            && let Err(e) = self.enter_level(back)
         {
             log::error!("could not reopen {}: {e}", back.id());
         }
-        self.lan = Some(host);
         Some(out)
     }
 }

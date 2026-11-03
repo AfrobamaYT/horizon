@@ -51,11 +51,14 @@ impl Game<'_> {
     }
     /// `Entity.startRiding` for two mobs: false when a mod canceled it.
     pub(super) fn try_mount_mob(&mut self, rider: u32, vehicle: u32) -> bool {
-        if !self.native_mob_may_ride(rider, vehicle, true) {
-            return false;
-        }
-        riders::link(&mut self.mobs, rider, vehicle);
-        true
+        let vehicle = if self.boats.iter().any(|b| b.id == vehicle) {
+            super::commands::Target::Boat(vehicle)
+        } else if self.carts.iter().any(|c| c.id == vehicle) {
+            super::commands::Target::Cart(vehicle)
+        } else {
+            super::commands::Target::Mob(vehicle)
+        };
+        self.start_riding_target(super::commands::Target::Mob(rider), vehicle, true)
     }
     /// Riders sit on their vehicles (`Entity.positionRider`), mobs or boats,
     /// and let go when the vehicle dies or is gone.
@@ -434,7 +437,7 @@ impl Game<'_> {
         let Some(d) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        if d.extra.main_hand.as_deref() != Some("minecraft:trident")
+        if d.extra.main_hand_id() != Some("minecraft:trident")
             || self.world.random.next_float() >= 0.5
         {
             return;
@@ -492,7 +495,7 @@ impl Game<'_> {
                     p.extra.age = if baby { i32::MIN / 2 } else { 0 };
                 }
                 if let Some(s) = self.mobs.iter_mut().find(|m| m.id == id) {
-                    s.extra.saddled = true;
+                    s.extra.set_saddled(true);
                 }
                 self.mount_mob(piglin, id);
             }
@@ -578,10 +581,17 @@ impl Game<'_> {
         let id = self.spawn_mob("minecraft:skeleton", at, true)?;
         let m = self.mobs.iter_mut().find(|m| m.id == id)?;
         m.invulnerable = TRAP_INVULNERABLE;
-        if m.extra.head.is_none() {
-            m.extra.head = Some("minecraft:iron_helmet".into());
+        if m.extra.head_id().is_none() {
+            m.extra.set_slot_id(
+                horizon_items::equipment::HEAD,
+                Some("minecraft:iron_helmet".into()),
+            );
         }
-        let (weapon, helmet) = (m.extra.main_hand.clone(), m.extra.head.clone());
+        let finalize = horizon_client::mobs::finalize::item;
+        let (weapon, helmet) = (
+            finalize(m, horizon_client::mobs::finalize::MAINHAND),
+            finalize(m, horizon_client::mobs::finalize::HEAD),
+        );
         let special = self.local_difficulty(at).special();
         // `SkeletonTrapGoal.enchant`: the weapon and the helmet, always.
         for (slot, item) in [

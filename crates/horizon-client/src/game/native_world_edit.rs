@@ -4,6 +4,7 @@ use super::Game;
 
 /// Which of a column's heights (`Heightmap.Types`) a run's `y` counts from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeHeightmap {
     WorldSurface,
     MotionBlocking,
@@ -40,7 +41,7 @@ impl Game<'_> {
     /// Runs in chunks not loaded, and the parts of runs outside the column, are left out. The blocks changed, or
     /// why the edit was left out, with nothing changed: another dimension, a client of a server, a palette entry
     /// or filter that doesn't read or carries NBT (refused), a run naming a palette entry or filter past the end,
-    /// or more than 65536 filters. API 126.
+    /// or more than 65536 filters.
     pub(super) fn native_edit_blocks(
         &mut self,
         dimension: &str,

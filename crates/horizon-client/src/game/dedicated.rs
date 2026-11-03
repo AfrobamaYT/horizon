@@ -10,6 +10,7 @@ use super::{Game, Options, lan::LanSettings, world_loading::WorldRequest};
 use horizon_client::{
     Result,
     lan::{LoginGate, NetConfig, NetLog, OnlineMode, hub::HubConfig},
+    mod_api::NativePermissionLevel,
     server::{
         eula, profiles,
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
@@ -508,20 +509,7 @@ impl Lists {
         if self.bans.contains(user)
             && let Some(ban) = self.bans.get(user).cloned()
         {
-            let mut reason = translatable_tag(
-                "multiplayer.disconnect.banned.reason",
-                vec![ban_reason(&ban.reason)],
-            );
-            if let Some(expires) = ban.expires {
-                append(
-                    &mut reason,
-                    translatable_tag(
-                        "multiplayer.disconnect.banned.expiration",
-                        vec![Tag::String(JavaString::from(ban_date(expires).as_str()))],
-                    ),
-                );
-            }
-            return Some(reason);
+            return Some(ban_message(&ban));
         }
         if !self.whitelisted(user) {
             return Some(translatable("multiplayer.disconnect.not_whitelisted", &[]));
@@ -637,6 +625,24 @@ impl Game<'_> {
 fn ban_date(millis: i64) -> String {
     let s = format_date(millis);
     format!("{} at {} UTC", &s[..10], &s[11..19])
+}
+/// What a banned player is told: `multiplayer.disconnect.banned.reason` and, for a ban that ends,
+/// `multiplayer.disconnect.banned.expiration` (PlayerList.canPlayerLogin).
+pub(super) fn ban_message(ban: &BanEntry<NameAndId>) -> Tag {
+    let mut reason = translatable_tag(
+        "multiplayer.disconnect.banned.reason",
+        vec![ban_reason(&ban.reason)],
+    );
+    if let Some(expires) = ban.expires {
+        append(
+            &mut reason,
+            translatable_tag(
+                "multiplayer.disconnect.banned.expiration",
+                vec![Tag::String(JavaString::from(ban_date(expires).as_str()))],
+            ),
+        );
+    }
+    reason
 }
 /// BanListEntry.getReasonMessage.
 fn ban_reason(reason: &Option<String>) -> Tag {
@@ -871,6 +877,8 @@ impl Game<'_> {
         self.server_lists = Some(lists.clone());
         log("INFO", &format!("Preparing level \"{level_name}\""));
         let folder = world_dir.to_string_lossy().into_owned();
+        // The mods' common and server configs, read before the server starts.
+        self.native_configs_server_start(&world_dir, true);
         // MinecraftServer.loadLevel's start: nothing is loaded yet.
         self.native_server_about_to_start(true);
         self.native_lifecycle_open_started();
@@ -1117,7 +1125,7 @@ impl Game<'_> {
                 crashed = Some(panic_message(payload.as_ref()));
                 break;
             }
-            let players = self.lan.as_ref().map_or(0, |h| h.hub.guests.len());
+            let players = self.lan.as_ref().map_or(0, |h| h.hub.online_count());
             // Vanilla reads pauseWhenEmptySeconds on every tick, so management changes take effect
             // without restarting the server.
             let pause_after = state.pause_when_empty_seconds.wrapping_mul(20);
@@ -1292,9 +1300,35 @@ impl Game<'_> {
         }
     }
 
+    pub(super) fn ban_ip_target(&self, target: &str) -> Option<String> {
+        if target.parse::<std::net::IpAddr>().is_ok() {
+            Some(target.to_owned())
+        } else {
+            self.lan
+                .as_ref()?
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.participates_online() && g.name.eq_ignore_ascii_case(target))
+                .map(|g| g.address.ip().to_string())
+        }
+    }
+
+    /// Network players `BanIpCommands` and the management service disconnect for an address.
+    fn ip_ban_players(&self, ip: &str) -> Vec<u128> {
+        self.lan.as_ref().map_or_else(Vec::new, |h| {
+            h.hub
+                .guests
+                .iter()
+                .filter(|g| g.participates_online() && g.address.ip().to_string() == ip)
+                .map(|g| g.uuid)
+                .collect()
+        })
+    }
+
     /// ServerGamePacketListenerImpl.tick: players idle longer than the
     /// timeout are kicked.
-    fn kick_idle(&mut self, minutes: i32) {
+    pub(super) fn kick_idle(&mut self, minutes: i32) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -1303,7 +1337,9 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| host.hub.ticks.saturating_sub(g.last_action_tick) > limit)
+            .filter(|g| {
+                g.participates_online() && host.hub.ticks.saturating_sub(g.last_action_tick) > limit
+            })
             .map(|g| g.conn)
             .collect();
         for conn in idle {
@@ -1328,13 +1364,44 @@ impl Game<'_> {
         self.resend_commands_filtered();
     }
 
+    /// The mods' say on `user` getting the permission level `new` (0 for `deop`) in the
+    /// operator list: true when one canceled it. The old level is the entry's, else 0.
+    pub(super) fn permission_change(
+        &mut self,
+        lists: &Arc<Mutex<Lists>>,
+        user: &NameAndId,
+        new: i32,
+    ) -> bool {
+        let old = lists.lock().unwrap().ops.get(user).map_or(0, |e| e.level);
+        let entity = self
+            .lan
+            .as_ref()
+            .and_then(|h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .find(|g| g.participates_online() && g.uuid == user.id)
+            })
+            .map(|g| g.entity_id);
+        let mut cancel = false;
+        self.native_permissions_changed(
+            user.id,
+            entity,
+            &user.name,
+            NativePermissionLevel::from_level(old),
+            NativePermissionLevel::from_level(new),
+            &mut cancel,
+        );
+        cancel
+    }
+
     /// A player on the server, by name.
     pub(super) fn online_player(&self, name: &str) -> Option<NameAndId> {
         let hub = &self.lan.as_ref()?.hub;
         let g = hub
             .guests
             .iter()
-            .find(|g| g.name.eq_ignore_ascii_case(name))?;
+            .find(|g| g.participates_online() && g.name.eq_ignore_ascii_case(name))?;
         Some(NameAndId {
             id: g.uuid,
             name: g.name.clone(),
@@ -1399,11 +1466,10 @@ impl Game<'_> {
         self.console_broadcast = Some(inform);
         self.console_command(state, line);
         self.console_broadcast = None;
-        if let Some(mut host) = self.lan.take() {
+        if let Some(host) = self.lan.as_ref() {
             crash_fixture("hub", || host.hub.guests.iter().any(|g| g.placed));
-            self.run_level_teleports(&mut host);
-            self.send_admin_feedback(&mut host, None);
-            self.lan = Some(host);
+            self.run_level_teleports();
+            self.send_admin_feedback(None);
         }
         self.admin_feedback.clear();
     }
@@ -1482,8 +1548,7 @@ impl Game<'_> {
                     .as_ref()
                     .map(|h| {
                         h.hub
-                            .guests
-                            .iter()
+                            .online_players()
                             .map(|g| (g.name.clone(), g.uuid))
                             .collect()
                     })
@@ -1516,7 +1581,13 @@ impl Game<'_> {
                     return;
                 };
                 let level = state.op_level;
-                let changed = {
+                let known = state.lists.lock().unwrap().ops.contains(&user);
+                let canceled = if command == "op" {
+                    !known && self.permission_change(&state.lists, &user, level)
+                } else {
+                    known && self.permission_change(&state.lists, &user, 0)
+                };
+                let changed = !canceled && {
                     let mut l = state.lists.lock().unwrap();
                     if command == "op" {
                         if l.ops.contains(&user) {
@@ -1552,9 +1623,17 @@ impl Game<'_> {
                 if super::chat_filter::MUTE_COMMANDS.contains(&command)
                     && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
             {
+                let words: Vec<&str> = [command].into_iter().chain(rest).collect();
+                let replies = self.mute_command(&words, "Server");
+                for reply in replies {
+                    self.console_reply(lit(&reply));
+                }
+            }
+            // Horizon's temporary ban (game/tempban.rs), as an operator's `/tempban`.
+            command if super::tempban::TEMPBAN_COMMANDS.contains(&command) => {
                 if let Some(mut host) = self.lan.take() {
                     let words: Vec<&str> = [command].into_iter().chain(rest).collect();
-                    let replies = self.mute_command(&mut host, &words, "Server");
+                    let replies = self.tempban_command(&mut host, &words, "Server");
                     self.lan = Some(host);
                     for reply in replies {
                         self.console_reply(lit(&reply));
@@ -1595,17 +1674,7 @@ impl Game<'_> {
             }
             "ban-ip" if !rest.is_empty() => {
                 let target = rest[0];
-                let ip = if target.parse::<std::net::IpAddr>().is_ok() {
-                    Some(target.to_owned())
-                } else {
-                    self.lan.as_ref().and_then(|h| {
-                        h.hub
-                            .guests
-                            .iter()
-                            .find(|g| g.name.eq_ignore_ascii_case(target))
-                            .map(|g| g.address.ip().to_string())
-                    })
-                };
+                let ip = self.ban_ip_target(target);
                 let Some(ip) = ip else {
                     self.console_reply(Text::translate("commands.banip.invalid", &[]));
                     return;
@@ -1631,18 +1700,7 @@ impl Game<'_> {
                         ),
                     ],
                 ));
-                let banned: Vec<u128> = self
-                    .lan
-                    .as_ref()
-                    .map(|h| {
-                        h.hub
-                            .guests
-                            .iter()
-                            .filter(|g| g.address.ip().to_string() == ip)
-                            .map(|g| g.uuid)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let banned = self.ip_ban_players(&ip);
                 if !banned.is_empty() {
                     self.console_reply(Text::translate(
                         "commands.banip.info",
@@ -1933,10 +1991,11 @@ impl Game<'_> {
                 .guests
                 .iter()
                 .filter(|g| {
-                    !l.white.contains(&NameAndId {
-                        id: g.uuid,
-                        name: g.name.clone(),
-                    })
+                    g.participates_online()
+                        && !l.white.contains(&NameAndId {
+                            id: g.uuid,
+                            name: g.name.clone(),
+                        })
                 })
                 .map(|g| g.uuid)
                 .collect()
@@ -1951,13 +2010,11 @@ impl Game<'_> {
 
     /// The anticheat bans a player (`HostEvent::Ban`): `banned-players.json` gets it as `/ban` adds it,
     /// with the anticheat as its source, and the player is sent away with the ban's message.
-    pub(super) fn anticheat_ban(
-        &mut self,
-        hub: &mut horizon_client::lan::hub::Hub,
-        uuid: u128,
-        name: &str,
-        reason: &str,
-    ) {
+    pub(super) fn anticheat_ban(&mut self, uuid: u128, name: &str, reason: &str) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let hub = &mut host.hub;
         let Some(lists) = &self.server_lists else {
             // No ban list to add to: the anticheat's kick, so a flagged cheater still doesn't stay.
             log(
@@ -2004,7 +2061,7 @@ impl Game<'_> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| g.uuid == uuid)
+                .filter(|g| g.participates_online() && g.uuid == uuid)
                 .map(|g| g.conn)
                 .collect();
             for conn in conns {
@@ -2043,9 +2100,9 @@ impl Game<'_> {
     /// `MinecraftServer.runServer`'s `finally`: a tick that panicked still saves. What the panic
     /// interrupted is not trusted: a guest's turn (`as_guest`) holds the game's player state
     /// swapped in, so its record is older than what the game holds, and writing it would put
-    /// back older data than the last autosave; that guest keeps the file it has. A hub that the
-    /// panic took with it (`self.lan.take()` was in progress) saves no players at all. The
-    /// levels, the scoreboard and the other state are saved as in a normal stop.
+    /// back older data than the last autosave; that guest keeps the file it has. If the hub
+    /// has already closed, no players can be saved. The levels, the scoreboard and the other
+    /// state are saved as in a normal stop.
     fn stop_after_crash(&mut self, message: &str) -> Result<()> {
         log("ERROR", &format!("The server thread panicked: {message}"));
         let acting = self.lan_acting;
@@ -2080,16 +2137,14 @@ impl Game<'_> {
         self.native_lifecycle.begin_close();
         // MinecraftServer.stopServer's start: everyone is still here.
         self.native_server_stopping(true);
+        self.native_configs_server_stop();
         log("INFO", "Stopping server");
         self.native_players_leaving();
         log("INFO", "Saving players");
-        if let Some(mut host) = self.lan.take() {
-            self.flush_native_net(&mut host);
-            // PlayerList.removeAll: each player's file, with the vehicle it
-            // alone rides, then its records.
-            self.save_leaving_guests(&mut host);
-            self.lan = Some(host);
-        }
+        self.flush_native_net();
+        // PlayerList.removeAll: each player's file, with the vehicle it
+        // alone rides, then its records.
+        self.save_leaving_guests();
         if let Some(h) = self.lan.as_mut() {
             let conns: Vec<u32> = h.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {
@@ -2113,8 +2168,8 @@ impl Game<'_> {
 }
 
 /// `tools/test_dedicated_crash_save.py`'s fixture: with `HORIZON_CRASH_FIXTURE` naming `point`
-/// (`guest`: during a placed guest's turn, `hub`: while a console line has the hub out and a
-/// player is in), the tick panics there, to see what `stop_after_crash` keeps.
+/// (`guest`: during a placed guest's turn, `hub`: after a console line while a player is in),
+/// the tick panics there, to see what `stop_after_crash` keeps.
 /// `armed` is asked only when the variable names `point`, so the tick pays one
 /// load of a `OnceLock` without it.
 pub(super) fn crash_fixture(point: &str, armed: impl FnOnce() -> bool) {
@@ -2153,6 +2208,43 @@ mod tests {
         process::{Command, Stdio},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn console_name_lookup_skips_fake_players() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            let level = game.native_level("minecraft:overworld").unwrap();
+            game.native_fake_player(level, 100, "robot").unwrap();
+            assert!(game.online_player("robot").is_none());
+            assert_eq!(game.online_player("GUEST12").unwrap().id, 12);
+            // A fake with the same name must not hide a real player later in join order.
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests.iter_mut().find(|g| g.uuid == 12).unwrap().name = "robot".into();
+            guests.reverse();
+            assert_eq!(game.online_player("ROBOT").unwrap().id, 12);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn console_and_management_ip_ban_sets_skip_fake_players() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            let level = game.native_level("minecraft:overworld").unwrap();
+            game.native_fake_player(level, 100, "robot").unwrap();
+            assert!(game.ip_ban_players("0.0.0.0").is_empty());
+            assert_eq!(game.ip_ban_players("127.0.0.1"), [12, 13]);
+            // Even with a matching real peer, the fake is not counted as affected.
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest_mut(12)
+                .unwrap()
+                .address = "0.0.0.0:1".parse().unwrap();
+            assert_eq!(game.ip_ban_players("0.0.0.0"), [12]);
+            assert_eq!(game.ip_ban_players("127.0.0.1"), [13]);
+        });
+    }
 
     /// `SaveAllCommand.saveAll`: a save that throws is the `ERROR_FAILED` the
     /// source is told about, not a log line the caller never sees.
@@ -2285,5 +2377,87 @@ mod tests {
             assert_log_lines(&fs::read_to_string(home.join("logs/latest.log")).unwrap());
             fs::remove_dir_all(home).unwrap();
         }
+    }
+
+    /// A temporary ban (`/tempban`, the chat filter's) keeps the player out and says when it ends;
+    /// once it has ended, or after `/pardon`, they come in.
+    #[test]
+    fn a_temporarily_banned_player_is_refused_with_the_end_until_it_has_passed() {
+        use super::{BanEntry, BanList, Lists, NameAndId};
+        use horizon_chat_filter::now_millis;
+        let dir = std::env::temp_dir().join(format!("horizon-can-login-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut lists = Lists {
+            ops: super::OpList::new(dir.join("ops.json")),
+            white: super::WhiteList::new(dir.join("whitelist.json")),
+            bans: BanList::new(dir.join("banned-players.json")),
+            ip_bans: super::IpBanList::new(dir.join("banned-ips.json")),
+            use_whitelist: false,
+            enforce_whitelist: false,
+            op_level: 4,
+            player_idle_timeout: 0,
+            stop: false,
+            autosave: true,
+        };
+        // Every translation key and string in a message, in the order they come.
+        fn words(tag: &super::Tag, out: &mut Vec<String>) {
+            match tag {
+                super::Tag::String(s) => out.push(s.to_string_lossy()),
+                super::Tag::List(items) => items.iter().for_each(|t| words(t, out)),
+                super::Tag::Compound(_) => {
+                    for key in ["translate", "with", "extra"] {
+                        if let Some(t) = tag.get(key) {
+                            words(t, out);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let message = |tag: Option<super::Tag>| {
+            let mut out = Vec::new();
+            words(&tag.expect("a refusal"), &mut out);
+            out.join(" | ")
+        };
+        let address: std::net::SocketAddr = "127.0.0.1:25565".parse().unwrap();
+        let user = |id: u128, name: &str| NameAndId {
+            id,
+            name: name.into(),
+        };
+        let ban = |user: &NameAndId, expires: Option<i64>| {
+            BanEntry::new(
+                user.clone(),
+                Some("Op".into()),
+                expires,
+                Some("griefing".into()),
+            )
+        };
+        let (steve, alex, dee) = (user(1, "Steve"), user(2, "Alex"), user(3, "Dee"));
+        // Free until banned.
+        assert!(lists.can_login(address, &steve).is_none());
+        // A ban for an hour: refused, with the reason and when it ends.
+        lists.bans.add(ban(&steve, Some(now_millis() + 3_600_000)));
+        let refused = message(lists.can_login(address, &steve));
+        assert!(
+            refused.contains("multiplayer.disconnect.banned.reason"),
+            "{refused}"
+        );
+        assert!(
+            refused.contains("multiplayer.disconnect.banned.expiration"),
+            "{refused}"
+        );
+        assert!(refused.contains("griefing"), "{refused}");
+        // A permanent ban is refused with no end.
+        lists.bans.add(ban(&alex, None));
+        let refused = message(lists.can_login(address, &alex));
+        assert!(!refused.contains("expiration"), "{refused}");
+        // A ban that has ended lets the player in, and the list drops it.
+        lists.bans.add(ban(&dee, Some(now_millis() - 1_000)));
+        assert!(lists.can_login(address, &dee).is_none());
+        assert!(!lists.bans.contains(&dee));
+        // `/pardon` lifts the hour's ban.
+        assert!(lists.bans.remove(&steve));
+        assert!(lists.can_login(address, &steve).is_none());
+        fs::remove_dir_all(dir).unwrap();
     }
 }
