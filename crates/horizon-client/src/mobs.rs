@@ -1490,9 +1490,10 @@ pub enum MobEvent {
         count: i32,
         speed: f64,
     },
-    /// `UseBonemeal`: the villager's bone meal grows the crop at `pos`
-    /// (`BoneMealItem.growCrop`, then level event 1505).
+    /// `UseBonemeal`: villager `mob`'s bone meal on the crop at `pos`
+    /// (`BoneMealItem.growCrop`, then level event 1505 when it grew).
     Bonemeal {
+        mob: u32,
         pos: [i32; 3],
     },
     /// `RingBell`: the villager rings the meeting-point bell

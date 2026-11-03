@@ -749,7 +749,15 @@ one, where vanilla gives the `by` one.
   and `native_analog_output` gives it (0 to 15) for its state and position. A state change with neighbour updates tells the comparators itself; when the output
   changes otherwise, `native_update_output_neighbors(dimension, pos)` makes them read it again (`Level.updateNeighbourForOutputSignal`).
 
-- `native_component_types(types)` runs once before content loads. Append namespaced component IDs; duplicates, invalid IDs and the `minecraft` namespace stop startup. `native_component`, `native_set_component` and `native_remove_component` read, set and remove registered components, including item defaults. Values use NBT and must fit the network reader limits.
+`Hooks::component_types`, `blocks`, `items` and `standalone_models` take
+`&RegistrationContext<'_>` before their event. `context.phase()` identifies the
+bootstrap declarations being collected; `context.mods()` returns a read-only
+`LoadedMods` view whose `ids()` lists loaded code mods in dispatch order. These
+contexts are supplied by the engine and have no game `Host`, handle constructors
+or transactions. Declarations still go on each event; `Hooks::register(&mut
+Registrar)` and Parts registration are unchanged.
+
+- `native_component_types(context, types)` runs once before content loads. Append namespaced component IDs; duplicates, invalid IDs and the `minecraft` namespace stop startup. `native_component`, `native_set_component` and `native_remove_component` read, set and remove registered components, including item defaults. Values use NBT and must fit the network reader limits.
 
 - [explosions](#explosions) for server mods: `native_explode(dimension, center, radius, fire, blast)` sets one off as
   `Level.explode` does, with `NativeBlast::Keep`, `Block` or `Tnt` for what it does to blocks.
@@ -792,6 +800,13 @@ one, where vanilla gives the `by` one.
   particles and sound follow as vanilla's do, whether or not the roll grows the block, from a player's bone meal, a
   dispenser's and, on a crop, a villager's. A block that answers nothing keeps the `BonemealableBlock` its template gives it.
   Authoritative servers only, except the first question.
+
+- Bone meal on any block: `Hooks::bonemeal` (NeoForge's `BonemealEvent`) hears every `BoneMealItem.growCrop`, before
+  the block is asked anything: a player's use on both sides, a dispenser's and a villager's. It names the player (none for a
+  dispenser or a villager), the block, the `source`, the stack (what the mod changes stays) and `valid_bonemeal_target`, the
+  block's own answer. Cancel it and the growth, the block's bone meal Parts and the meal's use are skipped: `growCrop`
+  answers `successful` (`setSuccessful`), false unless the mod sets it, so a player's use still tries the water plant
+  beside the clicked face. A mod growing only its own blocks answers the three questions above instead.
 
 - Mod-block entity contacts: `native_block_step_on`, `native_block_entity_inside` and `native_block_fall_on`. Each receives the server dimension, entity id/type, block state and position. The landing hook also receives fall distance and mutable calculated damage; zero prevents fall hurt and its generic fall sounds. Creative and fall-immune entities notify with zero and retain immunity. Invalid non-finite damage changes are ignored; negative damage is clamped to zero. Hooks run synchronously without `self`, like `native_living_incoming_damage`.
 
@@ -1157,7 +1172,7 @@ reload registration path.
 
 - A player's or mob's breathing, on the single player server thread and on a dedicated server: `native_living_breathe(entity, kind, can_breathe, consume, refill)` every tick for a player and for a mob with the generic air logic (NeoForge's `LivingBreatheEvent`, vanilla's `LivingEntity.baseTick`), with Horizon's answers as the defaults: set `can_breathe` and how much air `consume` takes or `refill` gives (up to 300); at -20 the entity is set to 0 air and takes 2 drowning damage. It is a free function in `horizon_client::breathing`, so it answers and cannot call helpers. Axolotls and `WaterAnimal`s keep their own air logic.
 
-- Blocks and items a native mod declares in code, as NeoForge's `DeferredRegister.Blocks` and `.Items` drained by `RegisterEvent`, instead of one content file each: `native_blocks(blocks)` and `native_items(items)`, asked once at start on every side, take `horizon_mods::content::Block` and `Item`, the declarations a content mod's `data/<id>/horizon/block/` and `item/` files hold (a vanilla template and what differs; `item: true` gives a block its item). Ids are in the mod's namespace. They join the content mods' blocks and items, inside the content mod whose id is that namespace when it is on (its models, textures, loot and recipes), else on their own with the template's look, so their network ids, saves and the joining client's content check are the files' (docs/mods.md). They pass the files' checks; a namespace whose declarations don't is logged and left out.
+- Blocks and items a native mod declares in code, as NeoForge's `DeferredRegister.Blocks` and `.Items` drained by `RegisterEvent`, instead of one content file each: `native_blocks(context, blocks)` and `native_items(context, items)`, asked once at start on every side, take `horizon_mods::content::Block` and `Item`, the declarations a content mod's `data/<id>/horizon/block/` and `item/` files hold (a vanilla template and what differs; `item: true` gives a block its item). Ids are in the mod's namespace. They join the content mods' blocks and items, inside the content mod whose id is that namespace when it is on (its models, textures, loot and recipes), else on their own with the template's look, so their network ids, saves and the joining client's content check are the files' (docs/mods.md). They pass the files' checks; a namespace whose declarations don't is logged and left out.
 
 - Entities ticking, through `native_entity_tick_pre` (NeoForge's `EntityTickEvent.Pre`) and `native_entity_tick_post` (`EntityTickEvent.Post`), with the entity's id and type (`minecraft:zombie`, `minecraft:item`) and the level. Set `canceled` in the Pre and the entity doesn't tick this tick (and its Post isn't told). Told for the mobs, item entities, minecarts and boats that tick in an entity-ticking chunk, on the single player server thread and on a dedicated server; not for a player's own boat or minecart, projectiles, orbs, primed TNT, falling blocks or armor stands. Check `kind`. Mobs and items hear every Pre before the family's first tick and every Post after its last; minecarts and boats hear theirs around each one's tick. A mod that hooks them also hooks `native_entity_tick_listened(listened)` and sets `*listened = true`: otherwise no entity's tick is told. It runs each tick for every ticking entity, so keep it cheap.
 
@@ -1167,7 +1182,7 @@ reload registration path.
 
 - A player finishing a sign: `native_sign_changed(player, name, dimension, pos, front, lines, cancel)` is heard when a player sends the text they wrote on a sign they were editing, right before it goes on the sign, once the checks have passed, on a server, with the player's state swapped in (`native_tell` reaches them). A mod may rewrite `lines` (four lines of plain text) or set `cancel` so the sign keeps its old text; a waxed sign is not told.
 
-- Models no blockstate names, as NeoForge's `ModelEvent.RegisterStandalone`: `native_standalone_models(models)`, asked once at start, takes the ids of models a block entity or a mob draws as parts (`mymod:block/shaft_half`, from `assets/mymod/models/block/shaft_half.json`), and every resource load, a pack reload included, bakes them beside the block models. `native_draw_model(draw, model, tint)` draws one under `draw`'s pose in `native_block_entity_submit` or `native_mob_submit`, as `native_draw_block` draws a block's model, with `tint` (0xRRGGBB) on its tinted faces. A model that doesn't read is logged and left out, and drawing it gives false; no block has to be registered just to bake a part's model.
+- Models no blockstate names, as NeoForge's `ModelEvent.RegisterStandalone`: `native_standalone_models(context, models)`, asked once at client startup (not on integrated or dedicated servers), takes the ids of models a block entity or a mob draws as parts (`mymod:block/shaft_half`, from `assets/mymod/models/block/shaft_half.json`), and every resource load, a pack reload included, bakes them beside the block models. `native_draw_model(draw, model, tint)` draws one under `draw`'s pose in `native_block_entity_submit` or `native_mob_submit`, as `native_draw_block` draws a block's model, with `tint` (0xRRGGBB) on its tinted faces. A model that doesn't read is logged and left out, and drawing it gives false; no block has to be registered just to bake a part's model.
 
 - A player opening and closing any menu on a server, on the single player server thread and on a dedicated server: `native_player_container_open(player, name, dimension, menu, pos)` and `native_player_container_close(...)` (NeoForge's `PlayerContainerEvent.Open` and `.Close`), with the menu type's name and, for a block's menu, its position. They run with the player's state swapped in. Unlike the viewer count of a mod container (`native_mod_container_viewers`) they name the player and cover every menu: chests, furnaces, crafting tables, trades, a mod's own. A menu is heard once a tick, so one opened and closed inside a tick is not; each open has one close, also when the player leaves.
 
@@ -3179,9 +3194,14 @@ so check `is_loaded` first. It also answers tag and fluid questions without a `H
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
-`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events). Whole-block writes wait for a
-later slice that creates block entities, as vanilla's `setBlock` does. The game owns
+`LevelWriteHost` adds random access, `set_block`, `native_set_block_property`, `native_play_sound` and
+`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events).
+`set_block(pos, state, flags)` is `Level.setBlock` on a whole state, as `LevelRef::set_block` takes it: it
+removes the old block's block entity and creates the new block's in the write (`LevelChunk.setBlockState`), runs
+the neighbour and shape updates `flags` ask for, and queues the write's level events in order. A mod block entity
+it creates starts with empty data, because `native_block_entity` needs a `Host`. It returns true when the block
+changed, and false off an authoritative server, for a position that is not loaded or outside the build height,
+an invalid state, or the state the block already has. It never loads a chunk. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
 renderer list is installed once alongside the mod list. `render_needs` collects requests;
@@ -3429,7 +3449,14 @@ between these and block or item handlers inside a transaction.
 
 #### A menu's slots
 
-`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`host.menu(player)`). It is
+Client hooks can read the local player's menu with `host.local_player()?.container_menu(host)`,
+including the inventory when no container is open. `MenuRef::slot_count`, `slot` and `carried`
+read on either side; `slot` and `carried` return an outer `None` when the handle or slot is
+unavailable and `Some(None)` for an empty slot. Each read checks the world epoch and menu generation,
+so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
+change slots.
+
+`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
 (`MenuSlotBacking`), and a write goes to that storage through its own handler, so it is kept once by the transaction

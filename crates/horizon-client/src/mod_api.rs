@@ -5,6 +5,8 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
+mod phase;
+pub use phase::{LoadedMods, RegistrationContext, RegistrationPhase};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod reload_order;
@@ -1892,6 +1894,7 @@ impl BossBarOverlay {
 }
 
 /// One player's open menu, invalidated on close, replacement or reconnect.
+/// Client menu handles are also invalidated on respawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
@@ -2507,6 +2510,17 @@ pub(in crate::mod_api) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&m
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
+/// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BonemealSource {
+    /// Bone meal used through `BoneMealItem.growCrop`: by a player, a
+    /// dispenser or a villager.
+    Interaction,
+    /// A mob growing the block itself.
+    Mob,
+}
+
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.
@@ -2717,8 +2731,23 @@ pub trait LevelTicksHost: LevelHost {
     }
 }
 
-/// Mutable level services, like vanilla's `ServerLevel`. Whole-block writes wait for block entity support.
+/// Mutable level services, like vanilla's `ServerLevel`.
 pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
+    /// Replace the block at `pos` with `state` through `Level.setBlock(pos, state, flags)`, as
+    /// `LevelRef::set_block` does: the old block's block entity goes and the new block's is
+    /// created in the write, its neighbour and shape updates run per `flags`, and its level events
+    /// queue in order with the caller's. A mod block entity starts with empty data
+    /// (`native_block_entity` needs a full `Host`). True when the block changed; false off an
+    /// authoritative server, for a position that is not loaded or outside the build height, an
+    /// invalid state, or the state it already is. It never loads a chunk.
+    fn set_block(
+        &mut self,
+        _pos: [i32; 3],
+        _state: BlockStateId,
+        _flags: NativeBlockUpdateFlags,
+    ) -> bool {
+        unimplemented!("LevelWriteHost::set_block")
+    }
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(
         &mut self,
@@ -2889,7 +2918,11 @@ mod tests {
     struct Broken;
     #[mod_api::__subscriptions]
     impl Hooks for Broken {
-        fn component_types(&self, _event: &mut ComponentTypesEvent<'_>) {
+        fn component_types(
+            &self,
+            _context: &RegistrationContext<'_>,
+            _event: &mut ComponentTypesEvent<'_>,
+        ) {
             panic!("a broken mod");
         }
     }
@@ -3169,7 +3202,10 @@ mod tests {
     #[test]
     fn dispatch_before_installation_is_empty() {
         let mut components = Vec::new();
-        dispatch_component_types(&mut components);
+        dispatch_component_types(
+            &RegistrationContext::new(RegistrationPhase::Components),
+            &mut components,
+        );
         assert!(mods().is_empty());
         assert!(components.is_empty());
     }
@@ -3197,7 +3233,10 @@ mod tests {
             }
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_component_types(&mut Vec::new())
+            dispatch_component_types(
+                &RegistrationContext::new(RegistrationPhase::Components),
+                &mut Vec::new(),
+            )
         }));
         // Once the dispatch has unwound, the thread is in no mod.
         let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));

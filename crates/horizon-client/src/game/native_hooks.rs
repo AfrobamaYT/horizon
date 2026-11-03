@@ -28,8 +28,9 @@ use horizon_client::mod_api::{
     WorldPhase,
 };
 use horizon_client::mod_api::{
-    AttachmentResult, Attachments, BlockHit, FluidStack, GameRuleValue, Holder, LegacyRandom,
-    LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState, Suggestion,
+    AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState,
+    Suggestion,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -1955,8 +1956,11 @@ impl Game<'_> {
         mod_api::dispatch_minimap(self, minimap);
     }
     /// Register namespaced NBT component types before content loads.
-    pub(super) fn native_component_types(types: &mut Vec<String>) {
-        mod_api::dispatch_component_types(types);
+    pub(super) fn native_component_types(
+        context: &mod_api::RegistrationContext<'_>,
+        types: &mut Vec<String>,
+    ) {
+        mod_api::dispatch_component_types(context, types);
     }
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
@@ -1973,8 +1977,11 @@ impl Game<'_> {
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
-    pub(super) fn native_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
-        mod_api::dispatch_blocks(blocks);
+    pub(super) fn native_blocks(
+        context: &mod_api::RegistrationContext<'_>,
+        blocks: &mut Vec<horizon_mods::content::Block>,
+    ) {
+        mod_api::dispatch_blocks(context, blocks);
     }
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
@@ -1983,8 +1990,11 @@ impl Game<'_> {
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
     /// Asked once at start, on every side.
-    pub(super) fn native_items(items: &mut Vec<horizon_mods::content::Item>) {
-        mod_api::dispatch_items(items);
+    pub(super) fn native_items(
+        context: &mod_api::RegistrationContext<'_>,
+        items: &mut Vec<horizon_mods::content::Item>,
+    ) {
+        mod_api::dispatch_items(context, items);
     }
     /// Models no blockstate names that this client bakes beside the block
     /// models (NeoForge's `ModelEvent.RegisterStandalone`): push their ids
@@ -1994,10 +2004,13 @@ impl Game<'_> {
     /// only to bake its model. Asked once at start, before the resources
     /// load; every resource load, a pack reload included, bakes them again
     /// from that pack's files. A model that doesn't read is logged and left
-    /// out; an id without a namespace is dropped. Every side asks it, but
-    /// only a window bakes models.
-    pub(super) fn native_standalone_models(models: &mut Vec<String>) {
-        mod_api::dispatch_standalone_models(models);
+    /// out; an id without a namespace is dropped. Only the client asks it,
+    /// as NeoForge's ModelEvent.RegisterStandalone is a client mod-bus event.
+    pub(super) fn native_standalone_models(
+        context: &mod_api::RegistrationContext<'_>,
+        models: &mut Vec<String>,
+    ) {
+        mod_api::dispatch_standalone_models(context, models);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
@@ -5757,6 +5770,40 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// `BonemealEvent`: bone meal from `stack` used on the block `state` at
+    /// `pos` (`BoneMealItem.growCrop`), by `player` or, when it is `None`, by
+    /// a dispenser or a villager. `valid_bonemeal_target` is the block's
+    /// `isValidBonemealTarget`. Cancel skips vanilla's growth, the block's
+    /// own bone meal Parts and the meal's use: `growCrop` then answers
+    /// `successful` (`setSuccessful`), which is `false` unless a mod sets it.
+    /// Fired on both sides; changes to `stack` stay.
+    pub(super) fn native_bonemeal(
+        &mut self,
+        dimension: LevelDimension,
+        player: Option<u128>,
+        player_entity_id: Option<i32>,
+        pos: BlockPos,
+        state: BlockStateId,
+        source: BonemealSource,
+        stack: &mut ItemStack,
+        valid_bonemeal_target: bool,
+        successful: &mut bool,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_bonemeal(
+            mod_api::HostSide::of(self),
+            dimension,
+            player,
+            player_entity_id,
+            pos,
+            state,
+            source,
+            stack,
+            valid_bonemeal_target,
+            successful,
+            canceled,
+        );
+    }
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
     /// about to break `blocks`: `ServerExplosion.explode` with its `toBlow`,
     /// before any block is hit. Take out the positions to spare; they keep
@@ -7322,6 +7369,42 @@ impl GameLevel<'_> {
         let b = self.behaviours;
         b.set_block(self, ticks, at, id, flags)
     }
+    /// Replaces the block at `pos` with `state` through `Level.setBlock`, as
+    /// `Game::native_set_block` does for the Host, from a hook that gets the
+    /// level's `ticks`: the old block's block entity is removed and the new
+    /// block's is created in the write (`LevelChunk.setBlockState`), and the
+    /// write's level events stay queued for the caller, in order. A mod block
+    /// entity starts with empty data: `native_block_entity` needs a `Host`,
+    /// which a level hook has not. True when the block changed; false off an
+    /// authoritative server, for a position that is not loaded or outside the
+    /// build height, an invalid state, or an unchanged state. Never loads a
+    /// chunk.
+    pub(super) fn native_set_block(
+        &mut self,
+        ticks: &mut Ticks,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: i32,
+    ) -> bool {
+        if !self.native_authoritative
+            || !self.world.is_loaded_at(pos[0], pos[1], pos[2])
+            || self.registry.state(state).is_none()
+        {
+            return false;
+        }
+        let at = BlockPos::new(pos[0], pos[1], pos[2]);
+        let previous = self.world.block(pos[0], pos[1], pos[2]);
+        let b = self.behaviours;
+        let changed = b.set_block(self, ticks, at, state, flags);
+        let landed = self.world.block(pos[0], pos[1], pos[2]);
+        if let Some(name) = block_entity_to_create(self.facts, changed, previous, state, landed)
+            && let Some(entity) =
+                block_entity_for_block(self.registry, self.facts, &name, Compound::default())
+        {
+            put_block_entity(self.world, pos, entity);
+        }
+        changed
+    }
     /// Schedules a tick of `block` (a block name) at `pos` in `delay` game
     /// ticks, as a falling block's shape update schedules its fall
     /// (`ScheduledTickAccess.scheduleTick(pos, block, delay)`, normal
@@ -7398,6 +7481,65 @@ impl GameLevel<'_> {
     }
 }
 
+/// `EntityBlock.newBlockEntity` of block `name`: a declared mod type starting
+/// with `initial` data, a mod's sign, else Horizon's own. Shared by the
+/// Host's and a level hook's whole-block writes.
+fn block_entity_for_block(
+    registry: &BlockRegistry,
+    facts: &horizon_client::blocks::BlockFacts,
+    name: &str,
+    initial: Compound,
+) -> Option<BlockEntity> {
+    if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
+        return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
+            kind.to_owned(),
+            ModBlockEntityFields {
+                nbt: initial,
+                ..Default::default()
+            },
+        ))));
+    }
+    // Undeclared content blocks retain their template's vanilla behaviour.
+    // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
+    if !name.starts_with("minecraft:")
+        && let Some(state) = registry.default_state(name)
+        && let Some(form) = facts.get(state).sign_form()
+    {
+        return Some(BlockEntity::Sign(horizon_client::signs::SignData {
+            hanging: form.hanging,
+            ..Default::default()
+        }));
+    }
+    BlockEntity::for_block(name)
+}
+
+/// After a `Level.setBlock` of `state` over `previous`: the block whose block
+/// entity the write creates, when the write changed the block's name and the
+/// new block landed.
+fn block_entity_to_create(
+    facts: &horizon_client::blocks::BlockFacts,
+    changed: bool,
+    previous: BlockStateId,
+    state: BlockStateId,
+    landed: BlockStateId,
+) -> Option<String> {
+    let new = &facts.get(state).name;
+    (changed && facts.get(previous).name != *new && facts.get(landed).name == *new)
+        .then(|| new.to_string())
+}
+
+/// Stores a new block entity at `pos`, keeping an existing one of the same kind.
+fn put_block_entity(world: &mut horizon_client::world::World, pos: [i32; 3], entity: BlockEntity) {
+    let key = (pos[0], pos[1], pos[2]);
+    if world
+        .block_entities
+        .get(&key)
+        .is_none_or(|existing| std::mem::discriminant(existing) != std::mem::discriminant(&entity))
+    {
+        world.block_entities.insert(key, entity);
+    }
+}
+
 /// Helpers for native mods, kept as stable as the hook points.
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
@@ -7471,19 +7613,12 @@ impl Game<'_> {
         let previous = self.world.block(pos[0], pos[1], pos[2]);
         let changed =
             self.with_level(|b, level, ticks| b.set_block(level, ticks, at, state, flags));
-        let new = self.res.facts().get(state).name.clone();
         let landed = self.world.block(pos[0], pos[1], pos[2]);
-        if changed
-            && self.res.facts().get(previous).name != new
-            && self.res.facts().get(landed).name == new
-            && let Some(entity) = self.new_block_entity(&new)
+        if let Some(name) =
+            block_entity_to_create(self.res.facts(), changed, previous, state, landed)
+            && let Some(entity) = self.new_block_entity(&name)
         {
-            let key = (pos[0], pos[1], pos[2]);
-            if self.world.block_entities.get(&key).is_none_or(|existing| {
-                std::mem::discriminant(existing) != std::mem::discriminant(&entity)
-            }) {
-                self.world.block_entities.insert(key, entity);
-            }
+            put_block_entity(&mut self.world, pos, entity);
         }
         let _ = self.process_level_events();
         changed
@@ -8368,6 +8503,44 @@ pub(super) enum BlockClickAnswer {
 
 /// Where the game calls the hook points.
 impl Game<'_> {
+    /// `BonemealEvent` for bone meal from `stack` on `pos`, used by the
+    /// acting player (`by_player`) or by a dispenser or a villager:
+    /// `Some(successful)` when a mod canceled it, the answer `growCrop`
+    /// gives in vanilla's place. The caller keeps what the mods did to
+    /// `stack`.
+    pub(super) fn bonemeal(
+        &mut self,
+        pos: BlockPos,
+        by_player: bool,
+        stack: &mut ItemStack,
+    ) -> Option<bool> {
+        if !mod_api::listened(mod_api::HookId::Bonemeal) {
+            return None;
+        }
+        let client = self.remote.is_some();
+        let valid = self.with_level(|b, level, _| b.is_valid_bonemeal_target(level, pos, client));
+        let state = self.world.block(pos.x, pos.y, pos.z);
+        let (player, player_entity_id) = if by_player {
+            let (uuid, entity) = self.native_clicker();
+            (Some(uuid), Some(entity))
+        } else {
+            (None, None)
+        };
+        let (mut successful, mut canceled) = (false, false);
+        self.native_bonemeal(
+            self.dim.level(),
+            player,
+            player_entity_id,
+            pos,
+            state,
+            BonemealSource::Interaction,
+            stack,
+            valid,
+            &mut successful,
+            &mut canceled,
+        );
+        canceled.then_some(successful)
+    }
     /// The player clicking, as the block-use hooks name them: the acting
     /// player's UUID and entity id on a server, this client's own player on
     /// a client.
@@ -8662,32 +8835,16 @@ impl Game<'_> {
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
     /// native mod's.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
-        if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
-            let mut nbt = None;
+        let mut nbt = None;
+        if horizon_client::block_entity_types::type_for(name).is_some() {
             self.native_block_entity(name, &mut nbt);
-            return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
-                kind.to_owned(),
-                ModBlockEntityFields {
-                    nbt: nbt.unwrap_or_default(),
-                    ..Default::default()
-                },
-            ))));
         }
-        // Undeclared content blocks retain their template's vanilla behaviour.
-        // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
-        if !name.starts_with("minecraft:")
-            && let Some(state) = self.pack.assets.registry.default_state(name)
-            && let Some(form) = self.res.facts().get(state).sign_form()
-        {
-            return Some(BlockEntity::Sign(horizon_client::signs::SignData {
-                hanging: form.hanging,
-                ..Default::default()
-            }));
-        }
-        if let Some(entity) = BlockEntity::for_block(name) {
-            return Some(entity);
-        }
-        None
+        block_entity_for_block(
+            self.pack.assets.registry,
+            self.res.facts(),
+            name,
+            nbt.unwrap_or_default(),
+        )
     }
     /// The containers of the mod blocks' block entities, by block state
     /// (`native_block_entity_container`), checked.
@@ -9513,7 +9670,11 @@ mod tests {
                     .blocks(&[EMPTY])
                     .build();
             }
-            fn blocks(&self, event: &mut BlocksEvent<'_>) {
+            fn blocks(
+                &self,
+                _context: &mod_api::RegistrationContext<'_>,
+                event: &mut BlocksEvent<'_>,
+            ) {
                 event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
                     horizon_mods::content::Block {
                         id: id.into(),

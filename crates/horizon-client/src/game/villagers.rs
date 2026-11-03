@@ -7,7 +7,7 @@ use horizon_client::{
     items::ItemStack,
     mobs::{Mob, Species, spawning, villager, villager_brain},
 };
-use horizon_core::geometry::Vec3;
+use horizon_core::{geometry::Vec3, position::BlockPos};
 
 fn block_of(p: Vec3) -> [i32; 3] {
     [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32]
@@ -20,6 +20,52 @@ impl Game<'_> {
     }
     fn item_max_stack(&self, item: &str) -> u32 {
         self.items().get(item).map_or(64, |i| i.max_stack)
+    }
+    /// `UseBonemeal.tick`'s `BoneMealItem.growCrop`: villager `id`'s first
+    /// bone meal on `pos`, with level event 1505 and the next crop to work
+    /// on when it grew.
+    pub(super) fn villager_bonemeal(&mut self, id: u32, pos: BlockPos) {
+        let Some(i) = self.villager_index(id) else {
+            return;
+        };
+        let inventory = &villager::ext_mut(&mut self.mobs[i]).inventory;
+        let Some(slot) = inventory
+            .iter()
+            .position(|s| s.count > 0 && &*s.item == "minecraft:bone_meal")
+        else {
+            return;
+        };
+        let mut stack = inventory[slot].clone();
+        let crop = self.bonemeal(pos, false, &mut stack);
+        let grown = crop
+            .unwrap_or_else(|| self.with_level(|b, level, ticks| b.grow_crop(level, ticks, pos)));
+        // A canceled `BonemealEvent` that succeeded uses none of the meal.
+        if grown && crop != Some(true) {
+            stack.count = stack.count.saturating_sub(1);
+        }
+        // The event's host may have moved the villager in `mobs`.
+        let Some(i) = self.villager_index(id) else {
+            return;
+        };
+        let m = &mut self.mobs[i];
+        let inventory = &mut villager::ext_mut(m).inventory;
+        if slot < inventory.len() {
+            if stack.count == 0 {
+                inventory.remove(slot);
+            } else {
+                inventory[slot] = stack;
+            }
+        }
+        if grown {
+            villager_brain::bonemeal_grown(m, self.world.game_time);
+            self.level_events
+                .push(horizon_world::level::LevelEvent::LevelEvent {
+                    id: 1505,
+                    pos,
+                    data: 15,
+                });
+            let _ = self.process_level_events();
+        }
     }
     /// `WorkAtComposter.useWorkstation`: at a composter the farmer makes
     /// bread, then composts seeds.
