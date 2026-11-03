@@ -553,6 +553,12 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
 }
 
 pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
+    if dir.join(MANIFEST).is_file() && dir.join(NATIVE_MANIFEST).is_file() {
+        return Err(format!(
+            "{}: both {MANIFEST} and {NATIVE_MANIFEST} are present; choose one bundle root.",
+            dir.display()
+        ));
+    }
     if dir.join(MANIFEST).is_file() {
         return bundle(dir, None).map(Some);
     }
@@ -2547,6 +2553,14 @@ mod tests {
         assert_eq!(read("plain").unwrap(), "plain");
         assert!(read("ordinary").is_err(), "horizon-mixins stages it");
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ambiguous_bundle_root_is_rejected_even_with_hooks() {
+        let d = dir("ambiguous-bundle");
+        fs::write(d.join(MANIFEST), "[mod]\nid = 'example'\nversion = '1'\n").unwrap();
+        fs::write(d.join(NATIVE_MANIFEST), r#"{"hooks":null}"#).unwrap();
+        assert!(bundle_in(&d).unwrap_err().contains("both"));
     }
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
