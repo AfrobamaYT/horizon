@@ -2477,6 +2477,12 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     ) -> bool {
         unimplemented!("LevelWriteHost::send_particles")
     }
+    /// `LevelAccessor.levelEvent(null, id, pos, data)` through `native_level_event`: the event
+    /// is queued with the write's own events, in order, and plays when the write is done.
+    /// `LevelRef::level_event` takes the same `id` and `data`.
+    fn level_event(&mut self, _id: i32, _pos: [i32; 3], _data: i32) -> bool {
+        unimplemented!("LevelWriteHost::level_event")
+    }
 }
 
 macro_rules! level_attachment_host {
