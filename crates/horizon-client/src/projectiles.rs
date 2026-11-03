@@ -2018,7 +2018,10 @@ mod deflect_tests {
         assert!(ball.deflect(Turn::Reverse, [1.0; 3], none(), false));
         assert_eq!(ball.yaw, yaw + (170.0 + draw * 20.0));
         assert_eq!(ball.previous_yaw, yaw + (170.0 + draw * 20.0));
-        assert_eq!(ball.random.0.clone().next_float(), expect.next_float());
+        assert_eq!(
+            ball.random.0.clone().next_float(),
+            expect.clone().next_float()
+        );
         let draw = expect.next_float();
         let yaw = ball.yaw;
         assert!(ball.deflect(Turn::Reverse, [1.0; 3], none(), false));
