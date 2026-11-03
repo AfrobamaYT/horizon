@@ -124,8 +124,11 @@ fn slot_image(item: &Item) -> Vec<u8> {
 /// what is worn on the back. A name tag style is never drawn on the body.
 fn covered(m: &Mob, slot: Slot) -> bool {
     match slot {
-        Slot::Head => m.extra.head.is_some(),
-        Slot::Back => m.cape.is_some() || m.extra.chest.as_deref() == Some("minecraft:elytra"),
+        Slot::Head => m.extra.head_id().is_some(),
+        Slot::Back => {
+            m.cape.is_some()
+                || m.extra.slot_id(horizon_items::equipment::CHEST) == Some("minecraft:elytra")
+        }
         Slot::Shoulder => false,
         Slot::NameTag => true,
     }

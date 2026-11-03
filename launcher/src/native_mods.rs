@@ -27,6 +27,7 @@ mod crates;
 mod dependencies;
 mod inject;
 mod inject_cache;
+mod package;
 
 const PREFIX: &str = "native-";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
@@ -394,15 +395,14 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 }
 
 const MANIFEST: &str = "horizon-mixin.toml";
-/// A registry download's manifest (`.hmod`, `horizon_mods::index::native`), beside `native/`.
-const NATIVE_MANIFEST: &str = horizon_mods::index::native::MANIFEST;
+/// A registry download's `horizon-mod.toml` at the `.hmod` package root.
+const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
 pub const INSTALLED: &str = "horizon-native-mods";
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
-/// Each `.hmod` is checked again as the registry checks it (Rust and TOML under
-/// `native/`, plus files under its `data/`, nothing run).
+/// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
 pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
     let out = root().join("installed.incoming");
     let _ = fs::remove_dir_all(&out);
@@ -435,24 +435,26 @@ pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-/// A mixin bundle: a folder with a `horizon-mixin.toml`, and the revisions it pins.
+/// A validated flat mod project. The package manifest owns identity and build pins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
-    pub id: String,
-    pub version: String,
+    pub manifest: horizon_mods::manifest::Manifest,
     pub dir: PathBuf,
-    /// The Horizon commit it builds on (`[compatibility] horizon_revision`, or its `.hmod`'s).
-    pub horizon: Option<String>,
-    /// The horizon-mixins commit it was tested with (its `.hmod`'s).
-    pub mixins: Option<String>,
-    /// The bundle-relative trait package folder (`[api] path`).
-    pub api: Option<String>,
-    /// True when the manifest has content for horizon-mixins.
-    pub mixins_content: bool,
-    /// Its `[[injection]]` entries, for the build's warnings. Read leniently:
-    /// an entry the launcher cannot make sense of is left out, horizon-mixins
-    /// refuses it when it applies.
+    /// The typed injection sites projected for conflict warnings.
     pub injections: Vec<Injection>,
+}
+
+impl Bundle {
+    fn native(&self) -> &horizon_mods::manifest::Native {
+        self.manifest
+            .native
+            .as_ref()
+            .expect("validated code package")
+    }
+
+    fn needs_mixins(&self) -> bool {
+        !self.native().injection.is_empty()
+    }
 }
 
 /// One `[[injection]]` of a bundle's manifest, read for the build's
@@ -467,10 +469,9 @@ pub struct Injection {
     /// Its `selector` and `ordinal`, which with the kind tell two interior
     /// sites of one function apart.
     pub selector: Option<String>,
-    pub ordinal: Option<i64>,
-    /// The `[mod]` `priority` unless the entry overrides it. horizon-mixins
-    /// defaults it to 0 (`#[serde(default)] priority: i32`).
-    pub priority: i64,
+    pub ordinal: Option<usize>,
+    /// The injection priority, defaulting to horizon-mixins' 0.
+    pub priority: i32,
     /// `cancellable = true` (a `HEAD`, `BEFORE_CALL`, `AFTER_CALL` or
     /// `AFTER_ASSIGN` may carry it): a `Break` skips the later injections
     /// at the site.
@@ -501,7 +502,7 @@ impl Injection {
     /// node, call site, constant site, then priority descending, mod id
     /// ascending, injection id ascending): same manifest place, and its
     /// tie-break tail is the run order.
-    fn place(&self) -> (&InjectionSite, Option<&str>, Option<&str>, Option<i64>) {
+    fn place(&self) -> (&InjectionSite, Option<&str>, Option<&str>, Option<usize>) {
         (
             &self.site,
             self.kind.as_deref(),
@@ -526,8 +527,7 @@ impl Injection {
     }
 }
 
-/// The bundles in `folder`: the folder itself when it is one (a `horizon-mixin.toml`, or an
-/// unpacked `.hmod`: `horizon-native.json` and `native/`), else each of its subfolders that is.
+/// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
@@ -545,7 +545,7 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     }
     if found.is_empty() {
         return Err(format!(
-            "{} holds no native mod ({MANIFEST} or {NATIVE_MANIFEST}).",
+            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
             folder.display()
         ));
     }
@@ -553,115 +553,7 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
 }
 
 pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
-    let source = dir.join(horizon_mods::index::native::SOURCE);
-    let path = dir.join(NATIVE_MANIFEST);
-    if !source.join(MANIFEST).is_file() {
-        if path.exists() || dir.join(MANIFEST).exists() {
-            return Err(format!("{} needs native/{MANIFEST}", dir.display()));
-        }
-        return Ok(None);
-    }
-    if !path.is_file() {
-        return bundle(&source, None).map(Some);
-    }
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let native: horizon_mods::index::native::Manifest =
-        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    native
-        .check()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    let found = bundle(&source, Some(native.mixins))?;
-    if found.id != native.id || found.version != native.version {
-        return Err("native manifest and mixin identity/revision differ".into());
-    }
-    if let Some(pinned) = &found.horizon {
-        if *pinned != native.horizon {
-            return Err(format!(
-                "{}: {NATIVE_MANIFEST} pins Horizon {}, its {MANIFEST} {pinned}.",
-                native.id, native.horizon
-            ));
-        }
-    }
-    Ok(Some(Bundle {
-        horizon: Some(native.horizon),
-        ..found
-    }))
-}
-
-fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
-    let path = dir.join(MANIFEST);
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let value: toml::Table = text
-        .parse()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    let field = |table: &str, name: &str| {
-        value
-            .get(table)
-            .and_then(|m| m.get(name))
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
-    };
-    horizon_mods::index::native::check_source_layout(&value).map_err(|e| e.to_string())?;
-    let need = |name: &str| {
-        field("mod", name).ok_or_else(|| format!("{} has no [mod] {name}.", path.display()))
-    };
-    // The `[mod]` `priority` the injections fall back to. horizon-mixins
-    // defaults it to 0 (`#[serde(default)] priority: i32`), not to a README
-    // example's 100.
-    let mod_priority = value
-        .get("mod")
-        .and_then(|m| m.get("priority"))
-        .and_then(|v| v.as_integer())
-        .unwrap_or(0);
-    // Read leniently: an entry without an id and a site (`hook` or `target`)
-    // is left out — horizon-mixins refuses it when it applies.
-    let injections = value
-        .get("injection")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let text = |name: &str| entry.get(name).and_then(|v| v.as_str()).map(str::to_owned);
-            let id = text("id")?;
-            let site = match (text("hook"), text("target")) {
-                (Some(hook), _) => InjectionSite::Hook(hook),
-                (None, Some(target)) => InjectionSite::Target(target),
-                (None, None) => return None,
-            };
-            Some(Injection {
-                id,
-                site,
-                kind: text("kind"),
-                selector: text("selector"),
-                ordinal: entry.get("ordinal").and_then(|v| v.as_integer()),
-                priority: entry
-                    .get("priority")
-                    .and_then(|v| v.as_integer())
-                    .unwrap_or(mod_priority),
-                cancellable: entry.get("cancellable").and_then(|v| v.as_bool()) == Some(true),
-            })
-        })
-        .collect();
-    let api = value.get("api").map(|_| api::folder(dir)).transpose()?;
-    let mixins_content = value
-        .keys()
-        .any(|key| !["mod", "compatibility", "api", "dependencies"].contains(&key.as_str()));
-    // Reject links before copying the bundle into the incoming folder.
-    files_with_api(dir, api.as_deref())?;
-    let id = need("id")?;
-    if !api::valid_id(&id) {
-        return Err(format!("{}: invalid mod id {id:?}", path.display()));
-    }
-    Ok(Bundle {
-        id,
-        version: need("version")?,
-        dir: dir.to_owned(),
-        horizon: field("compatibility", "horizon_revision"),
-        mixins,
-        injections,
-        api,
-        mixins_content,
-    })
+    package::read(dir)
 }
 
 fn is_revision(text: &str) -> bool {
@@ -685,7 +577,10 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
     let mut places: BTreeMap<_, Vec<(&str, &Injection)>> = BTreeMap::new();
     for b in mods {
         for i in &b.injections {
-            places.entry(i.place()).or_default().push((&b.id, i));
+            places
+                .entry(i.place())
+                .or_default()
+                .push((&b.manifest.id, i));
         }
     }
     for (_, list) in places {
@@ -722,7 +617,10 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
     for b in mods {
         for i in &b.injections {
             if i.kind.as_deref() == Some("HEAD") || i.kind.as_deref() == Some("RETURN") {
-                functions.entry(&i.site).or_default().push((&b.id, i));
+                functions
+                    .entry(&i.site)
+                    .or_default()
+                    .push((&b.manifest.id, i));
             }
         }
     }
@@ -763,7 +661,7 @@ fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
             {
                 out.push(format!(
                     "{}'s `{}` can cancel at {}: a Break skips the later injections and the function's body.",
-                    b.id,
+                    b.manifest.id,
                     i.id,
                     i.place_as_text()
                 ));
@@ -794,7 +692,7 @@ fn agreed(
 ) -> Result<String, String> {
     let mut pins: Vec<(&String, &str)> = bundles
         .iter()
-        .filter_map(|b| get(b).map(|r| (r, b.id.as_str())))
+        .filter_map(|b| get(b).map(|r| (r, b.manifest.id.as_str())))
         .collect();
     pins.sort();
     let revision = match pins.first() {
@@ -906,9 +804,9 @@ pub const MISMATCH: &str = "Made for other Horizon versions: ";
 fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     let list: Vec<String> = mods
         .iter()
-        .filter_map(|b| b.horizon.as_ref().map(|r| (b, r)))
+        .map(|b| (b, &b.native().horizon))
         .filter(|(_, r)| *r != revision)
-        .map(|(b, r)| format!("{} → {}", b.id, &r[..r.len().min(7)]))
+        .map(|(b, r)| format!("{} → {}", b.manifest.id, &r[..r.len().min(7)]))
         .collect();
     (!list.is_empty()).then(|| {
         format!(
@@ -1007,54 +905,41 @@ pub fn newer_than(base: &str, installed: &[String]) -> Option<String> {
 /// Every file under `dir`, by its path relative to `dir` (with `/`), sorted. A symlink is refused:
 /// horizon-mixins refuses them too.
 fn files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
-    files_with_api(dir, None)
-}
-
-/// Bundle files omit only the API package's Cargo build output.
-fn bundle_files(bundle: &Bundle) -> Result<Vec<(String, PathBuf)>, String> {
-    files_with_api(&bundle.dir, bundle.api.as_deref())
-}
-
-/// The API package's target folder in a canonical bundle root.
-fn api_target(root: &Path, api: Option<&str>) -> Result<Option<PathBuf>, String> {
-    api.map(|path| root.join(path).canonicalize().map(|p| p.join("target")))
-        .transpose()
-        .map_err(|e| e.to_string())
-}
-
-fn files_with_api(dir: &Path, api: Option<&str>) -> Result<Vec<(String, PathBuf)>, String> {
-    fn walk(
-        root: &Path,
-        dir: &Path,
-        skip: Option<&Path>,
-        out: &mut Vec<(String, PathBuf)>,
-    ) -> Result<(), String> {
-        for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
             let (path, kind) = (entry.path(), entry.file_type().map_err(|e| e.to_string())?);
             if kind.is_symlink() {
                 return Err(format!(
                     "{} is a link: copy the file instead.",
                     path.display()
                 ));
-            } else if kind.is_dir() {
-                if Some(path.as_path()) != skip {
-                    walk(root, &path, skip, out)?;
-                }
+            }
+            if kind.is_dir() {
+                walk(root, &path, out)?;
+            } else if kind.is_file() {
+                out.push((
+                    path.strip_prefix(root)
+                        .map_err(|e| e.to_string())?
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                    path,
+                ));
             } else {
-                let relative = path.strip_prefix(root).unwrap_or(&path);
-                out.push((relative.to_string_lossy().replace('\\', "/"), path));
+                return Err(format!("{}: unsupported file type", path.display()));
             }
         }
         Ok(())
     }
-    let root = dir
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", dir.display()))?;
-    let skip = api_target(&root, api)?;
     let mut out = Vec::new();
-    walk(&root, &root, skip.as_deref(), &mut out)?;
+    walk(dir, dir, &mut out)?;
     out.sort();
     Ok(out)
+}
+
+/// Bundle files omit only the API package's Cargo build output.
+fn bundle_files(bundle: &Bundle) -> Result<Vec<(String, PathBuf)>, String> {
+    package::files(bundle)
 }
 
 /// The installed version `bundles` built on Horizon `revision` with horizon-mixins `mixins`
@@ -1085,7 +970,7 @@ pub fn version_for(
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
-        hash.update(b.id.as_bytes());
+        hash.update(b.manifest.id.as_bytes());
         hash.update([0]);
         for (name, path) in bundle_files(b)? {
             let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1113,24 +998,10 @@ pub fn digest<'a>(files: impl Iterator<Item = (&'a str, &'a [u8])>) -> String {
     hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The digest of a bundle's files as the Mods page reads it (`native_status::enabled`): an
-/// unpacked `.hmod`'s whole folder, its `horizon-native.json` included, else the bundle's own
-/// folder. A build records it, so a build of the mods turned on reads as up to date.
+/// The selected flat files, in the same order as `native_status::enabled` hashes an archive.
+/// A build records this digest so an unchanged installed mod reads as up to date.
 fn source_digest(bundle: &Bundle) -> Option<String> {
-    let root = bundle
-        .dir
-        .parent()
-        .filter(|root| {
-            root.join(NATIVE_MANIFEST).is_file()
-                && bundle.dir == root.join(horizon_mods::index::native::SOURCE)
-        })
-        .unwrap_or(&bundle.dir);
-    // An installed .hmod keeps its archive digest for the Mods page.
-    let paths = if root == bundle.dir {
-        bundle_files(bundle)
-    } else {
-        files(root)
-    };
+    let paths = bundle_files(bundle);
     let read: Vec<_> = paths
         .ok()?
         .into_iter()
@@ -1396,16 +1267,14 @@ fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
     cmd
 }
 
-/// Checks the mods' crates (`native-crates/`) against `source`'s `Cargo.lock`, Horizon's own.
-/// horizon-mixins already wrote them into `stage`'s lock (and refused a crate the lock lacks,
-/// `E_CRATE_DEPENDENCY`), leaving every other package as it was: this checks that again, a crate
-/// they name must be in Horizon's lock and every package downloaded exactly as there. Then the
-/// crates are fetched, so a feature turning on a dependency the lock lacks fails here, readably.
+/// Check staged crates against Horizon's own Cargo.lock before fetching dependencies.
+/// Their requested packages and every downloaded package must belong to that lock.
 fn lock_crates(
     rust: &Toolchain,
     source: &Path,
     stage: &Path,
     mods: &[Bundle],
+    wanted: &[crates::Wanted],
 ) -> Result<(), String> {
     let read = |dir: &Path| {
         let path = dir.join("Cargo.lock");
@@ -1413,18 +1282,8 @@ fn lock_crates(
     };
     let horizon = crates::downloaded(&read(source)?)?;
     let staged = crates::downloaded(&read(stage)?)?;
-    // `wanted` reads native-crates, which API-only stages do not have.
-    let wanted = if crates::any(stage) {
-        crates::wanted(stage)?
-    } else {
-        Vec::new()
-    };
-    let api_ids: Vec<&str> = mods
-        .iter()
-        .filter(|m| m.api.is_some())
-        .map(|m| m.id.as_str())
-        .collect();
-    if let Some(why) = crates::refused(&horizon, Some(&staged), &wanted, &api_ids) {
+    let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
+    if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
         return Err(why);
     }
     // Only this computer's crates: the build needs no others.
@@ -1439,8 +1298,7 @@ fn lock_crates(
 /// Builds the mods' post-build programs with the game's profile in `target`; each step and its
 /// program, in mod order. A bin's file name doesn't include its package, so two mods' bins of the
 /// same name (or one named like the game) are the same file in `target`: each program is copied
-/// to `programs/<step>/` as soon as it is built. horizon-mixins refuses such names too
-/// (`E_POST_BUILD`, horizon-mixins#8); this keeps a bundle built by an older one safe.
+/// to `programs/<step>/` as soon as it is built.
 fn post_build_programs(
     rust: &Toolchain,
     stage: &Path,
@@ -1552,30 +1410,36 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
 
 /// Copy a bundle without its API package's Cargo build output.
 fn copy_bundle(bundle: &Bundle, to: &Path) -> Result<(), String> {
-    let root = bundle.dir.canonicalize().map_err(|e| e.to_string())?;
-    let skip = api_target(&root, bundle.api.as_deref())?;
-    backend::copy_dir_except(&root, to, skip.as_deref()).map_err(|e| e.to_string())
+    package::copy(bundle, to)
 }
 
 /// Stage only manifests horizon-mixins can apply, after trait injections are prepared.
-fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<(), String> {
+fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<Vec<Bundle>, String> {
     if to.exists() {
         fs::remove_dir_all(to).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
-    for bundle in mods.iter().filter(|b| b.mixins_content) {
-        copy_bundle(bundle, &to.join(&bundle.id))?;
+    let mut staged = Vec::new();
+    for bundle in mods.iter().filter(|bundle| bundle.needs_mixins()) {
+        let dir = to.join(&bundle.manifest.id);
+        copy_bundle(bundle, &dir)?;
+        let copied = Bundle {
+            dir,
+            ..bundle.clone()
+        };
+        package::tool_manifest(&copied)?;
+        staged.push(copied);
     }
-    Ok(())
+    Ok(staged)
 }
 
 /// The `data/` of the bundles horizon-mixins doesn't apply, staged in `stage` where it stages the
 /// others' (`native-data/<mod id>/`), for `native_data!` and the mods' build steps.
 fn stage_trait_data(mods: &[Bundle], stage: &Path) -> Result<(), String> {
-    for bundle in mods.iter().filter(|b| !b.mixins_content) {
+    for bundle in mods {
         let data = bundle.dir.join("data");
         if data.is_dir() {
-            let to = stage.join("native-data").join(&bundle.id);
+            let to = stage.join("native-data").join(&bundle.manifest.id);
             backend::copy_dir(&data, &to).map_err(|e| format!("{}: {e}", to.display()))?;
         }
     }
@@ -1629,40 +1493,33 @@ fn pipeline(
     let origin = built_on.as_ref().map_or(base, |a| a.base.as_str());
     let mut ids = std::collections::HashSet::new();
     for b in &found {
-        if !ids.insert(&b.id) {
-            return Err(format!("Duplicate native mod id {:?}.", b.id));
+        if !ids.insert(&b.manifest.id) {
+            return Err(format!("Duplicate native mod id {:?}.", b.manifest.id));
         }
-        copy_bundle(b, &incoming.join(&b.id))?;
+        copy_bundle(b, &incoming.join(&b.manifest.id))?;
     }
     let digests: std::collections::HashMap<String, Option<String>> = found
         .iter()
-        .map(|b| (b.id.clone(), source_digest(b)))
+        .map(|b| (b.manifest.id.clone(), source_digest(b)))
         .collect();
     let mods: Vec<Bundle> = found
         .into_iter()
         .map(|b| Bundle {
-            dir: incoming.join(&b.id),
+            dir: incoming.join(&b.manifest.id),
             ..b
         })
         .collect();
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
-        .map(|bundle| {
-            let path = bundle.dir.join(MANIFEST);
-            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let table: toml::Table = text
-                .parse()
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-            dependencies::parse(&bundle.id, table.get("dependencies")).map_err(|e| e.to_string())
-        })
-        .collect::<Result<_, String>>()?;
+        .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
+        .collect();
     let inputs: Vec<_> = mods
         .iter()
         .zip(&declared)
         .map(|(bundle, deps)| dependencies::Mod {
-            id: &bundle.id,
-            version: &bundle.version,
-            has_api: bundle.api.is_some(),
+            id: &bundle.manifest.id,
+            version: &bundle.manifest.version,
+            has_api: true,
             dependencies: deps,
         })
         .collect();
@@ -1688,7 +1545,7 @@ fn pipeline(
     let mixins = newest(
         &mods,
         "horizon-mixins",
-        |b| b.mixins.as_ref(),
+        |b| Some(&b.native().mixins),
         || Ok(MIXINS_REV.into()),
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
@@ -1699,7 +1556,7 @@ fn pipeline(
         mixins: mixins.clone(),
         mods: mods
             .iter()
-            .map(|m| Ok((m.id.clone(), mod_hash(m)?)))
+            .map(|m| Ok((m.manifest.id.clone(), mod_hash(m)?)))
             .collect::<Result<_, String>>()?,
     };
     let exists = target.directory(&version).join(".installed").is_file();
@@ -1719,7 +1576,7 @@ fn pipeline(
             Target::Server => rust_toolchain::linker_server()?,
         }
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
-        let needs_mixins = mods.iter().any(|m| m.mixins_content);
+        let needs_mixins = mods.iter().any(Bundle::needs_mixins);
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
@@ -1734,10 +1591,10 @@ fn pipeline(
                 progress(Step::CachedMixins);
                 sync(&snapshot, &fresh)?;
             } else {
-                let injections = inject::prepare(&ordered, &source)?;
                 let tool = tool(&rust, &mixins, &progress)?;
                 let mixin_input = real.join("mixins.incoming");
-                stage_mixins(&ordered, &mixin_input)?;
+                let tool_mods = stage_mixins(&ordered, &mixin_input)?;
+                let injections = inject::prepare(&tool_mods, &source, &ordered)?;
                 progress(Step::Mixins);
                 let result = run(
                     apply(&rust, &tool, &source, &mixin_input, &fresh),
@@ -1759,13 +1616,28 @@ fn pipeline(
             sync(&source, &fresh)?;
         }
         stage_trait_data(&mods, &fresh)?;
-        if mods.iter().any(|m| m.api.is_some()) {
+        if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
             let mut fetch = cargo(&rust, &source, "fetch");
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
         let has_api = api::stage(&fresh, &mods, &declared, &resolution)?;
+        let paths = mods
+            .iter()
+            .map(|bundle| {
+                (
+                    bundle.manifest.id.as_str(),
+                    bundle
+                        .manifest
+                        .dependencies
+                        .keys()
+                        .map(String::as_str)
+                        .collect(),
+                )
+            })
+            .collect();
+        let wanted = crates::wanted(&fresh, &paths)?;
         if has_api {
             // Add path packages to Cargo.lock before the locked dependency check.
             let mut metadata = cargo(&rust, &fresh, "metadata");
@@ -1778,7 +1650,7 @@ fn pipeline(
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage, &mods)?;
+            lock_crates(&rust, &source, &stage, &mods, &wanted)?;
         }
         let target_dir = real.join("target");
         let compiled = profile;
@@ -1845,9 +1717,9 @@ fn pipeline(
             "profile": compiled.name(),
             "target": target.name(),
             "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.id,
-                "version": m.version,
-                "sha256": digests.get(&m.id).cloned().flatten(),
+                "id": m.manifest.id,
+                "version": m.manifest.version,
+                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
             })).collect::<Vec<_>>(),
         });
         install(base, &version, target, &binary, &about, |dir| {
@@ -2189,12 +2061,25 @@ mod tests {
         d
     }
 
-    fn write_bundle(project: &Path, id: &str, helper: &str) {
-        let at = project.join("native");
-        fs::create_dir_all(at.join("rust/src")).unwrap();
-        let manifest = format!("[mod]\nid = \"{id}\"\nversion = \"0.1.0\"\n");
-        fs::write(at.join(MANIFEST), manifest).unwrap();
-        fs::write(at.join("rust/src/hook.rs"), helper).unwrap();
+    fn project_manifest(id: &str, version: &str, horizon: &str, mixins: &str) -> String {
+        format!(
+            "id='{id}'\nname='{id}'\nversion='{version}'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{horizon}'\nmixins='{mixins}'\n"
+        )
+    }
+
+    pub(super) fn write_bundle(project: &Path, id: &str, helper: &str) {
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join(NATIVE_MANIFEST),
+            project_manifest(id, "0.1.0", A, B),
+        )
+        .unwrap();
+        fs::write(
+            project.join("Cargo.toml"),
+            "[package]\nname='example'\nversion='9.0.0'\n[dependencies]\nhorizon-client='0.1'\n",
+        )
+        .unwrap();
+        fs::write(project.join("src/lib.rs"), helper).unwrap();
     }
 
     #[test]
@@ -2232,21 +2117,15 @@ mod tests {
         );
     }
 
-    /// A bundle whose manifest only needs to parse, with the injections of
-    /// `toml`'s `[[injection]]` list read as the build's warnings read them.
-    fn bundle_of(id: &str, toml: &str) -> Bundle {
-        // Each call its own folder: the tests run in parallel.
+    /// Warning inputs are real flat packages with explicit source helpers.
+    fn bundle_of(id: &str, injections: &str) -> Bundle {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let at = dir(&format!("warn-{id}-{n}"));
         write_bundle(&at, id, "fn hook() {}");
-        // A fragment may carry its own `[mod]` (a priority, say).
-        let manifest = if toml.starts_with("[mod]") {
-            toml.to_owned()
-        } else {
-            format!("[mod]\nid = \"{id}\"\nversion = \"0.1.0\"\n{toml}")
-        };
-        fs::write(at.join("native").join(MANIFEST), manifest).unwrap();
+        let manifest = project_manifest(id, "0.1.0", A, B)
+            + &injections.replace("[[injection]]", "[[native.injection]]\nhelper='src/lib.rs'");
+        fs::write(at.join(NATIVE_MANIFEST), manifest).unwrap();
         bundles(&at).unwrap().remove(0)
     }
 
@@ -2259,13 +2138,14 @@ mod tests {
             ),
             bundle_of(
                 "beta",
-                "[mod]\nid = \"beta\"\nversion = \"0.1.0\"\npriority = 200\n\
-                 [[injection]]\nid = \"b\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+                "[[injection]]\nid = \"b\"\nhook = \"frame\"\nkind = \"HEAD\"\npriority = 200\n",
             ),
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."]
+            [
+                "mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2285,7 +2165,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."]
+            [
+                "mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2303,7 +2185,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2322,7 +2206,9 @@ mod tests {
         // beta's is 0 (the default), alpha's 50: alpha first.
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2340,7 +2226,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at `game::calls::compute` HEAD; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at `game::calls::compute` HEAD; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2360,7 +2248,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities."]
+            [
+                "mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities."
+            ]
         );
     }
 
@@ -2400,7 +2290,9 @@ mod tests {
         ];
         assert_eq!(
             warn_conflicts(&mods),
-            ["mods alpha, beta both inject at hook `tick` BEFORE_CALL selector `x` ordinal 1; alpha runs first (priority descending, mod id ascending)."]
+            [
+                "mods alpha, beta both inject at hook `tick` BEFORE_CALL selector `x` ordinal 1; alpha runs first (priority descending, mod id ascending)."
+            ]
         );
     }
 
@@ -2427,7 +2319,9 @@ mod tests {
         )];
         assert_eq!(
             warn_conflicts(&mods),
-            ["alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."]
+            [
+                "alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."
+            ]
         );
     }
 
@@ -2473,12 +2367,13 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_without_a_site_is_left_out() {
-        let mods = [bundle_of(
-            "alpha",
-            "[[injection]]\nid = \"broken\"\nkind = \"HEAD\"\n",
-        )];
-        assert!(mods[0].injections.is_empty());
+    fn an_entry_without_a_site_is_refused() {
+        let root = dir("no-site");
+        write_bundle(&root, "alpha", "");
+        let text = project_manifest("alpha", "1", A, B)
+            + "[[native.injection]]\nid='no_site'\nkind='HEAD'\nhelper='src/lib.rs'\n";
+        fs::write(root.join(NATIVE_MANIFEST), text).unwrap();
+        assert!(bundles(&root).is_err());
     }
 
     #[test]
@@ -2487,90 +2382,94 @@ mod tests {
         write_bundle(&one, "hello", "fn hook() {}");
         let found = bundles(&one).unwrap();
         assert_eq!(
-            (found[0].id.as_str(), found[0].version.as_str()),
+            (
+                found[0].manifest.id.as_str(),
+                found[0].manifest.version.as_str()
+            ),
             ("hello", "0.1.0")
         );
         let many = dir("many");
         write_bundle(&many.join("b"), "beta", "fn hook() {}");
         write_bundle(&many.join("a"), "alpha", "fn hook() {}");
         fs::create_dir_all(many.join("notes")).unwrap();
-        let ids: Vec<String> = bundles(&many).unwrap().into_iter().map(|b| b.id).collect();
+        let ids: Vec<String> = bundles(&many)
+            .unwrap()
+            .into_iter()
+            .map(|b| b.manifest.id)
+            .collect();
         assert_eq!(ids, ["alpha", "beta"]);
         assert!(bundles(&many.join("notes")).is_err());
     }
 
     #[test]
-    fn mixin_input_excludes_trait_only_bundles_but_keeps_trait_injections() {
+    fn generated_tool_input_is_separate_and_trait_data_is_staged() {
         let root = dir("mixed-mixin-input");
         let incoming = root.join("incoming");
         for (id, injection) in [
             ("plain", ""),
-            ("ordinary", "[[injection]]\nid = 'ordinary'\n"),
-            ("trait_injection", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\n"),
+            (
+                "ordinary",
+                "[[native.injection]]\nid='ordinary'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
+            ),
+            (
+                "trait_injection",
+                "[[native.injection]]\nid='hook'\ntarget='horizon_client::game::tick'\nkind='HEAD'\ntrait_method='tick'\n",
+            ),
         ] {
-            let bundle = incoming.join(id).join("native");
-            fs::create_dir_all(bundle.join("rust")).unwrap();
-            fs::write(bundle.join("rust/Cargo.toml"), "[package]\nname = 'example'\nversion = '1.0.0'\n").unwrap();
-            fs::write(bundle.join(MANIFEST), format!("[mod]\nid = '{id}'\nversion = '1'\n[api]\npath = 'rust'\n{injection}")).unwrap();
+            let project = incoming.join(id);
+            write_bundle(&project, id, "fn hook() {}");
+            fs::write(
+                project.join(NATIVE_MANIFEST),
+                project_manifest(id, "1", A, B) + injection,
+            )
+            .unwrap();
+            fs::create_dir_all(project.join("data").join(id)).unwrap();
+            fs::write(project.join("data").join(id).join("table.txt"), id).unwrap();
         }
         let mods = bundles(&incoming).unwrap();
-        assert!(!mods[1].mixins_content);
-        assert!(mods[0].mixins_content && mods[2].mixins_content);
-        let key = inject_cache::key("rev", "mixins", Profile::Performance, &mods).unwrap();
-        let without_plain: Vec<_> = mods.iter().filter(|b| b.id != "plain").cloned().collect();
-        assert_ne!(
-            key,
-            inject_cache::key("rev", "mixins", Profile::Performance, &without_plain).unwrap()
-        );
-
-        let injections = inject::prepare(&mods, &root).unwrap();
-        assert_eq!(injections.len(), 1);
+        assert!(!mods[1].needs_mixins());
+        assert!(mods[0].needs_mixins() && mods[2].needs_mixins());
         let input = root.join("mixins");
-        stage_mixins(&mods, &input).unwrap();
+        let tool_mods = stage_mixins(&mods, &input).unwrap();
+        let injections = inject::prepare(&tool_mods, &root, &mods).unwrap();
+        assert_eq!(injections.len(), 1);
         assert!(!input.join("plain").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
         assert!(input
-            .join("trait_injection")
-            .join("horizon-trait-injection-0.rs")
+            .join("trait_injection/horizon-trait-injection-0.rs")
             .is_file());
         let manifest = fs::read_to_string(input.join("trait_injection").join(MANIFEST)).unwrap();
         assert!(manifest.contains("horizon-trait-injection-0.rs"));
         assert!(!manifest.contains("trait_method"));
-
-        for id in ["plain", "ordinary"] {
-            fs::create_dir_all(incoming.join(id).join("native/data")).unwrap();
-            fs::write(incoming.join(id).join("native/data/table.txt"), id).unwrap();
-        }
+        assert!(mods
+            .iter()
+            .all(|bundle| !bundle.dir.join(MANIFEST).exists()));
         let stage = root.join("stage");
         stage_trait_data(&mods, &stage).unwrap();
-        let read =
-            |id: &str| fs::read_to_string(stage.join("native-data").join(id).join("table.txt"));
-        assert_eq!(read("plain").unwrap(), "plain");
-        assert!(read("ordinary").is_err(), "horizon-mixins stages it");
+        for id in ["plain", "ordinary", "trait_injection"] {
+            assert_eq!(
+                fs::read_to_string(
+                    stage
+                        .join("native-data")
+                        .join(id)
+                        .join(id)
+                        .join("table.txt")
+                )
+                .unwrap(),
+                id
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    /// An unpacked `.hmod`, as the registry ships one (horizon_mods::index::native).
     fn write_native(at: &Path, id: &str, horizon: &str, mixins: &str) {
-        let manifest = serde_json::json!({"schema": 1, "id": id, "version": "0.3.0", "game": "26.3",
-            "horizon": horizon, "mixins": mixins});
-        fs::create_dir_all(at.join("native/rust/src")).unwrap();
+        write_bundle(at, id, "pub fn marker() {}\n");
         fs::write(
-            at.join("native/rust/Cargo.toml"),
-            "[package]\nname = 'test-native'\nversion = '0.1.0'\nedition = '2024'\n",
-        )
-        .unwrap();
-        fs::write(at.join("native/rust/src/lib.rs"), "pub fn marker() {}\n").unwrap();
-        fs::write(at.join(NATIVE_MANIFEST), manifest.to_string()).unwrap();
-        let toml = format!(
-            "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
-        );
-        fs::write(
-            at.join("native").join(MANIFEST),
-            toml + "[[crate]]\nid = 'code'\npath = 'rust'\n",
+            at.join(NATIVE_MANIFEST),
+            project_manifest(id, "0.3.0", horizon, mixins),
         )
         .unwrap();
     }
@@ -2582,36 +2481,41 @@ mod tests {
         write_bundle(&d.join("local"), "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
         assert_eq!(found.len(), 2);
-        assert_eq!(found[1].id, "veinminer");
-        assert_eq!(found[1].dir, d.join("veinminer/native"));
-        assert_eq!(found[1].horizon.as_deref(), Some(A));
-        assert_eq!(found[1].mixins.as_deref(), Some(B));
-        assert_eq!(
-            (found[0].horizon.as_ref(), found[0].mixins.as_ref()),
-            (None, None)
-        );
+        assert_eq!(found[1].manifest.id, "veinminer");
+        assert_eq!(found[1].dir, d.join("veinminer"));
+        assert_eq!(found[1].native().horizon, A);
+        assert_eq!(found[1].native().mixins, B);
+        assert_eq!(found[0].native().horizon, A);
     }
 
     #[test]
-    fn unpacked_projects_reject_old_roots_and_mismatched_identity() {
+    fn flat_projects_use_manifest_identity_and_reject_old_roots() {
         let root = dir("project-layout");
         write_native(&root, "example", A, B);
-        let path = root.join(NATIVE_MANIFEST);
-        let mut manifest: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        for id in ["other", "../escape"] {
-            manifest["id"] = id.into();
-            fs::write(&path, manifest.to_string()).unwrap();
-            assert!(bundle_in(&root).is_err());
-        }
-        fs::remove_dir_all(root.join("native")).unwrap();
-        fs::create_dir_all(root.join("mixins/example")).unwrap();
+        assert_eq!(bundle_in(&root).unwrap().unwrap().manifest.id, "example");
+        // Cargo's different name/version do not change mod identity.
+        assert_eq!(bundle_in(&root).unwrap().unwrap().manifest.version, "0.3.0");
         fs::write(
-            root.join("mixins/example/horizon-mixin.toml"),
-            "[mod]\nid = 'example'\nversion = '1'\n",
+            root.join(NATIVE_MANIFEST),
+            project_manifest("../escape", "1", A, B),
         )
         .unwrap();
         assert!(bundle_in(&root).is_err());
+        fs::write(
+            root.join(NATIVE_MANIFEST),
+            project_manifest("example", "1", A, B),
+        )
+        .unwrap();
+        for old in [
+            "horizon-native.json",
+            "horizon-mixin.toml",
+            "native",
+            "rust",
+        ] {
+            fs::write(root.join(old), "").unwrap();
+            assert!(bundle_in(&root).is_err(), "{old}");
+            fs::remove_file(root.join(old)).unwrap();
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2625,12 +2529,7 @@ mod tests {
             let mut zip =
                 zip::ZipWriter::new(fs::File::create(home.join(INSTALLED).join(name)).unwrap());
             let options = zip::write::SimpleFileOptions::default();
-            for file in [
-                NATIVE_MANIFEST,
-                "native/horizon-mixin.toml",
-                "native/rust/Cargo.toml",
-                "native/rust/src/lib.rs",
-            ] {
+            for file in [NATIVE_MANIFEST, "Cargo.toml", "src/lib.rs"] {
                 zip.start_file(file, options).unwrap();
                 zip.write_all(&fs::read(d.join(file)).unwrap()).unwrap();
             }
@@ -2645,17 +2544,37 @@ mod tests {
         crate::browser::java::set_enabled(&home, "veinminer", true).unwrap();
         let out = installed_mods(&home).unwrap();
         let found = bundles(&out).unwrap();
-        let staged = d.join("tool-input");
-        stage_mixins(&found, &staged).unwrap();
-        assert!(staged.join("veinminer/horizon-mixin.toml").is_file());
         assert_eq!(
-            fs::read(staged.join("veinminer/rust/src/lib.rs")).unwrap(),
+            fs::read(found[0].dir.join("src/lib.rs")).unwrap(),
             b"pub fn marker() {}\n"
         );
-        assert!(!staged.join("veinminer/native").exists());
+        let injected = d.join("injected-project");
+        write_native(&injected, "injected", A, B);
+        fs::write(
+            injected.join(NATIVE_MANIFEST),
+            project_manifest("injected", "0.3.0", A, B)
+                + "[[native.injection]]\nid='marker'\ntarget='game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
+        )
+        .unwrap();
+        let mut mods = found.clone();
+        mods.push(bundle_in(&injected).unwrap().unwrap());
+        let staged = d.join("tool-input");
+        let tool_mods = stage_mixins(&mods, &staged).unwrap();
+        assert_eq!(tool_mods.len(), 1);
+        assert_eq!(tool_mods[0].manifest.id, "injected");
+        assert!(!staged.join("veinminer").exists());
+        assert!(staged.join("injected/horizon-mixin.toml").is_file());
         assert_eq!(
-            (found[0].id.as_str(), found[0].horizon.as_deref()),
-            ("veinminer", Some(A))
+            fs::read(staged.join("injected/src/lib.rs")).unwrap(),
+            b"pub fn marker() {}\n"
+        );
+        assert!(!staged.join("injected/native").exists());
+        assert_eq!(
+            (
+                found[0].manifest.id.as_str(),
+                found[0].native().horizon.as_str()
+            ),
+            ("veinminer", A)
         );
         // What a build records of it is what the Mods page compares: up to date, not Needs rebuild.
         assert_eq!(
@@ -2666,9 +2585,9 @@ mod tests {
                 source_digest(&found[0])
             )]
         );
-        pack("veinminer.hmod", Some(("native/data/table.bin", "data")));
+        pack("veinminer.hmod", Some(("data/veinminer/table.bin", "data")));
         let out = installed_mods(&home).unwrap();
-        let path = out.join("veinminer/native/data/table.bin");
+        let path = out.join("veinminer/data/veinminer/table.bin");
         assert_eq!(fs::read(&path).unwrap(), b"data");
         let first = version_for(
             A,
@@ -2696,19 +2615,19 @@ mod tests {
 
     #[test]
     fn the_mods_of_one_build_pin_one_revision() {
-        let pinned = |id: &str, horizon: Option<&str>| Bundle {
-            id: id.into(),
-            version: "1".into(),
-            dir: PathBuf::new(),
-            horizon: horizon.map(str::to_owned),
-            mixins: None,
-            injections: Vec::new(),
-            api: None,
-            mixins_content: false,
+        let pinned = |id: &str, horizon: Option<&str>| {
+            let mut manifest =
+                horizon_mods::manifest::Manifest::parse(&project_manifest(id, "1", A, B)).unwrap();
+            manifest.native.as_mut().unwrap().horizon = horizon.unwrap_or_default().into();
+            Bundle {
+                manifest,
+                dir: PathBuf::new(),
+                injections: Vec::new(),
+            }
         };
         let never = || -> Result<String, String> { panic!("a pin wins") };
         fn get(b: &Bundle) -> Option<&String> {
-            b.horizon.as_ref()
+            Some(&b.native().horizon).filter(|pin| !pin.is_empty())
         }
         let same = [
             pinned("a", Some(A)),
@@ -2730,15 +2649,13 @@ mod tests {
 
     #[test]
     fn mods_made_for_different_revisions_build_on_the_newest() {
-        let pinned = |id: &str, horizon: Option<&str>, mixins: Option<&str>| Bundle {
-            id: id.into(),
-            version: "1".into(),
+        let pinned = |id: &str, horizon: &str, mixins: &str| Bundle {
+            manifest: horizon_mods::manifest::Manifest::parse(&project_manifest(
+                id, "1", horizon, mixins,
+            ))
+            .unwrap(),
             dir: PathBuf::new(),
-            horizon: horizon.map(str::to_owned),
-            mixins: mixins.map(str::to_owned),
             injections: Vec::new(),
-            api: None,
-            mixins_content: false,
         };
         let c = "c".repeat(40);
         // a is the oldest commit, then b, then c.
@@ -2752,15 +2669,15 @@ mod tests {
         };
         let never = || -> Result<String, String> { panic!("a pin wins") };
         fn horizon(b: &Bundle) -> Option<&String> {
-            b.horizon.as_ref()
+            Some(&b.native().horizon)
         }
         fn mixins(b: &Bundle) -> Option<&String> {
-            b.mixins.as_ref()
+            Some(&b.native().mixins)
         }
         let split = [
-            pinned("veinminer", Some(B), Some(&c)),
-            pinned("lookat", Some(A), Some(A)),
-            pinned("zoom", None, None),
+            pinned("veinminer", B, &c),
+            pinned("lookat", A, A),
+            pinned("zoom", B, &c),
         ];
         assert_eq!(
             newest(&split, "Horizon", horizon, never, None, date).unwrap(),
@@ -2771,14 +2688,14 @@ mod tests {
             newest(&split, "horizon-mixins", mixins, never, Some(B), date).unwrap(),
             c
         );
-        let older = [pinned("a", None, Some(A)), pinned("b", None, Some(B))];
+        let older = [pinned("a", A, A), pinned("b", B, B)];
         assert_eq!(
             newest(&older, "horizon-mixins", mixins, never, Some(&c), date).unwrap(),
             c
         );
         // One pin, or the same one everywhere: that pin, and no date is asked for.
         let no_date = |_: &str| -> Result<String, String> { panic!("no date needed") };
-        let same = [pinned("a", Some(A), None), pinned("b", Some(A), None)];
+        let same = [pinned("a", A, A), pinned("b", A, A)];
         assert_eq!(
             newest(&same, "Horizon", horizon, never, None, no_date).unwrap(),
             A
@@ -2827,11 +2744,11 @@ mod tests {
     fn unknown_manifest_fields_are_refused_by_the_typed_reader() {
         let d = dir("unknown-field");
         write_native(&d, "zoom", A, B);
-        let json = fs::read_to_string(d.join(NATIVE_MANIFEST)).unwrap();
+        let text = fs::read_to_string(d.join(NATIVE_MANIFEST)).unwrap();
         for (name, value) in [("hooks", "1"), ("banana", "\"x\"")] {
             fs::write(
                 d.join(NATIVE_MANIFEST),
-                json.replacen('}', &format!(",\"{name}\":{value}}}"), 1),
+                format!("{text}\n{name} = {value}\n"),
             )
             .unwrap();
             let error = bundles(&d).unwrap_err();
@@ -2872,33 +2789,19 @@ mod tests {
             )
             .unwrap()
         );
-        fs::write(
-            d.join("native/rust/src/hook.rs"),
-            "fn hook() { let _ = 1; }",
-        )
-        .unwrap();
+        fs::write(d.join("src/lib.rs"), "fn hook() { let _ = 1; }").unwrap();
         assert_ne!(first, key(A));
     }
 
     #[test]
-    fn api_target_is_neither_copied_nor_hashed() {
+    fn build_output_is_neither_copied_nor_hashed() {
         let d = dir("api-target");
-        fs::create_dir_all(d.join("rust/target/debug")).unwrap();
-        fs::create_dir_all(d.join("other/target")).unwrap();
-        fs::create_dir_all(d.join("rust/empty")).unwrap();
-        fs::write(
-            d.join(MANIFEST),
-            "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'rust'\n",
-        )
-        .unwrap();
-        fs::write(
-            d.join("rust/Cargo.toml"),
-            "[package]\nname = 'example'\nversion = '0.1.0'\n",
-        )
-        .unwrap();
-        fs::write(d.join("rust/target/debug/output"), "one").unwrap();
-        fs::write(d.join("other/target/keep"), "keep").unwrap();
-        let bundle = bundle(&d, None).unwrap();
+        write_bundle(&d, "example", "");
+        fs::create_dir_all(d.join("target/debug")).unwrap();
+        fs::create_dir_all(d.join(".git/hooks")).unwrap();
+        fs::write(d.join("target/debug/output"), "one").unwrap();
+        fs::write(d.join(".git/hooks/pre-commit"), "not packaged").unwrap();
+        let bundle = bundle_in(&d).unwrap().unwrap();
         let key = || {
             version_for(
                 A,
@@ -2912,16 +2815,16 @@ mod tests {
         let first = key();
         let hash = mod_hash(&bundle).unwrap();
         let digest = source_digest(&bundle);
-        fs::write(d.join("rust/target/debug/output"), "two").unwrap();
+        fs::write(d.join("target/debug/output"), "two").unwrap();
         assert_eq!(first, key());
         assert_eq!(hash, mod_hash(&bundle).unwrap());
         assert_eq!(digest, source_digest(&bundle));
         let dest = dir("api-target-copy");
         copy_bundle(&bundle, &dest).unwrap();
-        assert!(!dest.join("rust/target").exists());
-        assert!(dest.join("rust/empty").is_dir());
-        assert!(dest.join("other/target/keep").is_file());
-        fs::write(d.join("rust/Cargo.toml"), "changed").unwrap();
+        assert!(!dest.join("target").exists());
+        assert!(!dest.join(".git").exists());
+        assert!(dest.join("src/lib.rs").is_file());
+        fs::write(d.join("Cargo.toml"), "changed").unwrap();
         assert_ne!(first, key());
     }
 
@@ -2934,7 +2837,7 @@ mod tests {
         let d = dir("crate-key");
         backend::copy_dir(&fixture, &d).unwrap();
         let found = bundles(&d).unwrap();
-        assert_eq!(found[0].id, "crate_demo");
+        assert_eq!(found[0].manifest.id, "crate_demo");
         let key = || {
             version_for(
                 A,
@@ -2947,14 +2850,14 @@ mod tests {
         };
         let mut seen = vec![key()];
         for file in [
-            "rust/src/lib.rs",
-            "rust/data/salt.txt",
-            "rust/Cargo.toml",
-            "data/greeting.txt",
+            "src/lib.rs",
+            "src/salt.rs",
+            "Cargo.toml",
+            "data/crate_demo/greeting.txt",
         ] {
-            let mut bytes = fs::read(d.join("native").join(file)).unwrap();
+            let mut bytes = fs::read(d.join(file)).unwrap();
             bytes.extend_from_slice(b"\n");
-            fs::write(d.join("native").join(file), bytes).unwrap();
+            fs::write(d.join(file), bytes).unwrap();
             let now = key();
             assert!(!seen.contains(&now), "{file} is in the key");
             seen.push(now);

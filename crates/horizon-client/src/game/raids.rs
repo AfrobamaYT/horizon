@@ -855,6 +855,7 @@ impl Game<'_> {
             let target_player = m.ai.target == Some(horizon_client::mobs::Who::Player);
             let (health, range) = (m.health, m.attrs.follow_range);
             let raids = &mut self.raiding.raids;
+            let wears_banner = m.extra.head_id() == Some(raider::BANNER);
             let s = m.extra.raider.get_or_insert_with(Box::default);
             s.rider = has_rider;
             s.in_village = in_village;
@@ -911,7 +912,7 @@ impl Game<'_> {
                 && s.active_raid
                 && !s.raid_over
                 && raider::can_be_leader(species)
-                && m.extra.head.as_deref() != Some(raider::BANNER)
+                && !wears_banner
                 && raids.get(id).is_some_and(|r| r.leader(s.wave).is_none())
                 && !leaders.contains(&(id, s.wave))
             {

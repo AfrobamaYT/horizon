@@ -279,7 +279,7 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
         m.extra.using_item -= 1;
         if m.extra.using_item < 0 {
             m.extra.using_item = 0;
-            if let Some(potion) = m.extra.take_main_hand() {
+            if let Some(potion) = m.extra.take_slot_id(horizon_items::equipment::MAINHAND) {
                 match potion.as_ref() {
                     "minecraft:water_breathing" => {
                         m.add_effect("minecraft:water_breathing", 3600, 0)
@@ -357,7 +357,7 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     let deg = horizon_core::geometry::trig::DEG_TO_RAD;
     p.xrot("nose", (s.age * speed).msin() * 4.5 * deg);
     p.zrot("nose", (s.age * speed).mcos() * 2.5 * deg);
-    if m.extra.main_hand.is_some() {
+    if m.extra.main_hand_id().is_some() {
         let n = p.get("nose");
         n[0] = 0.0;
         n[1] = 1.0;

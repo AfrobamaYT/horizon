@@ -595,9 +595,9 @@ fn params(m: &Mob, s: &State, frame: &Frame, rule_index: f32, slots: &mut [f32])
     let swing_right = m.extra.swing_right_arm.unwrap_or(!m.main_arm_left());
     // `HumanoidArm`'s items: the main hand is on the main arm.
     let (right_hand, left_hand) = if m.main_arm_left() {
-        (&m.extra.off_hand, &m.extra.main_hand)
+        (m.extra.off_hand_id(), m.extra.main_hand_id())
     } else {
-        (&m.extra.main_hand, &m.extra.off_hand)
+        (m.extra.main_hand_id(), m.extra.off_hand_id())
     };
     for (i, (_, p)) in PARAMS.iter().enumerate() {
         use Param::*;

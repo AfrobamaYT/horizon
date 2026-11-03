@@ -121,9 +121,12 @@ mod tests {
     #[test]
     fn equipment_and_covered_shell_are_counted_once_before_effective_limits() {
         let mut mob = pig(20.0, 8.0);
-        mob.extra.head = Some("minecraft:diamond_helmet".into());
+        mob.extra.set_slot_id(
+            horizon_items::equipment::HEAD,
+            Some("minecraft:diamond_helmet".into()),
+        );
         assert_eq!(values(&mob), (23.0, 10.0));
-        mob.extra.head = None;
+        mob.extra.set_slot_id(horizon_items::equipment::HEAD, None);
         Arc::make_mut(&mut mob.kind).species = Species::Shulker;
         let map = mob.extra.armor_attributes.as_deref_mut().unwrap();
         let key = map.catalog().id("minecraft:armor").unwrap();

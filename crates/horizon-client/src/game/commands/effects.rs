@@ -234,7 +234,7 @@ impl Game<'_> {
                         .mobs
                         .iter()
                         .find(|m| m.id == mob)
-                        .and_then(|m| m.extra.main_hand.clone());
+                        .and_then(|m| m.extra.main_hand_id().map(str::to_owned));
                     if single {
                         return Err(match held {
                             None => err(

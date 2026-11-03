@@ -1943,8 +1943,9 @@ mod tests {
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
 
     fn effect_test_mod() {
-        use horizon_client::mod_api::*;
+        use horizon_client::mod_api::{self, *};
         struct TestMod;
+        #[mod_api::__subscriptions]
         impl Hooks for TestMod {
             fn should_apply_effect_tick_this_tick(
                 &self,
@@ -2020,6 +2021,8 @@ mod tests {
     fn mod_tick_kills_mob_through_death_and_drops() {
         effect_test_mod();
         super::super::native_entity_refs::tests::with_game(|game| {
+            // Death drops read the server's loot, which a world open loads.
+            game.load_server_loot();
             use horizon_client::chunk::Chunk;
             use std::sync::Arc;
             game.world
@@ -2032,7 +2035,8 @@ mod tests {
                 .unwrap()
                 .clone();
             let mut mob = Mob::new(12, kind, Vec3::new(1.0, 64.0, 1.0), 0.0);
-            mob.extra.main_hand = Some(Arc::from("minecraft:iron_sword"));
+            mob.extra
+                .set_main_hand(Some(Arc::from("minecraft:iron_sword")));
             mob.extra.drop_chances = Some(Box::new([2.0; 8]));
             mob.add_effect(brewing::effect("test:effect").unwrap().id, 10, 2);
             game.mobs.push(mob);

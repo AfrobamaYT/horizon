@@ -912,21 +912,16 @@ async fn a_retry_takes_up_its_own_branch() {
 
 /// A native rewrite (`.hmod`) of `coords_hud` at `version`.
 fn hmod(version: &str) -> Vec<u8> {
-    use std::io::Write;
-    let revision = "a".repeat(40);
-    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let options = zip::write::SimpleFileOptions::default();
-    zip.start_file("horizon-native.json", options).unwrap();
-    let manifest = json!({"schema": 1, "id": "coords_hud", "version": version, "game": "26.3", "horizon": revision, "mixins": "b".repeat(40)});
-    zip.write_all(manifest.to_string().as_bytes()).unwrap();
-    zip.start_file("native/horizon-mixin.toml", options)
-        .unwrap();
-    write!(
-        zip,
-        "[mod]\nid = \"coords_hud\"\nversion = \"{version}\"\n[compatibility]\nhorizon_revision = \"{revision}\"\n"
-    )
-    .unwrap();
-    zip.finish().unwrap().into_inner()
+    let manifest = format!(
+        "id = 'coords_hud'\nname = 'Coordinates'\nversion = '{version}'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+        "a".repeat(40),
+        "b".repeat(40)
+    );
+    let files: &[(&str, &[u8])] = &[
+        ("Cargo.toml", b"[package]\nname='coords'\nversion='1'\n"),
+        ("src/lib.rs", b"pub fn hooks() {}"),
+    ];
+    horizon_mods::Package::write_files(&manifest, files).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]

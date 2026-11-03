@@ -228,7 +228,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| g.placed)
+            .filter(|g| g.placed && g.participates_online())
             .map(|g| (g.conn, g.uuid, g.name.clone()))
             .collect();
         for (conn, player, name) in players {
@@ -1672,7 +1672,7 @@ impl Game<'_> {
     pub(super) fn store_owner(&mut self) -> Option<(u128, String)> {
         let uuid = self.lan.as_ref().and_then(|h| h.owner.as_ref())?.uuid;
         let (riding, dim, others) = self.lan.as_ref().and_then(|h| {
-            let g = h.hub.guests.iter().find(|g| g.uuid == uuid && g.placed)?;
+            let g = h.hub.online_players().find(|g| g.uuid == uuid)?;
             let others = self.ridden_by_others(&h.hub.guests, &g.dimension, Some(uuid), true);
             Some((g.vehicle, g.dimension.clone(), others))
         })?;
@@ -1682,7 +1682,7 @@ impl Game<'_> {
             .map(|(tag, _)| tag);
         let host = self.lan.as_ref()?;
         let mut stored = None;
-        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid && g.placed) {
+        if let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) {
             playerdata::store(g, &mut self.level, vehicle);
             self.save_guest_records(host, g);
             stored = Some(g.name.clone());
@@ -1717,6 +1717,13 @@ impl Game<'_> {
     pub(super) fn set_allow_flight(&mut self, allow: bool) {
         if let Some(host) = self.lan.as_mut() {
             host.hub.config.allow_flight = allow;
+        }
+    }
+
+    /// Update whether status responses include online player names.
+    pub(super) fn set_hide_online_players(&mut self, hide: bool) {
+        if let Some(host) = self.lan.as_ref() {
+            host.hub.lan.shared.set_hide_online_players(hide);
         }
     }
 
@@ -1877,7 +1884,7 @@ impl Game<'_> {
                         .hub
                         .guests
                         .iter()
-                        .find(|g| g.placed && g.uuid == message.sender)
+                        .find(|g| g.placed && g.participates_online() && g.uuid == message.sender)
                         .map(|g| g.entity_id)
                     else {
                         continue;
@@ -2001,6 +2008,14 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Left(mut guest) => {
+                    if !guest.participates_online() {
+                        let Some(mut host) = self.lan.take() else {
+                            return;
+                        };
+                        self.cleanup_fake_player(&mut host, &guest);
+                        self.lan = Some(host);
+                        continue;
+                    }
                     // The menu they had open closes, in the level they were in
                     // (`ServerPlayer.disconnect` -> `doCloseContainer`).
                     if guest.placed {
@@ -2031,7 +2046,7 @@ impl Game<'_> {
                     // PlayerList.remove: the vehicle it alone rides goes too.
                     self.take_parent_vehicle(&mut guest);
                     self.save_guest(&mut guest);
-                    self.guest_attachments.remove(&guest.uuid);
+                    self.guest_attachments.remove(&guest.conn);
                     let Some(host) = self.lan.as_mut() else {
                         return;
                     };
@@ -2597,7 +2612,7 @@ impl Game<'_> {
             None => playerdata::load(g, &root),
         };
         self.guest_attachments
-            .insert(g.uuid, std::mem::take(&mut g.attachments));
+            .insert(g.conn, std::mem::take(&mut g.attachments));
         // PlayerEvent.LoadFromFile: the player's data is read and applied,
         // the player not yet placed.
         let (uuid, name) = (g.uuid, g.name.clone());
@@ -3104,18 +3119,19 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
-            if self.options.dedicated.is_some() {
-                super::dedicated::events::record(
-                    "chat",
-                    &g.name,
-                    sender,
-                    serde_json::json!({ "message": text }),
-                );
-            }
-            let conn = g.conn;
-            self.detect_rate_spam(conn, false);
+        let Some(g) = host.hub.online_players().find(|g| g.uuid == sender) else {
+            return;
+        };
+        if self.options.dedicated.is_some() {
+            super::dedicated::events::record(
+                "chat",
+                &g.name,
+                sender,
+                serde_json::json!({ "message": text }),
+            );
         }
+        let conn = g.conn;
+        self.detect_rate_spam(conn, false);
     }
     /// A hub's chat and log lines: a dedicated server logs them
     /// (MinecraftServer.logChatMessage, `[Not Secure]` for unsigned or
