@@ -1416,6 +1416,34 @@ pub enum LightLayer {
     Sky,
 }
 
+/// The feature flags a world enables (`FeatureFlagSet`, `LevelReader.enabledFeatures`), each
+/// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), borrowed from the world.
+/// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
+/// Reading it allocates nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeatureFlags<'a>(&'a [String]);
+
+impl<'a> FeatureFlags<'a> {
+    /// The flags of a world's `enabled_features` list; an empty list is vanilla's default.
+    pub fn new(ids: &'a [String]) -> Self {
+        Self(ids)
+    }
+    /// `FeatureFlagSet.contains`: whether the flag `flag` (`minecraft:redstone_experiments`, or
+    /// `redstone_experiments`) is enabled.
+    pub fn contains(&self, flag: &str) -> bool {
+        let bare = !flag.contains(':');
+        self.iter()
+            .any(|id| id == flag || (bare && id.strip_prefix("minecraft:") == Some(flag)))
+    }
+    /// The enabled flag ids.
+    pub fn iter(&self) -> impl Iterator<Item = &'a str> + use<'a> {
+        let ids = self.0;
+        ids.iter()
+            .map(String::as_str)
+            .chain(ids.is_empty().then_some("minecraft:vanilla"))
+    }
+}
+
 /// What an explosion a mod sets off does to blocks
 /// (`Level.ExplosionInteraction`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2610,6 +2638,16 @@ pub trait LevelHost {
     /// loads the chunk.
     fn is_loaded(&self, _pos: [i32; 3]) -> bool {
         unimplemented!("LevelHost::is_loaded")
+    }
+    /// `Level.isRainingAt`: it rains in this level and `pos` is open to the sky (full sky light,
+    /// nothing motion-blocking or fluid above it) in a biome whose precipitation there is rain,
+    /// not snow or none. False where `pos` is not loaded, the chunk is never loaded for it.
+    fn is_raining_at(&self, _pos: [i32; 3]) -> bool {
+        unimplemented!("LevelHost::is_raining_at")
+    }
+    /// `LevelReader.enabledFeatures`: the feature flags the world enables.
+    fn enabled_features(&self) -> FeatureFlags<'_> {
+        unimplemented!("LevelHost::enabled_features")
     }
 }
 
