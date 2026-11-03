@@ -192,8 +192,6 @@ the catalog, not a global API number, source comments or documentation histories
   draws replaces all the rows — armour, hearts, food, air and the heights above the hotbar — for that
   frame. Nothing answered draws Horizon's own.
 
-- `native_block_in_tag` and `native_item_in_tag` for server tick hooks. They read the world's merged block and item tags, including data packs and content mods. An unknown tag returns false. An empty item stack tests the `minecraft:air` item, as vanilla does. Calls with an inactive or stale tick context return an error.
-
 - Right-clicking an entity, on the server for every player: `native_interact_entity` hears a right click on
   an entity (its id and type, and the stack in the hand) where `Player.interactOn` starts, once per hand. A mod that claims
   it swings the hand instead of the entity's and the item's own interaction.
@@ -727,7 +725,7 @@ one, where vanilla gives the `by` one.
 
 - Nicknames for server mods: `native_set_nickname(uuid, Option<&str>)` shows a name in place of a player's in chat (their messages, `/me`, `/msg`) and the Tab list, the real name on hover and everywhere else; `native_text_allowed(text)` asks the server's chat filter. Both outside a player's hook.
 
-- Context-free block and item tag lookups from server hooks (`native_server_block_in_tag`, `native_server_item_in_tag`). They return `NotServer` on a client and `TagsUnavailable` before the world loads its tags. An unknown tag returns false; an empty stack tests `minecraft:air`.
+- Tag and fluid reads from any hook that has a `Host`: `host.block_state_in_tag(state, "minecraft:logs")` (`BlockState.is(TagKey)`), `host.item_stack_in_tag(&stack, tag)` (`ItemStack.is(TagKey)`), `host.state_fluid_state(state)` (`BlockState.getFluidState`: water for a waterlogged state, `None` for an id no state has) and `host.fluid_in_tag(fluid, "minecraft:water")` (`FluidState.is(TagKey)`). The tag may be written with or without `minecraft:`, with no `#`. They read the world's merged tags, data packs and content mods included; an unknown tag is false and an empty stack tests `minecraft:air`. The tag reads are `None` on a client and before the world loads its tags. `level.fluid_state(host, pos)` (`BlockGetter.getFluidState`) reads the fluid at a position, `None` where the block read is (an unloaded chunk or a `y` outside the world).
 
 - A block part's `should_check_weak_power` adjusts whether a signal query reads indirect power through that block, for its position and input direction.
 
@@ -2471,7 +2469,7 @@ the server entity and level reads available on a client.
   `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
   `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any
   level the server has loaded, not only the one in place. A block in a chunk that isn't loaded or a `y` outside
-  the world's height reads as `None`.
+  the world's height reads as `None`. `level.fluid_state(host, pos)` reads the fluid there the same way.
 - `level.seed(host)`, `difficulty` (`"normal"`, as `/difficulty` names it), `game_rule(host, "keep_inventory")` (a
   `GameRuleValue`, `Bool` or `Int`; None for an unknown rule), `weather` (rain and thunder levels, 0.0 to 1.0; both 0
   where the level has no weather), `is_raining` and `is_thundering` read its world settings.
@@ -3099,7 +3097,10 @@ hooks can run on any loading thread; item default changes must be identical on e
 The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
-`state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
+`state_with_property`. It also answers tag and fluid questions without a `Host`: `block_state_in_tag(state, tag)`,
+`item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
+`state_fluid_state(state)` and `fluid_in_tag(fluid, tag)`. The tag reads are false on a client level.
+`LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and

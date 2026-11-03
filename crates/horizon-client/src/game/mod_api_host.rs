@@ -181,6 +181,29 @@ impl horizon_client::mod_api::LevelHost for super::GameLevel<'_> {
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.native_state_block(state)
     }
+    fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> bool {
+        self.native_authoritative
+            && super::native_world_read::state_in_tag(self.items, self.registry, state, tag)
+    }
+    fn item_stack_in_tag(&self, stack: &horizon_client::mod_api::ItemStack, tag: &str) -> bool {
+        self.native_authoritative && super::native_world_read::stack_in_tag(self.items, stack, tag)
+    }
+    fn fluid_state(&self, pos: [i32; 3]) -> Option<horizon_client::mod_api::FluidState> {
+        let [x, y, z] = pos;
+        if !(self.world.shape.contains_y(y) && self.world.loaded(x, z)) {
+            return None;
+        }
+        self.state_fluid_state(self.world.block(x, y, z))
+    }
+    fn state_fluid_state(
+        &self,
+        state: BlockStateId,
+    ) -> Option<horizon_client::mod_api::FluidState> {
+        super::native_world_read::state_fluid(self.behaviours, self.registry, state)
+    }
+    fn fluid_in_tag(&self, fluid: horizon_client::mod_api::FluidState, tag: &str) -> bool {
+        self.native_authoritative && super::native_world_read::fluid_in_tag(self.items, fluid, tag)
+    }
     fn state_with_property(
         &self,
         state: BlockStateId,
@@ -221,6 +244,24 @@ impl<'a, L: std::ops::Deref<Target = super::GameLevel<'a>>> horizon_client::mod_
     }
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.level.registry.state(state).map(|s| &*s.name)
+    }
+    fn block_state_in_tag(&self, state: BlockStateId, tag: &str) -> bool {
+        horizon_client::mod_api::LevelHost::block_state_in_tag(&*self.level, state, tag)
+    }
+    fn item_stack_in_tag(&self, stack: &horizon_client::mod_api::ItemStack, tag: &str) -> bool {
+        horizon_client::mod_api::LevelHost::item_stack_in_tag(&*self.level, stack, tag)
+    }
+    fn fluid_state(&self, pos: [i32; 3]) -> Option<horizon_client::mod_api::FluidState> {
+        horizon_client::mod_api::LevelHost::fluid_state(&*self.level, pos)
+    }
+    fn state_fluid_state(
+        &self,
+        state: BlockStateId,
+    ) -> Option<horizon_client::mod_api::FluidState> {
+        horizon_client::mod_api::LevelHost::state_fluid_state(&*self.level, state)
+    }
+    fn fluid_in_tag(&self, fluid: horizon_client::mod_api::FluidState, tag: &str) -> bool {
+        horizon_client::mod_api::LevelHost::fluid_in_tag(&*self.level, fluid, tag)
     }
     fn state_with_property(
         &self,
