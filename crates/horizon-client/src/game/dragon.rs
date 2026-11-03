@@ -3350,7 +3350,13 @@ impl Game<'_> {
             data: 0,
             meta,
             forced_meta: [0; 4],
-            defaults: Vec::new(),
+            // Back at their defaults the values leave `meta`, and the clients
+            // still hold the old ones.
+            defaults: vec![
+                (9, serializer::FLOAT, Value::Float(1.0)),
+                (15, serializer::BYTE, Value::Byte(0)),
+                (16, serializer::INT, Value::Int(10)),
+            ],
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
@@ -4866,5 +4872,25 @@ mod tests {
         let hurt = d.hurt(0, 5.0, HIT, false);
         assert_eq!(hurt, Hurt::Landed { full: true });
         assert_eq!(d.hurt_time, 10);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_tracked_dragon_lists_its_data_defaults() {
+        use horizon_protocol::entity_data::serializer;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let state = game.lan_dragon_state().unwrap();
+            assert_eq!(
+                state.defaults,
+                vec![
+                    (9, serializer::FLOAT, Value::Float(1.0)),
+                    (15, serializer::BYTE, Value::Byte(0)),
+                    (16, serializer::INT, Value::Int(10)),
+                ]
+            );
+        });
     }
 }
