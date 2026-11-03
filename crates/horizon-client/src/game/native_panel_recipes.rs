@@ -6,9 +6,9 @@
 use super::{
     Game,
     native_hooks::{
-        NativePanelEvent as BrowserEvent, NativeRecipeFluid as BrowserFluid,
-        NativeRecipeLayout as BrowserLayout, NativeRecipeResult as BrowserResult,
-        NativeRecipeView as BrowserRecipe, NativeStack as BrowserStack,
+        NativePanelEvent as BrowserEvent, NativeRecipeLayout as BrowserLayout,
+        NativeRecipeResult as BrowserResult, NativeRecipeView as BrowserRecipe,
+        NativeStack as BrowserStack,
     },
     native_panel::{Layout, Owner, browser_stack, inside},
 };
@@ -104,8 +104,8 @@ pub(super) struct Shown {
     /// Each result's chance in percent, in order; its length is the number of
     /// result slots at the end of `slots`.
     chances: Vec<Option<f32>>,
-    fluid_inputs: Vec<BrowserFluid>,
-    fluid_outputs: Vec<BrowserFluid>,
+    fluid_inputs: Vec<crate::mod_api::FluidStack>,
+    fluid_outputs: Vec<crate::mod_api::FluidStack>,
     note: String,
     action: Option<bool>,
 }
@@ -574,18 +574,28 @@ impl Game<'_> {
 
     /// A fluid's well, no clicks: its slot, the sprite or colour in it and
     /// its amount under it.
-    fn draw_fluid_well(&self, batch: &mut HudBatch, fluid: &BrowserFluid, x: f32, y: f32) {
+    fn draw_fluid_well(
+        &self,
+        batch: &mut HudBatch,
+        fluid: &crate::mod_api::FluidStack,
+        x: f32,
+        y: f32,
+    ) {
         let atlas = &self.gui.atlas;
         batch.sprite(atlas, "gui/sprites/container/slot", x, y);
-        let tint = fluid.tint.unwrap_or(match &*fluid.stack.fluid {
-            "minecraft:water" => 0xFF3F76E4,
-            "minecraft:lava" => 0xFFFF6A00,
-            _ => 0xFF9A9A9A,
-        });
+        let look = horizon_client::mod_content::fluid_look(&fluid.fluid);
+        let tint = look
+            .as_ref()
+            .and_then(|l| l.tint)
+            .unwrap_or(match &*fluid.fluid {
+                "minecraft:water" => 0xFF3F76E4,
+                "minecraft:lava" => 0xFFFF6A00,
+                _ => 0xFF9A9A9A,
+            });
         let dst = [x + 1.0, y + 1.0, 16.0, 16.0];
-        let sprite = fluid
-            .sprite
-            .as_deref()
+        let sprite = look
+            .as_ref()
+            .and_then(|l| l.sprite.as_deref())
             .and_then(|s| self.native_sprite_size(s).map(|size| (s, size)));
         match sprite {
             Some((name, size)) => {
@@ -596,7 +606,7 @@ impl Game<'_> {
                 batch.fill(atlas, dst[0], dst[1], dst[2], dst[3], rgba(r, g, b, a));
             }
         }
-        let amount = format!("{} mB", fluid.stack.amount);
+        let amount = format!("{} mB", fluid.amount);
         batch.text(
             atlas,
             &amount,
@@ -605,13 +615,16 @@ impl Game<'_> {
             rgba(224, 224, 224, 255),
             true,
         );
-        // Vanilla names a fluid block `block.<namespace>.<path>`, as a content mod's lang does.
+        // NeoForge's `FluidType` description id is `fluid_type.<namespace>.<path>`; vanilla's own
+        // fluids are named by their block, `block.<namespace>.<path>`.
         let (ns, path) = fluid
-            .stack
             .fluid
             .split_once(':')
-            .unwrap_or(("minecraft", &fluid.stack.fluid));
-        let name = self.translate(&format!("block.{ns}.{path}"), &prettified(path));
+            .unwrap_or(("minecraft", &fluid.fluid));
+        let name = self.translate(
+            &format!("fluid_type.{ns}.{path}"),
+            &self.translate(&format!("block.{ns}.{path}"), &prettified(path)),
+        );
         horizon_client::widgets::record_as(
             &format!("{name} {amount}"),
             [x, y, FLUID_WELL, SLOT + FLUID_TEXT],
@@ -759,12 +772,8 @@ mod tests {
         assert!(action.0 > at[3].0);
     }
 
-    fn fluid(amount: u32) -> BrowserFluid {
-        BrowserFluid {
-            stack: crate::mod_api::FluidStack::new("minecraft:water", amount),
-            sprite: None,
-            tint: None,
-        }
+    fn fluid(amount: u32) -> crate::mod_api::FluidStack {
+        crate::mod_api::FluidStack::new("minecraft:water", amount)
     }
 
     /// Inputs past the grid continue in rows under it, and the block grows with them.

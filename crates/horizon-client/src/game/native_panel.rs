@@ -562,9 +562,7 @@ pub(super) fn browser_stack(
 #[cfg(test)]
 mod tests {
     use super::{BrowserStack, Owner, Panel, RecipePage};
-    use crate::game::native_hooks::{
-        NativeRecipeFluid, NativeRecipeLayout, NativeRecipeResult, NativeRecipeView,
-    };
+    use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeResult, NativeRecipeView};
     use horizon_client::mod_api::FluidStack;
 
     fn stack(item: &str) -> BrowserStack {
@@ -574,12 +572,8 @@ mod tests {
             components: String::new(),
         }
     }
-    fn fluid(id: &str, amount: u32) -> NativeRecipeFluid {
-        NativeRecipeFluid {
-            stack: FluidStack::new(id, amount),
-            sprite: None,
-            tint: None,
-        }
+    fn fluid(id: &str, amount: u32) -> FluidStack {
+        FluidStack::new(id, amount)
     }
     fn view() -> NativeRecipeView {
         NativeRecipeView {

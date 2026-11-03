@@ -1028,18 +1028,6 @@ pub(crate) struct NativeRecipeResult {
     pub(crate) chance: Option<f32>,
 }
 
-/// A fluid a recipe takes or gives (`native_panel_recipes`), drawn in a well
-/// with its amount in millibuckets under it. `sprite` is the atlas sprite the
-/// well shows (a content mod's `mymod:gui/fluids/steam`), tinted by `tint`
-/// (`0xAARRGGBB`); a fluid with no sprite in the atlas is a flat square of
-/// `tint`, which defaults to vanilla's colour for water and lava and else grey.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativeRecipeFluid {
-    pub(crate) stack: FluidStack,
-    pub(crate) sprite: Option<String>,
-    pub(crate) tint: Option<u32>,
-}
-
 /// A recipe the panel shows (`native_panel_recipes`). Each slot, and each
 /// result, cycles through its stacks, one a second; an empty slot shows
 /// nothing. A crafting recipe has one result and no chance.
@@ -1053,10 +1041,13 @@ pub(crate) struct NativeRecipeView {
     pub(crate) slots: Vec<Vec<NativeStack>>,
     /// Up to four, left to right after the arrow.
     pub(crate) results: Vec<NativeRecipeResult>,
-    /// Fluids the recipe takes and gives, `amount` in millibuckets; at most
-    /// eight each.
-    pub(crate) fluid_inputs: Vec<NativeRecipeFluid>,
-    pub(crate) fluid_outputs: Vec<NativeRecipeFluid>,
+    /// Fluids the recipe takes and gives, `amount` in millibuckets, each in
+    /// a well with its amount under it; at most eight each. A well shows the
+    /// fluid's client look (`data/<mod>/horizon/fluid/`: sprite and tint), a
+    /// flat square of vanilla's colour for water and lava and else grey when
+    /// the fluid has none.
+    pub(crate) fluid_inputs: Vec<FluidStack>,
+    pub(crate) fluid_outputs: Vec<FluidStack>,
     /// A short line under the recipe (a cooking time), or "".
     pub(crate) note: String,
     /// The action button beside it: none, enabled, or shown greyed.
