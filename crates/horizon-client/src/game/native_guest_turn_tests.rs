@@ -82,6 +82,68 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
     });
 }
 
+/// B's live menu and motion stay available while A acts, but displaced
+/// menus and an outer turn's motion must not use the swapped-out records.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn another_guests_menu_and_push_work_during_a_turn() {
+    use horizon_client::items::ItemStack;
+
+    with_guests(|game| {
+        for conn in [12, 13] {
+            game.as_guest(conn, |game| {
+                game.player.as_mut().unwrap().velocity = Vec3::ZERO;
+            })
+            .unwrap();
+        }
+        let a = game.native_player_ref(12).unwrap();
+        let b = game.native_player_ref(13).unwrap();
+        let a_menu = game.native_menu_ref(a).unwrap();
+        let b_menu = game.native_menu_ref(b).unwrap();
+        let stone = ItemStack::new("minecraft:stone", 4);
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guest_mut(13)
+            .unwrap()
+            .inventory[0] = Some(stone.clone());
+        game.as_guest(12, |game| {
+            assert!(game.native_menu_ref(a).is_none());
+            assert_eq!(a_menu.slot_count(game), None);
+            assert_eq!(game.native_menu_ref(b), Some(b_menu));
+            assert_eq!(b_menu.slot_count(game), Some(46));
+            assert_eq!(b_menu.slot(game, 36), Some(Some(stone.clone())));
+            assert!(game.native_entity_set_rotation(b.entity(), 90.0, 10.0));
+            assert!(game.native_entity_set_head_yaw(b.entity(), 45.0));
+            assert_eq!(game.native_entity_head_yaw(b.entity()), Some(45.0));
+            assert!(game.native_entity_push(b.entity(), [0.25, 0.5, -0.25]));
+            assert_eq!(
+                game.native_entity_velocity(b.entity()),
+                Some([0.25, 0.5, -0.25])
+            );
+            assert!(game.native_entity_push(a.entity(), [0.5, 0.0, 0.0]));
+            game.as_guest(13, |game| {
+                assert!(game.native_menu_ref(a).is_none());
+                assert!(game.native_menu_ref(b).is_none());
+                assert_eq!(b_menu.slot_count(game), None);
+                assert!(!game.native_entity_push(a.entity(), [1.0, 0.0, 0.0]));
+            })
+            .unwrap();
+            assert_eq!(
+                game.native_entity_velocity(a.entity()),
+                Some([0.5, 0.0, 0.0])
+            );
+        })
+        .unwrap();
+        assert_eq!(b_menu.slot(game, 36), Some(Some(stone)));
+        assert_eq!(
+            game.native_entity_velocity(b.entity()),
+            Some([0.25, 0.5, -0.25])
+        );
+    });
+}
+
 /// The body/saddle store and existing armor/offhand move with nested turns.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

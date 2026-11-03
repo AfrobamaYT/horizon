@@ -1012,8 +1012,6 @@ impl Game<'_> {
         self.apply_publish();
         true
     }
-    /// Publish or unpublish for real, once the hub is in its place (a
-    /// player's `/publish` runs while it is out).
     /// IntegratedServer.tickServer: the server follows the window's render
     /// and simulation distances when they change.
     fn follow_distances(&mut self, flags: &Flags) {

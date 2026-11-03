@@ -446,7 +446,7 @@ impl Game<'_> {
     /// player's game mode changes (`GameType.updatePlayerAbilities`), and are
     /// saved with the player. A speed that is not finite refuses the write
     /// (vanilla's setters take any float). Returns false for a
-    /// stale or unavailable player, another player during a swap, and a speed
+    /// stale or unavailable player, a displaced outer player, and a speed
     /// that is not finite.
     pub(super) fn native_player_set_abilities(
         &mut self,

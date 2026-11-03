@@ -322,19 +322,24 @@ impl Game<'_> {
             .as_ref()
             .and_then(|host| host.play.get(&conn))
             .and_then(|p| p.lectern.as_ref())
-            .map(|gl| (gl.key, gl.window, gl.sent.clone()))
+            .map(|gl| (gl.key, gl.window, &gl.sent))
         else {
             return;
         };
         let (book, page) = match self.world.block_entities.get(&key) {
-            Some(BlockEntity::Lectern(l)) => (l.book.clone(), l.page),
-            _ => (None, 0),
+            Some(BlockEntity::Lectern(l)) => (&l.book, l.page),
+            _ => (&None, 0),
         };
-        let now = Some((book.clone(), page));
-        if !all && sent == now {
+        if !all
+            && sent
+                .as_ref()
+                .is_some_and(|(old, p)| old == book && *p == page)
+        {
             return;
         }
         let page_changed = sent.as_ref().is_none_or(|(_, p)| *p != page);
+        let book = book.clone();
+        let now = Some((book.clone(), page));
         if let Some(host) = self.lan.as_mut() {
             if let Some(gl) = host.play.get_mut(&conn).and_then(|p| p.lectern.as_mut()) {
                 gl.sent = now;

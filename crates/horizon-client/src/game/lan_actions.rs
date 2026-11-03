@@ -5286,14 +5286,16 @@ impl Game<'_> {
                 _ => {}
             }
         }
-        if let (Some(v), Some((uuid, name))) = (
-            marked,
-            self.lan
-                .as_ref()
-                .and_then(|host| host.hub.guest(conn))
-                .map(|g| (g.uuid, g.name.clone())),
-        ) {
-            self.native_player_velocity(uuid, &name, [v.x, v.y, v.z]);
+        if let Some(v) = marked {
+            if horizon_client::mod_api::listened(horizon_client::mod_api::HookId::PlayerVelocity)
+                && let Some((uuid, name)) = self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| host.hub.guest(conn))
+                    .map(|g| (g.uuid, g.name.clone()))
+            {
+                self.native_player_velocity(uuid, &name, [v.x, v.y, v.z]);
+            }
             if let Some(g) = self.lan.as_ref().and_then(|host| host.hub.guest(conn)) {
                 g.send(&C::SetEntityMotion(play::SetEntityMotion {
                     id: g.entity_id,
