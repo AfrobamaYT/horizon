@@ -1289,6 +1289,14 @@ pub(crate) mod tests {
         fn entity_container_size(&self, _: u32) -> Option<usize> {
             None
         }
+        fn player(&self, uuid: u128) -> Option<PlayerRef> {
+            let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
+            Some(PlayerRef { entity, uuid })
+        }
+        // The player holds hotbar slot 5.
+        fn player_selected_slot(&self, _: PlayerRef) -> Option<usize> {
+            Some(5)
+        }
         fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
             Some(match entity.id() {
                 4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
@@ -1419,8 +1427,12 @@ pub(crate) mod tests {
         let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
         let helmet = || stack("minecraft:iron_helmet", 1, 0);
         let mut player = Player {
-            main_hand: Some(stack("minecraft:stick", 60, 0)),
-            slots: [(3, stack("minecraft:stick", 10, 0))].into_iter().collect(),
+            slots: [
+                (3, stack("minecraft:stick", 10, 0)),
+                (5, stack("minecraft:stick", 60, 0)),
+            ]
+            .into_iter()
+            .collect(),
             ..Player::default()
         };
         let host: &mut dyn Host = &mut player;
@@ -1435,6 +1447,7 @@ pub(crate) mod tests {
         assert_eq!(items.capacity(host, 39, &helmet_), 1);
         assert_eq!(items.capacity(host, 36, &helmet_), 0);
         assert_eq!(items.capacity(host, 40, &helmet_), 1);
+        assert_eq!(items.capacity(host, 39, &sticks), 0);
         assert_eq!(items.amount(host, 3), 10);
         // Into one index, no further: 54 of 60 fill slot 3, and nothing goes elsewhere.
         let insert = |host: &mut dyn Host, index, resource: &ItemResource, amount| {
@@ -1449,19 +1462,20 @@ pub(crate) mod tests {
         assert_eq!(player.slots[&3].count, 64);
         assert_eq!(player.slots[&103], helmet());
         assert!(player.given.is_empty());
-        // Without an index, as `Inventory.add`: the held sticks first, then an empty slot.
+        // Without an index, as `Inventory.add`: the selected slot's sticks first, then an
+        // empty slot.
         let host: &mut dyn Host = &mut player;
         let aborted = host.transaction(|host, tx| {
             assert_eq!(items.insert_any(host, tx, &sticks, 10), 10);
             Err::<(), ()>(())
         });
         assert!(aborted.is_err());
-        assert_eq!(player.main_hand, Some(stack("minecraft:stick", 60, 0)));
+        assert_eq!(player.slots[&5], stack("minecraft:stick", 60, 0));
         let host: &mut dyn Host = &mut player;
         let went =
             host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 10)));
         assert_eq!(went, Ok(10));
-        assert_eq!(player.main_hand, Some(stack("minecraft:stick", 64, 0)));
+        assert_eq!(player.slots[&5], stack("minecraft:stick", 64, 0));
         assert_eq!(player.slots[&0], stack("minecraft:stick", 6, 0));
         assert!(player.given.is_empty());
     }

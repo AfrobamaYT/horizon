@@ -3145,10 +3145,12 @@ Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
 stale handle and an entity outside the level in place. The game answers it for a player with their inventory
 (`PlayerInventoryWrapper`), indices as vanilla's `Inventory` numbers them: 0..36 the main inventory (0..9 the hotbar),
 36..40 the armour from feet to head, 40 the off hand. Each index is the player's `ItemPlace::PlayerSlot` and takes only
-what fits there: an armour slot what its `equippable` names it for. `insert_any`, without an index, goes where
+what fits there: an armour slot one of what its `equippable` names it for (`ArmorSlot`: its allowed entities hold the
+player by id or by tag), and bound armour comes off only in creative. `insert_any`, without an index, goes where
 `Inventory.add` puts a stack: onto the same item in the selected slot, the off hand and the main inventory in order,
 then into its empty slots, never the armour. For a chest or hopper minecart, a chest boat and a chested donkey, mule or
-llama the game answers with their container's slots (`ItemPlace::EntitySlot`). `r.entity_capability(&ENTITY_ITEMS,
+llama the game answers with their container's slots (`ItemPlace::EntitySlot`). A handler kept past its entity's removal
+or its world's close reaches nothing. `r.entity_capability(&ENTITY_ITEMS,
 "mymod:robot", |host, robot| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
 game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
 
