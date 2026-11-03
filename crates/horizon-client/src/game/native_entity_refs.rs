@@ -955,6 +955,7 @@ pub(super) mod tests {
                 guest::Guest,
                 hub::{Hub, HubConfig},
             },
+            mod_api::HostTransaction,
             motion::PlayerMotion,
         };
         use horizon_core::geometry::Vec3;
