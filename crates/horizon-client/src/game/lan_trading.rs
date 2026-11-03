@@ -871,7 +871,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_trade_hook_fired_by_a_real_select_cannot_write_the_open_trade() {
+    fn a_trade_hook_fired_by_a_real_select_can_write_the_open_trade() {
         use horizon_client::mod_api::{self, Hooks, Host, TradeSelectEvent};
         struct Observer(Seen);
         impl Hooks for Observer {
@@ -902,13 +902,19 @@ mod tests {
                 let second = offer("minecraft:coal", "minecraft:diamond");
                 assert!(villager.add_offer(game, second.clone()));
                 game.lan_select_trade(12, 1);
-                // The hook ran for the selected offer and its write was refused:
-                // the trade is mid-click on a copy. (Reads and `trading_player`
-                // inside it wait for the shared `as_guest` host fix.)
+                // The selected menu is restored before the hook, so its live
+                // session and trading player are readable and writable there.
                 let seen = seen.lock().unwrap();
                 assert_eq!(seen.len(), 1);
-                assert_eq!((seen[0].0, seen[0].1, seen[0].2), (Some(40), 1, false));
-                assert_eq!(villager.offers(game), Some(vec![first, second]));
+                assert_eq!(seen[0], (Some(40), 1, true, true));
+                assert_eq!(
+                    villager.offers(game),
+                    Some(vec![
+                        first,
+                        second,
+                        offer("minecraft:wheat", "minecraft:emerald")
+                    ])
+                );
             });
         });
     }
