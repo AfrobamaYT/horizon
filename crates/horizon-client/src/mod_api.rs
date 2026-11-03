@@ -2093,7 +2093,8 @@ pub enum NativeInteractionResult {
     /// `PASS`: nothing happens and the click goes on.
     #[default]
     Pass,
-    /// `TRY_WITH_EMPTY_HAND`: passes, as `PASS` does here.
+    /// `TRY_WITH_EMPTY_HAND`: for a block's `use_item_on`, try its
+    /// `use_without_item` next, on the main hand only.
     TryWithEmptyHand,
 }
 impl NativeInteractionResult {
@@ -2106,6 +2107,7 @@ impl NativeInteractionResult {
 /// NeoForge's `TriState`: force a part of an action off or on, or leave it
 /// to vanilla.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NativeTriState {
     False,
     #[default]

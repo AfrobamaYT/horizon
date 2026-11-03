@@ -5621,10 +5621,11 @@ mod tests {
 
     #[test]
     #[ignore = "requires prepared game resources"]
-    fn block_part_picks_on_the_server_and_for_a_guest() {
+    fn block_parts_pick_and_use_on_the_server_and_for_a_guest() {
         use super::super::{lan::LanSettings, native_entity_refs::tests::with_game};
         use crate::mod_api::{
-            self, BlockPart, CloneItemStackEvent, Hooks, Host, ItemStack, Registrar,
+            self, BlockPart, CloneItemStackEvent, Flow, Hooks, Host, ItemStack,
+            NativeInteractionResult as Answer, Registrar, UseItemOnEvent, UseOnEvent,
         };
         use horizon_client::{
             chunk::Chunk,
@@ -5649,18 +5650,55 @@ mod tests {
                     .then(|| ItemStack::new("minecraft:diamond", 1))
             }
         }
-        struct Mod(Arc<Mutex<Vec<bool>>>);
+        #[derive(Clone)]
+        struct User {
+            answer: Arc<Mutex<Answer>>,
+            clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
+            item_uses: Arc<AtomicUsize>,
+        }
+        impl BlockPart for User {
+            fn use_item_on(
+                &self,
+                _: &mut dyn Host,
+                event: &mut UseItemOnEvent<'_>,
+            ) -> Option<Answer> {
+                self.clicks
+                    .lock()
+                    .unwrap()
+                    .push((event.click.player, event.click.hand));
+                Some(*self.answer.lock().unwrap())
+            }
+        }
+        struct Mod {
+            picks: Arc<Mutex<Vec<bool>>>,
+            user: User,
+        }
         impl Hooks for Mod {
             fn register(&self, r: &mut Registrar) {
-                r.block_part("minecraft:stone", Picker(self.0.clone()));
-                r.block_part("minecraft:beehive", Picker(self.0.clone()));
-                r.block_part("minecraft:chest", Picker(self.0.clone()));
+                r.block_part("minecraft:stone", Picker(self.picks.clone()));
+                r.block_part("minecraft:beehive", Picker(self.picks.clone()));
+                r.block_part("minecraft:chest", Picker(self.picks.clone()));
+                r.block_part("minecraft:lever", self.user.clone());
+            }
+            fn use_on(&self, _: &mut dyn Host, _: &mut UseOnEvent<'_>) -> Flow {
+                self.user
+                    .item_uses
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Flow::Cancel
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
+        let user = User {
+            answer: Arc::new(Mutex::new(Answer::Success)),
+            clicks: Arc::new(Mutex::new(Vec::new())),
+            item_uses: Arc::new(AtomicUsize::new(0)),
+        };
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "picker",
-            Box::new(Mod(seen.clone())),
+            Box::new(Mod {
+                picks: seen.clone(),
+                user: user.clone(),
+            }),
         )]
         .into();
         mod_api::install_parts(&mods).unwrap();
@@ -5722,6 +5760,71 @@ mod tests {
                 guest.placed = true;
                 guest.game_mode = 1;
                 host.hub.guests.push(guest);
+
+                // BlockState.useItemOn replaces the template. Only TryWithEmptyHand
+                // reaches useWithoutItem, which toggles this lever on the main hand.
+                use crate::first_person::Hand;
+                use std::sync::atomic::Ordering::SeqCst;
+                game.resolve_parts().unwrap();
+                let lever = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:lever")
+                    .unwrap();
+                let hit = super::super::Hit {
+                    pos: [0, 64, 0],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 0.5],
+                    inside: false,
+                };
+                game.world.set(0, 64, 0, lever).unwrap();
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stick", 1));
+                for (answer, item_uses, powered, swings) in [
+                    (Answer::Success, 0, false, 1),
+                    (Answer::SuccessServer, 0, false, 1),
+                    (Answer::Consume, 0, false, 0),
+                    (Answer::Pass, 1, false, 1),
+                    (Answer::Fail, 2, false, 1),
+                    (Answer::TryWithEmptyHand, 2, true, 1),
+                ] {
+                    *user.answer.lock().unwrap() = answer;
+                    game.swing = Default::default();
+                    let before = game.swings_started;
+                    assert!(game.use_hand(Some(&hit)).unwrap());
+                    assert_eq!(game.inventory[game.selected].as_ref().unwrap().count, 1);
+                    assert_eq!(game.swings_started - before, swings);
+                    assert_eq!(user.item_uses.load(SeqCst), item_uses);
+                    assert_eq!(game.world.block(0, 64, 0) != lever, powered);
+                }
+                let calls = user.clicks.lock().unwrap().len();
+                game.world.set(0, 64, 0, stone).unwrap();
+                assert!(game.use_hand(Some(&hit)).unwrap());
+                assert_eq!(user.item_uses.load(SeqCst), 3);
+                assert_eq!(user.clicks.lock().unwrap().len(), calls);
+
+                // The real guest packet follows the same path, with the guest's UUID.
+                game.world.set(0, 64, 0, lever).unwrap();
+                host.hub.guests[0].inventory[0] = Some(ItemStack::new("minecraft:stick", 1));
+                *user.answer.lock().unwrap() = Answer::Success;
+                game.lan_guest_packet(
+                    &mut host,
+                    12,
+                    play::Serverbound::UseItemOn(play::UseItemOn {
+                        hand: 0,
+                        pos: hit.pos,
+                        face: 1,
+                        cursor: [0.5, 1.0, 0.5],
+                        inside: false,
+                        world_border: false,
+                        sequence: 1,
+                    }),
+                );
+                assert_eq!(user.clicks.lock().unwrap().last(), Some(&(12, Hand::Main)));
+                assert_eq!(user.item_uses.load(SeqCst), 3);
+                assert_eq!(game.world.block(0, 64, 0), lever);
+                game.world.set(0, 64, 0, stone).unwrap();
+
                 game.lan_guest_packet(
                     &mut host,
                     12,

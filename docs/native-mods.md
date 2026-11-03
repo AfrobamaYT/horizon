@@ -110,6 +110,15 @@ the catalog, not a global API number, source comments or documentation histories
   after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
   instead of the item's use.
 
+- A block's own item-use behaviour, on the server for every player: attach a `BlockPart` and implement
+  `use_item_on(host, event) -> Option<NativeInteractionResult>`. `event.state` keys the per-state table;
+  `event.click` carries the level, position, hit, hand, stack and player. `Some` replaces the template's
+  `Block.useItemOn`: `Success`/`SuccessServer` consume and swing, `Consume` consumes without swinging,
+  `Pass`/`Fail` let the item try its `useOn`, and `TryWithEmptyHand` tries the block's `useWithoutItem`
+  on the main hand only. `None` leaves the template in charge. This is the block's behaviour, not
+  NeoForge's separate `UseItemOnBlockEvent` broadcast interceptor. The earlier `right_click_block`
+  event still decides whether the block is used at all.
+
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
   drops; `native_place_block` hears a block placed from an item (`BlockItem.place`). To stop a placement, a mod claims
