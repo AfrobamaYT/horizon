@@ -419,6 +419,66 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_ref_draws_from_its_levels_own_stream() {
+        use horizon_client::mod_api::{LevelRef, ServerHost};
+        use horizon_core::random::RandomSource;
+
+        with_game(|game| {
+            let level = game.native_level(game.dim.id()).unwrap();
+            // The level in place: the draws advance `World.random` itself.
+            let mut expected = game.world.random.clone();
+            let host: &mut dyn ServerHost = game;
+            let drawn: Vec<i32> = (0..3)
+                .map(|_| level.random(&mut *host).unwrap().next_int())
+                .collect();
+            let want: Vec<i32> = (0..3).map(|_| expected.next_int()).collect();
+            assert_eq!(drawn, want);
+            assert_eq!(game.world.random.next_int(), expected.next_int());
+
+            // A parked level answers with its own stream, not the one in place.
+            let other = if game.dim == Dim::Nether {
+                Dim::End
+            } else {
+                Dim::Nether
+            };
+            let parked = LevelRef::new(level.epoch(), other.id());
+            let host: &mut dyn ServerHost = game;
+            assert!(parked.random(&mut *host).is_none(), "not open yet");
+            let back = game.dim;
+            game.enter_level(other).unwrap();
+            game.enter_level(back).unwrap();
+            let mut expected = game
+                .levels
+                .parked_world_of(other.id())
+                .unwrap()
+                .random
+                .clone();
+            let in_place = game.world.random.clone();
+            let host: &mut dyn ServerHost = game;
+            let drawn = parked.random(&mut *host).unwrap().next_long();
+            assert_eq!(drawn, expected.next_long());
+            let mut after = game
+                .levels
+                .parked_world_of(other.id())
+                .unwrap()
+                .random
+                .clone();
+            assert_eq!(after.next_long(), expected.next_long());
+            let mut untouched = in_place;
+            assert_eq!(game.world.random.next_long(), untouched.next_long());
+
+            // A handle of an earlier open names nothing.
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                game.dim.id(),
+            );
+            let host: &mut dyn ServerHost = game;
+            assert!(stale.random(&mut *host).is_none());
+        });
+    }
+
     fn in_mod(id: &'static str) -> horizon_client::crash::NativeModGuard {
         horizon_client::crash::enter_native_mod(horizon_client::crash::NativeModCall {
             id,

@@ -28,8 +28,8 @@ use horizon_client::mod_api::{
     WorldPhase,
 };
 use horizon_client::mod_api::{
-    AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LogicalSide, NativeBlockClick,
-    NativeInteractionResult, NativeTriState, Suggestion,
+    AttachmentResult, Attachments, BlockHit, GameRuleValue, Holder, LegacyRandom, LevelRef,
+    LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState, Suggestion,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -7231,6 +7231,11 @@ impl GameLevel<'_> {
         if !self.native_authoritative || !mod_sound_ok(sound, at, source, volume, pitch) {
             return false;
         }
+        // `Level.playSound` draws `soundSeedGenerator.nextLong` at the call;
+        // without a host nothing can be sent.
+        let Some(seed) = self.sound_seeds.map(|hub| hub.next_sound_seed()) else {
+            return false;
+        };
         self.native_sounds.push(super::creatures::NativeSound {
             dimension: dimension_id(self.dimension),
             sound: sound.to_owned(),
@@ -7238,6 +7243,7 @@ impl GameLevel<'_> {
             source: source as i32,
             volume,
             pitch,
+            seed,
             except: None,
             entity: None,
         });
@@ -7534,31 +7540,23 @@ impl Game<'_> {
     pub(super) fn native_max_stack_size(&self, item: &str) -> Option<u32> {
         self.res.items().get(item).map(|i| i.max_stack)
     }
-    /// The random of the server level `dimension`: vanilla's `Level.random`
+    /// The random of the server level `level` names: vanilla's `Level.random`
     /// (`level.getRandom()`), the one its explosions, block drops and other
     /// level draws use, so a mod's draws move vanilla's later ones as a Java
-    /// mod's do. Draw with `horizon_core::random::RandomSource` (`next_int_bound`,
-    /// `next_float`...). `None` on a client of a server, and for a level not
-    /// open: the Nether and the End open when someone first goes there and
-    /// close after 300 ticks with nobody in them (`close_idle_levels`).
-    pub(super) fn native_level_random(
-        &mut self,
-        dimension: &str,
-    ) -> Option<&mut horizon_core::random::LegacyRandom> {
-        if self.serving.is_none() && self.options.dedicated.is_none() {
-            return None;
-        }
-        let dim = match dimension {
-            "minecraft:overworld" => super::Dim::Overworld,
-            "minecraft:the_nether" => super::Dim::Nether,
-            "minecraft:the_end" => super::Dim::End,
-            _ => return None,
-        };
-        if dim == self.dim {
+    /// mod's do. A parked level (the Nether while the server ticks the
+    /// Overworld) answers with its own stream. Draw with
+    /// `horizon_core::random::RandomSource` (`next_int_bound`, `next_float`...),
+    /// at the call site: the stream is the level's, not a copy. `None` on a
+    /// client of a server, for a stale handle and for a level not open: the
+    /// Nether and the End open when someone first goes there and close after
+    /// 300 ticks with nobody in them (`close_idle_levels`).
+    pub(super) fn native_level_random(&mut self, level: LevelRef) -> Option<&mut LegacyRandom> {
+        self.native_level_world(level)?;
+        if level.dimension() == self.dim.id() {
             Some(&mut self.world.random)
         } else {
             self.levels
-                .parked_world_mut(dim)
+                .parked_world_mut_of(level.dimension())
                 .map(|world| &mut world.random)
         }
     }

@@ -48,7 +48,6 @@ from tools import parity, release_train  # noqa: E402
 from tools.ci import rust_changes  # noqa: E402
 
 RBUILD = Path.home() / "fleet" / "rbuild"
-LINE_LIMIT = 500
 # What rbuild's login shell needs on each fleet machine before cargo (it adds sccache itself). The ThinkPad no
 # longer builds (2026-10-26: it keeps the AI pool and a few services; Linux work goes to playhorizon's runner).
 HOST_SETUP = {
@@ -137,16 +136,9 @@ def area(path):
     return "game"
 
 
-def reviewed(path):
-    """Whether a path's lines count towards a pull request's size: documentation and tests don't."""
-    return not is_doc(path) and not path.startswith("tests/") and not re.search(r"(^|/)tests?/|/test_\w+\.py$", path)
-
-
-def scope_warnings(paths, lines):
-    """lines: the changed lines of the reviewed paths (not documentation or tests)."""
+def scope_warnings(paths):
+    """A pull request keeps to one area; its size is its own concern (#385)."""
     warnings = []
-    if lines > LINE_LIMIT:
-        warnings.append(f"{lines} lines of code: over {LINE_LIMIT}, split it if it can ship in parts")
     areas = sorted({area(path) for path in paths} - {None})
     if len(areas) > 1:
         warnings.append("mixes " + ", ".join(areas))
@@ -555,7 +547,7 @@ def block(args, base, merge_base, changed, counts, steps, label, elapsed):
     flags = "".join(f" --{flag}" for flag in ("quick",) if getattr(args, flag)) + \
         ("" if args.host == "local" else f" --host {args.host}") + ("" if base == "origin/main" else f" --base {base}")
     added, removed = (sum(count[i] for count in counts.values()) for i in (0, 1))
-    warnings = scope_warnings(changed, sum(sum(count) for path, count in counts.items() if reviewed(path)))
+    warnings = scope_warnings(changed)
     lines = [f"**pr_ready** (`tools/pr_ready.py{flags}` on {where}, against {base} at {merge_base[:9]}, "
              f"{duration(elapsed)})", "", "| Check | Result |", "| --- | --- |",
              f"| Scope | {'⚠️' if warnings else '✅'} {len(changed)} files, +{added} −{removed}"

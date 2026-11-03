@@ -27,6 +27,11 @@
       "receiver": "entity"
     },
     {
+      "name": "entity_start_riding", "side": "server",
+      "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_start_riding",
+      "receiver": "entity"
+    },
+    {
       "name": "entity_stop_riding", "side": "server",
       "target": "horizon_client::game::native_entity_riding::Game<'_>::native_entity_stop_riding",
       "receiver": "entity"

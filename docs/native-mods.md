@@ -281,10 +281,12 @@ the catalog, not a global API number, source comments or documentation histories
   `ItemEntityRef::set_stack` changes one's nonempty stack; discarding an entity is a separate operation. The query acts on
   the level in place.
 
-- `native_level_random(dimension)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
+- `LevelRef::random(host)`, the server level's own random (vanilla's `Level.random`, NeoForge mods'
   `level.getRandom()`): a mod draws from the stream vanilla's explosions and block drops use, so its draws shift theirs
-  as a Java mod's would. It is `None` on a client of a server and for a level that isn't open: the Nether and the End
-  open when someone first goes there and close after 300 ticks with nobody in them.
+  as a Java mod's would. The draws are made at the call site on that level's real stream, also for a level parked while
+  the server ticks another. It is `None` on a client of a server, for a stale handle and for a level that isn't open:
+  the Nether and the End open when someone first goes there and close after 300 ticks with nobody in them. Inside a
+  restricted level hook, `LevelRandomHost::random` is the same stream.
 
 - The server starting and stopping, on the single player server thread and on a dedicated server:
   `native_server_about_to_start(dedicated)` before the worlds load (NeoForge's `ServerAboutToStartEvent`), and
@@ -3075,7 +3077,7 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
 `LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
-`native_send_particles`. Whole-block writes wait for a
+`native_send_particles` and `native_level_event` (`levelEvent`, queued in order with the write's own events). Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -3263,7 +3265,7 @@ Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
 
 #### An entity's items
 
-`entity.capability(host, &ENTITY_ITEMS)` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
+`entity.capability(host, &ENTITY_ITEMS, ())` (NeoForge 26.3's `Capabilities.Item.ENTITY`) is an entity's items, None for a
 stale handle and an entity outside the level in place. The game answers it for a player with their inventory
 (`PlayerInventoryWrapper`), indices as vanilla's `Inventory` numbers them: 0..36 the main inventory (0..9 the hotbar),
 36..40 the armour from feet to head, 40 the off hand. Each index is the player's `ItemPlace::PlayerSlot` and takes only
@@ -3273,13 +3275,13 @@ player by id or by tag), and bound armour comes off only in creative. `insert_an
 then into its empty slots, never the armour. For a chest or hopper minecart, a chest boat and a chested donkey, mule or
 llama the game answers with their container's slots (`ItemPlace::EntitySlot`). A handler kept past its entity's removal
 or its world's close reaches nothing. `r.entity_capability(&ENTITY_ITEMS,
-"mymod:robot", |host, robot| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
+"mymod:robot", |host, robot, ()| …)` answers it for a mod's entity type, and `r.entity_capability_before_game` ahead of the
 game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
 
 ```rust
 // A trade: each offer is (index, the exact stack it must still hold). A stale offer or no
 // room for one aborts the transaction, and every move in it is put back.
-let (a, b) = (seller.capability(host, &ENTITY_ITEMS)?, buyer.capability(host, &ENTITY_ITEMS)?);
+let (a, b) = (seller.capability(host, &ENTITY_ITEMS, ())?, buyer.capability(host, &ENTITY_ITEMS, ())?);
 host.transaction(|host, tx| {
     for (from, to, offer) in [(&a, &b, &seller_offer), (&b, &a, &buyer_offer)] {
         for (index, stack) in offer {
@@ -3297,6 +3299,16 @@ host.transaction(|host, tx| {
     Ok(())
 })
 ```
+
+#### Entity energy and fluids
+
+`entity.capability(host, &ENTITY_ENERGY, side)` and `entity.capability(host, &ENTITY_FLUIDS, side)` reach a mod's
+entity energy and fluid handlers (NeoForge 26.3's `Capabilities.Energy.ENTITY` and `Capabilities.Fluid.ENTITY`), where
+`side` is the `Option<Direction>` of the entity the lookup reaches it from, `None` for no particular side. Vanilla
+answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "mymod:robot", |host, robot, side| …)`,
+which is given that side and may answer differently for each. An entity capability's context is its key's second type:
+`()` for `ENTITY_ITEMS`, `Option<Direction>` for these two. The existing `move_energy` and `move_resources` transfer
+between these and block or item handlers inside a transaction.
 
 #### A menu's slots
 
