@@ -3125,6 +3125,8 @@ struct Game<'a> {
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
     remote: Option<remote::Remote>,
+    /// The client chunk seam's listener (game/remote_chunks.rs): `None`
+    /// until the client side of `chunk_load`/`chunk_unload` is wired.
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
