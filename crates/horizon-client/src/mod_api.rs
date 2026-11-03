@@ -781,6 +781,7 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 mod capability;
 pub use capability::{CapabilityKey, ITEMS, ItemHandler};
 mod fluid_capability;
+pub(crate) use fluid_capability::give_back;
 pub use fluid_capability::{FLUIDS, FluidHandler, FluidStack};
 mod part_table;
 pub use part_table::{Attached, Parts, Registrar, block_entity_capability};

@@ -631,6 +631,10 @@ impl Game<'_> {
                     continue;
                 }
                 if let Some(got) = part.extract(host, pos, side, tank, want, false) {
+                    if got.amount > want {
+                        let excess = got.with_amount(got.amount - want);
+                        mod_api::give_back(host, part.clone(), pos, side, tank, excess);
+                    }
                     out = Some(there.with_amount(taken + got.amount.min(want)));
                 }
             }

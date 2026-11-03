@@ -533,6 +533,10 @@ mod tests {
             r.block_entity_capability(&ITEMS, "test:pipe", Arc::new(Pipe));
             r.block_entity_capability(&FLUIDS, "test:tank", Arc::new(Tank));
             r.block_entity_capability(&FLUIDS, "test:liar", Arc::new(Liar));
+            let gives_more = Overstates { gives_more: true };
+            r.block_entity_capability(&FLUIDS, "test:gives_more", Arc::new(gives_more));
+            let refuses_more = Overstates { gives_more: false };
+            r.block_entity_capability(&FLUIDS, "test:refuses_more", Arc::new(refuses_more));
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output *= 2;
@@ -909,6 +913,62 @@ mod tests {
         }
     }
 
+    /// The game's tank under it, but its real calls overstate: with `gives_more` an extract gives
+    /// 100 mB more than asked, else an insert keeps nothing and answers 100 mB more than offered.
+    struct Overstates {
+        gives_more: bool,
+    }
+    impl FluidHandler for Overstates {
+        fn tanks(&self, host: &dyn Host, at: [i32; 3], side: Option<Direction>) -> usize {
+            host.fluid_tank_count(at, side).unwrap_or(0)
+        }
+        fn fluid(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+        ) -> Option<FluidStack> {
+            host.fluid_tank(at, side, tank)
+        }
+        fn capacity(
+            &self,
+            host: &dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+            fluid: &FluidStack,
+        ) -> u32 {
+            host.fluid_tank_capacity(at, side, tank, fluid)
+        }
+        fn insert(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+            fluid: FluidStack,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            if !self.gives_more && !simulate {
+                return Some(fluid.with_amount(fluid.amount + 100));
+            }
+            host.fluid_tank_insert(at, side, tank, fluid, simulate)
+        }
+        fn extract(
+            &self,
+            host: &mut dyn Host,
+            at: [i32; 3],
+            side: Option<Direction>,
+            tank: usize,
+            max: u32,
+            simulate: bool,
+        ) -> Option<FluidStack> {
+            let more = if self.gives_more && !simulate { 100 } else { 0 };
+            host.fluid_tank_extract(at, side, tank, max + more, simulate)
+        }
+    }
+
     /// One tank, as the game answers it: what it holds, its capacity, and whether it fills and
     /// drains. Truthfully, their simulations answering as their real calls: a `halving` tank
     /// takes half of each offer, a `half_room` one at most half its room, a `short` one gives
@@ -1191,6 +1251,49 @@ mod tests {
                 .is_none()
         );
         assert_eq!(world.held(SOURCE), None);
+    }
+
+    #[test]
+    fn a_handler_answering_more_than_it_was_asked_or_offered_moves_no_more_than_agreed() {
+        game_thread();
+        let water = |amount| FluidStack::new("minecraft:water", amount);
+        // A source giving 100 more than asked: the target gets only what both ends agreed on, the
+        // move never passes its max, and the excess goes back into the source.
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water(1000)), true);
+        world.tank(TANK, None, true);
+        world.types.insert(SOURCE, "test:gives_more");
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 300),
+            Some(water(300))
+        );
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (700, 300));
+        // With no room for the excess in the source, the target's room takes it.
+        world.tanks.get_mut(&SOURCE).unwrap().fills = false;
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(
+            host.transfer_fluids(SOURCE, None, TANK, None, 300),
+            Some(water(300))
+        );
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (300, 700));
+        // The API 54 extract's excess goes back into the tank it came from.
+        world.tanks.get_mut(&SOURCE).unwrap().fills = true;
+        let host: &mut dyn Host = &mut world;
+        let handler = host.capability(&FLUIDS, SOURCE).unwrap();
+        super::super::give_back(host, handler, SOURCE, None, 0, water(100));
+        assert_eq!(world.amount(SOURCE), 400);
+        // A target that keeps nothing and answers more than it was offered: it all goes back.
+        let mut world = TankWorld::default();
+        world.tank(SOURCE, Some(water(1000)), true);
+        world.tank(TANK, None, true);
+        world.types.insert(TANK, "test:refuses_more");
+        let host: &mut dyn Host = &mut world;
+        assert_eq!(host.transfer_fluids(SOURCE, None, TANK, None, 300), None);
+        assert_eq!((world.amount(SOURCE), world.amount(TANK)), (1000, 0));
+        assert!(super::super::fluid_capability::warned_about(
+            "native mod #0"
+        ));
     }
 
     #[test]
