@@ -360,11 +360,9 @@ impl Game<'_> {
     }
 
     /// The first half of `as_guest`: the guest's state in place of the
-    /// game's, which the returned swap keeps until `leave_guest`. Between the
-    /// two the host may go back into `self.lan`, so that what the guest does
-    /// can reach the other players (their commands, `for_player`), and a
-    /// guest's turn can nest in another's: the acting guest and the packets
-    /// queued for them are kept and restored too.
+    /// game's, which the returned swap keeps until `leave_guest`. The host
+    /// stays in `self.lan`, so the guest can reach other players. Guest turns
+    /// can nest: the acting guest and their queued packets are restored.
     pub(super) fn enter_guest(&mut self, conn: u32) -> Option<GuestSwap> {
         let host = self.lan.as_mut()?;
         // An active guest's record holds an outer player's state, not theirs.
