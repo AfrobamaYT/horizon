@@ -3125,6 +3125,7 @@ mod same_vehicle_push_tests {
     use crate::mobs::world::with_test_world;
 
     #[test]
+    #[ignore = "needs prepared resources"]
     fn zombie_horse_sunburn_checks_body_not_head() {
         assert!(with_test_world(&[], |world, types| {
             let mut world = world.clone();
@@ -3157,6 +3158,7 @@ mod same_vehicle_push_tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources"]
     fn leather_body_armor_prevents_freezing() {
         assert!(with_test_world(&[], |w, types| {
             let mut horse = Mob::new(
