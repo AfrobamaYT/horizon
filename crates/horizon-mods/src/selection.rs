@@ -1,6 +1,6 @@
 //! The package candidates the game loads, before content validation and conflicts.
 mod context;
-pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext};
+pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext, data_dir_with};
 
 use crate::{
     Package, find,
