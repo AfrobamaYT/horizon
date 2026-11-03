@@ -41,7 +41,7 @@ impl Game<'_> {
     pub(super) fn lan_open_merchant(&mut self, conn: u32, mut state: MerchantState) {
         let Some(uuid) = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
             .map(|g| uuid_words(g.uuid))
         else {
@@ -64,7 +64,7 @@ impl Game<'_> {
         self.guest_close_all(conn);
         let Some(window) = self
             .lan
-            .as_deref_mut()
+            .as_mut()
             .and_then(|host| host.hub.open_merchant_window(conn, title))
         else {
             self.merchant_closed(&mut state);
@@ -80,7 +80,7 @@ impl Game<'_> {
         };
         self.lan_send_offers(conn, &mut gm, true);
         self.lan_send_merchant_content(conn, &mut gm);
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             host.play.entry(conn).or_default().merchant = Some(gm);
         }
     }
@@ -145,7 +145,7 @@ impl Game<'_> {
         if !force && s.offers == gm.sent && s.level == gm.sent_level {
             return;
         }
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             let offers: Vec<play::NetOffer> = s
                 .offers
                 .iter()
@@ -186,7 +186,7 @@ impl Game<'_> {
         }
     }
     fn lan_send_merchant_content(&mut self, conn: u32, gm: &mut GuestMerchant) {
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
                 return;
             };
@@ -218,21 +218,21 @@ impl Game<'_> {
     ) -> bool {
         let Some(mut gm) = self
             .lan
-            .as_deref_mut()
+            .as_mut()
             .and_then(|host| host.play.get_mut(&conn))
             .and_then(|p| p.merchant.take())
         else {
             return false;
         };
         if window.is_some_and(|w| w != gm.window) {
-            if let Some(host) = self.lan.as_deref_mut() {
+            if let Some(host) = self.lan.as_mut() {
                 host.play.entry(conn).or_default().merchant = Some(gm);
             }
             return false;
         }
         let Some(gi) = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn))
         else {
             return false;
@@ -252,7 +252,7 @@ impl Game<'_> {
             enchantments: &self.stations().enchantments,
             maps: Some(&maps),
         };
-        let Some((player_uuid, player_entity_id)) = self.lan.as_deref().map(|host| {
+        let Some((player_uuid, player_entity_id)) = self.lan.as_ref().map(|host| {
             let g = &host.hub.guests[gi];
             (g.uuid, g.entity_id)
         }) else {
@@ -273,7 +273,7 @@ impl Game<'_> {
             maps: None,
         };
         let mut menu = Menu::new(Kind::Merchant);
-        if let Some(host) = self.lan.as_deref() {
+        if let Some(host) = self.lan.as_ref() {
             let g = &host.hub.guests[gi];
             for i in 0..36 {
                 menu.set_player_item(i, g.inventory[i].clone());
@@ -296,7 +296,7 @@ impl Game<'_> {
             menu.slot(1).cloned(),
             menu.slot(2).cloned(),
         ];
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             let g = &mut host.hub.guests[gi];
             for i in 0..36 {
                 g.inventory[i] = menu.player_item(i).cloned();
@@ -311,7 +311,7 @@ impl Game<'_> {
             // The guest's own statistic and advancements.
             if let Some(g) = self
                 .lan
-                .as_deref()
+                .as_ref()
                 .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
             {
                 if let Some(entity_id) = gm.merchant.mob {
@@ -328,7 +328,7 @@ impl Game<'_> {
         self.drop_guest_items(gi, dropped);
         self.lan_send_offers(conn, &mut gm, false);
         self.lan_send_merchant_content(conn, &mut gm);
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             host.play.entry(conn).or_default().merchant = Some(gm);
         }
         true
@@ -356,7 +356,7 @@ impl Game<'_> {
         };
         let Some((uuid, name)) = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
             .map(|guest| (guest.uuid, guest.name.clone()))
         else {
@@ -365,7 +365,7 @@ impl Game<'_> {
         if self.lan_merchant_op(conn, None, |menu, env| menu.merchant_select(env, index)) {
             let villager = self
                 .lan
-                .as_deref()
+                .as_ref()
                 .and_then(|host| host.play.get(&conn))
                 .and_then(|p| p.merchant.as_ref())
                 .and_then(|m| m.merchant.mob);
@@ -380,7 +380,7 @@ impl Game<'_> {
         }
         let Some(mut gm) = self
             .lan
-            .as_deref_mut()
+            .as_mut()
             .and_then(|host| host.play.get_mut(&conn))
             .and_then(|p| p.merchant.take())
         else {
@@ -388,7 +388,7 @@ impl Game<'_> {
         };
         let uuid = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.hub.guests.iter().find(|g| g.conn == conn))
             .map(|g| uuid_words(g.uuid));
         if std::mem::take(&mut gm.merchant.session.last_traded)
@@ -418,7 +418,7 @@ impl Game<'_> {
         // is gone or dead, or the guest is more than 4 blocks past its reach.
         let far: Vec<(u32, i32)> = self
             .lan
-            .as_deref()
+            .as_ref()
             .map(|host| {
                 host.play
                     .iter()
@@ -437,7 +437,7 @@ impl Game<'_> {
             .unwrap_or_default();
         for (conn, window) in far {
             if self.lan_merchant_closed(conn, Some(window))
-                && let Some(host) = self.lan.as_deref_mut()
+                && let Some(host) = self.lan.as_mut()
             {
                 host.hub.send_to(
                     conn,
@@ -447,7 +447,7 @@ impl Game<'_> {
         }
         let conns: Vec<u32> = self
             .lan
-            .as_deref()
+            .as_ref()
             .map(|host| {
                 host.play
                     .iter()
@@ -463,7 +463,7 @@ impl Game<'_> {
         for conn in conns {
             let Some(uuid) = self
                 .lan
-                .as_deref()
+                .as_ref()
                 .and_then(|host| {
                     host.hub
                         .guests
@@ -476,7 +476,7 @@ impl Game<'_> {
             };
             let Some(id) = self
                 .lan
-                .as_deref_mut()
+                .as_mut()
                 .and_then(|host| host.play.get_mut(&conn))
                 .and_then(|p| p.merchant.as_mut())
                 .map(|gm| {

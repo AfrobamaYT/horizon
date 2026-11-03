@@ -59,7 +59,7 @@ impl Game<'_> {
         }
         // The text only goes to the filter's own log, for operators: never to the console or the stream.
         dedicated::log("INFO", &summary);
-        if let Some(path) = self.lan.as_deref().and_then(|host| host.hub.chat_filter_log()) {
+        if let Some(path) = self.lan.as_ref().and_then(|host| host.hub.chat_filter_log()) {
             let line =
                 horizon_chat_filter::log_line(now, name, uuid, place.name(), count, action, text);
             if let Err(e) = horizon_chat_filter::append_log(std::path::Path::new(path), &line) {
@@ -96,7 +96,7 @@ impl Game<'_> {
         ));
         let conns: Vec<u32> = self
             .lan
-            .as_deref()
+            .as_ref()
             .map(|host| {
                 host.hub
                     .guests
@@ -107,7 +107,7 @@ impl Game<'_> {
             })
             .unwrap_or_default();
         for conn in conns {
-            if let Some(host) = self.lan.as_deref_mut() {
+            if let Some(host) = self.lan.as_mut() {
                 host.hub.kick(conn, reason.clone());
             }
             dedicated::events::record(
@@ -122,37 +122,49 @@ impl Game<'_> {
     /// The message arguments of a guest's command (`/msg`, `/me`, `/say`, `/teammsg`...) through the
     /// filter: false when it refused them.
     pub(super) fn chat_filter_command(&mut self, i: usize, command: &str) -> bool {
-        let Some(host) = self.lan.as_deref() else {
+        let Some((filter_on, permission)) = self
+            .lan
+            .as_ref()
+            .map(|host| (host.hub.chat_filter_on(), host.hub.guests[i].permission))
+        else {
             return true;
         };
-        if !host.hub.chat_filter_on() {
+        if !filter_on {
             return true;
         }
-        let permission = host.hub.guests[i].permission;
         let arguments = self.signable_arguments(permission, command);
         if arguments.is_empty() {
             return true;
         }
         let texts: Vec<&str> = arguments.iter().map(|(_, t)| t.as_str()).collect();
         let mut events = Vec::new();
-        let allowed = host.hub.chat_allowed(i, &texts, Place::Command, &mut events);
+        let Some(allowed) = self.lan.as_mut().map(|host| {
+            host.hub.chat_allowed(i, &texts, Place::Command, &mut events)
+        }) else {
+            return true;
+        };
         self.chat_filter_events(events);
         allowed
     }
 
     /// A guest's text for a sign, an anvil or a book through the filter (`conn`'s guest).
     pub(super) fn chat_filter_text(&mut self, conn: u32, texts: &[&str], place: Place) -> bool {
-        let Some(host) = self.lan.as_deref() else {
-            return true;
-        };
-        if !host.hub.chat_filter_on() {
-            return true;
-        }
-        let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+        let Some(i) = self
+            .lan
+            .as_ref()
+            .filter(|host| host.hub.chat_filter_on())
+            .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn))
+        else {
             return true;
         };
         let mut events = Vec::new();
-        let allowed = host.hub.chat_allowed(i, texts, place, &mut events);
+        let Some(allowed) = self
+            .lan
+            .as_mut()
+            .map(|host| host.hub.chat_allowed(i, texts, place, &mut events))
+        else {
+            return true;
+        };
         self.chat_filter_events(events);
         allowed
     }
@@ -162,7 +174,7 @@ impl Game<'_> {
     pub(super) fn guest_mute_command(&mut self, conn: u32, words: &[&str]) {
         let Some((permission, by)) = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.hub.guest(conn))
             .map(|g| (g.permission, g.name.clone()))
         else {
@@ -178,7 +190,7 @@ impl Game<'_> {
                 .collect()
         };
         for content in replies {
-            if let Some(host) = self.lan.as_deref() {
+            if let Some(host) = self.lan.as_ref() {
                 host.hub.send_to(
                     conn,
                     &C::SystemChat(play::SystemChat {
@@ -199,7 +211,7 @@ impl Game<'_> {
                 let now = horizon_chat_filter::now_millis();
                 let mutes = self
                     .lan
-                    .as_deref()
+                    .as_ref()
                     .map(|host| host.hub.mutes())
                     .unwrap_or_default();
                 if mutes.is_empty() {
@@ -244,7 +256,7 @@ impl Game<'_> {
         // A player here, else one the server has seen (the user cache).
         let user = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| {
                 host.hub
                     .guests
@@ -265,7 +277,7 @@ impl Game<'_> {
             .as_deref()
             .map(|r| format!(": {r}"))
             .unwrap_or_default();
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             host.hub.mute(uuid, &name, until, by, reason);
         }
         if self.options.dedicated.is_some() {
@@ -279,7 +291,7 @@ impl Game<'_> {
 
     /// Lifts `name`'s mute, logged; what to answer.
     pub(super) fn unmute(&mut self, name: &str, by: &str) -> String {
-        match self.lan.as_deref_mut().and_then(|host| host.hub.unmute(name)) {
+        match self.lan.as_mut().and_then(|host| host.hub.unmute(name)) {
             Some(name) => {
                 if self.options.dedicated.is_some() {
                     dedicated::log("INFO", &format!("[chat-filter] {by} unmuted {name}"));

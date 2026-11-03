@@ -387,7 +387,7 @@ impl Game<'_> {
         if cancelled == Some(true)
             && let Some(g) = self
                 .lan
-                .as_deref_mut()
+                .as_mut()
                 .and_then(|host| host.hub.guests.iter_mut().find(|g| g.conn == conn))
         {
             g.menu_sent[menu_slot] = None;

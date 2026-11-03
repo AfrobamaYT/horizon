@@ -384,7 +384,7 @@ impl Game<'_> {
     pub(super) fn lan_open_sign_editor(&mut self, conn: u32, edit: SignEditor) {
         let pos = [edit.pos.0, edit.pos.1, edit.pos.2];
         let state = self.world.block(pos[0], pos[1], pos[2]).0 as i32;
-        if let Some(host) = self.lan.as_deref_mut() {
+        if let Some(host) = self.lan.as_mut() {
             host.hub
                 .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
             host.hub.send_to(
@@ -448,7 +448,7 @@ impl Game<'_> {
         // or refuse it.
         if let Some((uuid, name, dimension)) = self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.hub.guest(conn))
             .map(|g| (g.uuid, g.name.clone(), g.dimension.clone()))
         {
@@ -474,7 +474,7 @@ impl Game<'_> {
                 // client, which shows what it sent, gets the sign as it is.
                 if let Some(play) = self
                     .lan
-                    .as_deref_mut()
+                    .as_mut()
                     .and_then(|host| host.play.get_mut(&conn))
                 {
                     play.sign_editing = None;
@@ -489,7 +489,7 @@ impl Game<'_> {
         }
         if self
             .lan
-            .as_deref()
+            .as_ref()
             .and_then(|host| host.play.get(&conn))
             .is_none()
         {
@@ -512,7 +512,7 @@ impl Game<'_> {
         }
         if let Some(play) = self
             .lan
-            .as_deref_mut()
+            .as_mut()
             .and_then(|host| host.play.get_mut(&conn))
         {
             play.sign_editing = None;
