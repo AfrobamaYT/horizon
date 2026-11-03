@@ -3240,7 +3240,7 @@ struct Game<'a> {
     /// records, so a hook in one guest's turn (when the hub is out of
     /// `self.lan`) still reaches the others'. The acting guest's are in
     /// `player_attachments` for the turn.
-    guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
+    guest_attachments: HashMap<u32, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.

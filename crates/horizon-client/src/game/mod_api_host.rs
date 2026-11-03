@@ -52,7 +52,7 @@ impl Game<'_> {
     pub(super) fn guest_attachments_into(&self, guest: &mut horizon_client::lan::guest::Guest) {
         guest.attachments = self
             .guest_attachments
-            .get(&guest.uuid)
+            .get(&guest.conn)
             .cloned()
             .unwrap_or_default();
     }
@@ -137,10 +137,13 @@ impl Game<'_> {
             if self.lan_acting_uuid == Some(uuid) {
                 return Ok(&mut self.player_attachments);
             }
-            return self
-                .guest_attachments
-                .get_mut(&uuid)
-                .ok_or(AttachmentError::MissingHolder);
+            let conn = self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
+                .map(|guest| guest.conn)
+                .ok_or(AttachmentError::MissingHolder)?;
+            return Ok(self.guest_attachments.entry(conn).or_default());
         }
         if let horizon_client::mod_api::Holder::BlockEntity([x, y, z]) = holder {
             self.journal_block_entity((x, y, z));

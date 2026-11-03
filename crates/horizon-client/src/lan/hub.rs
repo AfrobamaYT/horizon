@@ -822,6 +822,21 @@ impl Hub {
         self.config.simulation_distance = distance;
         self.broadcast(&C::SetSimulationDistance(play::Distance { distance }));
     }
+    /// Resolve a player attachment holder in the level in place.
+    pub fn holder_guest(&self, uuid: u128, dimension: &str) -> Option<&Guest> {
+        self.guests
+            .iter()
+            .find(|g| g.placed && g.uuid == uuid && g.participates_online())
+            .or_else(|| {
+                self.guests.iter().find(|g| {
+                    g.placed
+                        && g.uuid == uuid
+                        && !g.participates_online()
+                        && g.dimension == dimension
+                })
+            })
+    }
+
     /// Placed network players in join order.
     pub fn online_players(&self) -> impl Iterator<Item = &Guest> {
         self.guests

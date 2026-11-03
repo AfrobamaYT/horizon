@@ -1643,7 +1643,7 @@ impl Game<'_> {
     pub(super) fn store_owner(&mut self) -> Option<(u128, String)> {
         let uuid = self.lan.as_ref().and_then(|h| h.owner.as_ref())?.uuid;
         let (riding, dim, others) = self.lan.as_ref().and_then(|h| {
-            let g = h.hub.guests.iter().find(|g| g.uuid == uuid && g.placed)?;
+            let g = h.hub.online_players().find(|g| g.uuid == uuid)?;
             let others = self.ridden_by_others(&h.hub.guests, &g.dimension, Some(uuid), true);
             Some((g.vehicle, g.dimension.clone(), others))
         })?;
@@ -1653,7 +1653,7 @@ impl Game<'_> {
             .map(|(tag, _)| tag);
         let host = self.lan.as_ref()?;
         let mut stored = None;
-        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid && g.placed) {
+        if let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) {
             playerdata::store(g, &mut self.level, vehicle);
             self.save_guest_records(host, g);
             stored = Some(g.name.clone());
@@ -1983,7 +1983,7 @@ impl Game<'_> {
                     // PlayerList.remove: the vehicle it alone rides goes too.
                     self.take_parent_vehicle(&mut host, &mut guest);
                     self.save_guest(&host, &mut guest);
-                    self.guest_attachments.remove(&guest.uuid);
+                    self.guest_attachments.remove(&guest.conn);
                     host.play.remove(&guest.conn);
                     self.guest_combat.remove(&guest.conn);
                     if self.options.dedicated.is_some() && guest.placed {
@@ -2524,7 +2524,7 @@ impl Game<'_> {
             None => playerdata::load(g, &root),
         };
         self.guest_attachments
-            .insert(g.uuid, std::mem::take(&mut g.attachments));
+            .insert(g.conn, std::mem::take(&mut g.attachments));
         // PlayerEvent.LoadFromFile: the player's data is read and applied,
         // the player not yet placed.
         self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));

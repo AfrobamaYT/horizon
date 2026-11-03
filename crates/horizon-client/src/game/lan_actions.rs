@@ -451,7 +451,7 @@ impl Game<'_> {
         };
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
@@ -957,7 +957,7 @@ impl Game<'_> {
         let g = &mut host.hub.guests[i];
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
@@ -3590,8 +3590,7 @@ impl Game<'_> {
             return;
         }
         // PlayerList.respawn replaces the player, retaining only opted-in data.
-        let uuid = host.hub.guests[i].uuid;
-        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+        if let Some(attachments) = self.guest_attachments.get_mut(&conn)
             && let Ok(copy) = attachments.copy_on_death()
         {
             *attachments = copy;

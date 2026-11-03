@@ -429,12 +429,10 @@ impl Game<'_> {
     pub(super) fn cleanup_fake_player(&mut self, host: &mut super::lan::LanHost, guest: &Guest) {
         host.play.remove(&guest.conn);
         host.poses.remove(&guest.conn);
-        host.sleep_ignored.remove(&guest.uuid);
-        host.waypoint_dead.remove(&guest.uuid);
         host.mob_players.retain(|_, conn| *conn != guest.conn);
         self.destroying.remove(&guest.entity_id);
         self.guest_combat.remove(&guest.conn);
-        self.guest_attachments.remove(&guest.uuid);
+        self.guest_attachments.remove(&guest.conn);
     }
 
     /// Remove a fake without treating it as a disconnect or saving it.
@@ -451,6 +449,10 @@ impl Game<'_> {
             !g.participates_online()
                 && g.uuid == player.uuid
                 && g.entity_id as u32 == player.entity.id()
+                && host
+                    .hub
+                    .holder_guest(g.uuid, &g.dimension)
+                    .is_some_and(|owner| owner.conn == g.conn)
         });
         let removed = if let Some(index) = index {
             let guest = host.hub.guests.remove(index);
@@ -718,14 +720,14 @@ impl Game<'_> {
         self.native_send_all(uuid, vec![packet])
     }
     fn native_send_all(&mut self, uuid: u128, packets: Vec<C>) -> bool {
-        if self.lan_acting_uuid == Some(uuid) {
+        if self.lan_acting_uuid == Some(uuid) && !self.lan_acting_fake {
             self.guest_packets.extend(packets);
             return true;
         }
         let Some(host) = &self.lan else {
             return false;
         };
-        let Some(g) = host.hub.guests.iter().find(|g| g.placed && g.uuid == uuid) else {
+        let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) else {
             return false;
         };
         for packet in &packets {
@@ -809,7 +811,7 @@ impl Game<'_> {
         let Some(host) = &mut self.lan else {
             return false;
         };
-        if !host.hub.guests.iter().any(|g| g.placed && g.uuid == uuid) {
+        if !host.hub.online_players().any(|g| g.uuid == uuid) {
             return false;
         }
         if ignored {
@@ -852,7 +854,7 @@ impl Game<'_> {
         let Some(host) = &mut self.lan else {
             return false;
         };
-        if !host.hub.guests.iter().any(|g| g.placed && g.uuid == uuid) {
+        if !host.hub.online_players().any(|g| g.uuid == uuid) {
             return false;
         }
         host.hub.set_nickname(uuid, nickname.map(str::to_owned));
@@ -1102,7 +1104,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .find(|g| g.placed && !g.dead && g.uuid == uuid)
+            .find(|g| g.placed && g.participates_online() && !g.dead && g.uuid == uuid)
             .map(|g| g.conn);
         let ran = conn
             .and_then(|conn| self.as_guest(&mut host, conn, f))

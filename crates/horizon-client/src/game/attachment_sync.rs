@@ -13,7 +13,7 @@ use horizon_world::attachments::{Attachments, Holder};
 /// and a player's own wherever they are.
 fn recipients(hub: &Hub, holder: Holder) -> impl Iterator<Item = &Guest> {
     let owner = match holder {
-        Holder::Player(uuid) => hub.guests.iter().find(|g| g.uuid == uuid),
+        Holder::Player(uuid) => hub.holder_guest(uuid, &hub.config.dimension),
         _ => None,
     };
     let sees = move |g: &Guest| match holder {
@@ -25,7 +25,8 @@ fn recipients(hub: &Hub, holder: Holder) -> impl Iterator<Item = &Guest> {
         _ => false,
     };
     hub.guests.iter().filter(move |g| {
-        matches!(holder, Holder::Player(uuid) if g.uuid == uuid) || (hub.here(g) && sees(g))
+        owner.is_some_and(|o| g.conn == o.conn && g.participates_online())
+            || (hub.here(g) && sees(g))
     })
 }
 

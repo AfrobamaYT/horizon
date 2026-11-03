@@ -1106,6 +1106,25 @@ pub(super) mod tests {
             game.lan = Some(host);
             assert!(game.native_player_remove_fake(replacement));
             let overworld_actor = game.native_fake_player(level, 2345, "parked").unwrap();
+            let attachment = horizon_world::attachments::AttachmentType {
+                namespace: "test",
+                name: "identity",
+                default: || 0i32,
+                codec: None,
+                copy_on_death: false,
+                sync: false,
+            };
+            let holder = horizon_world::attachments::Holder::Player(2345);
+            game.options.dedicated = Some(Vec::new());
+            let real_holder = horizon_world::attachments::Holder::Player(1);
+            game.attachment_map_quiet(real_holder)
+                .unwrap()
+                .set(&attachment, 17)
+                .unwrap();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 3)
+                .unwrap();
             assert!(
                 game.enter_command_level(super::super::Dim::Nether)
                     .is_some()
@@ -1113,6 +1132,17 @@ pub(super) mod tests {
             let nether = game.native_level("minecraft:the_nether").unwrap();
             assert!(game.native_fake_player(level, 3456, "other").is_none());
             let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
+            game.attachment_map_quiet(holder)
+                .unwrap()
+                .set(&attachment, 8)
+                .unwrap();
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
             assert_ne!(overworld_actor, nether_actor);
             assert_eq!(
                 game.native_fake_player(nether, 2345, "parked"),
@@ -1134,8 +1164,33 @@ pub(super) mod tests {
                 game.enter_command_level(super::super::Dim::Overworld)
                     .is_some()
             );
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                3
+            );
             assert!(game.native_player_remove_fake(overworld_actor));
+            assert_eq!(
+                game.attachment_map_quiet(real_holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                17
+            );
+            game.enter_command_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(
+                game.attachment_map_quiet(holder)
+                    .unwrap()
+                    .get(&attachment)
+                    .unwrap(),
+                8
+            );
             assert!(game.native_player_remove_fake(nether_actor));
+            game.enter_command_level(super::super::Dim::Overworld)
+                .unwrap();
+            game.options.dedicated = None;
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].uuid, 1);
