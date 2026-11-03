@@ -24,8 +24,9 @@ pub enum ItemPlace {
     PlayerSlot { player: u128, slot: i32 },
     /// What a player holds in `hand` (`forPlayerInteraction`).
     PlayerHand { player: u128, hand: Hand },
-    /// The stack on a player's cursor in a menu (`forPlayerCursor`).
-    PlayerCursor { player: u128 },
+    /// The stack on the cursor of a player's open menu, `menu` (`forPlayerCursor`): nothing
+    /// once the menu is closed, replaced or its player gone.
+    PlayerCursor { menu: MenuRef },
     /// Slot `slot` of the block entity at `pos` as `side` reaches it, through its [`ITEMS`]
     /// handler (`forHandlerIndex`).
     BlockEntity {
@@ -43,9 +44,11 @@ pub enum ItemPlace {
     /// Slot `slot` of the item at `parent`, through its [`ITEM_ITEMS`] handler: a backpack in a
     /// backpack.
     Nested { parent: Box<ItemPlace>, slot: usize },
-    /// Slot `slot` of a player's open menu, `menu` (`forMenuSlot`): the storage the slot shows
-    /// ([`MenuRef::slot_backing`]), its own slot only. Nothing where the menu is closed,
-    /// replaced or its player gone; nothing goes into or out of the crafting result.
+    /// Slot `slot` of a player's open menu, `menu`, a fork addition (NeoForge 26.3 has no
+    /// `ItemAccess` for a menu slot): the storage the slot shows ([`MenuRef::slot_backing`]),
+    /// its own slot only, under the slot's own rules first ([`MenuRef::slot_holds`],
+    /// [`MenuRef::slot_gives`]). Nothing where the menu is closed, replaced or its player gone;
+    /// nothing goes into or out of the crafting result.
     MenuSlot { menu: MenuRef, slot: usize },
     /// A place a mod keeps, such as an accessory slot: read and written by the [`PlaceProvider`]
     /// it registered as `provider`, which alone knows what `key` means.
@@ -325,6 +328,17 @@ impl ItemPlace {
         insert: bool,
     ) -> u32 {
         let _ = tx;
+        // A menu slot's own rules come before its storage's: `Slot.mayPlace` and
+        // `getMaxStackSize` for what goes in, `Slot.mayPickup` for what comes out.
+        let amount = match self {
+            ItemPlace::MenuSlot { menu, slot } if insert => {
+                let holds = menu.slot_holds(host, *slot, &resource.to_stack(1));
+                let room = holds.unwrap_or(0).saturating_sub(self.amount(host));
+                amount.min(room)
+            }
+            ItemPlace::MenuSlot { menu, slot } if menu.slot_gives(host, *slot) != Some(true) => 0,
+            _ => amount,
+        };
         if amount == 0 {
             return 0;
         }

@@ -86,9 +86,6 @@ pub(super) enum After {
     Spawn([f64; 3], ItemStack),
     /// The item entity with this id was emptied: removed, unless it holds items again.
     Emptied(u32),
-    /// The crafting grid of the guest with this UUID changed: its result is made again
-    /// (`InventoryMenu.slotsChanged`).
-    CraftGrid(u128),
 }
 
 impl Level {
@@ -286,7 +283,6 @@ impl Game<'_> {
                     self.remove_dropped(i);
                 }
             }
-            After::CraftGrid(uuid) => self.guest_craft_result(uuid),
         }
     }
     fn root_commit(&mut self, level: Level) {
@@ -308,6 +304,16 @@ impl Game<'_> {
                     }
                 }
                 after => self.run_after(after),
+            }
+        }
+        // A crafting grid the transaction changed has its result made again, once for each
+        // player however many writes it took (`InventoryMenu.slotsChanged`).
+        for (uuid, kept) in &level.menus {
+            let mut guests = self.lan.iter().flat_map(|host| host.hub.guests.iter());
+            let changed =
+                guests.any(|g| g.placed && g.uuid == *uuid && g.craft_grid != kept.craft_grid);
+            if changed {
+                self.guest_craft_result(*uuid);
             }
         }
         for (pos, kept) in level.block_entities {
@@ -595,9 +601,8 @@ mod tests {
         assert_eq!(j.ticks, 0, "the new disc's song starts from its beginning");
 
         // A player's place: one of three buckets in the hand is exchanged for a filled one; the
-        // hand keeps two and the filled one goes to the inventory, the cursor changes too, and
-        // what doesn't fit would be thrown. Aborted, the hand, the inventory and the cursor are as
-        // they were, and nothing was thrown.
+        // hand keeps two and the filled one goes to the inventory, and what doesn't fit would be
+        // thrown. Aborted, the hand and the inventory are as they were, and nothing was thrown.
         game.player = Some(
             super::super::PlayerMotion::new(
                 game.motion,
@@ -623,12 +628,10 @@ mod tests {
             player: me,
             hand: horizon_client::first_person::Hand::Main,
         };
-        let cursor = horizon_client::mod_api::ItemPlace::PlayerCursor { player: me };
         let water = ItemResource::of(&bucket("minecraft:water_bucket", 1));
         let host: &mut dyn Host = &mut game;
         let _ = host.transaction(|host, tx| {
             assert_eq!(hand.exchange(host, tx, &water, 1), 1);
-            assert_eq!(cursor.insert(host, tx, &stick, 4), 4);
             Err::<(), ()>(())
         });
         assert_eq!(

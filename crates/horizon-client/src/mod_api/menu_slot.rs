@@ -1,6 +1,7 @@
-//! A player's open menu's slots as item places (arismoko/horizon#41 §7): NeoForge 26.3's
-//! `ItemAccess.forMenuSlot`. A slot is the storage it shows, so a write through
-//! [`ItemPlace::MenuSlot`] is a write to that storage, journaled once, through its own handler.
+//! A player's open menu's slots as item places (arismoko/horizon#41 §7), a fork addition beside
+//! NeoForge 26.3's `ItemAccess.forPlayerSlot`. A slot is the storage it shows, so a write through
+//! [`ItemPlace::MenuSlot`] is a write to that storage, journaled once, through its own handler,
+//! under the slot's own rules.
 use super::{EntityRef, ItemPlace, LevelRef, MenuRef};
 
 /// What a menu slot shows: where [`MenuRef::slot_backing`] says its stack lives.
@@ -30,10 +31,9 @@ pub enum MenuSlotBacking {
 }
 
 impl MenuRef {
-    /// The stack on the player's cursor in this menu, as a place (`ItemAccess.forPlayerCursor`).
+    /// The stack on this menu's cursor, as a place (`ItemAccess.forPlayerCursor`): nothing once
+    /// the menu is gone.
     pub fn cursor(self) -> ItemPlace {
-        ItemPlace::PlayerCursor {
-            player: self.player.uuid(),
-        }
+        ItemPlace::PlayerCursor { menu: self }
     }
 }

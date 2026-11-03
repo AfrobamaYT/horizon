@@ -1,11 +1,16 @@
 //! Read-only handles to supported server menus.
-use super::Game;
+use super::{
+    Game,
+    lan_crafting::{load_player, machine_menu},
+};
 use horizon_client::{
+    containers::BlockEntity,
     items::ItemStack,
     lan::{
         guest::Guest,
-        menu::{SlotBacking, VEHICLE_KEY_Y},
+        menu::{SlotBacking, Slots, VEHICLE_KEY_Y},
     },
+    menu::{Kind, Menu},
     mod_api::{EntityRef, MenuRef, MenuSlotBacking, PlayerRef},
 };
 
@@ -151,6 +156,68 @@ impl Game<'_> {
             MenuSlotBacking::Ender(n) => guest.ender_items.get(n)?.clone(),
             MenuSlotBacking::Native(n) => guest.native_menu.get(n)?.clone(),
         })
+    }
+
+    /// How many of `stack` menu slot `slot` holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`):
+    /// a furnace's fuel slot one bucket, an armour slot one piece that fits it, a crafting result
+    /// none. API @API:menu_slots@.
+    pub(super) fn native_menu_slot_holds(
+        &self,
+        menu: MenuRef,
+        slot: usize,
+        stack: &ItemStack,
+    ) -> Option<u32> {
+        let rules = self.native_menu_rules(menu, slot)?;
+        Some(rules.slot_holds(&self.menu_env(), slot, stack))
+    }
+
+    /// Whether menu slot `slot` gives up what it holds (`Slot.mayPickup`): bound armour stays
+    /// on outside creative. API @API:menu_slots@.
+    pub(super) fn native_menu_slot_gives(&self, menu: MenuRef, slot: usize) -> Option<bool> {
+        let rules = self.native_menu_rules(menu, slot)?;
+        Some(rules.slot_gives(&self.menu_env(), slot))
+    }
+
+    /// The menu engine's model of `menu`, holding slot `slot`, for its slots' rules: the
+    /// inventory menu, a furnace's, brewing stand's, crafter's or content mod's menu over its
+    /// block entity, a shulker box's, or a plain container of the menu's size.
+    fn native_menu_rules(&self, menu: MenuRef, slot: usize) -> Option<Box<Menu>> {
+        let guest = self.native_menu_guest(menu)?;
+        (slot < self.native_menu_slot_count(menu)?).then_some(())?;
+        let (kind, disabled) = match &guest.menu {
+            None => (Kind::Inventory, None),
+            Some(open) => {
+                let world = self.native_level_world(self.native_level(&guest.dimension)?)?;
+                let name = self
+                    .lan
+                    .as_ref()?
+                    .hub
+                    .registry_name("minecraft:menu", open.kind);
+                let entity = match open.slots {
+                    Slots::Block(pos) => world.block_entities.get(&pos),
+                    _ => None,
+                };
+                let kind = match entity.and_then(|e| machine_menu(e, open.mod_type)) {
+                    Some((kind, _)) => kind,
+                    None if name == Some("minecraft:shulker_box") => Kind::Shulker,
+                    None if open.size == 5 => Kind::Hopper,
+                    None if open.size == 9 => Kind::Dispenser,
+                    None => Kind::Chest(open.size / 9),
+                };
+                // `CrafterSlot.mayPlace`: a disabled slot takes nothing.
+                let disabled = match entity {
+                    Some(BlockEntity::Crafter(c)) => Some(c.disabled),
+                    _ => None,
+                };
+                (kind, disabled)
+            }
+        };
+        let mut rules = Box::new(Menu::new(kind));
+        load_player(&mut rules, guest);
+        for (k, off) in disabled.iter().flatten().enumerate() {
+            rules.data[k] = i32::from(*off);
+        }
+        Some(rules)
     }
 
     /// The game's own storage menu slot `slot` shows, for a write: the ender chest's, the

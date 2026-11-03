@@ -3166,18 +3166,23 @@ host.transaction(|host, tx| {
 
 #### A menu's slots
 
-`ItemPlace::MenuSlot { menu, slot }` (NeoForge 26.3's `ItemAccess.forMenuSlot`) is slot `slot` of a player's open
-menu, a `MenuRef` (`host.menu(player)`). It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
+`ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`host.menu(player)`). It is
+a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
+(`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
 (`MenuSlotBacking`), and a write goes to that storage through its own handler, so it is kept once by the transaction
-and its rules hold: the player's inventory, armour and off hand by their [`ENTITY_ITEMS`](#an-entitys-items) index (an
-armour slot takes one piece that fits it), a chest's or a furnace's slot through its `ITEMS` handler, a chest
-minecart's or a chested mount's through its `ENTITY_ITEMS`, and the player's ender chest, inventory crafting grid and
-a mod's chest menu (`native_open_menu`), kept by the game. An insert fills that slot alone, up to the item's stack
-size, and what doesn't fit stays out. A crafting grid changed by a transaction has its result made again at the
-outermost commit (`InventoryMenu.slotsChanged`, with `native_prepare_item_craft`); the result slot takes nothing and
-gives nothing, since taking it is a craft. A menu closed, replaced or reopened since the `MenuRef` was made, or one
-whose player left, reads and writes nothing. `menu.cursor()` is the stack on the cursor
-(`ItemPlace::PlayerCursor`). The player's screen follows with the tick's container sync.
+and the storage's rules hold: the player's inventory, armour and off hand by their
+[`ENTITY_ITEMS`](#an-entitys-items) index, a chest's or a furnace's slot through its `ITEMS` handler, a chest minecart's
+or a chested mount's through its `ENTITY_ITEMS`, and the player's ender chest, inventory crafting grid and a mod's chest
+menu (`native_open_menu`), kept by the game. The slot's own rules come first, as a click has them:
+`menu.slot_holds(host, slot, &stack)` is how many of a stack it holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`: a
+furnace's fuel slot one bucket, an armour slot one piece that fits it, a shulker box's slot no shulker box, a result
+slot none), and `menu.slot_gives(host, slot)` whether it gives up what it holds (`Slot.mayPickup`: bound armour stays
+on outside creative). An insert fills that slot alone, and what doesn't fit stays out. A crafting grid a transaction
+changed has its result made again at the outermost commit, once for each player however many writes it took
+(`InventoryMenu.slotsChanged`, with `native_prepare_item_craft`); the result slot takes nothing and gives nothing,
+since taking it is a craft. A menu closed, replaced or reopened since the `MenuRef` was made, or one whose player left,
+reads and writes nothing. `menu.cursor()` is that menu's cursor (`ItemPlace::PlayerCursor { menu }`,
+`forPlayerCursor`), which reaches nothing once the menu is gone, so a kept cursor never reaches the next menu's. The player's screen follows with the tick's container sync.
 
 ```rust
 // Put four of the menu's offered emeralds into slot 0 of the open chest, or nothing.
