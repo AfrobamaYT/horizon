@@ -76,6 +76,7 @@ Start the client (needs a signed-in Microsoft account that owns Minecraft: Java 
 
     horizon-launcher play
 
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 - `--instance`: The instance to play (its name or id; default: the selected one). A Java instance starts its Minecraft: Java Edition, downloaded with its Java the first time
 - `--world`: Open or create this world (a folder under saves) at once
 - `--creative`: Creative mode for a new world
@@ -92,6 +93,7 @@ Run a dedicated server here; type commands into its console.
 
     horizon-launcher server
 
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 - `--dir`: The server's folder (default: the one the launcher uses)
 - `--accept-eula`: Agree to the Minecraft EULA (https://aka.ms/MinecraftEULA)
 
@@ -812,6 +814,7 @@ Play a ported pack as its own profile.
     horizon-launcher modpack play <PACK>
 
 - `PACK`
+- `--allow-jar-downloads`: Allow missing original Java asset/data jars to be downloaded from Modrinth
 
 MCP: `modpack_play`.
 

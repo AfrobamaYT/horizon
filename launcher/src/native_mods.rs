@@ -401,7 +401,7 @@ const MANIFEST: &str = "horizon-mixin.toml";
 const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
-pub const INSTALLED: &str = "horizon-native-mods";
+pub const INSTALLED: &str = horizon_mods::mod_list::NATIVE_DIR;
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.hmod` passes the registry's shared package boundary; no code is run.

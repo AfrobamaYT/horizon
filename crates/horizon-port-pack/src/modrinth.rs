@@ -32,8 +32,7 @@ impl Cache {
             .filter(|h| !self.versions.contains_key(*h))
             .collect();
         for chunk in missing.chunks(500) {
-            let body = serde_json::json!({"hashes": chunk, "algorithm": "sha1"});
-            let found = post(&format!("{API}/version_files"), &body)?;
+            let found = version_files(chunk, "sha1")?;
             for (hash, version) in found.as_object().into_iter().flatten() {
                 self.versions.insert(hash.clone(), version.clone());
             }
@@ -78,6 +77,43 @@ impl Cache {
     }
 }
 
+/// The exact file named by a validated manifest jar, if Modrinth has it.
+pub fn jar_url(jar: &horizon_mods::manifest::JarRef) -> Result<Option<String>, String> {
+    let found = version_files([jar.sha512()], "sha512")?;
+    jar_file_url(found, jar.sha512())
+}
+
+fn version_files(hashes: impl Serialize, algorithm: &str) -> Result<Value, String> {
+    post(
+        &format!("{API}/version_files"),
+        &serde_json::json!({"hashes": hashes, "algorithm": algorithm}),
+    )
+}
+
+fn jar_file_url(found: Value, hash: &str) -> Result<Option<String>, String> {
+    #[derive(Deserialize)]
+    struct Version {
+        files: Vec<File>,
+    }
+    #[derive(Deserialize)]
+    struct File {
+        hashes: BTreeMap<String, String>,
+        url: String,
+    }
+    let mut versions: BTreeMap<String, Version> =
+        serde_json::from_value(found).map_err(|e| format!("Modrinth version files: {e}"))?;
+    Ok(versions.remove(hash).and_then(|v| {
+        v.files
+            .into_iter()
+            .find(|f| {
+                f.hashes
+                    .get("sha512")
+                    .is_some_and(|h| h.eq_ignore_ascii_case(hash))
+            })
+            .map(|f| f.url)
+    }))
+}
+
 fn post(url: &str, body: &Value) -> Result<Value, String> {
     let response = crate::net::agent(url)
         .post(url)
@@ -112,4 +148,35 @@ fn encode(s: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_hash_selects_the_file_not_the_versions_primary_jar() {
+        let hash = "a".repeat(128);
+        let found = serde_json::json!({hash.clone(): {"files": [
+            {"primary": true, "url": "wrong.jar", "hashes": {"sha512": "b".repeat(128)}},
+            {"url": "exact.jar", "hashes": {"sha512": hash}}
+        ]}});
+        assert_eq!(
+            jar_file_url(found, &hash).unwrap().as_deref(),
+            Some("exact.jar")
+        );
+        assert_eq!(jar_file_url(serde_json::json!({}), &hash).unwrap(), None);
+        assert_eq!(
+            jar_file_url(serde_json::json!({hash.clone(): {"files": []}}), &hash).unwrap(),
+            None
+        );
+        assert!(
+            jar_file_url(
+                serde_json::json!({hash.clone(): {"files": "broken"}}),
+                &hash
+            )
+            .is_err()
+        );
+        assert!(jar_file_url(serde_json::json!([]), &hash).is_err());
+    }
 }

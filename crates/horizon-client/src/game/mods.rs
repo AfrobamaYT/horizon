@@ -1,8 +1,10 @@
 //! Mods in the game (`docs/mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
-use super::Game;
+use super::{Game, execution_role::ExecutionRole};
+use crate::mod_api::{RegistrationContext, RegistrationPhase};
 use horizon_client::mod_list::{self, Installed};
+use horizon_mods::selection::{BUILD_INFO, built_ids};
 use std::path::PathBuf;
 
 #[derive(Default)]
@@ -16,7 +18,10 @@ pub(super) struct ModsState {
 /// treats as no custom components, and `registries.json` isn't read.
 pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Result<()> {
     let mut names = Vec::new();
-    Game::native_component_types(&mut names);
+    Game::native_component_types(
+        &RegistrationContext::new(RegistrationPhase::Components),
+        &mut names,
+    );
     if names.is_empty() {
         return Ok(());
     }
@@ -43,8 +48,14 @@ fn native_declared() -> &'static NativeDeclared {
     static DECLARED: std::sync::OnceLock<NativeDeclared> = std::sync::OnceLock::new();
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
-        Game::native_blocks(&mut blocks);
-        Game::native_items(&mut items);
+        Game::native_blocks(
+            &RegistrationContext::new(RegistrationPhase::Blocks),
+            &mut blocks,
+        );
+        Game::native_items(
+            &RegistrationContext::new(RegistrationPhase::Items),
+            &mut items,
+        );
         let types = crate::mod_api::block_entity_types()
             .iter()
             .map(|kind| horizon_mods::content::BlockEntityType {
@@ -61,9 +72,15 @@ fn native_declared() -> &'static NativeDeclared {
 }
 /// The native mods' standalone models (`native_standalone_models`), set once
 /// before the resources first load.
-pub(super) fn register_standalone_models() {
+pub(super) fn register_standalone_models(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
     let mut names = Vec::new();
-    Game::native_standalone_models(&mut names);
+    Game::native_standalone_models(
+        &RegistrationContext::new(RegistrationPhase::StandaloneModels),
+        &mut names,
+    );
     horizon_client::models::register_standalone(names);
 }
 
@@ -272,20 +289,6 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     }
 }
 
-/// What the launcher writes beside a game it built with native mods: their ids under `mods`.
-const BUILD_INFO: &str = "native-mods.json";
-
-/// IDs compiled into this executable, from the launcher's build record.
-fn built_ids(built: &str) -> std::collections::BTreeSet<String> {
-    let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
-    info["mods"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str().map(str::to_owned))
-        .collect()
-}
-
 /// `native-mods.json`'s `mods` list is not empty: the game was built with mods.
 fn build_lists_mods(built: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(built)
@@ -417,6 +420,53 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn standalone_models_register_only_on_the_client() {
+        use crate::mod_api::{self, Hooks, ModEntry, StandaloneModelsEvent, testing::with_mods};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        #[derive(Default)]
+        struct Models(Arc<AtomicUsize>);
+        #[crate::mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn standalone_models(
+                &self,
+                context: &RegistrationContext<'_>,
+                event: &mut StandaloneModelsEvent<'_>,
+            ) {
+                assert_eq!(context.phase(), RegistrationPhase::StandaloneModels);
+                assert_eq!(
+                    context.mods().ids().collect::<Vec<_>>(),
+                    ["registration_test"]
+                );
+                self.0.fetch_add(1, Ordering::Relaxed);
+                event.models.push("registration_test:block/shaft".into());
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        with_mods(
+            vec![ModEntry::new(
+                "registration_test",
+                Box::new(Models(calls.clone())),
+            )]
+            .into(),
+            || {
+                register_standalone_models(ExecutionRole::IntegratedServer);
+                register_standalone_models(ExecutionRole::DedicatedServer);
+                assert_eq!(calls.load(Ordering::Relaxed), 0);
+                register_standalone_models(ExecutionRole::Client);
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+                assert!(
+                    horizon_client::models::standalone()
+                        .iter()
+                        .any(|id| id == "registration_test:block/shaft")
+                );
+            },
+        );
+    }
+
     /// Only a build whose `native-mods.json` lists a mod counts as built with mods.
     #[test]
     fn only_a_listed_mod_makes_a_build_a_mod_build() {

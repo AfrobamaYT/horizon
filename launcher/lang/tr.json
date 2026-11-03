@@ -1029,5 +1029,16 @@
   "Play online with your Microsoft account": "Microsoft hesabınla çevrim içi oyna",
   "Sign in with the account that owns Minecraft: Java Edition. Your name and skin come along to online servers, like in other launchers.": "Minecraft: Java Edition'a sahip hesapla giriş yap. Adın ve görünümün, diğer başlatıcılarda olduğu gibi çevrim içi sunuculara da gelir.",
   "Microsoft's own page opens in your browser. Horizon never sees your password.": "Microsoft'un kendi sayfası tarayıcında açılır. Horizon parolanı asla görmez.",
-  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Düğmeleri, anahtarları ve gökyüzünü renklendirir. Birini seç ya da herhangi bir hex rengi yaz."
+  "Colours the buttons, the switches and the sky. Pick one, or type any hex colour.": "Düğmeleri, anahtarları ve gökyüzünü renklendirir. Birini seç ya da herhangi bir hex rengi yaz.",
+  "A new world takes a minute the first time": "Yeni bir dünyanın ilk kez oluşturulması bir dakika sürer",
+  "Cannot read or write jar cache {path}: {error}. Check the file and its permissions before retrying.": "JAR önbelleği {path} okunamıyor veya yazılamıyor: {error}. Yeniden denemeden önce dosyayı ve izinlerini kontrol edin.",
+  "Download jars": "JAR dosyalarını indir",
+  "Download {count} original Java jars from Modrinth?": "Modrinth'ten {count} özgün Java JAR dosyası indirilsin mi?",
+  "Jar downloads were not allowed. Supply the original files at these exact cache paths, or pass --allow-jar-downloads:\n": "JAR dosyalarının indirilmesine izin verilmedi. Özgün dosyaları bu tam önbellek yollarına yerleştirin veya --allow-jar-downloads kullanın:\n",
+  "Jar {id} {version}: {reason}. Put the original file with this exact SHA-512 at {path}, then retry.": "JAR {id} {version}: {reason}. Tam olarak bu SHA-512 değerine sahip özgün dosyayı {path} konumuna yerleştirip yeniden deneyin.",
+  "Only assets and data are used; Java code is never run. Each file is checked against the manifest's SHA-512.": "Yalnızca kaynaklar ve veriler kullanılır; Java kodu asla çalıştırılmaz. Her dosya, bildirimdeki SHA-512 ile doğrulanır.",
+  "SHA-512 mismatch at {path}: expected {expected}, got {actual}. Replace this cache entry with the exact original file, or remove it and retry with --allow-jar-downloads.": "{path} konumunda SHA-512 uyuşmazlığı: beklenen {expected}, alınan {actual}. Bu önbellek girdisini tam özgün dosyayla değiştirin veya silip --allow-jar-downloads ile yeniden deneyin.",
+  "SHA-512 {hash} names both {first_id} {first_version} and {second_id} {second_version}.": "SHA-512 {hash}, hem {first_id} {first_version} hem de {second_id} {second_version} kimliğini belirtiyor.",
+  "no exact file on Modrinth": "Modrinth'te tam olarak eşleşen dosya yok",
+  "{id} {version}\nSHA-512: {hash}": "{id} {version}\nSHA-512: {hash}"
 }
