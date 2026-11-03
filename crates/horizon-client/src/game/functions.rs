@@ -190,7 +190,7 @@ impl Game<'_> {
             log::warn!("Horizon: failed to load function {id}: {e}");
         }
         self.fns.store = store;
-        self.sync_function_registries();
+        self.sync_function_registries(enabled_features);
     }
     fn save_datapack_settings(&self) {
         let disabled: Vec<&String> = self
@@ -203,7 +203,7 @@ impl Game<'_> {
         let json = serde_json::json!({"enabled": self.fns.enabled, "disabled": disabled});
         let _ = std::fs::write(self.datapack_settings_path(), json.to_string());
     }
-    pub(super) fn sync_function_registries(&mut self) {
+    pub(super) fn sync_function_registries(&mut self, enabled_features: &[String]) {
         let reg = &mut self.ui.registries;
         reg.functions = self.fns.store.functions.keys().cloned().collect();
         reg.function_tags = self.fns.store.function_tags.keys().cloned().collect();
@@ -228,11 +228,8 @@ impl Game<'_> {
             &self.world_root,
             &self.options.resources,
         );
-        let enabled = horizon_client::datapack::enabled_ids(
-            &self.world_root,
-            &packs,
-            &self.level.enabled_features,
-        );
+        let enabled =
+            horizon_client::datapack::enabled_ids(&self.world_root, &packs, enabled_features);
         let enabled: Vec<_> = enabled
             .iter()
             .filter_map(|id| packs.iter().find(|p| &p.id == id))
@@ -600,7 +597,7 @@ impl Game<'_> {
                 "commands.schedule.cleared.success",
                 &[Text::literal(count.to_string()), Text::literal(name)],
             ));
-            self.sync_function_registries();
+            self.sync_function_registries(&self.level.enabled_features.clone());
             return Ok(count as i32);
         }
         let Some(Arg::Resource(name)) = ctx.get("function").cloned() else {
@@ -658,7 +655,7 @@ impl Game<'_> {
                 Text::literal(tick_time.to_string()),
             ],
         ));
-        self.sync_function_registries();
+        self.sync_function_registries(&self.level.enabled_features.clone());
         Ok((tick_time.rem_euclid(i64::from(i32::MAX))) as i32)
     }
     /// ReloadCommand: the message, then the (asynchronous) reload; returns 0.
@@ -966,6 +963,7 @@ mod tests {
             "data/test/function",
             "data/minecraft/tags/function",
             "data/test/tags/item",
+            "data/test/tags/worldgen/biome",
             "data/test/recipe",
         ] {
             std::fs::create_dir_all(pack.join(path)).unwrap();
@@ -988,6 +986,11 @@ mod tests {
         )
         .unwrap();
         std::fs::write(pack.join("data/test/recipe/sample.json"), r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#).unwrap();
+        std::fs::write(
+            pack.join("data/test/tags/worldgen/biome/feature_marker.json"),
+            r#"{"values":[]}"#,
+        )
+        .unwrap();
         std::fs::write(
             root.join("datapacks.json"),
             r#"{"enabled":["file/test"],"disabled":[]}"#,
@@ -1025,6 +1028,22 @@ mod tests {
             assert_eq!(game.score.board.score("times", "loaded").unwrap().value, 1);
             assert!(game.items().item_tags["test:sample"].contains("minecraft:stone"));
             assert!(game.stations().recipe_index.contains("test:sample"));
+
+            // World-open selection and completions must both use the incoming
+            // level's flags, even while `self.level` is still the old level.
+            game.ui.registries.by_registry.clear();
+            game.level.enabled_features.clear();
+            std::fs::write(
+                pack.join("pack.mcmeta"),
+                r#"{"features":{"enabled":["test:feature"]}}"#,
+            )
+            .unwrap();
+            game.reload_datapacks(false, &["test:feature".into()]);
+            assert!(
+                game.ui.registries.by_registry["minecraft:worldgen/biome"]
+                    .tags
+                    .contains(&"test:feature_marker".to_owned())
+            );
         });
         std::fs::remove_dir_all(root).unwrap();
     }
