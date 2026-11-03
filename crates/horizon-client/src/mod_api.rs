@@ -6,7 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
-pub use crate::camera::CameraEntity;
+pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CustomRecipe, Ingredient};
@@ -27,9 +27,11 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::menu::StackedOnOther;
 pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::recipe_book::RecipeBookCategory;
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
 pub use horizon_core::{
@@ -38,6 +40,7 @@ pub use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 pub use horizon_world::consumable::UseAnimation;
+pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
@@ -53,6 +56,24 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
+
+/// Camera values from the most recently extracted world frame.
+#[derive(Clone, Debug)]
+pub struct NativeCamera {
+    pub position: [f64; 3],
+    pub eye_height: f32,
+    pub partial_tick: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Camera-relative view matrix in column-major order.
+    pub view: [f32; 16],
+    /// Reversed-Z projection matrix in column-major order.
+    pub projection: [f32; 16],
+    pub dimension: String,
+}
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
@@ -110,7 +131,7 @@ pub struct NativeScreenView<'a> {
     /// on it. Every container, station and mod window draws on the inventory
     /// screen and so reports `inventory`: tell them apart by `menu` and
     /// `title` (both None on a window the client opened itself) and by
-    /// `slots`. The title's own screens report theirs (API @API:native_instance_dir@): `title`,
+    /// `slots`. The title's own screens report theirs (API 326): `title`,
     /// `world_select`, `world_create`, `world_create_flat`, `world_edit`,
     /// `multiplayer`, `add_server`, `direct_connect`…, with no menu, no title
     /// and no slots.
@@ -326,7 +347,7 @@ pub enum NativeAuthority {
 }
 
 /// One open attempt of one world; it rejects a previous open's commands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeWorldEpoch(u64);
 
 impl NativeWorldEpoch {
@@ -339,6 +360,144 @@ impl NativeWorldEpoch {
     pub fn get(self) -> u64 {
         self.0
     }
+}
+
+/// An entity of the open world, for the `Host` methods that read or change one
+/// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
+/// are shared by every level and never reused while the world is open, and an
+/// entity that changes dimension gets a new one, as in vanilla. A handle from an
+/// earlier open, of an entity that is gone, or used on a client reads as `None`
+/// and changes nothing. `Host::entity` makes one from an event's entity id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EntityRef {
+    epoch: NativeWorldEpoch,
+    id: u32,
+}
+
+impl EntityRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, id: u32) -> Self {
+        Self { epoch, id }
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.id
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+}
+
+/// A living entity of the open world: a mob, a player, an armor stand or the
+/// dragon (vanilla's `LivingEntity`). `host.living(entity)` makes one from an
+/// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
+/// entity's methods work on it too. Stale handles read as `None`, as an
+/// `EntityRef`'s do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LivingRef(EntityRef);
+
+impl LivingRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl From<LivingRef> for EntityRef {
+    fn from(living: LivingRef) -> Self {
+        living.0
+    }
+}
+
+/// A level of the open world, by its dimension (`minecraft:the_nether`).
+/// `Host::level` makes one, and `entity.level(host)` gives an entity's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LevelRef {
+    epoch: NativeWorldEpoch,
+    dimension: &'static str,
+}
+
+impl LevelRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
+        Self { epoch, dimension }
+    }
+    /// The level's dimension (`minecraft:overworld`).
+    pub fn dimension(self) -> &'static str {
+        self.dimension
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+}
+
+/// An online player in one open server world, keyed by UUID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlayerRef {
+    pub(crate) entity: EntityRef,
+    pub(crate) uuid: u128,
+}
+
+impl PlayerRef {
+    /// The same player as an entity handle.
+    pub fn entity(self) -> EntityRef {
+        self.entity
+    }
+    /// The player's UUID.
+    pub fn uuid(self) -> u128 {
+        self.uuid
+    }
+}
+
+impl From<PlayerRef> for EntityRef {
+    fn from(player: PlayerRef) -> Self {
+        player.entity
+    }
+}
+
+/// A player's food data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerFood {
+    /// Food level.
+    pub level: i32,
+    /// Food saturation.
+    pub saturation: f32,
+    /// Food exhaustion.
+    pub exhaustion: f32,
+}
+
+/// A player's server-side abilities.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct NativePlayerAbilities {
+    /// Whether ordinary damage is ignored.
+    pub invulnerable: bool,
+    /// Whether the player is flying.
+    pub flying: bool,
+    /// Whether the player may fly.
+    pub may_fly: bool,
+    /// Whether items are used without consumption.
+    pub instabuild: bool,
+    /// Whether the player may build.
+    pub may_build: bool,
+    /// Flying speed.
+    pub fly_speed: f32,
+    /// Walking speed. Horizon currently keeps no per-player value; this is 0.1.
+    pub walk_speed: f32,
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
@@ -403,6 +562,85 @@ pub fn mods() -> &'static [Box<dyn Hooks>] {
     MODS.get().map_or(&[], |mods| mods.as_ref())
 }
 
+/// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
+static MOD_IDS: OnceLock<&'static [&'static str]> = OnceLock::new();
+
+/// Names the entries of [`mods`] by their bundles' `[mod] id`s, so a panic in a hook names its mod.
+/// The launcher's generated executable calls it before `entry::main_with`.
+pub fn name_mods(ids: &'static [&'static str]) {
+    if MOD_IDS.set(ids).is_err() {
+        log::warn!("Trait mods already named; ignoring the second list");
+    }
+}
+
+/// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
+/// panic in it names the mod. The generated dispatch loops over it.
+fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
+    Entered {
+        mods: mods.iter().enumerate(),
+        hook,
+        guard: None,
+    }
+}
+
+/// The parts in `parts`, each marked as running `hook` as `entered` marks a mod, with its
+/// type, so a panic in it names the mod, the hook and the part.
+fn entered_parts<'a, P: ?Sized>(
+    parts: &'a [Attached<P>],
+    hook: &'static str,
+) -> impl Iterator<Item = &'a P> {
+    let mut guard = None;
+    parts.iter().map(move |attached| {
+        // The last part's mark goes first, as in `Entered`.
+        drop(guard.take());
+        guard = Some(crate::crash::enter_native_mod(
+            crate::crash::NativeModCall {
+                id: MOD_IDS
+                    .get()
+                    .and_then(|ids| ids.get(attached.mod_index))
+                    .copied(),
+                index: attached.mod_index,
+                hook,
+                part: Some(attached.type_name),
+            },
+        ));
+        &*attached.part
+    })
+}
+
+/// Mod `index` of [`mods`] by its `[mod] id`, or by its place when the build didn't name them.
+fn mod_name(index: usize) -> String {
+    MOD_IDS
+        .get()
+        .and_then(|ids| ids.get(index))
+        .map_or_else(|| format!("native mod #{index}"), |id| (*id).to_owned())
+}
+
+struct Entered<'a> {
+    mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
+    hook: &'static str,
+    guard: Option<crate::crash::NativeModGuard>,
+}
+
+impl<'a> Iterator for Entered<'a> {
+    type Item = &'a Box<dyn Hooks>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // The last mod's mark goes first, so the next one's puts back what was there before.
+        drop(self.guard.take());
+        let (index, hooks) = self.mods.next()?;
+        self.guard = Some(crate::crash::enter_native_mod(
+            crate::crash::NativeModCall {
+                id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
+                index,
+                hook: self.hook,
+                part: None,
+            },
+        ));
+        Some(hooks)
+    }
+}
+
 /// Whether a mod claims a cancellable hook.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -430,6 +668,9 @@ pub trait LevelHost {
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId;
     /// `Level.isClientSide`, through `LevelAccess::is_client_side`.
     fn is_client_side(&self) -> bool;
+    /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
+    /// unknown state.
+    fn state_block(&self, state: BlockStateId) -> Option<&str>;
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
@@ -491,6 +732,10 @@ macro_rules! level_attachment_host {
 }
 level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
+mod part_table;
+pub use part_table::{Attached, Parts, Registrar};
+pub(crate) use part_table::{KnownIds, install_parts, mark_game_thread, parts, resolve_parts};
+
 mod generated;
 pub use generated::Hooks;
 #[doc(hidden)]
@@ -499,6 +744,17 @@ pub use generated::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    struct Quiet;
+    impl Hooks for Quiet {}
+
+    struct Broken;
+    impl Hooks for Broken {
+        fn component_types(&self, _event: &mut ComponentTypesEvent<'_>) {
+            panic!("a broken mod");
+        }
+    }
 
     /// A double with the three `Host` methods the probe calls.
     struct Reader {
@@ -565,7 +821,40 @@ mod tests {
     }
 
     #[test]
+    fn a_panic_in_a_hook_names_the_mod_and_the_hook() {
+        name_mods(&["quiet", "broken"]);
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Quiet), Box::new(Broken)];
+        let caught = Arc::new(Mutex::new(Vec::new()));
+        let sink = caught.clone();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let error = crate::crash::panic_report(info, "client").error;
+            if error.contains("a broken mod") {
+                sink.lock().unwrap().push(error);
+            }
+        }));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dispatch_component_types(&mods, &mut Vec::new())
+        }));
+        // Once the dispatch has unwound, the thread is in no mod.
+        let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
+        std::panic::set_hook(previous);
+        // The game stops as before: the panic goes on to the dispatch's caller.
+        assert!(unwound.is_err());
+        let errors = caught.lock().unwrap();
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0].ends_with("\nin native mod broken, hook component_types"),
+            "{}",
+            errors[0]
+        );
+        assert!(!errors[1].contains("in native mod"), "{}", errors[1]);
+    }
+
+    #[test]
     fn a_test_host_implements_only_what_its_hook_calls() {
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
         let mods = [Box::new(Probe) as Box<dyn Hooks>];
         let stack = stick();
         for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
@@ -584,6 +873,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "Host::tell")]
     fn an_unexpected_host_call_names_the_method() {
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
         let mods = [Box::new(Chatty) as Box<dyn Hooks>];
         let mut host = Reader {
             block: "minecraft:stone",

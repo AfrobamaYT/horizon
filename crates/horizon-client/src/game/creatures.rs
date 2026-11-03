@@ -403,6 +403,19 @@ impl Game<'_> {
         persistent: bool,
         scripted: bool,
     ) -> Option<u32> {
+        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent)
+    }
+    /// `spawn_mob_for` with the spawn reason's NATURAL flag explicit: only a
+    /// natural spawn rolls the jockey mounts of zombie horses, husks and
+    /// drowned (`reinforcement` and spawner spawns pass `false`).
+    pub(super) fn spawn_mob_reason(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        persistent: bool,
+        scripted: bool,
+        natural: bool,
+    ) -> Option<u32> {
         let kind = if kind.contains(':') {
             kind.to_owned()
         } else {
@@ -431,10 +444,13 @@ impl Game<'_> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        if !self.mobs.iter().any(|m| m.id == id) {
+            return None;
+        }
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
-            self.spawn_jockeys(id, true);
+            self.spawn_jockeys(id, natural);
         }
         Some(id)
     }
@@ -857,6 +873,8 @@ impl Game<'_> {
     pub(super) fn tick_creatures(&mut self) -> Result<()> {
         self.attack_ticks = self.attack_ticks.saturating_add(1);
         self.tick_leads();
+        // Vanilla's spawning and raids run before ChunkMap.tick.
+        let from = self.lan_synced_from();
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
         if self.ui.rules.bool("spawn_mobs") {
@@ -866,6 +884,7 @@ impl Game<'_> {
             self.tick_village_siege();
         }
         self.tick_raids();
+        self.lan_synced_since(from);
         let ticked =
             horizon_client::spans::time("tick_creature_entities", || self.tick_creature_entities());
         self.dismount_underwater_mob_riders();
@@ -1050,9 +1069,9 @@ impl Game<'_> {
                         for e in &mut events[from..] {
                             if let MobEvent::Projectile(p) = e
                                 && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                                && *target == Who::Player
+                                && *target == Some(Who::Player)
                             {
-                                *target = Who::Mob(id);
+                                *target = Some(Who::Mob(id));
                             }
                         }
                     }
@@ -1470,7 +1489,7 @@ impl Game<'_> {
         // LootContextParams.ORIGIN of a death: the mob's position.
         let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
         let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
-            drops::die(m, &death, &mut self.rand_sequences)
+            drops::die(m, &death, &mut self.rand_sequences, &mut self.world.random)
         });
         if skulls && let Some(Who::Mob(id)) = m.last_damage.and_then(|(d, _)| d.attacker) {
             // Creeper.droppedSkulls: one head per charged explosion.
@@ -1548,6 +1567,8 @@ impl Game<'_> {
         let mut hurt = false;
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
+        // So `living_knockback` sees who hit and what they hold.
+        let _attacker = self.knockback_scope_for(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(amount, source, aim);
             hurt = hit;
@@ -1767,6 +1788,19 @@ impl Game<'_> {
             );
         }
     }
+    /// A mob's projectile enters the level.
+    fn launch_mob_projectile(&mut self, mut p: Projectile) {
+        self.next_entity += 1;
+        p.id = self.next_entity;
+        let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
+        // LlamaSpit.recreateFromPacket: the spit's burst on the client.
+        if p.kind == ProjectileKind::LlamaSpit {
+            let v = p.velocity;
+            self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+        }
+        self.add_projectile(p);
+        self.projectile_event("minecraft:projectile_shoot", owner, at);
+    }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
             match e {
@@ -1946,6 +1980,10 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
+                        let _attacker = self.knockback_scope(match source.attacker {
+                            Some(Who::Mob(id)) => id as i32,
+                            _ => 0,
+                        });
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
@@ -2057,6 +2095,23 @@ impl Game<'_> {
                     source,
                 } => {
                     self.mob_hits_mob(target, amount, source);
+                }
+                MobEvent::AttackMobWithEffect {
+                    target,
+                    amount,
+                    source,
+                    effect,
+                    ticks,
+                    amplifier,
+                } => {
+                    // CaveSpider, Husk and WitherSkeleton.doHurtTarget: the
+                    // effect sits inside the branch where the hit landed, and
+                    // `LivingEntity.addEffect` takes a mob as well as a player.
+                    if self.mob_hits_mob(target, amount, source)
+                        && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target)
+                    {
+                        t.add_effect(effect, ticks, amplifier);
+                    }
                 }
                 MobEvent::CubeHurtPlayer { cube, amount, from } => {
                     // AbstractCubeMob.dealDamage: the attack sound (and its
@@ -2255,17 +2310,40 @@ impl Game<'_> {
                         }
                     }
                 }
-                MobEvent::Projectile(mut p) => {
-                    self.next_entity += 1;
-                    p.id = self.next_entity;
-                    let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
-                    // LlamaSpit.recreateFromPacket: the spit's burst on the client.
-                    if p.kind == ProjectileKind::LlamaSpit {
-                        let v = p.velocity;
-                        self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+                MobEvent::Projectile(p) => self.launch_mob_projectile(p),
+                MobEvent::BowShot {
+                    mob,
+                    weapon,
+                    mut arrow,
+                } => {
+                    self.mob_bow_ammo(mob, &weapon, &mut arrow);
+                    self.launch_mob_projectile(arrow);
+                }
+                MobEvent::CrossbowShot { ammo, mut arrow } => {
+                    if &*ammo.item == "minecraft:firework_rocket" {
+                        // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
+                        let mut at = arrow.position;
+                        at.y -= f64::from(0.15f32) - 0.1;
+                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                    } else {
+                        Self::arrow_from_ammo(&ammo, &mut arrow);
+                        self.launch_mob_projectile(arrow);
                     }
-                    self.add_projectile(p);
-                    self.projectile_event("minecraft:projectile_shoot", owner, at);
+                }
+                MobEvent::CrossbowLoad {
+                    mob,
+                    weapon,
+                    at,
+                    pitch,
+                } => {
+                    if self.mob_crossbow_ammo(mob, &weapon) {
+                        self.audio.play(
+                            "minecraft:item.crossbow.loading_end",
+                            Some(at),
+                            1.0,
+                            pitch,
+                        );
+                    }
                 }
                 MobEvent::Spawn(mut m) => {
                     self.next_entity += 1;
@@ -2309,21 +2387,29 @@ impl Game<'_> {
                         thrown.thrower = Some(thrower);
                     }
                 }
-                MobEvent::DropItem { item, count, at } => self.spawn_item(
-                    ItemStack {
-                        item,
-                        count,
-                        damage: 0,
-                        extra: None,
-                    },
+                MobEvent::DropItem {
+                    mob,
+                    item,
+                    count,
                     at,
-                    // The ItemEntity constructor's motion, from the entity's
-                    // own random (not the level's), so spawnAtLocation drops
-                    // (a fox's berries, a panda's held food, a goat's horn)
-                    // land apart.
-                    dispenser::new_item_motion(),
-                    10,
-                ),
+                } => {
+                    self.native_entity_drop_item(mob, &item, count as i32, at);
+                    self.spawn_item(
+                        ItemStack {
+                            item,
+                            count,
+                            damage: 0,
+                            extra: None,
+                        },
+                        at,
+                        // The ItemEntity constructor's motion, from the entity's
+                        // own random (not the level's), so spawnAtLocation drops
+                        // (a fox's berries, a panda's held food, a goat's horn)
+                        // land apart.
+                        dispenser::new_item_motion(),
+                        10,
+                    );
+                }
                 MobEvent::DropGoatHorn {
                     mob,
                     screaming,
@@ -3342,6 +3428,11 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
+        let _attacker = self.knockback_scope(
+            attacker
+                .or(owner)
+                .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
+        );
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -3460,7 +3551,7 @@ impl Game<'_> {
     /// `LivingEntity.knockback` on the player: pushed `power` away from the
     /// direction (`xd`, `zd`), less its knockback resistance, and up only from
     /// the ground.
-    /// The native knockback hook runs once the resistance is applied, with
+    /// The native knockback hook runs before resistance is applied, with
     /// `source`, the hit's.
     pub(super) fn knock_back_player(
         &mut self,
@@ -3469,6 +3560,14 @@ impl Game<'_> {
         zd: f64,
         source: HurtSource<'_>,
     ) {
+        let credit = match self.player_hurt_by() {
+            Some((Who::Mob(id), _)) => id as i32,
+            _ => 0,
+        };
+        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
+            0 => credit,
+            attacker => attacker,
+        });
         if let Some(p) = self.player.as_mut() {
             knock_back(p, &mut self.world.random, power, (xd, zd), source);
         }
@@ -4153,6 +4252,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        let _attacker = self.knockback_scope_for(p.owner);
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
@@ -4766,7 +4866,16 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack, _), hit) => {
+            (kind @ (ProjectileKind::Potion(..) | ProjectileKind::ExperienceBottle), hit) => {
+                // A bottle flies as the bottle item (`getDefaultItem`).
+                let bottle;
+                let stack = match kind {
+                    ProjectileKind::Potion(stack, _) => stack,
+                    _ => {
+                        bottle = Box::new(ItemStack::new("minecraft:experience_bottle", 1));
+                        &bottle
+                    }
+                };
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
@@ -5359,7 +5468,7 @@ impl Game<'_> {
                     .map_or(2.0, |f| f.0 as f32 * 2.0);
                 // TamableAnimal.feed(.., 2.0F, 2.0F): heals twice the nutrition,
                 // then playEatingSound, which wolves leave empty.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
             }
             // Wolf.mobInteract: the owner puts wolf armor on a tamed adult.
@@ -5497,7 +5606,7 @@ impl Game<'_> {
                     .and_then(|i| i.food.as_ref())
                     .map_or(1.0, |f| f.0 as f32);
                 // TamableAnimal.feed.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
                 eat = eating_sound(m, &mut self.world.random);
             }
@@ -5553,7 +5662,7 @@ impl Game<'_> {
             Species::IronGolem
                 if item == "minecraft:iron_ingot" && m.health < m.attrs.max_health =>
             {
-                m.health = (m.health + 25.0).min(m.attrs.max_health);
+                m.heal(25.0);
                 consume = true;
                 sound = Some("entity.iron_golem.repair");
             }
@@ -6288,16 +6397,13 @@ impl Game<'_> {
     /// poses entities: a new frame of draws, the store restarted when the
     /// renderer's no longer matches. Once per frame, before any entity draws.
     pub(super) fn begin_skinning(&self) {
-        let stored = self
-            .renderer
-            .as_ref()
-            .filter(|r| r.skins_entities())
-            .and_then(|r| r.skinned_models());
-        match stored {
-            Some(stored) => self
-                .skin_models
-                .borrow_mut()
-                .begin(&mut self.skin_frame.borrow_mut(), stored),
+        let renderer = self.renderer.as_ref().filter(|r| r.skins_entities());
+        match renderer.and_then(|r| r.skinned_models()) {
+            Some(stored) => {
+                let mut models = self.skin_models.borrow_mut();
+                models.begin(&mut self.skin_frame.borrow_mut(), stored);
+                models.tagged = renderer.is_some_and(|r| r.skins_tagged());
+            }
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
     }
@@ -6484,12 +6590,15 @@ impl Game<'_> {
                 Vec::new()
             };
             let body = out.len();
-            // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
-            // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
+            // The GPU path: an ordinary mob, no layers the CPU path changes after drawing them
+            // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
+            // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
+            // then only the outline draws.
+            let silhouette_on_gpu = outline.is_none() || !mob.invisible;
             let posable = skinning
                 && !is_player
                 && !layers_only
-                && outline.is_none()
+                && silhouette_on_gpu
                 && armor.is_empty()
                 && !matches!(
                     mob.species(),
@@ -6500,11 +6609,7 @@ impl Game<'_> {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
-                let mut skin = horizon_client::mobs::skin::Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
                 horizon_client::mobs::render::render_skinned(
                     mob,
                     alpha as f32,
@@ -6566,16 +6671,39 @@ impl Game<'_> {
                 self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
             }
+            // Cosmetics (game/cosmetics.rs), posed on the GPU with the mob's own jobs: culled
+            // with it.
+            if !layers_only
+                && horizon_cosmetics::enabled()
+                && (is_player || &*mob.kind.id == "minecraft:mannequin")
+            {
+                let mark = self.skin_frame.borrow().mark();
+                let base = horizon_client::mobs::render::base_transform(mob, alpha as f32, camera);
+                let gpu = skinning;
+                if let Some((lo, hi)) =
+                    self.cosmetics_geometry(mob, false, base, alpha as f32, packed, gpu, out)
+                {
+                    skinned = Some(match skinned {
+                        Some((first, Some((l, h)))) => (first, Some((l.min(lo), h.max(hi)))),
+                        Some((first, None)) => (first, Some((lo, hi))),
+                        None => (mark, Some((lo, hi))),
+                    });
+                }
+            }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
-                // Held items join the GPU path's draws unless an outline reads their vertices.
-                let skin = (skinning && outline.is_none()).then_some(&mut skinned);
+                // Held items join the GPU path's draws, their silhouette too.
+                let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
+                if let Some(((first, _, _), _)) = skinned {
+                    let color = horizon_client::mobs::render::abgr(rgb);
+                    self.skin_frame.borrow_mut().outline_since(first, color);
+                }
                 if mob.invisible {
                     out.truncate(entity_start);
                     continue;
@@ -7433,8 +7561,8 @@ mod knockback_tests {
         false
     }
 
-    /// `LivingEntity.knockback` on a player: the hook runs after the
-    /// knockback resistance and before the motion changes; a mod's strength or
+    /// `LivingEntity.knockback` on a player: the hook runs before the
+    /// knockback resistance and the motion changes; a mod's strength or
     /// direction pushes, a cancel pushes nothing, and without a mod in the way
     /// the push is vanilla's. Needs the prepared data in
     /// `.local/horizon-client/26.3`; skipped without it.
