@@ -2445,6 +2445,8 @@ a dimension.
 - `host.block_entity(level, pos)` finds a block entity in a loaded chunk, including in parked levels;
   `kind`, `position`, `level` and `data` read it. A removed or temporarily taken-out entity reads `None`;
   a replacement at the same position resolves to the new entity, unlike vanilla's object identity.
+- `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
+  `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered. Bundles need "hooks": @API:level_entities_in@.
 
 Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
@@ -3016,6 +3018,14 @@ that already has that kind of part warns, naming both mods, and the earlier mod'
 doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
+
+A capability is answered by block entity type: `r.block_entity_capability(&ITEMS, "mymod:pipe",
+Arc::new(PipeItems))` gives the type an `ItemHandler` in place of the game's answer, and
+`host.capability(&ITEMS, pos)` finds the handler at `pos`, the mod's or the game's own (a block entity's slots
+by side, by the rules hoppers follow). A handler holds no borrow: each call is given the host, so it may call a
+neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
+`insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
+mod's own capability is a `CapabilityKey::new("mymod:chemicals")`, answered only by parts.
 
 ### Testing a trait mod
 
