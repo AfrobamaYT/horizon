@@ -2865,10 +2865,10 @@ impl Game<'_> {
                     parent,
                     partner,
                     llama,
-                    experience_inline,
+                    experience,
                 } => {
                     let mob_count = self.mobs.len();
-                    self.breed(parent, partner, llama, experience_inline);
+                    self.breed(parent, partner, llama, experience);
                     let child = self.mobs.get(mob_count).map(|m| m.id);
                     self.native_entity_breed(parent, partner, child);
                 }
@@ -3125,7 +3125,7 @@ impl Game<'_> {
         parent: u32,
         partner: u32,
         llama: Option<Box<horizon_client::mobs::llama::Offspring>>,
-        experience_inline: bool,
+        experience: horizon_client::mobs::BreedExperience,
     ) {
         let Some(p) = self.mobs.iter().find(|m| m.id == parent).cloned() else {
             return;
@@ -3315,11 +3315,15 @@ impl Game<'_> {
             // A llama's baby was drawn in the parent's tick.
             if let Some(o) = llama {
                 horizon_client::mobs::llama::apply_offspring(child, &o);
-                if !experience_inline {
-                    self.award_breeding_experience(
-                        parent,
-                        [p.position.x, p.position.y, p.position.z],
-                    );
+                let at = [p.position.x, p.position.y, p.position.z];
+                match experience {
+                    horizon_client::mobs::BreedExperience::Deferred => {
+                        self.award_breeding_experience(parent, at);
+                    }
+                    horizon_client::mobs::BreedExperience::Drawn(Some(amount)) => {
+                        self.add_orb(at, amount);
+                    }
+                    horizon_client::mobs::BreedExperience::Drawn(None) => {}
                 }
                 return;
             }

@@ -2237,11 +2237,10 @@ impl Goal for Breed {
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
             let llama = super::llama::is_llama(m.species())
                 .then(|| Box::new(super::llama::breed_offspring(m, &p)));
-            let experience_inline = llama.is_some() && !cx.w.ask_mods;
-            let experience = if experience_inline {
-                super::breeding_experience(m, cx.w.mob_drops)
+            let experience = if llama.is_some() && !cx.w.ask_mods {
+                super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
             } else {
-                None
+                super::BreedExperience::Deferred
             };
             m.extra.in_love = 0;
             m.extra.age = 6000;
@@ -2257,12 +2256,8 @@ impl Goal for Breed {
                 parent: m.id,
                 partner: p.id,
                 llama,
-                experience_inline,
+                experience,
             });
-            if let Some(amount) = experience {
-                let at = [m.position.x, m.position.y, m.position.z];
-                cx.events.push(MobEvent::Experience { at, amount });
-            }
         }
     }
 }

@@ -404,7 +404,7 @@ mod tests {
                     "the pair breeds a llama"
                 );
                 let experience = events.iter().find_map(|e| match e {
-                    MobEvent::Experience { amount, .. } => Some(*amount),
+                    MobEvent::Breed { experience, .. } => Some(*experience),
                     _ => None,
                 });
                 assert_eq!(
@@ -418,7 +418,11 @@ mod tests {
                 );
                 assert_eq!(
                     experience,
-                    (!ask_mods && mob_drops).then_some(2),
+                    Some(if ask_mods {
+                        super::super::BreedExperience::Deferred
+                    } else {
+                        super::super::BreedExperience::Drawn(mob_drops.then_some(2))
+                    }),
                     "asking mods: {ask_mods}, drops: {mob_drops}"
                 );
             }
