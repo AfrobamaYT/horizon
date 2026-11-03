@@ -43,6 +43,15 @@ fn injected_methods_get_matching_ids_and_counts() {
             .any(|item| matches!(item, syn::Item::Const(item) if item.ident == "injected"))
     );
     assert!(output.contains("HOOK_COUNT : usize = 2"));
+    let duplicate_id = "pub enum HookId { Injected } pub(crate) const HOOK_COUNT: usize = 1; pub mod hook_ids {} pub trait Hooks {}";
+    assert!(
+        inject(
+            duplicate_id,
+            &serde_json::json!([injection("injected", "InjectedEvent")]).to_string()
+        )
+        .unwrap_err()
+        .contains("duplicate generated hook id")
+    );
 }
 
 #[test]

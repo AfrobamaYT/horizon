@@ -395,7 +395,7 @@ mod tests {
         };
         let before: Box<[&'static dyn RenderHooks]> = renderers.clone();
         install_for_test(renderers);
-        native_render_needs(&mut RenderNeeds::default()); // Prune defaults once, outside the timed loop.
+        native_render_needs(&mut RenderNeeds::default()); // Warm dispatch outside the timed loop.
         let iterations = 1_000_000;
         let start = Instant::now();
         for _ in 0..iterations {
@@ -417,7 +417,7 @@ mod tests {
             .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
             .collect();
         install_for_test(renderers);
-        native_render_needs(&mut RenderNeeds::default()); // Prune all nine once.
+        native_render_needs(&mut RenderNeeds::default()); // Warm the empty dispatch.
         let start = Instant::now();
         for _ in 0..iterations {
             let mut needs = RenderNeeds::default();
@@ -425,7 +425,7 @@ mod tests {
         }
         let empty = start.elapsed().as_nanos() as f64 / f64::from(iterations);
         println!(
-            "render_needs dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns, pruned-empty {empty:.2} ns per call ({iterations} iterations)"
+            "render_needs dispatch: before {baseline:.2} ns, subscribed {subscribed:.2} ns, empty {empty:.2} ns per call ({iterations} iterations)"
         );
     }
 

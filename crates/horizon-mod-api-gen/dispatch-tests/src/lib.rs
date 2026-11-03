@@ -328,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_default_on_another_zero_sized_type_does_not_prune_override() {
+    fn nested_default_does_not_affect_installed_subscribers() {
         struct Other;
         #[mod_api::hooks]
         impl Hooks for Other {}

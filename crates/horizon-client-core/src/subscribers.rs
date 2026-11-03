@@ -80,6 +80,8 @@ mod tests {
         let set = Subscribers::new(2, 70, [(69, 0), (1, 0), (1, 0)]);
         assert!(set.contains_any(0));
         assert!(!set.contains_any(1));
+        assert!(set.contains(0, 69));
+        assert!(!set.contains(0, 68));
         assert_eq!(set.indices(0).collect::<Vec<_>>(), [1, 69]);
     }
 }
