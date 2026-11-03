@@ -98,12 +98,13 @@ API 8 adds server commands and players: `native_register_commands` (the commands
 command tree) and `native_perform_command` (a player's command on the server), with helpers to answer
 ([Server commands and players](#server-commands-and-players)). Bundles that use them need `"hooks": 8`.
 
-API 9 adds the acting player's plain items for server mods (count, take, give; [Server commands and
-players](#server-commands-and-players)). Bundles that use them need `"hooks": 9`.
+API 9 adds a player's items for server mods: counting, taking and giving go through the player's
+[`ENTITY_ITEMS`](#an-entitys-items) handler. Bundles that use them need `"hooks": 9`.
 
 API 10 adds server menus: a vanilla chest menu a server mod opens and fills, whose clicks and closing reach the mod
-(`native_menu_clicked`, `native_menu_closed`), and `native_exchange_items`, two players' stacks swapped in one checked
-step ([Server menus](#server-menus)). Bundles that use them need `"hooks": 10`.
+(`native_menu_clicked`, `native_menu_closed`), and trades on them between the players'
+[`ENTITY_ITEMS`](#an-entitys-items) handlers in one transaction ([Server menus](#server-menus)). Bundles that use them
+need `"hooks": 10`.
 
 API 12 adds item tooltips through `native_tooltip`: the hovered stack, with its components, and its tooltip's
 lines, which a mod can add to, change or take out of, wherever the game shows an item's tooltip. Bundles that use it
@@ -259,8 +260,8 @@ it read it again; it acts on the level in place and is refused for another dimen
 
 API 39 adds item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
 held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
-`native_carried_stack` reads and changes that stack, and `native_on_equip` hears an equipment slot take a different item. The helpers read the acting player. Bundles
-that use them need `"hooks": 39`.
+the stack is the place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place, and
+`native_on_equip` hears an equipment slot take a different item. Bundles that use them need `"hooks": 39`.
 
 API 40 adds [mod messages](#mod-messages) between a mod's server and client halves, and hearing players and mobs on the
 server for every player: `native_player_died`, `native_mob_spawned`, `native_mob_killed` (a player's melee blow, a sweep or a spear thrust too),
@@ -895,7 +896,9 @@ API 96 adds `native_neighbor_signal(dimension, pos)`, the strongest redstone sig
 
 API 97 adds `native_light(pos)` (block and sky light, 0 to 15, both 0 where the chunk isn't loaded), `native_weather()` (rain and thunder levels, 0 in the Nether and the End), `native_day_time()`, `native_world_height()` (min y and height) and `native_max_stack_size(item)`: what a mod's solar panel, wind turbine, quarry or own container needs without reaching into Horizon's internals. Bundles that use them need "hooks": 97.
 
-API 98 adds `native_give_stack(uuid, stack)`: gives a whole stack (damage, name, enchantments kept) to any player from a server hook, as `Inventory.add` places it, and returns what did not fit. Bundles need "hooks": 98.
+API 98 adds giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
+the player's [`ENTITY_ITEMS`](#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
+Bundles need "hooks": 98.
 
 API 99 adds a mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `native_acting_player` is None), and a mod sets `ran`. `native_feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher as before; the single player owner's console is not covered. Bundles that use it need `"hooks": 99`.
 
@@ -1894,7 +1897,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   <amount:integer>", 3)` for operators of level 3. Kinds: `word`, `text` (the rest of the line, last), `integer`,
   `number`, `boolean`, `player`, `item`, `block_pos`. The usages of one command merge into one tree, which every
   player receives after vanilla's (filtered by their level, as vanilla's is), so their chat box completes and colours
-  it. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+  it. The server also parses player and console invocations against that tree, including each usage's permission and argument types, before calling a mod. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
@@ -1994,7 +1997,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_respawned(player, name)`**: a dead player came back, once per respawn, on a server: after
   `PlayerList.respawn` reset their health, food and experience and placed them at their bed, anchor or the world spawn
   (NeoForge's `PlayerRespawnEvent`). The player's state is swapped in for the call, as for their other actions, so
-  `native_player`, `native_give_items` and the other helpers reach them. A respawn at an anchor in another dimension, or
+  `native_player` and the other helpers reach them. A respawn at an anchor in another dimension, or
   at the world spawn's free column, may still move them on a later tick, once that level has loaded round them; the
   End-exit respawn (after the credits) does not fire it.
 - **`native_player_login(player, name, cancel, reason)`**: a player the server has accepted (their name, the whitelist,
@@ -2252,17 +2255,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `amount` (0 leaves the item whole) or set `cancel` for no wear. Not heard for a creative player or when Unbreaking
   saved the item, nor for a mob's armour, a dispenser's tool or the host of a LAN world. The player's state is swapped
   in, so `native_acting_player`, `native_tell` and the item helpers reach them.
-- Items (API 9), of the acting player (inside `native_perform_command`, whose player is swapped in): `native_held()`
-  (the main hand's item, count, and whether it is plain), `native_count_items(item)`, `native_carried_items()`,
-  `native_take_items(item, count)` (the main hand first, then as `Inventory.add` orders slots),
-  `native_room_for(item)` and `native_give_items(item, count)` (only where it fits: nothing is dropped). They look at
-  the 36 inventory slots and the off hand, never the armour, and only at **plain** stacks: no damage and no
-  component (name, enchantment...), so a shop never takes a worn or enchanted item for a new one. Each returns how
-  many it counted, took or gave; the player's screen follows as for any change to their inventory.
-- `native_give_stack(uuid, stack)`, a whole stack (damage, name, enchantments... kept) to any player from any server
-  hook, as `Inventory.add` places it (onto equal stacks, then empty inventory slots); what did not fit comes back, all
-  of it for a player not here, dead, or swapped out by another player's hook. Nothing is dropped: an auto-pickup
-  leaves the rest on the ground, a machine keeps it.
+- Items: a player's inventory is their [`ENTITY_ITEMS`](#an-entitys-items) handler, from any server hook.
 - Experience: `native_experience_orbs(dimension, min, max)`, the orbs in a box (id, position, `value`, and `count`
   for merged orbs), read before a mod cancels an orb in `native_entity_join_level`; and `native_give_experience(uuid,
   points)`, points given to any player as touching an orb gives them: Mending repairs their damaged items first, the
@@ -2447,6 +2440,14 @@ a dimension.
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
   `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
+- `entity.play_sound(host, sound, volume, pitch)` (`Entity.playSound`: at the entity, under its `sound_source`, for the
+  players in range; a silent mob plays nothing and a player doesn't hear their own), `game_event(host, event)`
+  (`Entity.gameEvent`: the entity is the source of a vibration for sculk sensors, wardens and allays),
+  `broadcast_event(host, id)` (`Level.broadcastEntityEvent`: entity event `id` to the players near it, for
+  `handleEntityEvent` to act on), `sound_source(host)` (`Entity.getSoundSource`, a `NativeSoundSource`) and
+  `spectator(host)` (`Entity.isSpectator`) work for every kind. `game_event` and `broadcast_event` act on the level in
+  place and return false for a player in a parked level. There is no `sprint_particles`: vanilla spawns those on the
+  client only.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2673,15 +2674,10 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
   is sent the menu, its inventory and its cursor as they were. `slot` counts the menu's own slots first, then the
   player's inventory below it: `native_menu_inventory_slot(size, slot)` gives the inventory slot (0..9 the hotbar).
 - `native_menu_closed(uuid, window)`: the player closed it, another menu opened, or the player left.
-- `native_player_stacks(uuid)`: the player's 36 inventory slots, to show copies or offer them.
-- `native_exchange_items(a, a_offer, b, b_offer)`: each offer is inventory slots, each with the exact stack it must
-  still hold. Both offers leave their slots and go to the other player where they fit whole (onto matching stacks,
-  then empty slots), or nothing moves and the error says why (an offer that changed, no room, a player gone or
-  dead). A trade on these menus leaves the offered stacks in their owners' inventories until this one step, so
-  closing the menu, leaving or dying moves nothing.
-
-The menu hooks run with no player's state swapped in; `native_player_stacks` and `native_exchange_items` refuse a
-player whose state is (inside `native_perform_command`): call them from a menu hook or `native_server_tick`.
+- A trade on these menus leaves the offered stacks in their owners' inventories until both sides are settled. Then,
+  in one `host.transaction`, each offered inventory index is checked to still hold exactly what was offered, taken
+  out of the player's [`ENTITY_ITEMS`](#an-entitys-items) handler and put into the other's with `insert_any`
+  ([the recipe](#an-entitys-items)). A changed offer or no room returns an error, and every move is put back.
 
 ### Render hook points
 
@@ -3134,12 +3130,24 @@ or its world's close reaches nothing. `r.entity_capability(&ENTITY_ITEMS,
 game's own, asked as block entities' providers are. Giving, taking and counting a player's items go through it:
 
 ```rust
-// Swap two players' offers, or nothing: an abort puts the first move back.
+// A trade: each offer is (index, the exact stack it must still hold). A stale offer or no
+// room for one aborts the transaction, and every move in it is put back.
 let (a, b) = (seller.capability(host, &ENTITY_ITEMS)?, buyer.capability(host, &ENTITY_ITEMS)?);
 host.transaction(|host, tx| {
-    let paid = move_resources(host, &b, &a, |item| item == &emerald, 5, tx);
-    let sold = move_resources(host, &a, &b, |item| item == &sword, 1, tx);
-    if paid == 5 && sold == 1 { Ok(()) } else { Err(()) }
+    for (from, to, offer) in [(&a, &b, &seller_offer), (&b, &a, &buyer_offer)] {
+        for (index, stack) in offer {
+            let offered = ItemResource::of(stack);
+            let still = from.resource(host, *index).as_ref() == Some(&offered)
+                && from.amount(host, *index) == stack.count;
+            if !still
+                || from.extract(host, tx, *index, &offered, stack.count) != stack.count
+                || to.insert_any(host, tx, &offered, stack.count) != stack.count
+            {
+                return Err(());
+            }
+        }
+    }
+    Ok(())
 })
 ```
 
