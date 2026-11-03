@@ -733,8 +733,8 @@ impl Game<'_> {
         count.saturating_sub(self.recipe_unlocked(&unlocked))
     }
 
-    /// `KnowledgeBookItem.use`: the recipes the book names become known and it
-    /// is used up. A book naming a recipe this server does not have is
+    /// `KnowledgeBookItem.use`: the book is used up and its recipes pass through
+    /// `award_recipes`; a fake player learns nothing. A book naming a recipe this server does not have is
     /// vanilla's `Invalid recipe: {}` and knows nothing. Whether the click
     /// ends here: `InteractionResult.SUCCESS` does and swings, `FAIL` leaves
     /// the other hand its turn (`Minecraft.startUseItem`).
@@ -746,14 +746,13 @@ impl Game<'_> {
         let mut hand = self.stack_in(slot).cloned();
         let infinite = self.creative;
         let index = &world_stations!(self).recipe_index;
-        let result = self
-            .level
-            .recipe_book
-            .use_knowledge_book(index, &mut hand, infinite);
+        let result = horizon_client::recipe_book::Settings::knowledge_book_recipes(
+            index, &mut hand, infinite,
+        );
         *self.stack_in_mut(slot) = hand;
         match result {
-            Ok(unlocked) => {
-                self.award_recipes(&unlocked);
+            Ok(recipes) => {
+                self.award_recipes(&recipes);
                 self.award_stat("used", &stack.item, 1);
                 self.swing_arm();
                 true
