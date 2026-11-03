@@ -1,4 +1,7 @@
-//! `horizon-mod.toml`, a content mod's manifest, and the `.hmod` file around it.
+//! `horizon-mod.toml`, a mod's manifest, and the `.hmod` file around it.
+//!
+//! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
+//! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
 mod jar;
 pub use jar::JarRef;
 
@@ -45,6 +48,127 @@ pub struct Manifest {
     /// that are on may share one (`content::clash`).
     #[serde(default)]
     pub namespaces: Vec<String>,
+    /// Other native mods whose hooks must be available before this one.
+    #[serde(default)]
+    pub dependencies: std::collections::BTreeMap<String, Dependency>,
+    /// Exact build pins and optional raw injections for a code mod.
+    pub native: Option<Native>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Dependency {
+    Version(semver::VersionReq),
+    Detailed(DependencyDetails),
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyDetails {
+    pub version: semver::VersionReq,
+    #[serde(default)]
+    pub optional: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Native {
+    pub game: String,
+    pub horizon: String,
+    pub mixins: String,
+    #[serde(default)]
+    pub injection: Vec<Injection>,
+    #[serde(default)]
+    pub post_build: Vec<PostBuild>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PostBuild {
+    pub bin: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Injection {
+    pub id: String,
+    pub target: Option<String>,
+    pub hook: Option<String>,
+    pub hook_version: Option<u32>,
+    pub kind: InjectionKind,
+    pub helper: String,
+    #[serde(default)]
+    pub cancellable: bool,
+    pub argument: Option<usize>,
+    #[serde(default)]
+    pub bindings: Vec<Binding>,
+    pub priority: Option<i32>,
+    pub selector: Option<String>,
+    pub ordinal: Option<usize>,
+    pub require: Option<usize>,
+    pub fingerprint: Option<String>,
+    pub slice: Option<Slice>,
+    pub variable: Option<Variable>,
+    pub result: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum InjectionKind {
+    Head,
+    BeforeCall,
+    Overwrite,
+    Return,
+    ModifyArg,
+    ModifyConstant,
+    WrapOperation,
+    ModifyArgs,
+    ModifyVariable,
+    ModifyExpressionValue,
+    AfterCall,
+    AfterAssign,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    pub name: String,
+    pub ty: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Slice {
+    pub from: Option<Anchor>,
+    pub to: Option<Anchor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Anchor {
+    pub selector: String,
+    pub ordinal: usize,
+    pub require: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Variable {
+    pub name: String,
+    pub ordinal: usize,
+    pub at: Access,
+    #[serde(default)]
+    pub parameter: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Access {
+    Store,
+    Load,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -82,6 +206,14 @@ impl fmt::Display for Capability {
     }
 }
 
+/// Whether a source pin is an exact lowercase Git object id.
+pub fn revision(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
@@ -94,6 +226,31 @@ impl Manifest {
                 "{MANIFEST}: id {:?} is not [a-z0-9_]{{1,64}}",
                 m.id
             ));
+        }
+        for id in m.dependencies.keys() {
+            if !(1..=64).contains(&id.len())
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            {
+                return Err(format!("{MANIFEST}: invalid dependency id {id:?}"));
+            }
+        }
+        if m.native.is_none() && !m.dependencies.is_empty() {
+            return Err(format!(
+                "{MANIFEST}: content mod dependencies are not supported yet"
+            ));
+        }
+        if let Some(native) = &m.native {
+            if m.version.is_empty()
+                || native.game.is_empty()
+                || !revision(&native.horizon)
+                || !revision(&native.mixins)
+            {
+                return Err(format!(
+                    "{MANIFEST}: native requires game and exact revisions"
+                ));
+            }
         }
         if m.api != API {
             return Err(format!(
@@ -134,16 +291,82 @@ impl Manifest {
     }
 }
 
-/// A content mod as found on disk.
+/// A source file that belongs to the flat Cargo project, not its resource packs.
+fn source_file(name: &str) -> bool {
+    if name
+        .split('/')
+        .any(|part| matches!(part, ".git" | "target"))
+    {
+        return false;
+    }
+    name == "Cargo.toml"
+        || name == "build.rs"
+        || (name.starts_with("src/") && (name.ends_with(".rs") || name.ends_with(".toml")))
+        || (!name.contains('/')
+            && ["README", "LICENSE", "LICENCE", "COPYING", "NOTICE"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix)))
+}
+
+fn plain_path(name: &str) -> bool {
+    !name.starts_with('/')
+        && !name.contains(['\\', ':'])
+        && !name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+/// A mod as found on disk.
 pub struct Package {
     pub manifest: Manifest,
+    pub icon: Option<crate::icon::Icon>,
 }
 impl Package {
-    /// A `.hmod` (a zip holding `horizon-mod.toml`, `assets/` and `data/`)
-    /// or a folder holding the same. Executable components are unsupported.
+    /// Read a flat `.hmod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        let mut icon = None;
+        let mut has_cargo = false;
+        let mut has_source = false;
         let toml = if metadata.is_dir() {
+            for old in [
+                "horizon-native.json",
+                "horizon-mixin.toml",
+                "native",
+                "rust",
+            ] {
+                if std::fs::symlink_metadata(path.join(old)).is_ok() {
+                    return Err(format!("{old}: unsupported package path"));
+                }
+            }
+            if std::fs::symlink_metadata(path.join("Cargo.toml")).is_ok() {
+                check_folder_file(path, "Cargo.toml")?;
+                has_cargo = true;
+            }
+            if let Ok(source) = std::fs::symlink_metadata(path.join("src")) {
+                if !source.is_dir() {
+                    return Err("src: unsupported package path".into());
+                }
+                has_source = true;
+            }
+            let icon_path = path.join("icon.png");
+            match std::fs::symlink_metadata(&icon_path) {
+                Ok(metadata) => {
+                    check_folder_file(path, "icon.png")?;
+                    if metadata.len() > crate::icon::MAX_ICON as u64 {
+                        return Err("icon.png exceeds 256 KiB".into());
+                    }
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(&icon_path)
+                        .map_err(|e| format!("icon.png: {e}"))?
+                        .take(crate::icon::MAX_ICON as u64 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(|e| format!("icon.png: {e}"))?;
+                    icon = Some(crate::icon::Icon::parse(bytes)?);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("icon.png: {e}")),
+            }
             check_folder_file(path, MANIFEST)?;
             for (name, _) in crate::content::folder_files(path)? {
                 check_folder_file(path, &name)?;
@@ -158,32 +381,127 @@ impl Package {
             }
             let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
             let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            for i in 0..zip.len() {
-                let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-                let name = entry.name().map_err(|e| e.to_string())?.into_owned();
-                let mode = entry.unix_mode().unwrap_or_default();
-                if entry.is_dir() && matches!(mode & 0o170000, 0 | 0o040000) {
-                    continue;
-                }
-                check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
-            }
-            let mut toml = String::new();
-            zip.by_name(MANIFEST)
-                .map_err(|e| format!("{MANIFEST}: {e}"))?
-                .take(MAX_MANIFEST + 1)
-                .read_to_string(&mut toml)
-                .map_err(|e| format!("{MANIFEST}: {e}"))?;
-            if toml.len() as u64 > MAX_MANIFEST {
-                return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
-            }
-            toml
+            return Self::read_zip(&mut zip);
         };
-        Ok(Package {
-            manifest: Manifest::parse(&toml)?,
-        })
+        Self::from_parts(&toml, icon, has_cargo, has_source)
+    }
+
+    /// Read and validate an archive, including all selected source and resource entries.
+    pub fn read_zip<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>) -> Result<Self, String> {
+        let mut icon = None;
+        let mut has_cargo = false;
+        let mut has_source = false;
+        let mut entries = Vec::new();
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().map_err(|e| e.to_string())?.into_owned();
+            let mode = entry.unix_mode().unwrap_or_default();
+            entries.push((name.clone(), entry.size(), entry.is_dir()));
+            let first = name.split('/').next().unwrap_or("");
+            if matches!(
+                first,
+                "horizon-native.json" | "horizon-mixin.toml" | "native" | "rust"
+            ) {
+                return Err(format!("{name}: unsupported package path"));
+            }
+            has_source |= first == "src";
+            if entry.is_dir() && matches!(mode & 0o170000, 0 | 0o040000) {
+                continue;
+            }
+            has_cargo |= name == "Cargo.toml";
+            check_file(&name, mode, || Ok(&mut entry)).map_err(|e| e.to_string())?;
+            if name == "icon.png" {
+                if icon.is_some() {
+                    return Err("duplicate icon.png".into());
+                }
+                if entry.size() > crate::icon::MAX_ICON as u64 {
+                    return Err("icon.png exceeds 256 KiB".into());
+                }
+                let mut bytes = Vec::new();
+                drop(entry);
+                zip.by_index(i)
+                    .map_err(|e| e.to_string())?
+                    .take(crate::icon::MAX_ICON as u64 + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| format!("icon.png: {e}"))?;
+                icon = Some(crate::icon::Icon::parse(bytes)?);
+            }
+        }
+        let mut toml = String::new();
+        zip.by_name(MANIFEST)
+            .map_err(|e| format!("{MANIFEST}: {e}"))?
+            .take(MAX_MANIFEST + 1)
+            .read_to_string(&mut toml)
+            .map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if toml.len() as u64 > MAX_MANIFEST {
+            return Err(format!("{MANIFEST}: over {} MiB", MAX_MANIFEST >> 20));
+        }
+        let package = Self::from_parts(&toml, icon, has_cargo, has_source)?;
+        if package.manifest.native.is_some() {
+            let mut names = std::collections::HashSet::new();
+            let mut source_count = 0usize;
+            let mut source_bytes = 0u64;
+            let mut resource_count = 0usize;
+            let mut resource_bytes = 0u64;
+            for (name, size, directory) in entries {
+                let path = if directory {
+                    name.trim_end_matches('/')
+                } else {
+                    &name
+                };
+                if !plain_path(path) || !names.insert(name.clone()) {
+                    return Err(format!("invalid or duplicate package path: {name}"));
+                }
+                if !directory {
+                    if name != MANIFEST
+                        && name != "icon.png"
+                        && !name.starts_with("assets/")
+                        && !name.starts_with("data/")
+                        && !source_file(&name)
+                    {
+                        return Err(format!("unexpected package path: {name}"));
+                    }
+                    if source_file(&name) {
+                        source_count += 1;
+                        source_bytes = source_bytes
+                            .checked_add(size)
+                            .ok_or("native package too large")?;
+                    } else if name.starts_with("assets/") || name.starts_with("data/") {
+                        if size > crate::content::MAX_FILE {
+                            return Err(format!("{name} exceeds the content file size limit"));
+                        }
+                        resource_count += 1;
+                        resource_bytes = resource_bytes
+                            .checked_add(size)
+                            .ok_or("content too large")?;
+                    }
+                }
+            }
+            if source_count > 511 || source_bytes > 64 << 20 {
+                return Err("native package exceeds its entry or size limit".into());
+            }
+            if resource_count > crate::content::MAX_FILES
+                || resource_bytes > crate::content::MAX_TOTAL
+            {
+                return Err("content exceeds its entry or size limit".into());
+            }
+        }
+        Ok(package)
+    }
+
+    fn from_parts(
+        text: &str,
+        icon: Option<crate::icon::Icon>,
+        has_cargo: bool,
+        has_source: bool,
+    ) -> Result<Self, String> {
+        let manifest = Manifest::parse(text)?;
+        if has_cargo != manifest.native.is_some() || has_source != has_cargo {
+            return Err("inconsistent native package declaration and source".into());
+        }
+        Ok(Package { manifest, icon })
     }
     /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
-    /// A `.hmod` holding only native code has none.
     pub fn has_manifest(path: &Path) -> bool {
         if path.is_dir() {
             return path.join(MANIFEST).is_file();
@@ -193,10 +511,75 @@ impl Package {
             .and_then(|f| zip::ZipArchive::new(f).ok())
             .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
     }
-    /// The `.hmod` bytes for `manifest_text` and content `files` (`assets/...`, `data/...`).
+    /// Pack a flat project, selecting its source and resource files deterministically.
+    pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
+        let package = Self::read(root)?;
+        let content = crate::Content::read(root, &package.manifest)?;
+        let mut files = std::collections::BTreeMap::new();
+        let mut reader = content.reader()?;
+        for name in &content.files {
+            files.insert(name.clone(), reader.read(name)?);
+        }
+        if let Some(icon) = package.icon {
+            files.insert("icon.png".to_string(), icon.bytes().to_vec());
+        }
+        if package.manifest.native.is_some() {
+            fn walk(
+                root: &Path,
+                dir: &Path,
+                files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+                source_bytes: &mut u64,
+                source_count: &mut usize,
+            ) -> Result<(), String> {
+                for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    let path = entry.path();
+                    let relative = path.strip_prefix(root).map_err(|e| e.to_string())?;
+                    let name = relative
+                        .to_str()
+                        .ok_or("non-UTF-8 package path")?
+                        .replace('\\', "/");
+                    let kind = entry.file_type().map_err(|e| e.to_string())?;
+                    if kind.is_dir() {
+                        if matches!(entry.file_name().to_str(), Some(".git" | "target"))
+                            || matches!(name.as_str(), "assets" | "data")
+                        {
+                            continue;
+                        }
+                        walk(root, &path, files, source_bytes, source_count)?;
+                    } else if source_file(&name) {
+                        check_folder_file(root, &name)?;
+                        let size = entry.metadata().map_err(|e| e.to_string())?.len();
+                        *source_bytes = source_bytes
+                            .checked_add(size)
+                            .ok_or("native package too large")?;
+                        *source_count += 1;
+                        if *source_bytes > 64 << 20 || *source_count > 511 {
+                            return Err("native package exceeds its entry or size limit".into());
+                        }
+                        files.insert(name, std::fs::read(path).map_err(|e| e.to_string())?);
+                    } else if name.ends_with(".rs") || (name.ends_with(".toml") && name != MANIFEST)
+                    {
+                        return Err(format!("unexpected package path: {name}"));
+                    }
+                }
+                Ok(())
+            }
+            let (mut source_bytes, mut source_count) = (0, 0);
+            walk(root, root, &mut files, &mut source_bytes, &mut source_count)?
+        }
+        let text = std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| e.to_string())?;
+        let files: Vec<_> = files
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+            .collect();
+        Self::write_files(&text, &files)
+    }
+
+    /// The `.hmod` bytes for `manifest_text` and selected project files.
     pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
-        Manifest::parse(manifest_text)?;
+        let manifest = Manifest::parse(manifest_text)?;
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         let err = |e: zip::result::ZipError| e.to_string();
@@ -206,11 +589,17 @@ impl Package {
         };
         put(MANIFEST, manifest_text.as_bytes())?;
         for (name, bytes) in files {
-            crate::content::check_path(name)?;
+            let source = manifest.native.is_some() && source_file(name) && plain_path(name);
+            if *name != "icon.png" && !source {
+                crate::content::check_path(name)?;
+            }
             check_file(name, 0, || Ok(*bytes)).map_err(|e| e.to_string())?;
             put(name, bytes)?;
         }
-        Ok(zip.finish().map_err(err)?.into_inner())
+        let bytes = zip.finish().map_err(err)?.into_inner();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).map_err(err)?;
+        Self::read_zip(&mut archive)?;
+        Ok(bytes)
     }
 }
 
@@ -375,6 +764,157 @@ capabilities = ["registries"]
                 .side,
             Side::Both
         );
+    }
+
+    #[test]
+    fn native_manifest_requires_exact_pins_and_known_fields() {
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n[[native.post_build]]\nbin = 'bake'\nargs = ['one']\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let manifest = Manifest::parse(&format!("{EXAMPLE}{native}")).unwrap();
+        assert_eq!(manifest.native.unwrap().post_build[0].bin, "bake");
+        assert!(
+            Manifest::parse(&format!(
+                "{EXAMPLE}{}",
+                native.replace(&"a".repeat(40), "main")
+            ))
+            .is_err()
+        );
+        assert!(Manifest::parse(&format!("{EXAMPLE}{native}unexpected = true\n")).is_err());
+    }
+
+    #[test]
+    fn dependencies_are_typed_and_content_dependencies_are_refused() {
+        let deps =
+            "[dependencies]\ncreate = '^6.0'\naddon = { version = '^1.2', optional = true }\n";
+        assert!(
+            Manifest::parse(&format!("{EXAMPLE}{deps}"))
+                .unwrap_err()
+                .contains("not supported")
+        );
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let text = format!("{EXAMPLE}{deps}{native}");
+        let manifest = Manifest::parse(&text).unwrap();
+        assert!(
+            matches!(&manifest.dependencies["addon"], Dependency::Detailed(details) if details.optional)
+        );
+        assert!(matches!(
+            &manifest.dependencies["create"],
+            Dependency::Version(_)
+        ));
+        for bad in [
+            text.replace("^6.0", "not semver"),
+            text.replace("create =", "\"not-valid\" ="),
+            text.replace("optional = true", "unexpected = true"),
+        ] {
+            assert!(Manifest::parse(&bad).is_err());
+        }
+    }
+
+    #[test]
+    fn flat_native_archive_round_trips_through_shared_writer() {
+        let manifest = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let files: &[(&str, &[u8])] = &[
+            (
+                "Cargo.toml",
+                b"[package]\nname = 'other'\nversion = '2.0.0'\n",
+            ),
+            ("src/lib.rs", b"pub fn hooks() {}"),
+        ];
+        let bytes = Package::write_files(&manifest, files).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let package = Package::read_zip(&mut zip).unwrap();
+        assert_eq!(package.manifest.id, "ruby");
+        assert_eq!(package.manifest.version, "0.1.0");
+        assert_eq!(package.manifest.native.unwrap().game, "26.3");
+        assert!(
+            Package::write_files(&manifest, &[("Cargo.toml", b""), ("src/../bad.rs", b"")])
+                .is_err()
+        );
+        assert!(
+            Package::write_files(
+                &manifest,
+                &[
+                    ("Cargo.toml", b""),
+                    ("src/lib.rs", b""),
+                    ("src/lib.rs", b"")
+                ]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn flat_project_packs_only_selected_safe_files() {
+        let root = std::env::temp_dir().join(format!("horizon-flat-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(root.join("target/generated")).unwrap();
+        let manifest = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), manifest).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = 'other'\nversion = '2.0.0'\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn hooks() {}\n").unwrap();
+        std::fs::write(root.join(".git/hooks/pre-commit"), "#!/bin/sh\n").unwrap();
+        std::fs::write(root.join("target/generated/bad.rs"), "#!/bin/sh\n").unwrap();
+        let bytes = Package::pack_directory(&root).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
+        assert!(zip.by_name("Cargo.toml").is_ok());
+        assert!(zip.by_name("src/lib.rs").is_ok());
+        assert!(zip.by_name(".git/hooks/pre-commit").is_err());
+        assert!(zip.by_name("target/generated/bad.rs").is_err());
+        std::fs::write(root.join("src/lib.rs"), b"MZ executable").unwrap();
+        assert!(
+            Package::pack_directory(&root)
+                .unwrap_err()
+                .contains("unsupported executable")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_kind_requires_matching_source_and_native_declaration() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-package-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        assert!(Package::read(&root).is_ok());
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = 'unrelated'\nversion = '7.0.0'\n",
+        )
+        .unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        assert!(Package::read(&root).is_err());
+        let native = format!(
+            "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), format!("{EXAMPLE}{native}")).unwrap();
+        assert_eq!(Package::read(&root).unwrap().manifest.id, "ruby");
+        std::fs::create_dir(root.join("native")).unwrap();
+        assert!(Package::read(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
