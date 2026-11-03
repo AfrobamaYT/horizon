@@ -111,10 +111,10 @@ the catalog, not a global API number, source comments or documentation histories
 - Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
   the name and before the components' lines, never for a tooltip the stack hides.
 
-- Using an item, on the server for every player: `native_use_on` hears a right click with an item on a
-  block once the block let it through (`ItemStack.useOn`), and `native_use_item` hears the item's own use, in the air or
-  after `native_use_on` let it through (`Item.use`). Each hears a click once. A mod that claims one swings the hand
-  instead of the item's use.
+- An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
+  block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
+  item's own use, in the air or after `use_on` let it through (`Item.use`). Each hears a click once.
+  Claiming either skips the template and swings the hand. These scoped methods have no global `Hooks` equivalent.
 
 - A block's own item-use behaviour, on the server for every player: attach a `BlockPart` and implement
   `use_item_on(host, event) -> Option<NativeInteractionResult>`. `event.state` keys the per-state table;
@@ -123,8 +123,23 @@ the catalog, not a global API number, source comments or documentation histories
   `Pass`/`Fail` let the item try its `useOn`, and `TryWithEmptyHand` tries the block's `useWithoutItem`
   on the main hand only. `None` leaves the template in charge. This is the block's behaviour, not
   NeoForge's separate `UseItemOnBlockEvent` broadcast interceptor. The earlier `right_click_block`
-  event still decides whether the block is used at all. Dispatch asks the global `Hooks`
-  subscriber (when present), then the clicked state's parts.
+  event still decides whether the block is used at all. Dispatch visits only the clicked state's parts.
+
+- Global interaction interception on both sides: `Hooks::use_item_on_block(host, event)` is NeoForge's
+  `UseItemOnBlockEvent`. `event.phase` is `UsePhase::Block` just before the block's item method/Part,
+  or `ItemAfterBlock` just before the item's `use_on` method/Part. It fires only after that phase's
+  sneak, `use_block`/`use_item`, cooldown and other eligibility gates select it. `event.click`
+  (`NativeBlockClick`) supplies the dimension, hit, hand, stack and player. Return `Flow::Cancel` to
+  skip that phase's Part and template, using `*event.cancellation_result` as the phase's result
+  (default `TryWithEmptyHand`); a main-hand block-phase TRY can still run the empty method.
+  `UsePhase::ItemBeforeBlock` is reserved for `on_item_use_first` and has no firing point yet.
+
+- `Hooks::right_click_item(host, event)` is NeoForge's `PlayerInteractEvent.RightClickItem`, before
+  `Item.use` and the item's `use_item` Part on both sides, only when no block or entity is targeted.
+  `event.click` (`NativeItemClick`) contains the dimension, player's feet block position, player,
+  hand and stack. `Flow::Cancel` skips the Part/template and returns `*event.cancellation_result`
+  (default `Pass`). Only `Success` ends the client's hand loop and predicts a swing; all other
+  canceled results continue to the other hand, including `SuccessServer` and `Consume`.
 
 - A block's empty-hand behaviour: `BlockPart::use_without_item(host, event)` replaces
   `Block.useWithoutItem` on the server, on the main hand only, after `useItemOn` returns
@@ -132,7 +147,7 @@ the catalog, not a global API number, source comments or documentation histories
   changed the block. `Some` replaces the template; `None` runs it, including jukebox ejection,
   pot wobble and bookshelf removal. Consuming results trigger DEFAULT_BLOCK_USE.
   `Pass`, `Fail` and `TryWithEmptyHand` continue to the item; the empty method is never
-  retried. Dispatch asks the global `Hooks` subscriber (when present), then the clicked state's parts.
+  retried. Dispatch visits only the clicked state's parts.
 
 - Breaking and placing a block, on the server for every player: `native_destroy_block` hears a player break a
   block once the game allowed it (`ServerPlayerGameMode.destroyBlock`) and may cancel it, which keeps the block and its
@@ -2338,6 +2353,14 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `cancellation_result` (`NativeInteractionResult`, default `Pass`, which goes on to the item's own use and the other
   hand); with `native_destroy_block`, a cancel with `Fail` keeps players out of claimed land, and the player's client is
   sent the block back.
+- **`native_use_item_on_block(click, phase, cancellation_result, canceled)`**: NeoForge's
+  `UseItemOnBlockEvent`, on both sides, immediately before the selected block or item-on-block phase.
+  Canceling replaces that phase with `cancellation_result` (default `TryWithEmptyHand`), skipping its
+  Part and template. `UsePhase::Block` and `ItemAfterBlock` fire today; `ItemBeforeBlock` is reserved.
+- **`native_right_click_item(click, cancellation_result, canceled)`**: NeoForge's
+  `PlayerInteractEvent.RightClickItem`, on both sides, before air `Item.use` and its Part, never for a
+  block/entity target. Canceling answers with `cancellation_result` (default `Pass`). On the client,
+  every canceled result except `Success` continues to the other hand without a predicted swing.
 - **`native_block_spread(dimension, kind, from, to, canceled)`** and **`native_piston_move(dimension, piston,
   direction, push, destroy, canceled)`** (on `GameLevel`, like the block observers): a fluid flowing or fire
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.

@@ -29,8 +29,8 @@ use horizon_client::mod_api::{
 };
 use horizon_client::mod_api::{
     AttachmentResult, Attachments, BlockHit, BonemealSource, FluidStack, GameRuleValue, Holder,
-    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult, NativeTriState,
-    Suggestion,
+    LegacyRandom, LevelRef, LogicalSide, NativeBlockClick, NativeInteractionResult,
+    NativeItemClick, NativeTriState, Suggestion, UsePhase,
 };
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeExplosionStart, NativeItemFished, NativeLootDrops,
@@ -5770,6 +5770,40 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// `UseItemOnBlockEvent`: after a phase was chosen, before its Part or
+    /// vanilla behaviour. Cancel skips that behaviour and returns
+    /// `cancellation_result` (initially `TryWithEmptyHand`).
+    pub(super) fn native_use_item_on_block(
+        &mut self,
+        click: &NativeBlockClick<'_>,
+        phase: UsePhase,
+        cancellation_result: &mut NativeInteractionResult,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_use_item_on_block(
+            mod_api::HostSide::of(self),
+            click,
+            phase,
+            cancellation_result,
+            canceled,
+        );
+    }
+    /// `PlayerInteractEvent.RightClickItem`, immediately before `Item.use`.
+    /// Cancel skips its Part and vanilla behaviour; its result defaults to
+    /// `Pass`. On the client only `Success` ends the hand loop.
+    pub(super) fn native_right_click_item(
+        &mut self,
+        click: &NativeItemClick<'_>,
+        cancellation_result: &mut NativeInteractionResult,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_right_click_item(
+            mod_api::HostSide::of(self),
+            click,
+            cancellation_result,
+            canceled,
+        );
+    }
     /// `BonemealEvent`: bone meal from `stack` used on the block `state` at
     /// `pos` (`BoneMealItem.growCrop`), by `player` or, when it is `None`, by
     /// a dispenser or a villager. `valid_bonemeal_target` is the block's
@@ -8585,6 +8619,74 @@ impl Game<'_> {
                 use_item,
             }
         }
+    }
+    /// The chosen phase's broadcast event, before its scoped behaviour.
+    pub(super) fn use_item_on_block(
+        &mut self,
+        hit: &super::Hit,
+        hand: Hand,
+        stack: Option<&ItemStack>,
+        phase: UsePhase,
+    ) -> Option<NativeInteractionResult> {
+        if !mod_api::listened(mod_api::HookId::UseItemOnBlock) {
+            return None;
+        }
+        let click = self.block_click(hit, hand, stack);
+        let (mut result, mut canceled) = (NativeInteractionResult::TryWithEmptyHand, false);
+        self.native_use_item_on_block(&click, phase, &mut result, &mut canceled);
+        if !canceled {
+            return None;
+        }
+        if phase == UsePhase::ItemAfterBlock
+            && result.consumes_action()
+            && let Some(stack) = stack
+        {
+            self.with_hand(hand, |game| {
+                if game.remote.is_none() {
+                    game.award_stat("used", &stack.item, 1);
+                }
+                game.apply_after_use_components(stack);
+            });
+        }
+        Some(result)
+    }
+    /// Air use only: a passing block or entity keeps its target, rather than
+    /// becoming a `RightClickItem` interaction.
+    pub(super) fn right_click_item(
+        &mut self,
+        hand: Hand,
+        stack: &ItemStack,
+    ) -> Option<NativeInteractionResult> {
+        if !mod_api::listened(mod_api::HookId::RightClickItem)
+            || self.entity_targeted()
+            || self.pick().is_some()
+        {
+            return None;
+        }
+        let pos = self
+            .target_position(super::commands::Target::Player)?
+            .map(|v| v.floor() as i32);
+        let (player, player_entity_id) = self.native_clicker();
+        let click = NativeItemClick {
+            side: if self.remote.is_some() {
+                LogicalSide::Client
+            } else {
+                LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos,
+            hand,
+            stack,
+            player,
+            player_entity_id,
+        };
+        let instant = self.use_duration(stack) <= 0;
+        let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
+        self.native_right_click_item(&click, &mut result, &mut canceled);
+        if canceled && instant && result.consumes_action() {
+            self.with_hand(hand, |game| game.apply_after_use_components(stack));
+        }
+        canceled.then_some(result)
     }
     /// The shared context for a block's behaviour and the click event.
     pub(super) fn block_click<'a>(
