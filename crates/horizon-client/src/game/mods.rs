@@ -2,7 +2,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native
 //! (`native_hooks.rs`); executable components in content packages are refused.
 use super::{Game, execution_role::ExecutionRole};
-use crate::mod_api::{RegistrationContext, RegistrationPhase};
+use crate::mod_api::RegistrationContext;
 use horizon_client::mod_list::{self, Installed};
 use std::{
     path::PathBuf,
@@ -42,7 +42,7 @@ pub(super) struct ModsState {
 pub(super) fn register_components(root: &std::path::Path) -> horizon_client::Result<()> {
     let mut names = Vec::new();
     Game::native_component_types(
-        &RegistrationContext::new(RegistrationPhase::Components),
+        &RegistrationContext::new(),
         &mut names,
     );
     if names.is_empty() {
@@ -72,11 +72,11 @@ fn native_declared() -> &'static NativeDeclared {
     DECLARED.get_or_init(|| {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         Game::native_blocks(
-            &RegistrationContext::new(RegistrationPhase::Blocks),
+            &RegistrationContext::new(),
             &mut blocks,
         );
         Game::native_items(
-            &RegistrationContext::new(RegistrationPhase::Items),
+            &RegistrationContext::new(),
             &mut items,
         );
         let types = crate::mod_api::block_entity_types()
@@ -101,7 +101,7 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
     }
     let mut names = Vec::new();
     Game::native_standalone_models(
-        &RegistrationContext::new(RegistrationPhase::StandaloneModels),
+        &RegistrationContext::new(),
         &mut names,
     );
     horizon_client::models::register_standalone(names);
@@ -479,7 +479,6 @@ mod tests {
                 context: &RegistrationContext<'_>,
                 event: &mut StandaloneModelsEvent<'_>,
             ) {
-                assert_eq!(context.phase(), RegistrationPhase::StandaloneModels);
                 assert_eq!(
                     context.mods().ids().collect::<Vec<_>>(),
                     ["registration_test"]

@@ -9,9 +9,7 @@ mod phase;
 pub(crate) use phase::install_packages;
 #[cfg(test)]
 pub(crate) use phase::with_test_packages;
-pub use phase::{
-    LoadedMods, PackageInfo, PackageKind, PackageSide, RegistrationContext, RegistrationPhase,
-};
+pub use phase::{LoadedMods, PackageInfo, PackageKind, PackageSide, RegistrationContext};
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod reload_order;
@@ -3193,7 +3191,7 @@ mod tests {
     fn dispatch_before_installation_is_empty() {
         let mut components = Vec::new();
         dispatch_component_types(
-            &RegistrationContext::new(RegistrationPhase::Components),
+            &RegistrationContext::new(),
             &mut components,
         );
         assert!(mods().is_empty());
@@ -3224,7 +3222,7 @@ mod tests {
         }));
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             dispatch_component_types(
-                &RegistrationContext::new(RegistrationPhase::Components),
+                &RegistrationContext::new(),
                 &mut Vec::new(),
             )
         }));

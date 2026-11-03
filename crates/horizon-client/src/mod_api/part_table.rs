@@ -914,7 +914,7 @@ fn namespaced(id: &str) -> bool {
 /// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
 fn register_all(mods: &[ModEntry]) -> Registrar {
     let mut registrar = Registrar::new(mods[0].id);
-    let context = super::RegistrationContext::new(super::RegistrationPhase::Parts);
+    let context = super::RegistrationContext::new();
     for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
         registrar.mod_index = index;

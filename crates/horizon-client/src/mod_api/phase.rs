@@ -120,17 +120,6 @@ pub(crate) fn install_packages(
     );
 }
 
-/// The bootstrap declarations being collected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum RegistrationPhase {
-    Parts,
-    Components,
-    Blocks,
-    Items,
-    StandaloneModels,
-}
-
 /// Read-only view of the startup package inventory.
 pub struct LoadedMods<'a> {
     entries: &'a [PackageInfo],
@@ -184,21 +173,14 @@ impl LoadedMods<'_> {
 /// }
 /// ```
 pub struct RegistrationContext<'a> {
-    phase: RegistrationPhase,
     mods: LoadedMods<'a>,
 }
 
 impl RegistrationContext<'_> {
-    pub(crate) fn new(phase: RegistrationPhase) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            phase,
             mods: LoadedMods::new(),
         }
-    }
-
-    /// The declarations this hook may add to its event.
-    pub fn phase(&self) -> RegistrationPhase {
-        self.phase
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
