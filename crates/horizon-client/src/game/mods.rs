@@ -90,7 +90,6 @@ pub(super) fn content_root(
         .unwrap_or_default();
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
-    // The first load's list stays (`set_local`): a reload does not hash the files again.
     let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
     for path in &paths {
@@ -132,7 +131,7 @@ pub(super) fn content_root(
             content,
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) if announce => announced.push(announced_entry(m, path)),
+            Ok(_) if announce => announced.push(announced_entry(m)),
             Ok(_) => {}
             Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
         }
@@ -203,26 +202,13 @@ fn register_block_entity_types(
     Ok(())
 }
 
-/// A loaded mod as a server tells joining clients (`horizon_protocol::mod_list`): its manifest's
-/// id, version and side, and the SHA-256 of its `.hmod` (none for a folder).
-fn announced_entry(
-    m: &horizon_mods::Manifest,
-    path: &std::path::Path,
-) -> horizon_protocol::mod_list::Entry {
+/// Manifest identity for the configuration-phase mod check.
+fn announced_entry(m: &horizon_mods::Manifest) -> horizon_protocol::mod_list::Entry {
     use horizon_mods::Side;
     use horizon_protocol::mod_list;
-    use sha2::{Digest, Sha256};
-    let sha256 = if path.is_file() {
-        std::fs::read(path)
-            .ok()
-            .map(|bytes| Sha256::digest(bytes).into())
-    } else {
-        None
-    };
     mod_list::Entry {
         id: m.id.clone(),
         version: m.version.clone(),
-        sha256,
         side: match m.side {
             Side::Both => mod_list::Side::Both,
             Side::Client => mod_list::Side::Client,
@@ -523,25 +509,19 @@ mod tests {
         assert!(build_lists_mods(r#"{"mods":[{"id":"worldmap"}]}"#));
     }
 
-    /// A minimal `.hmod` the registry accepts: its manifest and its mixin's.
+    /// A minimal flat native `.hmod`.
     fn hmod(dir: &std::path::Path, id: &str) {
-        let horizon = "a".repeat(40);
-        let manifest = serde_json::json!({
-            "schema": 1, "id": id, "version": "0.3.0", "game": "26.3",
-            "horizon": horizon, "mixins": "b".repeat(40),
-        });
-        let mixin = format!(
-            "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
+        let manifest = format!(
+            "id = '{id}'\nname = '{id}'\nversion = '0.3.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
         );
-        let file = std::fs::File::create(dir.join(format!("{id}.hmod"))).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default();
-        zip.start_file("horizon-native.json", options).unwrap();
-        zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("native/horizon-mixin.toml", options)
-            .unwrap();
-        zip.write_all(mixin.as_bytes()).unwrap();
-        zip.finish().unwrap();
+        let files: &[(&str, &[u8])] = &[
+            ("Cargo.toml", b"[package]\nname='example'\nversion='1'\n"),
+            ("src/lib.rs", b"pub fn hooks() {}"),
+        ];
+        let bytes = horizon_mods::Package::write_files(&manifest, files).unwrap();
+        std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
     }
 
     #[test]

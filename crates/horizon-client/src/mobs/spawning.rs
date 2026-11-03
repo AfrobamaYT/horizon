@@ -152,14 +152,10 @@ fn populate_armor(m: &mut Mob, d: &LocalDifficulty) {
         if i > 0 && m.random.next_float() < partial {
             break;
         }
-        let slot = match i {
-            0 => &mut m.extra.head,
-            1 => &mut m.extra.chest,
-            2 => &mut m.extra.legs,
-            _ => &mut m.extra.feet,
-        };
-        if slot.is_none() {
-            *slot = Some(format!("minecraft:{material}_{piece}").into());
+        let slot = horizon_items::equipment::ARMOR[i];
+        if m.extra.slot_stack(slot).is_none() {
+            m.extra
+                .set_slot_id(slot, Some(format!("minecraft:{material}_{piece}").into()));
         }
     }
 }
@@ -287,13 +283,11 @@ pub fn finalize(m: &mut Mob, biome: &BiomeFacts, difficulty: &LocalDifficulty) {
             m.extra.pick_up_loot = true;
             for i in 0..4 {
                 if m.random.next_float() < 0.1 {
-                    let (slot, piece) = match i {
-                        0 => (&mut m.extra.head, "helmet"),
-                        1 => (&mut m.extra.chest, "chestplate"),
-                        2 => (&mut m.extra.legs, "leggings"),
-                        _ => (&mut m.extra.feet, "boots"),
-                    };
-                    *slot = Some(format!("minecraft:golden_{piece}").into());
+                    let piece = ["helmet", "chestplate", "leggings", "boots"][i];
+                    m.extra.set_slot_id(
+                        horizon_items::equipment::ARMOR[i],
+                        Some(format!("minecraft:golden_{piece}").into()),
+                    );
                 }
             }
             let crossbow = m.random.next_float() < 0.5;
@@ -459,10 +453,10 @@ mod tests {
         let mut lanterns = 0;
         for id in 1..=400 {
             let mut m = spawn(&types, "minecraft:skeleton", id);
-            m.extra.head = None;
+            m.extra.set_slot_id(horizon_items::equipment::HEAD, None);
             let mut random = m.random.clone();
             crate::mobs::finalize::halloween_head(&mut m, &mut random, true);
-            match m.extra.head.as_deref() {
+            match m.extra.head_id() {
                 Some("minecraft:jack_o_lantern") => {
                     pumpkins += 1;
                     lanterns += 1;
@@ -482,14 +476,14 @@ mod tests {
         );
         assert!(lanterns < pumpkins / 2, "{lanterns} lanterns of {pumpkins}");
         let mut m = spawn(&types, "minecraft:skeleton", 1);
-        m.extra.head = None;
+        m.extra.set_slot_id(horizon_items::equipment::HEAD, None);
         let mut random = m.random.clone();
         crate::mobs::finalize::halloween_head(&mut m, &mut random, false);
-        assert!(m.extra.head.is_none());
+        assert!(m.extra.head_id().is_none());
         let mut cow = spawn(&types, "minecraft:cow", 1);
-        cow.extra.head = None;
+        cow.extra.set_slot_id(horizon_items::equipment::HEAD, None);
         let mut random = cow.random.clone();
         crate::mobs::finalize::halloween_head(&mut cow, &mut random, true);
-        assert!(cow.extra.head.is_none());
+        assert!(cow.extra.head_id().is_none());
     }
 }

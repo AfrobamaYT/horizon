@@ -9,6 +9,7 @@ use horizon_client::{
     mod_api::{
         FileToIdConverter, Identifier, ReloadOrderError, ServerReloadApply, ServerReloadContext,
         ServerReloadError, ServerReloadListeners, VanillaServerListeners,
+        server_reload::ReloadMark,
     },
 };
 
@@ -41,7 +42,21 @@ impl std::error::Error for ServerDataReloadError {
 
 pub(super) enum PreparedReload {
     Functions(Box<DataStore>),
-    Mod(ServerReloadApply),
+    Mod {
+        apply: ServerReloadApply,
+        owner: Option<&'static str>,
+        id: Identifier,
+    },
+}
+
+/// Loads the vanilla function library from `stack`, logging per-file failures.
+fn functions_store(stack: &PackStack) -> DataStore {
+    let packs: Vec<_> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
+    let store = DataStore::load(&packs);
+    for (id, e) in &store.errors {
+        log::warn!("Horizon: failed to load function {id}: {e}");
+    }
+    store
 }
 
 impl PackStack {
@@ -86,6 +101,12 @@ impl Game<'_> {
         &self,
         stack: &PackStack,
     ) -> Result<Vec<PreparedReload>, ServerDataReloadError> {
+        // Nobody listens: no registration graph, only the vanilla function library.
+        if !crate::mod_api::listened(crate::mod_api::HookId::AddServerReloadListeners) {
+            return Ok(vec![PreparedReload::Functions(Box::new(functions_store(
+                stack,
+            )))]);
+        }
         let mut listeners = ServerReloadListeners::new();
         self.native_add_server_reload_listeners(&mut listeners);
         let listeners = listeners.finish().map_err(ServerDataReloadError::Order)?;
@@ -93,20 +114,21 @@ impl Game<'_> {
         for listener in listeners {
             if let Some(converter) = &listener.converter {
                 let context = stack.reload_context(&listener.id, converter);
+                let _mark =
+                    ReloadMark::enter(listener.owner, &listener.id, "server_reload_prepare");
                 let apply = listener.listener.prepare(&context).map_err(|source| {
                     ServerDataReloadError::Listener {
-                        listener: listener.id,
+                        listener: listener.id.clone(),
                         source,
                     }
                 })?;
-                prepared.push(PreparedReload::Mod(apply));
+                prepared.push(PreparedReload::Mod {
+                    apply,
+                    owner: listener.owner,
+                    id: listener.id,
+                });
             } else if listener.id == VanillaServerListeners::functions() {
-                let packs: Vec<_> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
-                let store = DataStore::load(&packs);
-                for (id, e) in &store.errors {
-                    log::warn!("Horizon: failed to load function {id}: {e}");
-                }
-                prepared.push(PreparedReload::Functions(Box::new(store)));
+                prepared.push(PreparedReload::Functions(Box::new(functions_store(stack))));
             }
         }
         Ok(prepared)
@@ -118,7 +140,10 @@ impl Game<'_> {
                     self.fns.store = *store;
                     self.sync_function_registries(stack);
                 }
-                PreparedReload::Mod(apply) => apply.apply(),
+                PreparedReload::Mod { apply, owner, id } => {
+                    let _mark = ReloadMark::enter(owner, &id, "server_reload_apply");
+                    apply.apply();
+                }
             }
         }
     }

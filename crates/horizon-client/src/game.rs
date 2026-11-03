@@ -353,6 +353,7 @@ mod structure_edit;
 mod structures;
 mod subtitle_hud;
 mod sulfur_cubes;
+mod tempban;
 mod test_block_edit;
 mod test_blocks;
 mod test_entities;
@@ -1451,6 +1452,26 @@ impl LevelAccess for GameLevel<'_> {
             self.native_is_signal_source(state, &mut source);
         }
         source
+    }
+    fn has_redstone_wire_connection_hook(&self) -> bool {
+        self.native_authoritative && !horizon_client::mod_api::mods().is_empty()
+    }
+    fn adjust_should_redstone_wire_connect_to(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        direction: Option<Direction>,
+        vanilla: bool,
+    ) -> bool {
+        let mut connected = vanilla;
+        self.native_should_redstone_wire_connect_to(
+            self.dimension,
+            pos,
+            state,
+            direction,
+            &mut connected,
+        );
+        connected
     }
     fn adjust_signal(
         &self,
@@ -2840,6 +2861,7 @@ struct Game<'a> {
     cooldowns: horizon_client::cooldowns::Cooldowns,
     /// The source of a command run through /execute (the player otherwise).
     command_source: Option<commands::execute::Source>,
+    native_command_filter: bool,
     titles: titles::Titles,
     /// `Hud.toolHighlightTimer`: the selected item name.
     tool_highlight: horizon_client::hud_overlays::ToolHighlight,
@@ -3132,8 +3154,6 @@ struct Game<'a> {
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
     /// Connected to a server: the world comes from the network (game/remote.rs).
     remote: Option<remote::Remote>,
-    /// The client chunk seam's listener (game/remote_chunks.rs): `None`
-    /// until the client side of `chunk_load`/`chunk_unload` is wired.
     /// This world is open to the network (game/lan.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
@@ -3266,10 +3286,10 @@ struct Game<'a> {
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
     player_attachments: horizon_world::attachments::Attachments,
-    /// The joined guests' attachments, by UUID: here rather than in their
+    /// The joined guests' attachments, by connection: here rather than in their
     /// records, so a hook in one guest's turn still reaches the others'.
     /// The acting guest's are in `player_attachments` for the turn.
-    guest_attachments: HashMap<u128, horizon_world::attachments::Attachments>,
+    guest_attachments: HashMap<u32, horizon_world::attachments::Attachments>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -13924,7 +13944,7 @@ impl Game<'_> {
         let player = self
             .player
             .as_ref()
-            .filter(|p| !p.health.dead_or_dying() && !spectator);
+            .filter(|p| !p.health.dead_or_dying() && !spectator && !self.lan_acting_fake);
         // ExperienceOrb.followNearbyPlayer: each orb goes for the nearest
         // living player within 8 blocks, the host's own or a guest.
         let mut followed: Vec<([f64; 3], [f64; 3])> = player
@@ -13940,7 +13960,13 @@ impl Game<'_> {
                 host.hub
                     .guests
                     .iter()
-                    .filter(|g| g.placed && g.loaded && !g.dead && g.health > 0.0)
+                    .filter(|g| {
+                        g.placed
+                            && g.participates_in_player_simulation()
+                            && g.loaded
+                            && !g.dead
+                            && g.health > 0.0
+                    })
                     .filter(|g| !g.spectator())
                     .map(|g| {
                         let p = g.position;
@@ -19360,6 +19386,7 @@ impl<'a> Game<'a> {
             shield_cooldown: 0,
             cooldowns: Default::default(),
             command_source: None,
+            native_command_filter: false,
             titles: Default::default(),
             tool_highlight: Default::default(),
             saving_indicator: Default::default(),
@@ -22282,6 +22309,7 @@ mod tests {
         struct TagPart;
         impl BlockPart for TagPart {}
         struct ReloadMod;
+        #[mod_api::__subscriptions]
         impl Hooks for ReloadMod {
             fn register(&self, registrar: &mut Registrar) {
                 registrar.block_part_tag("test:reload", TagPart);
@@ -22329,6 +22357,7 @@ mod tests {
             atomic::{AtomicBool, AtomicUsize, Ordering},
         };
         struct Observer(Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
         impl Hooks for Observer {
             fn right_click_block(
                 &self,

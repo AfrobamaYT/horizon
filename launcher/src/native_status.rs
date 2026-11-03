@@ -4,6 +4,7 @@
 use crate::{backend, browser::java, native_mods};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Shown once, before the first native mod is installed.
 pub const NOTICE: &str = "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; the first build downloads Rust and takes 20 to 30 minutes.";
@@ -126,6 +127,8 @@ pub struct Installed {
     pub id: String,
     pub version: String,
     pub origin: Option<crate::github_mods::Origin>,
+    /// The validated package icon, or the package error (the file remains removable).
+    pub icon: Result<Option<Arc<horizon_mods::icon::Icon>>, String>,
 }
 
 /// Discover the actual files, not just GitHub sidecars. Registry files already have a row.
@@ -138,8 +141,10 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
             if !path.is_file() || tracked.entries.iter().any(|e| e.file == file) {
                 return None;
             }
-            let (id, version) = horizon_mods::index::native::Bundle::read(&path)
-                .map(|b| (b.manifest.id, b.manifest.version))
+            let package = horizon_mods::manifest::Package::read(&path);
+            let (id, version) = package
+                .as_ref()
+                .map(|p| (p.manifest.id.clone(), p.manifest.version.clone()))
                 .unwrap_or_else(|_| (stem(&path), String::new()));
             let origin = (path.file_stem()?.to_str()? == id)
                 .then(|| crate::github_mods::origin(home, &id))
@@ -149,6 +154,7 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
                 id,
                 version,
                 origin,
+                icon: package.map(|p| p.icon.map(Arc::new)),
             })
         })
         .collect()
@@ -240,11 +246,14 @@ mod tests {
                 .join(native_mods::INSTALLED)
                 .join(format!("{file}.hmod"));
             let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
-            let manifest = serde_json::json!({"schema":1,"id":id,"version":"1.2","game":"26.3","horizon":pin,"mixins":pin});
-            let source = format!("[mod]\nid = \"{id}\"\nversion = \"1.2\"\n[compatibility]\nhorizon_revision = \"{pin}\"\n");
+            let manifest = format!("id = '{id}'\nname = '{id}'\nversion = '1.2'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '{pin}'\nmixins = '{pin}'\n");
             for (name, bytes) in [
-                ("horizon-native.json", manifest.to_string()),
-                ("native/horizon-mixin.toml", source),
+                ("horizon-mod.toml", manifest.as_str()),
+                (
+                    "Cargo.toml",
+                    "[package]\nname = 'unrelated'\nversion = '9'\n",
+                ),
+                ("src/lib.rs", "pub fn hooks() {}\n"),
             ] {
                 zip.start_file(name, zip::write::SimpleFileOptions::default())
                     .unwrap();
@@ -293,6 +302,7 @@ mod tests {
             .map(|m| (m.id.as_str(), m.version.as_str(), m.origin.is_some()))
             .collect();
         assert_eq!(seen, [("github", "1.2", true), ("local", "1.2", false)]);
+        assert!(files.iter().all(|m| matches!(&m.icon, Ok(None))));
         for id in ["registry", "github", "local"] {
             java::set_enabled(&home, id, true).unwrap();
         }
@@ -319,11 +329,12 @@ mod tests {
             b"broken",
         )
         .unwrap();
+        let files = untracked(&home);
         assert_eq!(
-            untracked(&home)[0].id,
-            "broken",
+            files[0].id, "broken",
             "unreadable files can still be removed"
         );
+        assert!(files[0].icon.is_err(), "a refusal is not an absent icon");
         fs::remove_dir_all(home).unwrap();
     }
 

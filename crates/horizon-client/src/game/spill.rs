@@ -477,6 +477,21 @@ impl GameLevel<'_> {
         ) {
             return 0;
         }
+        // A mod's block entity answers its parts in place (its slot, so its
+        // attachments, stay until `put`), as vanilla's override runs on `this`.
+        // One out for its own tick or menu button, which an empty id stands in
+        // for, isn't here to answer: its part isn't asked.
+        let mut part_drops = Vec::new();
+        if side_effects
+            && matches!(
+                self.world.block_entities.get(&key),
+                Some(BlockEntity::Mod(m)) if !m.id().is_empty()
+            )
+            && let Some(BlockEntity::Mod(entity)) = self.world.block_entities.take(&key)
+        {
+            self.native_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
+            self.world.block_entities.put(key, BlockEntity::Mod(entity));
+        }
         let entity = self.world.block_entities.remove(&key);
         self.world.block_names.remove(&key);
         self.world.forget_block_entity_source(key);
@@ -579,6 +594,9 @@ impl GameLevel<'_> {
                 | PreRemove::CreakingHeart
                 | PreRemove::Beacon
                 | PreRemove::Nothing => {}
+            }
+            for stack in part_drops {
+                self.drop_item_stack(pos, Some(stack));
             }
         }
         // BlockEntity.setRemoved: a jukebox always reports its song stopping,
@@ -747,6 +765,148 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A mod block entity's part answers its removal as vanilla's `preRemoveSideEffects`
+    /// override does: found by the entity's type, not its block, reading its attachments in
+    /// place, its stacks scattered after the block entity's own; skipped under flag 256, and
+    /// drawing nothing when it gives nothing back.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_entity_part_gives_back_what_it_held_when_removed() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+        use horizon_client::mod_api::Holder;
+        use horizon_client::mod_api::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use std::sync::Arc;
+        use std::sync::atomic::Ordering;
+        with_game(|game| {
+            let _mods = game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            // Each case: the entity's type, its hoard, side effects; the gold that comes out.
+            let asked = HOARD_ASKED.load(Ordering::Relaxed);
+            for (id, hoard, side_effects, gold) in [
+                ("doubler:hoard", 5, true, 5),
+                ("doubler:hoard", 5, false, 0),
+                ("doubler:hoard", 0, true, 0),
+                // A different declared type's removal doesn't reach `Hoard`.
+                ("doubler:press_entity", 5, true, 0),
+            ] {
+                let pos = BlockPos::new(1, 64, 2);
+                let key = (pos.x, pos.y, pos.z);
+                let entity = BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                    id.into(),
+                    ModBlockEntityFields::default(),
+                )));
+                game.world.block_entities.insert(key, entity);
+                let holder = Holder::BlockEntity([pos.x, pos.y, pos.z]);
+                let host: &mut dyn horizon_client::mod_api::Host = game;
+                HOARD.set(host, holder, hoard).unwrap();
+                let (spawns, random) = game.with_level(|_, level, _| {
+                    let mut scatter = level.world.random.clone();
+                    level.remove_entity(pos, stone, side_effects);
+                    // The game's own draws for what came out, from the random as it was.
+                    let count = level.spill.spawns.iter().map(|s| s.stack.count).sum();
+                    if count > 0 {
+                        removal::drop_item_stack(&mut scatter, pos, count);
+                    }
+                    let spawns: Vec<_> = level
+                        .spill
+                        .spawns
+                        .iter()
+                        .map(|s| (s.stack.item.to_string(), s.stack.count))
+                        .collect();
+                    (spawns, scatter.next_int() == level.world.random.next_int())
+                });
+                let total: u32 = spawns.iter().map(|(_, count)| count).sum();
+                assert!(
+                    spawns
+                        .iter()
+                        .all(|(item, _)| item == "minecraft:gold_ingot")
+                );
+                assert_eq!(
+                    total, gold,
+                    "{id} holding {hoard}, side effects {side_effects}"
+                );
+                assert!(random, "{id}: the random drew only the scatter");
+                assert!(game.world.block_entities.get(&key).is_none());
+            }
+            // Only the two `doubler:hoard` removals with side effects asked it.
+            assert_eq!(HOARD_ASKED.load(Ordering::Relaxed) - asked, 2);
+        });
+    }
+
+    /// A mod block entity that replaces its own block during its tick is out of the level for
+    /// the call, so its removal doesn't reach its part: the part isn't asked, its attachments
+    /// go with the block entity, and only its container slots come back out.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_block_entity_removing_itself_in_its_tick_is_not_asked() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::Chunk;
+        use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
+        use horizon_client::mod_api::Holder;
+        use horizon_client::mod_api::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use std::sync::Arc;
+        use std::sync::atomic::Ordering;
+        with_game(|game| {
+            let _mods = game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = &game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let granite = registry.default_state("minecraft:granite").unwrap();
+            let pos = BlockPos::new(1, 64, 2);
+            let key = (pos.x, pos.y, pos.z);
+            game.world.set(pos.x, pos.y, pos.z, stone).unwrap();
+            game.world.block_entities.set_mod_containers(
+                [(
+                    stone.0,
+                    Arc::new(ModContainer {
+                        slots: 1,
+                        ..Default::default()
+                    }),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            // Data `[1]` makes the hoard's tick set its own block to granite.
+            let fields = ModBlockEntityFields {
+                items: vec![Some(ItemStack::new("minecraft:diamond", 3))],
+                data: vec![1],
+                ..Default::default()
+            };
+            game.world.block_entities.insert(
+                key,
+                BlockEntity::Mod(Box::new(ModBlockEntity::new("doubler:hoard".into(), fields))),
+            );
+            let holder = Holder::BlockEntity([pos.x, pos.y, pos.z]);
+            let host: &mut dyn horizon_client::mod_api::Host = game;
+            HOARD.set(host, holder, 5).unwrap();
+            let asked = HOARD_ASKED.load(Ordering::Relaxed);
+            let dropped = game.dropped.len();
+            game.tick_mod_block_entity(key);
+            assert_eq!(game.world.block(pos.x, pos.y, pos.z), granite);
+            assert_eq!(HOARD_ASKED.load(Ordering::Relaxed), asked);
+            assert!(game.world.block_entities.attachments(key).is_none());
+            let out: Vec<_> = game.dropped[dropped..]
+                .iter()
+                .map(|d| (d.stack.item.to_string(), d.stack.count))
+                .collect();
+            assert_eq!(out, [("minecraft:diamond".to_owned(), 3)]);
+        });
+    }
     use horizon_client::{block_entity_item, item_data, mobs::raider, save};
     use horizon_world::nbt::Tag;
 

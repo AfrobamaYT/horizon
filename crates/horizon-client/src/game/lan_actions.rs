@@ -443,7 +443,7 @@ impl Game<'_> {
         };
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
@@ -985,7 +985,7 @@ impl Game<'_> {
         let g = &mut host.hub.guests[i];
         std::mem::swap(
             &mut self.player_attachments,
-            self.guest_attachments.entry(g.uuid).or_default(),
+            self.guest_attachments.entry(g.conn).or_default(),
         );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
@@ -3656,6 +3656,14 @@ impl Game<'_> {
             self.guest_mute_command(conn, &words);
             return;
         }
+        // Horizon's `/tempban` (game/tempban.rs), on dedicated servers.
+        if super::tempban::TEMPBAN_COMMANDS.contains(&words[0]) && self.server_lists.is_some() {
+            if let Some(mut host) = self.lan.take() {
+                self.guest_tempban_command(&mut host, conn, &words);
+                self.lan = Some(host);
+            }
+            return;
+        }
         // A native mod's command, for every player its level allows,
         // whether the world allows commands or not (game/native_server.rs).
         let allowed = self.options.dedicated.is_some() || self.allow_commands();
@@ -3844,7 +3852,7 @@ impl Game<'_> {
         } else {
             self.ui.registries.players.clone()
         };
-        players.extend(host.hub.guests.iter().map(|g| g.name.clone()));
+        players.extend(host.hub.online_players().map(|g| g.name.clone()));
         let (ops, banned_players, banned_ips, whitelisted) = match &self.server_lists {
             Some(lists) => {
                 let l = lists.lock().unwrap();
@@ -3941,8 +3949,7 @@ impl Game<'_> {
             return;
         }
         // PlayerList.respawn replaces the player, retaining only opted-in data.
-        let uuid = host.hub.guests[i].uuid;
-        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+        if let Some(attachments) = self.guest_attachments.get_mut(&conn)
             && let Ok(copy) = attachments.copy_on_death()
         {
             *attachments = copy;
@@ -6181,6 +6188,7 @@ mod tests {
             }
         }
         struct Mod(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut Registrar) {
                 r.block_part("minecraft:stone", Picker(self.0.clone()));

@@ -822,6 +822,21 @@ impl Hub {
         self.config.simulation_distance = distance;
         self.broadcast(&C::SetSimulationDistance(play::Distance { distance }));
     }
+    /// Resolve a player attachment holder in the level in place.
+    pub fn holder_guest(&self, uuid: u128, dimension: &str) -> Option<&Guest> {
+        self.guests
+            .iter()
+            .find(|g| g.placed && g.uuid == uuid && g.participates_online())
+            .or_else(|| {
+                self.guests.iter().find(|g| {
+                    g.placed
+                        && g.uuid == uuid
+                        && !g.participates_online()
+                        && g.dimension == dimension
+                })
+            })
+    }
+
     /// Placed network players in join order.
     pub fn online_players(&self) -> impl Iterator<Item = &Guest> {
         self.guests
@@ -1086,7 +1101,10 @@ impl Hub {
     }
 
     fn player_info(&self, uuid: u128, name: &str, mode: i32, latency: i32) -> play::PlayerInfo {
-        let guest = self.guests.iter().find(|g| g.uuid == uuid);
+        let guest = self
+            .guests
+            .iter()
+            .find(|g| g.uuid == uuid && g.participates_online());
         play::PlayerInfo {
             uuid,
             name: Some(name.to_owned()),
@@ -1768,6 +1786,13 @@ impl Hub {
         for event in self.lan.poll() {
             match event {
                 NetEvent::Joined(j) => {
+                    while let Some(i) = self
+                        .guests
+                        .iter()
+                        .position(|g| g.uuid == j.uuid && !g.participates_online())
+                    {
+                        events.push(HostEvent::Left(Box::new(self.guests.remove(i))));
+                    }
                     let conn = self.admit(*j, ctx);
                     events.push(HostEvent::Joined(conn));
                 }
