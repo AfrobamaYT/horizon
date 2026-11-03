@@ -3443,10 +3443,20 @@ impl Game<'_> {
             // Fox.FoxBreedGoal.breed: the baby trusts the players who fed its
             // parents into love.
             if p.species() == Species::Fox {
+                let parent_cause = self
+                    .love_cause
+                    .get(&parent)
+                    .copied()
+                    .and_then(|conn| self.killer_uuid(conn));
+                let partner_cause = self
+                    .love_cause
+                    .get(&partner)
+                    .copied()
+                    .and_then(|conn| self.killer_uuid(conn));
                 horizon_client::mobs::fox::trust_breeders(
                     child,
-                    p.extra.love_cause,
-                    q.as_ref().and_then(|q| q.extra.love_cause),
+                    parent_cause.map(horizon_client::lan::playerdata::uuid_ints),
+                    partner_cause.map(horizon_client::lan::playerdata::uuid_ints),
                 );
             }
             // Goat.getBreedOffspring: GoatAi.initMemories, then the baby
@@ -7912,6 +7922,9 @@ mod breeding_tests {
                 game.mobs
                     .push(Mob::new(fox_base + 2, fox, Vec3::new(1.0, 64.0, 0.0), 0.0));
                 game.native_joins_skip();
+                game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+                let feeder = horizon_client::lan::playerdata::uuid_ints(game.native_acting_id());
+                game.love_cause.insert(fox_base + 1, None);
                 let fox_child = game.breed(
                     fox_base + 1,
                     fox_base + 2,
@@ -7920,6 +7933,8 @@ mod breeding_tests {
                     horizon_client::mobs::BreedExperience::Deferred,
                 );
                 assert_eq!(fox_child, Some(fox_base + 3));
+                let fox_child = game.mobs.iter().find(|mob| mob.id == fox_base + 3).unwrap();
+                assert!(horizon_client::mobs::fox::trusts(fox_child, feeder));
                 assert_eq!(
                     *joins.lock().unwrap(),
                     vec![
