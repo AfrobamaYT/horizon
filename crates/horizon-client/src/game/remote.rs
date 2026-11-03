@@ -4049,12 +4049,7 @@ impl Game<'_> {
                 if p.event == 55
                     && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
-                    let (main, off) = (
-                        m.extra.take_slot_id(horizon_items::equipment::MAINHAND),
-                        m.extra.take_slot_id(horizon_items::equipment::OFFHAND),
-                    );
-                    m.extra.set_main_hand(off);
-                    m.extra.set_slot_id(horizon_items::equipment::OFFHAND, main);
+                    m.extra.swap_hands();
                 }
                 // LivingEntity.handleEntityEvent 47 to 52, 65 and 68: an
                 // equipped item broke (onEquippedItemBroken).
@@ -6590,10 +6585,11 @@ impl Game<'_> {
             if m.extra.using_item > 0 {
                 if player {
                     let item = if m.extra.using_off_hand {
-                        m.extra.off_hand_id().map(Arc::<str>::from)
+                        m.extra.slot_stack(horizon_items::equipment::OFFHAND)
                     } else {
-                        m.extra.main_hand_id().map(Arc::<str>::from)
-                    };
+                        m.extra.slot_stack(horizon_items::equipment::MAINHAND)
+                    }
+                    .map(|s| s.item.clone());
                     if let Some(item) = item {
                         let eye = m.eye_height();
                         let at = [m.position.x, m.position.y, m.position.z];
@@ -10622,6 +10618,48 @@ fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    /// `LivingEntity.handleEntityEvent(55)` is `swapHandItems`: the whole
+    /// stacks trade hands, not just their ids.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_hand_swap_event_keeps_whole_stacks() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::{items::ItemStack, mobs::Mob};
+        use horizon_core::geometry::Vec3;
+        use horizon_items::equipment::{MAINHAND, OFFHAND};
+        use horizon_protocol::packets::play::{Clientbound as C, EntityEvent};
+
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.damage = 40;
+            sword.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Biter".into()));
+            let mut shield = ItemStack::new("minecraft:shield", 1);
+            shield.damage = 12;
+            let mut mob = Mob::new(31, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            mob.extra.set_slot_stack(MAINHAND, Some(sword.clone()));
+            mob.extra.set_slot_stack(OFFHAND, Some(shield.clone()));
+            game.mobs.push(mob);
+            let swap = |game: &mut super::super::Game| {
+                game.handle_packet(C::EntityEvent(EntityEvent { id: 31, event: 55 }))
+                    .unwrap();
+            };
+            swap(game);
+            let m = game.mobs.iter().find(|m| m.id == 31).unwrap();
+            assert_eq!(m.extra.slot_stack(MAINHAND), Some(&shield));
+            assert_eq!(m.extra.slot_stack(OFFHAND), Some(&sword));
+            swap(game);
+            let m = game.mobs.iter().find(|m| m.id == 31).unwrap();
+            assert_eq!(m.extra.slot_stack(MAINHAND), Some(&sword));
+            assert_eq!(m.extra.slot_stack(OFFHAND), Some(&shield));
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_epochs_follow_level_replacement_and_logout() {

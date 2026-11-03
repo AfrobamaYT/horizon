@@ -1219,6 +1219,21 @@ impl Extra {
     pub fn main_hand_stack(&self) -> Option<&crate::items::ItemStack> {
         self.slot_stack(horizon_items::equipment::MAINHAND)
     }
+    /// `LivingEntity.swapHandItems`: the two hands trade their whole stacks,
+    /// with the enchantments and trims `gear` keeps for them.
+    pub fn swap_hands(&mut self) {
+        use horizon_items::equipment::{MAINHAND, OFFHAND};
+        let (main, off) = (
+            self.equipment[MAINHAND].take(),
+            self.equipment[OFFHAND].take(),
+        );
+        self.equipment[MAINHAND] = off;
+        self.equipment[OFFHAND] = main;
+        if let Some(g) = self.gear.as_deref_mut() {
+            g.slots.swap(gear::MAIN, gear::OFF);
+            g.trims.swap(gear::MAIN, gear::OFF);
+        }
+    }
     /// Empties `slot` and returns the id of what it held.
     pub fn take_slot_id(&mut self, slot: usize) -> Option<Arc<str>> {
         self.equipment[slot].take().map(|s| s.item)
