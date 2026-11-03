@@ -472,11 +472,10 @@ impl dyn Host + '_ {
     ) -> Option<Capability<T>> {
         let stack = self.place_stack(place)?;
         let mut game = None;
+        let parts = super::providers(true, key.name, self, |_| Some(stack.item.to_string()));
         let answer = super::ask_providers::<super::ItemProvider<T>, T>(
-            true,
-            key.name,
+            parts,
             self,
-            |_| Some(stack.item.to_string()),
             |provider, host| provider(host, place),
             |host| {
                 game = key.default.and_then(|default| default(host, &stack));

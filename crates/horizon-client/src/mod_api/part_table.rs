@@ -68,7 +68,7 @@ type Capabilities = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart>>
 /// A capability provider a mod registered: an `Arc` of [`BlockProvider`] or [`ItemProvider`]
 /// of the capability's handler trait.
 #[derive(Clone)]
-struct CapabilityPart {
+pub(crate) struct CapabilityPart {
     mod_index: usize,
     /// Asked ahead of the game's own provider.
     before_game: bool,
@@ -294,19 +294,15 @@ pub(crate) enum Answer<T: ?Sized> {
     Nobody,
 }
 
-/// Asks the providers mods registered for capability `name` and the id `id` works out, as
-/// NeoForge asks a capability's providers: those registered `before_game` in registration
-/// order, then the game's own (`game`: whether it answers), then the others in registration
-/// order; the first to answer wins. With no provider registered for `name`, neither `id` nor
-/// any provider is asked.
-pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
+/// The providers mods registered for capability `name` (an item capability's with `items`) and
+/// the id `id` works out, in registration order. With none registered for `name`, `id` isn't
+/// asked.
+pub(crate) fn providers(
     items: bool,
     name: &str,
     host: &mut dyn Host,
     id: impl FnOnce(&mut dyn Host) -> Option<String>,
-    call: impl Fn(&P, &mut dyn Host) -> Option<Box<T>>,
-    game: impl FnOnce(&mut dyn Host) -> bool,
-) -> Answer<T> {
+) -> &'static [CapabilityPart] {
     let table = INSTALLED.get().map(|installed| match items {
         true => &installed.keys.item_capabilities,
         false => &installed.keys.capabilities,
@@ -314,9 +310,21 @@ pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
     let by_id = table
         .and_then(|table| table.get(name))
         .filter(|by_id| !by_id.is_empty());
-    let parts = by_id
+    by_id
         .and_then(|by_id| by_id.get(id(host)?.as_str()))
-        .map_or(&[][..], Vec::as_slice);
+        .map_or(&[][..], Vec::as_slice)
+}
+
+/// Asks `parts`, a capability's providers, in the fork's chosen order (NeoForge's javadoc
+/// doesn't state one between mods' providers and the game's): those registered `before_game`
+/// in registration order, then the game's own (`game`: whether it answers), then the others in
+/// registration order; the first to answer wins.
+pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
+    parts: &[CapabilityPart],
+    host: &mut dyn Host,
+    call: impl Fn(&P, &mut dyn Host) -> Option<Box<T>>,
+    game: impl FnOnce(&mut dyn Host) -> bool,
+) -> Answer<T> {
     let ask = |before_game: bool, host: &mut dyn Host| {
         parts
             .iter()
@@ -340,18 +348,21 @@ pub(crate) fn ask_providers<P: ?Sized + 'static, T: ?Sized>(
 
 /// A mod's handler for capability `key` at `at`, where the game would answer with its own
 /// unless a mod comes first: one registered `before_game`, else, where the game has no answer
-/// (`game`), the first mod's. With no provider registered for `key`, one table check.
+/// (`game`), the first mod's. With no provider registered for `key` and the block entity's
+/// type, the game isn't asked, so a vanilla container's lookup costs one table check.
 pub fn block_entity_capability<T: ?Sized + 'static>(
     key: &CapabilityKey<T>,
     host: &mut dyn Host,
     at: BlockSide,
     game: impl FnOnce(&mut dyn Host) -> bool,
 ) -> Option<Capability<T>> {
+    let parts = providers(false, key.name, host, |host| host.block_entity_type(at.pos));
+    if parts.is_empty() {
+        return None;
+    }
     let answer = ask_providers::<BlockProvider<T>, T>(
-        false,
-        key.name,
+        parts,
         host,
-        |host| host.block_entity_type(at.pos),
         |provider, host| provider(host, at),
         game,
     );
@@ -433,8 +444,9 @@ impl Registrar {
     /// Answer capability `key` for the mod block entity type `kind` (`mymod:press`) with
     /// `provider`, which gives a handler for one block entity and side, or none:
     /// `r.block_entity_capability(&ITEMS, "mymod:press", |_, _| Some(Box::new(PressItems)))`.
-    /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: the game's own is asked
-    /// first, then the mods' in registration order, and the first to answer wins.
+    /// Like NeoForge's `RegisterCapabilitiesEvent`, providers add up: in the fork's chosen order
+    /// (NeoForge's javadoc states none), the game's own is asked first, then the mods' in
+    /// registration order, and the first to answer wins.
     pub fn block_entity_capability<T: ?Sized + 'static>(
         &mut self,
         key: &CapabilityKey<T>,
@@ -696,6 +708,21 @@ mod tests {
             r.block_entity_capability(&ITEMS, "test:ordered", |_, _| Some(Box::new(Marked(2))));
             r.block_entity_capability_before_game(&ITEMS, "test:ordered", |_, at| {
                 (at.pos[0] == 9).then(|| Box::new(Marked(3)) as _)
+            });
+            r.block_entity_capability_before_game(&ITEMS, "test:ordered", |_, at| {
+                (at.pos[0] >= 9).then(|| Box::new(Marked(4)) as _)
+            });
+            // `test:ordered_item` the same, the one ahead of the game answering for two items.
+            r.item_capability(&ITEM_ITEMS, "test:ordered_item", |_, _| None);
+            r.item_capability(&ITEM_ITEMS, "test:ordered_item", |_, _| {
+                Some(Box::new(MarkedItems(1)))
+            });
+            r.item_capability(&ITEM_ITEMS, "test:ordered_item", |_, _| {
+                Some(Box::new(MarkedItems(2)))
+            });
+            r.item_capability_before_game(&ITEM_ITEMS, "test:ordered_item", |host, place| {
+                let two = host.place_stack(place).is_some_and(|held| held.count == 2);
+                two.then(|| Box::new(MarkedItems(3)) as _)
             });
             r.block_entity_capability_before_game(&FLUIDS, "test:tank", |_, _| {
                 Some(Box::new(Tank))
@@ -1933,8 +1960,10 @@ mod tests {
         assert_eq!(answer(host, 7), (true, 1));
         // The game's slots come before the mods' providers.
         assert_eq!(answer(host, 8), (false, 27));
-        // A provider registered before the game comes first where it answers.
+        // Providers registered before the game come first where they answer, in registration
+        // order: at x = 9 both answer, at x = 10 only the second.
         assert_eq!(answer(host, 9), (true, 3));
+        assert_eq!(answer(host, 10), (true, 4));
         // The game's own lookup takes a mod's handler only where the game has none or a mod
         // comes first.
         let mod_only = |host: &mut dyn Host, x| {
@@ -1949,6 +1978,89 @@ mod tests {
         assert_eq!(mod_only(host, 7), Some(1));
         assert_eq!(mod_only(host, 8), None);
         assert_eq!(mod_only(host, 9), Some(3));
+        // With no provider for the block entity's type, or no type (a vanilla one), the game
+        // isn't asked at all: a hopper's lookup costs one table check.
+        let mut asked = false;
+        let at = BlockSide {
+            pos: [8, 64, 0],
+            side: None,
+        };
+        let vanilla: &mut dyn Host = &mut TypeOf(None);
+        let mut game = |_: &mut dyn Host| {
+            asked = true;
+            true
+        };
+        assert!(block_entity_capability(&ITEMS, vanilla, at, &mut game).is_none());
+        let unknown: &mut dyn Host = &mut TypeOf(Some("test:unregistered"));
+        assert!(block_entity_capability(&ITEMS, unknown, at, &mut game).is_none());
+        assert!(!asked);
+
+        // Item providers in the same order, for the item in a player's hand: with no game slots
+        // (damage 0), the first mod's that answers; with them (damage 1), the game's; for two
+        // items, the one ahead of the game.
+        let item = |damage, count| {
+            let mut host = HeldItem(stack("test:ordered_item", count, damage));
+            let host: &mut dyn Host = &mut host;
+            let found = host.item_capability(&ITEM_ITEMS, &HAND).unwrap();
+            (found.owner.is_some(), found.slots(host, &HAND))
+        };
+        assert_eq!(item(0, 1), (true, 1));
+        assert_eq!(item(1, 1), (false, 27));
+        assert_eq!(item(1, 2), (true, 3));
+    }
+
+    /// Block entities of one type, or vanilla ones (none).
+    struct TypeOf(Option<&'static str>);
+    impl Host for TypeOf {
+        fn block_entity_type(&self, _: [i32; 3]) -> Option<String> {
+            self.0.map(str::to_owned)
+        }
+    }
+
+    /// Player 1 holding one stack in their hand, which has game slots (`item_container`) when
+    /// its damage is 1.
+    struct HeldItem(ItemStack);
+    impl Host for HeldItem {
+        fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
+            (*place == HAND).then(|| self.0.clone())
+        }
+        fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+            (stack.damage == 1).then(|| vec![None; 27])
+        }
+    }
+
+    /// An item handler that only tells which provider made it, by its slot count.
+    struct MarkedItems(usize);
+    impl StackItemHandler for MarkedItems {
+        fn slots(&self, _: &mut dyn Host, _: &ItemPlace) -> usize {
+            self.0
+        }
+        fn stack(&self, _: &mut dyn Host, _: &ItemPlace, _: usize) -> Option<ItemStack> {
+            None
+        }
+        fn insert(
+            &self,
+            _: &mut dyn Host,
+            _: &ItemPlace,
+            _: usize,
+            stack: ItemStack,
+            _: bool,
+        ) -> Option<ItemStack> {
+            Some(stack)
+        }
+        fn extract(
+            &self,
+            _: &mut dyn Host,
+            _: &ItemPlace,
+            _: usize,
+            _: u32,
+            _: bool,
+        ) -> Option<ItemStack> {
+            None
+        }
+        fn capacity(&self, _: &mut dyn Host, _: &ItemPlace, _: usize, _: &ItemStack) -> u32 {
+            0
+        }
     }
 
     /// A mod's tank: the game's tank at its position, reached from every side but its top.

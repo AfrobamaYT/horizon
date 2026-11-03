@@ -182,11 +182,10 @@ impl dyn Host + '_ {
     ) -> Option<Capability<T>> {
         let at = BlockSide { pos, side };
         let mut game = None;
+        let parts = super::providers(false, key.name, self, |host| host.block_entity_type(pos));
         let answer = super::ask_providers::<super::BlockProvider<T>, T>(
-            false,
-            key.name,
+            parts,
             self,
-            |host| host.block_entity_type(pos),
             |provider, host| provider(host, at),
             |host| {
                 game = key.default.and_then(|default| default(host, at));

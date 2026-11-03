@@ -1003,7 +1003,7 @@ pub use transaction::TransactionSeal;
 mod part_table;
 pub(crate) use part_table::{
     Answer, KnownIds, ask_providers, install_parts, mark_game_thread, parts, place_provider,
-    resolve_parts,
+    providers, resolve_parts,
 };
 pub use part_table::{
     Attached, BlockProvider, ItemProvider, Parts, Registrar, block_entity_capability,

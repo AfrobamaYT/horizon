@@ -3107,7 +3107,8 @@ Some(Box::new(PipeItems)))` gives a handler for the block entity and side `at` (
 leave it to the next provider. Providers add up: `host.capability(&ITEMS, pos, side)` asks those registered
 with `r.block_entity_capability_before_game` first, then the game's own (a block entity's slots by side, by the
 rules hoppers follow, and a mod block entity's `block_entity_container`), then the others, each in registration
-order, and the first to answer wins. It returns a `Capability`, the handler and who answered. A handler holds
+order, and the first to answer wins. That order is the fork's choice, the game first and `_before_game` to go ahead
+of it: NeoForge 26.3's javadoc doesn't state one between mods' providers and the game's. It returns a `Capability`, the handler and who answered. A handler holds
 no borrow: each call is given the host, so it may call a
 neighbour's capability, and it keeps its state in the block entity's slots, compound or attachments. Hoppers and
 `insert_item` use a mod's handler where one is registered; `simulate` answers without changing anything. A
