@@ -1545,6 +1545,8 @@ mod capability;
 pub use capability::{BlockSide, Capability, CapabilityKey, ITEMS};
 mod entity_capability;
 pub use entity_capability::{ENTITY_ITEMS, EntityCapabilityKey};
+mod energy_capability;
+pub use energy_capability::{ENERGY, EnergyHandler, move_energy};
 mod fluid_capability;
 pub use fluid_capability::{FLUIDS, FluidResource, FluidStack, ITEM_FLUIDS};
 mod item_place;

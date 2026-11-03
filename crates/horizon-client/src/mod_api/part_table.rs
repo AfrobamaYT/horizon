@@ -844,6 +844,14 @@ pub(crate) mod tests {
                     Some(Box::new(ModTank { at, lie }))
                 });
             }
+            for (id, lie) in [
+                ("test:battery_gives_more", Lie::GivesMore),
+                ("test:battery_takes_more", Lie::TakesMore),
+            ] {
+                r.block_entity_capability_before_game(&ENERGY, id, move |_, at| {
+                    Some(Box::new(ModBattery { at, lie }))
+                });
+            }
         }
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output *= 2;
@@ -3180,6 +3188,152 @@ pub(crate) mod tests {
             assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
             let held = [SOURCE, OTHER, TANK].map(|pos| world.held(pos));
             assert_eq!(held, [water(1000), water(1000), None], "{liar}");
+        }
+    }
+
+    /// A mod's battery: the game's at its position, misanswering by 100 as `lie` says.
+    struct ModBattery {
+        at: BlockSide,
+        lie: Lie,
+    }
+    impl EnergyHandler for ModBattery {
+        fn amount(&self, host: &mut dyn Host) -> u32 {
+            host.energy_amount(self.at).unwrap_or(0)
+        }
+        fn capacity(&self, host: &mut dyn Host) -> u32 {
+            host.energy_capacity(self.at)
+        }
+        fn insert(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let went = host.energy_insert(self.at, amount, tx);
+            match self.lie {
+                Lie::TakesMore => went + 100,
+                Lie::GivesMore => went,
+            }
+        }
+        fn extract(&self, host: &mut dyn Host, tx: &Transaction, amount: u32) -> u32 {
+            let more = match self.lie {
+                Lie::GivesMore => 100,
+                Lie::TakesMore => 0,
+            };
+            host.energy_extract(self.at, amount + more, tx)
+        }
+    }
+
+    /// Batteries as the game answers them, by position: what each holds, and the most one
+    /// insert moves, of a capacity of 1000; and the mod block entity types standing at some.
+    #[derive(Clone, Default)]
+    struct EnergyWorld {
+        batteries: HashMap<[i32; 3], (u32, u32)>,
+        types: HashMap<[i32; 3], &'static str>,
+        kept: Vec<Self>,
+    }
+    impl EnergyWorld {
+        fn amounts(&self, at: &[[i32; 3]]) -> Vec<u32> {
+            at.iter().map(|pos| self.batteries[pos].0).collect()
+        }
+    }
+    impl Journal for EnergyWorld {
+        fn kept(&mut self) -> &mut Vec<Self> {
+            &mut self.kept
+        }
+    }
+    impl Host for EnergyWorld {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            open(self);
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            close(self, commit);
+        }
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
+        }
+        fn block_entity_kind(
+            &self,
+            BlockEntityRef { position: pos, .. }: BlockEntityRef,
+        ) -> Option<&str> {
+            self.types.get(&pos).copied()
+        }
+        fn energy_amount(&self, BlockSide { pos, .. }: BlockSide) -> Option<u32> {
+            Some(self.batteries.get(&pos)?.0)
+        }
+        fn energy_capacity(&self, _: BlockSide) -> u32 {
+            1000
+        }
+        fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
+            let Some((held, limit)) = self.batteries.get_mut(&at.pos) else {
+                return 0;
+            };
+            let went = amount.min(*limit).min(1000 - *held);
+            *held += went;
+            went
+        }
+        fn energy_extract(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
+            let Some((held, _)) = self.batteries.get_mut(&at.pos) else {
+                return 0;
+            };
+            let came = amount.min(*held);
+            *held -= came;
+            came
+        }
+    }
+
+    #[test]
+    fn an_energy_move_takes_what_the_targets_room_and_limit_let_in_and_loses_none() {
+        game_thread();
+        let mut world = EnergyWorld::default();
+        world.batteries.insert(SOURCE, (900, 1000));
+        world.batteries.insert(TANK, (700, 1000));
+        world.batteries.insert(OTHER, (0, 250));
+        let mut moved = |from, to, max| {
+            let host: &mut dyn Host = &mut world;
+            let source = here().capability(host, &ENERGY, from, None).unwrap();
+            let target = here().capability(host, &ENERGY, to, None).unwrap();
+            host.transaction(|host, tx| move_energy(host, &source, &target, max, tx))
+        };
+        // The target's room, then its limit per insert, each by a move tried again with what
+        // it took; and no more than the source holds.
+        assert_eq!(moved(SOURCE, TANK, 1000), Ok(300));
+        assert_eq!(moved(SOURCE, OTHER, 1000), Ok(250));
+        assert_eq!(moved(OTHER, SOURCE, 1000), Ok(250));
+        assert_eq!(world.amounts(&[SOURCE, TANK, OTHER]), [600, 1000, 0]);
+    }
+
+    #[test]
+    fn a_battery_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_energy() {
+        game_thread();
+        for (liar, at) in [
+            ("test:battery_gives_more", SOURCE),
+            ("test:battery_takes_more", TANK),
+        ] {
+            let mut world = EnergyWorld::default();
+            world.batteries.insert(SOURCE, (500, 1000));
+            world.batteries.insert(OTHER, (500, 1000));
+            world.batteries.insert(TANK, (0, 1000));
+            world.types.insert(at, liar);
+            let host: &mut dyn Host = &mut world;
+            let ends = |host: &mut dyn Host, pos| here().capability(host, &ENERGY, pos, None);
+            let (source, other, tank) = (
+                ends(host, SOURCE).unwrap(),
+                ends(host, OTHER).unwrap(),
+                ends(host, TANK).unwrap(),
+            );
+            // Two moves into the battery at `TANK` in one transaction, the second from the
+            // source: a move through the liar fails, and its error aborts the transaction.
+            let moved = host.transaction(|host, tx| {
+                let first = move_energy(host, &other, &tank, 200, tx)?;
+                let second = move_energy(host, &source, &tank, 200, tx)?;
+                Ok(first + second)
+            });
+            let owner = mod_name(0);
+            assert_eq!(moved, Err(Overanswered { owner }), "{liar}");
+            assert_eq!(
+                world.amounts(&[SOURCE, OTHER, TANK]),
+                [500, 500, 0],
+                "{liar}"
+            );
         }
     }
 

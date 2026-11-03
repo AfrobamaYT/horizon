@@ -1061,7 +1061,7 @@ API 140 adds `native_map_decorations(map, decorations)` is asked each time a map
 
 API 141 adds a player's client starting and stopping tracking an entity, on the single player server thread and on a dedicated server: `native_player_start_tracking(player, name, entity, uuid, kind)` when the entity is sent to the player (NeoForge's `PlayerEvent.StartTracking`, vanilla's `ServerEntity.addPairing`) and `native_player_stop_tracking(...)` when it stops (`PlayerEvent.StopTracking`, `removePairing`): out of range, gone from the level, or the player left, changed level or respawned. They name the entity by ID, UUID and type and run with no player's state swapped in, so a mod sends what the player needs with `native_net_send_to_player`. Each start has one stop. Bundles that use them need "hooks": 141.
 
-API 142 adds an energy buffer on a mod block's block entity (`Capabilities.Energy.BLOCK`), and the helpers that read and change it. `native_block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. `native_energy(dimension, pos, face)` reads it through a side; `native_energy_insert(pos, face, amount, simulate)` and `native_energy_extract(dimension, pos, face, amount, simulate)` answer the amount moved (`simulate` changes nothing); `native_move_energy(dimension, from, from_face, to, to_face, max)` is `EnergyHandlerUtil.move` between two blocks and answers the amount moved. Bundles need "hooks": 142.
+API 142 adds an energy buffer on a mod block's block entity. `native_block_entity_energy` declares the buffer as `SimpleEnergyHandler` is built: its capacity, the most one insert and one extract moves, and the faces a fill may come through and a drain may leave by. The amount lives in the entity's saved compound as the int `energy`, so it survives restarts and the block's own tick reads it there. The game's own energy capability answers it (see "A block's energy"). Bundles need "hooks": 142.
 
 API 143 adds data maps (`RegisterDataMapTypesEvent`). `native_data_map_types(types)` pushes the types a mod registers: an `id` (`mod_id:name`, not in `minecraft`) for a `registry`, `minecraft:item` or `minecraft:block` so far; asked once per load of the server's data (a world's first open and every `/reload`). The values come from `data/<mod_id>/data_maps/<registry path>/<name>.json` in the world's data packs and from files a mod pushes through `native_data_pack_files` under the key `data_maps/<mod_id>:<registry path>/<name>`: `{"replace": false, "values": {"minecraft:coal": ..., "#minecraft:logs": ...}, "remove": [...]}`, an entry's value being the data itself or `{"value": ..., "replace": false}`; `replace` clears what earlier files set, a tag gives every entry in it the value, `remove` applies after the file's own values, and a newer value overrides an older one. `native_data_map(registry, type, entry)` reads an entry's value (the JSON the file held) and `native_data_map_entries(registry, type)` lists them. Server side only and not synced to clients; mergers, conditions, other registries and mod datapack registries are not here yet. Bundles need "hooks": 143.
 
@@ -3167,10 +3167,23 @@ drained whole, an empty bucket taking plain water or lava and becoming its full 
 bucket. `move_resources` moves between an item and a block as between two blocks: a full cauldron fills a bucket in a
 player's slot, and two thirds of one fill none.
 
+#### A block's energy
+
+Energy is the capability `ENERGY` (NeoForge's `Capabilities.Energy.BLOCK`), answered by an `EnergyHandler`: an
+amount and a capacity, with no resource, and `insert` and `extract` written in a transaction as a
+`ResourceHandler`'s are. `r.block_entity_capability(&ENERGY, "mymod:battery", …)` registers a provider, asked as
+`ITEMS`' are, and `level.capability(host, &ENERGY, pos, side)` finds one. The game's own answer is a mod block
+entity's `block_entity_energy` buffer, as NeoForge's `SimpleEnergyHandler`: a fill through the sides it comes
+through, up to the buffer's room and its limit per insert, and a drain by the sides it leaves by, up to the limit per
+extract; a side that reaches neither finds no handler. `move_energy(host, &from, &to, max, tx)` moves between two
+(`EnergyHandlerUtil.move`) as one step of `move_resources`: all or nothing, a move the target takes only part of
+tried again with that part.
+
 The game never trusts an answer past what it asked or offered. A handler answering more than it was asked has its
-move undone, in its transaction, and is warned once naming the mod, and `move_resources` returns `Overanswered`
-naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so neither end keeps
-any of it: a broken handler can't make a move overflow, duplicate or lose items or fluid, or panic the game.
+move undone, in its transaction, and is warned once naming the mod, and `move_resources` or `move_energy` returns
+`Overanswered` naming it. Returned from the closure of `host.transaction` with `?`, it aborts the whole move, so
+neither end keeps any of it: a broken handler can't make a move overflow, duplicate or lose items, fluid or energy, or
+panic the game.
 
 `host.transaction(|host, tx| …)` (NeoForge 26.3's `Transaction`) runs a closure whose `Ok` commits and whose
 `Err` aborts, nested in the open transaction if any. `tx`, a `&Transaction` (NeoForge's `TransactionContext`), is
