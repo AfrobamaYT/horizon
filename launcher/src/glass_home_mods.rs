@@ -144,7 +144,9 @@ impl Launcher {
         } else {
             glass_home_lists::picture(None, "puzzle")
         };
-        let source = if let Some(origin) = row.native.as_ref().and_then(|n| n.origin.as_ref()) {
+        let source = if let Some(error) = &row.error {
+            error.clone()
+        } else if let Some(origin) = row.native.as_ref().and_then(|n| n.origin.as_ref()) {
             trf("from GitHub: {source}", &[("source", &origin.label())])
         } else {
             match &row.entry {
