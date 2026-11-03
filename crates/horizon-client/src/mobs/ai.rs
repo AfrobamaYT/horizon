@@ -2748,7 +2748,9 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
         .ambient_effects
         .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
     if m.effects_dirty {
-        m.invisible = m.has_effect("minecraft:invisibility");
+        let invisible = m.has_effect("minecraft:invisibility");
+        m.needs_sync |= m.invisible != invisible;
+        m.invisible = invisible;
         m.effects_dirty = false;
     }
 }
