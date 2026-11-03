@@ -406,7 +406,7 @@ pub use native_block_entity_draw::BlockEntityDraw;
 pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativeShake};
+pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 pub use native_item_energy::ItemEnergyBuffer;
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
@@ -14239,7 +14239,7 @@ impl Game<'_> {
                 };
             }
         }
-        if !(self.dim == Dim::Overworld && self.sky_darken() >= 4) {
+        if !self.bed_can_sleep_now() {
             self.tell_sleeper(
                 "block.minecraft.bed.no_sleep",
                 "You can sleep only at night or during thunderstorms",
