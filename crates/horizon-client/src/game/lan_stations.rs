@@ -189,12 +189,14 @@ impl Game<'_> {
                             .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
                 });
             // AnvilUpdateEvent, after createResult made vanilla's result
-            // (a rename that changes nothing else too): before PrepareAnvil.
-            // A cancelled take's undo is no createResult.
-            if gs.kind == StationKind::Anvil
-                && let Some(mut update) = gs.menu.anvil_update()
-                && !cancelled
+            // (a rename that changes nothing else too): before PrepareAnvil,
+            // which follows createResult too. A cancelled take's undo is no
+            // createResult.
+            let anvil_created =
+                gs.kind == StationKind::Anvil && gs.menu.anvil_created() && !cancelled;
+            if anvil_created
                 && !horizon_client::mod_api::mods().is_empty()
+                && let Some(mut update) = gs.menu.anvil_update()
             {
                 let guest = &host.hub.guests[gi];
                 let mut cancel = false;
@@ -207,7 +209,7 @@ impl Game<'_> {
                 );
                 gs.menu.anvil_updated(update, cancel);
             }
-            if recomputed && gs.kind == StationKind::Anvil {
+            if anvil_created {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(2).cloned();

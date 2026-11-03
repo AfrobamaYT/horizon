@@ -734,9 +734,12 @@ impl Game<'_> {
                 // AnvilUpdateEvent on a server's client menu, as on the
                 // server: asked when an input or the name changed (this
                 // recomputes on every click), its answer kept until then.
-                if self.remote.is_some()
-                    && let Some(left) = s.inputs[0].clone()
+                // An empty left slot has no result and forgets the answer.
+                if s.inputs[0].is_none() {
+                    s.anvil_answer = None;
+                } else if self.remote.is_some()
                     && !horizon_client::mod_api::mods().is_empty()
+                    && let Some(left) = s.inputs[0].clone()
                 {
                     match &s.anvil_answer {
                         Some((inputs, asked, answer)) if *inputs == s.inputs && *asked == name => {

@@ -444,7 +444,7 @@ pub struct Menu {
     /// `GrindstoneEvent.OnPlaceItem`'s experience for the result now in the
     /// slot, or -1 for vanilla's.
     grind_xp: i32,
-    /// `AnvilMenu.createResult` ran since `anvil_update` last asked.
+    /// `AnvilMenu.createResult` ran since `anvil_created` last asked.
     anvil_made: bool,
     /// The enchanting table's item changed to an enchantable one: the caller
     /// (with a level) fills the costs and clues (`slotsChanged`'s
@@ -1334,13 +1334,15 @@ impl Menu {
         }
     }
 
-    /// `AnvilUpdateEvent`'s question once `createResult` ran since the last
-    /// one (an input or the name changed, even back to what it was), or
-    /// `None`: it didn't, or with no left input, where vanilla has no result.
-    pub fn anvil_update(&mut self) -> Option<AnvilUpdate> {
-        if !std::mem::take(&mut self.anvil_made) {
-            return None;
-        }
+    /// Whether `createResult` ran since the last call (an input or the name
+    /// changed, even back to what it was, or to no visible change).
+    pub fn anvil_created(&mut self) -> bool {
+        std::mem::take(&mut self.anvil_made)
+    }
+
+    /// `AnvilUpdateEvent`'s question about the result `createResult` made,
+    /// or `None` with no left input, where vanilla has no result.
+    pub fn anvil_update(&self) -> Option<AnvilUpdate> {
         let left = self.containers[MAIN][0].clone()?;
         let right = self.containers[MAIN][1].clone();
         Some(AnvilUpdate::new(
@@ -3780,10 +3782,12 @@ pub(crate) mod tests {
         bare_env(|env| {
             let mut menu = Menu::new(Kind::Anvil);
             menu.set_slot(env, 1, stack("diamond", 5));
+            assert!(menu.anvil_created());
             assert_eq!(menu.anvil_update(), None);
             menu.set_slot(env, 0, stack("iron_sword", 1));
+            assert!(menu.anvil_created());
+            assert!(!menu.anvil_created());
             let mut update = menu.anvil_update().unwrap();
-            assert_eq!(menu.anvil_update(), None);
             assert_eq!((&update.vanilla.output, &update.output), (&None, &None));
             update.output = stack("netherite_sword", 1);
             update.xp_cost = 7;
@@ -3804,7 +3808,6 @@ pub(crate) mod tests {
             let mut menu = Menu::new(Kind::Anvil);
             menu.set_slot(env, 0, stack("iron_sword", 1));
             menu.set_slot(env, 1, stack("diamond", 5));
-            menu.anvil_update().unwrap();
             menu.anvil_updated(update, true);
             assert_eq!((menu.slot(2), menu.data[0]), (None, 0));
         });
@@ -3820,7 +3823,7 @@ pub(crate) mod tests {
             let renamed = || {
                 let mut menu = Menu::new(Kind::Anvil);
                 menu.set_slot(env, 0, stack("iron_sword", 1));
-                menu.anvil_update();
+                menu.anvil_created();
                 assert!(menu.rename(env, "Edge"));
                 menu
             };
@@ -3845,7 +3848,6 @@ pub(crate) mod tests {
             assert_eq!((menu.slot(2).cloned(), menu.data[0]), (vanilla.0, 5));
 
             let mut menu = renamed();
-            menu.anvil_update().unwrap();
             menu.anvil_updated(update, true);
             assert_eq!((menu.slot(2), menu.data[0]), (None, 0));
         });
@@ -3860,10 +3862,11 @@ pub(crate) mod tests {
             let mut menu = Menu::new(Kind::Anvil);
             menu.set_slot(env, 0, stack("iron_sword", 1));
             menu.set_slot(env, 1, stack("dirt", 1));
-            menu.anvil_update().unwrap();
+            menu.anvil_created();
             let before = (menu.slot(2).cloned(), menu.data[0]);
             assert!(menu.rename(env, "Edge"));
             assert_eq!((menu.slot(2).cloned(), menu.data[0]), before);
+            assert!(menu.anvil_created(), "createResult ran");
             let mut update = menu.anvil_update().unwrap();
             assert_eq!(update.name.as_deref(), Some("Edge"));
             update.output = stack("golden_sword", 1);
