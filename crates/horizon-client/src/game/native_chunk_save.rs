@@ -5,6 +5,17 @@ use super::Game;
 thread_local! {
     static OBSERVER: std::cell::RefCell<Option<Box<dyn for<'a> FnMut(&mut Game<'a>, [i32; 2])>>> =
         std::cell::RefCell::new(None);
+    static UNLOAD_OBSERVER: std::cell::RefCell<Option<Box<dyn for<'a> FnMut(&mut Game<'a>, [i32; 2])>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(super) fn observe_unload(game: &mut Game<'_>, pos: [i32; 2]) {
+    UNLOAD_OBSERVER.with(|observer| {
+        if let Some(observer) = observer.borrow_mut().as_mut() {
+            observer(game, pos);
+        }
+    });
 }
 
 impl Game<'_> {
@@ -107,6 +118,28 @@ mod tests {
             assert_eq!(calls.borrow().len(), 2);
             Arc::make_mut(game.world.chunks.get_mut(&key).unwrap()).set(0, 0, 0, 0);
             game.world.modified.insert(key);
+            let pos = (key.0 * 16, 0, key.1 * 16);
+            let mut entity = horizon_client::chunk::block_entity::ModBlockEntity::default();
+            entity.id = "example:machine".into();
+            entity
+                .nbt
+                .insert("value".into(), horizon_world::nbt::Tag::Int(1));
+            game.world.block_entities.insert(
+                pos,
+                horizon_client::containers::BlockEntity::Mod(Box::new(entity)),
+            );
+            UNLOAD_OBSERVER.with(|observer| {
+                *observer.borrow_mut() = Some(Box::new(move |game, chunk| {
+                    if chunk == [99, 99] {
+                        game.native_with_mod_block_entity([pos.0, pos.1, pos.2], |entity| {
+                            entity
+                                .nbt
+                                .insert("value".into(), horizon_world::nbt::Tag::Int(2));
+                        })
+                        .unwrap();
+                    }
+                }))
+            });
             game.streaming.paused = false;
             game.streaming.radius = -1;
             game.update_world();
@@ -118,8 +151,19 @@ mod tests {
                 .load(key.0, key.1, game.pack.assets.registry, world_biomes!(game))
                 .unwrap();
             assert_eq!(saved.get(0, 0, 0), stone);
+            let (_, horizon_client::containers::BlockEntity::Mod(entity)) =
+                &saved.block_entities[0]
+            else {
+                panic!("mod block entity was not saved")
+            };
+            assert_eq!(
+                entity.nbt.get(&"value".into()),
+                Some(&horizon_world::nbt::Tag::Int(1))
+            );
+            assert!(!game.world.modified.contains(&key));
             assert_eq!(calls.borrow().len(), 3);
             OBSERVER.with(|observer| *observer.borrow_mut() = None);
+            UNLOAD_OBSERVER.with(|observer| *observer.borrow_mut() = None);
             let _ = std::fs::remove_dir_all(dir);
         });
     }
