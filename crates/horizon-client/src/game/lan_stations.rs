@@ -1079,13 +1079,19 @@ impl Game<'_> {
     /// The guests' lecterns each tick: `stillValid` (the block entity, its
     /// book, the reach) closes them, and `broadcastChanges` sends a book or
     /// page another player changed.
-    fn lan_lecterns_tick(&mut self, host: &mut LanHost) {
+    fn lan_lecterns_tick(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
         let open: Vec<(u32, i32, (i32, i32, i32))> = host
             .play
             .iter()
             .filter_map(|(c, p)| p.lectern.as_ref().map(|l| (*c, l.window, l.key)))
             .collect();
         for (conn, window, key) in open {
+            let Some(host) = self.lan.as_ref() else {
+                return;
+            };
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };
@@ -1093,13 +1099,15 @@ impl Game<'_> {
                 continue;
             }
             if self.lan_lectern_valid(g, key) {
-                self.lan_send_lectern(host, conn, false);
+                self.lan_send_lectern(conn, false);
             } else {
-                self.lan_station_closed(host, conn, Some(window));
-                host.hub.send_to(
-                    conn,
-                    &C::ContainerClose(play::ContainerClose { container: window }),
-                );
+                self.lan_station_closed(conn, Some(window));
+                if let Some(host) = self.lan.as_mut() {
+                    host.hub.send_to(
+                        conn,
+                        &C::ContainerClose(play::ContainerClose { container: window }),
+                    );
+                }
             }
         }
     }
