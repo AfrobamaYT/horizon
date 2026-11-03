@@ -115,6 +115,13 @@ jobs:
     needs: changes
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
+    # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
+    # verify's tests were written to skip GPU work when no adapter exists, and one of them
+    # (gfx::frame_gen::optical_flow, horizon-rust/horizon#8627) fails on lavapipe, so verify hides the driver and runs
+    # exactly as before. ignored-tests is where the GPU tests run.
+    env:
+      VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
+      VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
     steps:
       - uses: actions/checkout@v4
         with:
