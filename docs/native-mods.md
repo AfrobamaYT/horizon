@@ -383,7 +383,7 @@ catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`,
 
 ### Host-aware weapon damage (API next)
 
-`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; upstream v1 keeps its signature and firing point. **Fork migration:** mods that read the extra damage or knockback fields previously added to the fork's v1 hooks must move to the corresponding v2 hooks. Those fork-only fields are no longer present on v1.
+`living_incoming_damage_v2` is an additive hook; upstream v1 keeps its signature and firing point. **Fork migration:** mods that read the extra damage or knockback fields previously added to the fork's v1 hooks must move to the corresponding v2 hooks. Those fork-only fields are no longer present on v1.
 It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
 and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
 levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
@@ -699,7 +699,7 @@ one, where vanilla gives the `by` one.
 
 Bundles that use it need `"hooks": 50`.
 
-API 51 adds `native_menu_button_v2`: a mod container's menu button (`AbstractContainerMenu.clickMenuButton(Player, int)`) with the clicking player's cursor stack, read and written, so a widget outside the slots can take or give what the player carries (a tank taking a bucket). It fires right after `native_menu_button`, on the server, for single player and LAN guests alike. Bundles need "hooks": 51.
+`native_menu_button` handles a mod container's button (`AbstractContainerMenu.clickMenuButton(Player, int)`) on the server, for single player and LAN guests. It exposes the player identity, button, block entity and mutable carried stack, so a widget outside the slots can take or give what the player carries.
 
 API 52 adds `native_block_entity_sync(pos)`, which sends the block and its update tag to clients again
 (`Level.sendBlockUpdated`): with the level's block changes, to the players who see its chunk, once per position
@@ -1870,9 +1870,7 @@ targets and the `hooks` metadata continue to work as before.
 
 ### Knockback hook versions
 
-`living_knockback_v2` keeps `living_knockback` version 1 unchanged, as `menu_button_v2` does for
-its older hook: v1's function signature is a target mixin mods attach to, so it cannot gain
-arguments. Both already receive the raw strength before knockback resistance (v1 did before
+`living_knockback_v2` keeps `living_knockback` version 1 unchanged. Both already receive the raw strength before knockback resistance (v1 did before
 v2 existed). V2 adds three things: the attacker's network entity id (falling back to a known
 last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
 `attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
