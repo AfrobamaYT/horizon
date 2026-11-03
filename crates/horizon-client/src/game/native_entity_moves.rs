@@ -1,0 +1,313 @@
+//! Moving and turning an entity for native server mods, through an
+//! `EntityRef` (docs/native-mods.md, "Entity and level handles", #7387):
+//! teleport, rotation, head yaw, facing, size and pushes. Writes move the
+//! entity as `/tp` and `/rotate` do, so clients see it as they see those.
+//! Reads return `None`, writes false, for a stale handle or on a client.
+use super::entity::{Entity as _, EntityHandle, with_entity_mut};
+use super::{
+    Game,
+    commands::{Target, entity_pitch},
+};
+use horizon_client::mod_api::EntityRef;
+use horizon_core::geometry::Vec3;
+
+/// `Level.isInSpawnableBounds` and `/tp`'s limits: 30,000,000 blocks out,
+/// 20,000,000 up or down.
+fn in_bounds([x, y, z]: [f64; 3]) -> bool {
+    [x, y, z].iter().all(|v| v.is_finite())
+        && x.abs() < 30_000_000.0
+        && z.abs() < 30_000_000.0
+        && y.abs() < 20_000_000.0
+}
+
+/// `Direction.fromYRot`: the horizontal direction a yaw faces.
+fn facing(yaw: f32) -> &'static str {
+    const BY_2D: [&str; 4] = ["south", "west", "north", "east"];
+    BY_2D[((f64::from(yaw) / 90.0 + 0.5).floor() as i64 & 3) as usize]
+}
+
+impl Game<'_> {
+    /// Moves the entity to `pos` in its level (`Entity.teleportTo`), as
+    /// `/tp` does: a player is placed there and told, a rider gets off. With
+    /// `rotation` (yaw, pitch in degrees) it also turns. False for a position
+    /// outside the world's bounds, for wall-mounted entities, or when the
+    /// requested rotation cannot be stored. API @API:entity_moves@.
+    pub(super) fn native_entity_teleport_to(
+        &mut self,
+        entity: EntityRef,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) -> bool {
+        let Some(t) = self.native_entity_target(entity) else {
+            return false;
+        };
+        if !in_bounds(pos)
+            || matches!(t, Target::Frame(_) | Target::Painting(_))
+            || rotation.is_some_and(|r| {
+                !r.iter().all(|v| v.is_finite())
+                    || !matches!(
+                        t,
+                        Target::Player | Target::Guest(_) | Target::Mob(_) | Target::Other(_)
+                    )
+            })
+            || matches!(t, Target::Guest(_)) && self.lan_acting_uuid.is_some()
+        {
+            return false;
+        }
+        self.teleport_to(t, pos, rotation);
+        true
+    }
+    /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
+    /// `setXRot`), as `/rotate` does: the pitch is clamped to -90..90, and a
+    /// player's client is told. False for kinds whose rotation Horizon does not
+    /// fully store, or an unavailable player. Does not teleport or dismount.
+    /// API @API:entity_moves@.
+    pub(super) fn native_entity_set_rotation(
+        &mut self,
+        entity: EntityRef,
+        yaw: f32,
+        pitch: f32,
+    ) -> bool {
+        let Some(t) = self.native_entity_target(entity) else {
+            return false;
+        };
+        if !yaw.is_finite() || !pitch.is_finite() {
+            return false;
+        }
+        let pitch = entity_pitch(pitch);
+        match t {
+            Target::Player | Target::Guest(_) => {
+                if matches!(t, Target::Guest(_)) && self.lan_acting_uuid.is_some() {
+                    return false;
+                }
+                self.for_player(t, |g| {
+                    if g.player.is_none() {
+                        return false;
+                    }
+                    g.yaw = yaw;
+                    g.pitch = pitch;
+                    true
+                }) == Some(true)
+            }
+            Target::Mob(id) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+                    return false;
+                };
+                m.yaw = yaw;
+                m.head_pitch = pitch;
+                m.needs_sync = true;
+                true
+            }
+            Target::Other(id) => {
+                let Some(o) = self.others.iter_mut().find(|o| o.id == id) else {
+                    return false;
+                };
+                o.yaw = yaw;
+                o.pitch = pitch;
+                true
+            }
+            _ => false,
+        }
+    }
+    /// The yaw of the entity's head (`Entity.getYHeadRot`): a mob's or a
+    /// player's own, zero for the kinds without a head. API
+    /// @API:entity_moves@.
+    pub(super) fn native_entity_head_yaw(&self, entity: EntityRef) -> Option<f32> {
+        let t = self.native_entity_target(entity)?;
+        if let Some(g) = self.native_target_guest(t) {
+            return Some(g.head_yaw);
+        }
+        if let Target::Mob(id) = t {
+            return Some(self.mobs.iter().find(|m| m.id == id)?.head_yaw);
+        }
+        Some(0.0)
+    }
+    /// Turns a mob's head to `yaw` (`Entity.setYHeadRot`); its body follows
+    /// as its AI turns it. Players' heads can turn too; false for other kinds
+    /// or an unavailable player. API @API:entity_moves@.
+    pub(super) fn native_entity_set_head_yaw(&mut self, entity: EntityRef, yaw: f32) -> bool {
+        if !yaw.is_finite() {
+            return false;
+        }
+        match self.native_entity_target(entity) {
+            Some(Target::Mob(id)) => match self.mobs.iter_mut().find(|m| m.id == id) {
+                Some(m) => {
+                    m.head_yaw = yaw;
+                    m.needs_sync = true;
+                    true
+                }
+                None => false,
+            },
+            Some(t @ (Target::Player | Target::Guest(_))) => {
+                let conn = match t {
+                    Target::Player => self.lan_acting,
+                    Target::Guest(conn) if self.lan_acting_uuid.is_none() => Some(conn),
+                    _ => None,
+                };
+                let Some(g) = conn.and_then(|conn| self.lan.as_mut()?.hub.guest_mut(conn)) else {
+                    return false;
+                };
+                g.head_yaw = yaw;
+                true
+            }
+            _ => false,
+        }
+    }
+    /// The horizontal direction the entity faces (`Entity.getDirection`):
+    /// `north`, `south`, `east` or `west`. API @API:entity_moves@.
+    pub(super) fn native_entity_direction(&self, entity: EntityRef) -> Option<&'static str> {
+        let t = self.native_entity_target(entity)?;
+        Some(facing(self.target_rotation(t)[0]))
+    }
+    /// The entity's width and height (`Entity.getBbWidth`, `getBbHeight`):
+    /// its box's, so a baby's or a scaled entity's own. API
+    /// @API:entity_moves@.
+    pub(super) fn native_entity_dimensions(&self, entity: EntityRef) -> Option<[f64; 2]> {
+        let [min, max] = self.native_entity_bounding_box(entity)?;
+        Some([max[0] - min[0], max[1] - min[1]])
+    }
+    /// Adds `delta` to the entity's velocity (`Entity.push`,
+    /// `addDeltaMovement`). False for an unavailable player, an entity
+    /// Horizon doesn't simulate, or a value that isn't finite. API
+    /// @API:entity_moves@.
+    pub(super) fn native_entity_push(&mut self, entity: EntityRef, delta: [f64; 3]) -> bool {
+        if !delta.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let Some(target) = self.native_entity_target(entity) else {
+            return false;
+        };
+        if matches!(target, Target::Player | Target::Guest(_)) {
+            let conn = match target {
+                Target::Player => self.lan_acting,
+                Target::Guest(conn) if self.lan_acting_uuid.is_none() => Some(conn),
+                _ => None,
+            };
+            let Some(g) = conn.and_then(|conn| self.lan.as_mut()?.hub.guest_mut(conn)) else {
+                return false;
+            };
+            let motion = if matches!(target, Target::Player) {
+                self.player.as_mut()
+            } else {
+                g.motion.as_deref_mut()
+            };
+            let Some(motion) = motion else {
+                return false;
+            };
+            let v = motion.velocity;
+            motion.velocity = Vec3::new(v.x + delta[0], v.y + delta[1], v.z + delta[2]);
+            let v = motion.velocity;
+            g.send(
+                &horizon_protocol::packets::play::Clientbound::SetEntityMotion(
+                    horizon_protocol::packets::play::SetEntityMotion {
+                        id: g.entity_id,
+                        velocity: [v.x, v.y, v.z],
+                    },
+                ),
+            );
+            return true;
+        }
+        let Some(h) = self.native_walk_entity(entity.id()) else {
+            return false;
+        };
+        let [x, y, z] = delta;
+        with_entity_mut!(self, h, e => {
+            let v = e.velocity_mut();
+            *v = Vec3::new(v.x + x, v.y + y, v.z + z);
+        });
+        if let EntityHandle::Mob(i) = h {
+            self.mobs[i].needs_sync = true;
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn moves_and_pushes_a_live_mob() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let entity = game.native_entity(12).unwrap();
+            assert!(entity.teleport_to(game, [5.0, 70.0, -3.0], Some([90.0, 120.0])));
+            assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
+            assert_eq!(entity.rotation(game), Some([90.0, 90.0]));
+            assert_eq!(entity.head_yaw(game), Some(90.0));
+            let before = entity.velocity(game).unwrap();
+            assert!(entity.set_rotation(game, 15.0, 360.0));
+            assert_eq!(entity.rotation(game), Some([15.0, 0.0]));
+            assert_eq!(entity.head_yaw(game), Some(90.0));
+            assert_eq!(entity.position(game), Some([5.0, 70.0, -3.0]));
+            assert_eq!(entity.velocity(game), Some(before));
+            assert!(entity.teleport_to(game, [5.0, 70.0, -3.0], Some([0.0, 450.0])));
+            assert_eq!(entity.rotation(game), Some([0.0, 90.0]));
+            assert!(entity.push(game, [1.0, 2.0, -1.0]));
+            assert_eq!(
+                entity.velocity(game),
+                Some([before[0] + 1.0, before[1] + 2.0, before[2] - 1.0])
+            );
+            assert!(!entity.teleport_to(game, [f64::NAN, 0.0, 0.0], None));
+            assert!(!entity.push(game, [0.0, f64::INFINITY, 0.0]));
+            game.armor_stands
+                .push(horizon_client::entities::ArmorStand::new(
+                    13,
+                    Vec3::ZERO,
+                    0.0,
+                ));
+            let stand = game.native_entity(13).unwrap();
+            assert!(!stand.set_rotation(game, 30.0, 10.0));
+            game.others.push(super::super::commands::OtherEntity {
+                id: 14,
+                kind: "minecraft:marker".into(),
+                position: Vec3::ZERO,
+                yaw: 60.0,
+                pitch: 0.0,
+            });
+            let marker = game.native_entity(14).unwrap();
+            assert_eq!(marker.head_yaw(game), Some(0.0));
+            assert!(!marker.set_head_yaw(game, 10.0));
+            game.paintings.push(horizon_client::entities::Painting {
+                id: 15,
+                pos: [0, 64, 0],
+                facing: 0,
+                variant: "minecraft:kebab".into(),
+                width: 1,
+                height: 1,
+                check_interval: 0,
+            });
+            let painting = game.native_entity(15).unwrap();
+            assert!(!painting.teleport_to(game, [1.0, 64.0, 0.0], None));
+            assert!(!painting.set_rotation(game, 30.0, 10.0));
+        });
+    }
+
+    #[test]
+    fn a_yaw_faces_vanillas_direction() {
+        assert_eq!(super::facing(0.0), "south");
+        assert_eq!(super::facing(90.0), "west");
+        assert_eq!(super::facing(180.0), "north");
+        assert_eq!(super::facing(-90.0), "east");
+        assert_eq!(super::facing(-45.0), "south");
+        assert_eq!(super::facing(-46.0), "east");
+        assert_eq!(super::facing(720.0 + 170.0), "north");
+    }
+
+    #[test]
+    fn positions_stay_inside_the_worlds_bounds() {
+        assert!(super::in_bounds([29_999_999.0, -64.0, 0.0]));
+        assert!(!super::in_bounds([30_000_000.0, 64.0, 0.0]));
+        assert!(!super::in_bounds([0.0, 20_000_001.0, 0.0]));
+        assert!(!super::in_bounds([f64::NAN, 64.0, 0.0]));
+    }
+}
