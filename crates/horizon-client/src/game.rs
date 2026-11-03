@@ -22375,6 +22375,7 @@ mod tests {
     fn reload_resolves_parts_against_reloaded_tags() {
         use crate::mod_api::{self, BlockPart, DataPackFilesEvent, Hooks, Registrar};
         struct TagPart;
+        #[mod_api::horizon_part]
         impl BlockPart for TagPart {}
         struct ReloadMod;
         #[mod_api::__subscriptions]

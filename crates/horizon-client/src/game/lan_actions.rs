@@ -6178,6 +6178,7 @@ mod tests {
         };
 
         struct Picker(Arc<Mutex<Vec<bool>>>);
+        #[mod_api::horizon_part]
         impl BlockPart for Picker {
             fn clone_item_stack(
                 &self,
@@ -6196,6 +6197,7 @@ mod tests {
             clicks: Arc<Mutex<Vec<(u128, crate::first_person::Hand)>>>,
             item_uses: Arc<AtomicUsize>,
         }
+        #[mod_api::horizon_part]
         impl BlockPart for User {
             fn use_item_on(
                 &self,

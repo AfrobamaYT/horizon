@@ -24,14 +24,18 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         .into();
     };
     let name = &trait_path.segments.last().unwrap().ident;
-    let render = if name == "Hooks" {
-        false
-    } else if name == "RenderHooks" {
-        true
-    } else {
-        return syn::Error::new_spanned(name, "expected Hooks or RenderHooks")
-            .into_compile_error()
-            .into();
+    let (render, part) = match name.to_string().as_str() {
+        "Hooks" => (false, None),
+        "RenderHooks" => (true, None),
+        "BlockPart" => (false, Some("block_subscribed")),
+        "BlockEntityPart" => (false, Some("block_entity_subscribed")),
+        "ItemPart" => (false, Some("item_subscribed")),
+        "MenuPart" => (false, Some("menu_subscribed")),
+        _ => {
+            return syn::Error::new_spanned(name, "expected a hook or part trait")
+                .into_compile_error()
+                .into();
+        }
     };
     let mut methods = Vec::new();
     let mut cfgs = Vec::new();
@@ -51,13 +55,14 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     } else {
         format_ident!("hook_ids")
     };
+    let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
     let subscribed = syn::parse_quote! {
-        fn subscribed(&self) -> &'static [Option<mod_api::#id>] {
+        fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
             &[#(#(#cfgs)* mod_api::#ids::#methods),*]
         }
     };
     implementation.items.push(subscribed);
-    let export = if export && !render {
+    let export = if export && !render && part.is_none() {
         let ty = &implementation.self_ty;
         quote!(pub fn hooks() -> Box<dyn mod_api::Hooks> { Box::new(<#ty as Default>::default()) })
     } else {
@@ -70,6 +75,12 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
 #[proc_macro_attribute]
 pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), true)
+}
+
+/// Mark a part implementation and derive the scoped hooks it overrides.
+#[proc_macro_attribute]
+pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream {
+    expand(parse_macro_input!(input as ItemImpl), false)
 }
 
 /// Derive subscriptions for internal test fixtures that construct their own mods.

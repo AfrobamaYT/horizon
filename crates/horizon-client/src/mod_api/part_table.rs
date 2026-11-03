@@ -886,6 +886,7 @@ pub(crate) mod tests {
 
     /// A comparator reading of 5 more than it was.
     struct Gauge;
+    #[mod_api::horizon_part]
     impl BlockPart for Gauge {
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output += 5;
@@ -894,6 +895,7 @@ pub(crate) mod tests {
 
     /// Connects redstone wire to its block from any side.
     struct Connector;
+    #[mod_api::horizon_part]
     impl BlockPart for Connector {
         fn should_redstone_wire_connect_to(
             &self,
@@ -907,7 +909,9 @@ pub(crate) mod tests {
     /// The block entity of type `test:press_entity`, held by block `test:press`: it ticks, and
     /// each tick adds a data slot.
     struct Press;
+    #[mod_api::horizon_part]
     impl BlockPart for Press {}
+    #[mod_api::horizon_part]
     impl BlockEntityPart for Press {
         fn block_entity_ticks(&self, _: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
             event.ticks = true;
@@ -931,7 +935,9 @@ pub(crate) mod tests {
     /// The block entity of type `test:hoard`, held by block `test:press` as `test:press_entity`
     /// is: when it is removed it gives back the gold its `HOARD` counts.
     struct Hoard;
+    #[mod_api::horizon_part]
     impl BlockPart for Hoard {}
+    #[mod_api::horizon_part]
     impl BlockEntityPart for Hoard {
         /// With data `[1]`, it replaces its own block with granite.
         fn block_entity_tick(
@@ -983,6 +989,7 @@ pub(crate) mod tests {
 
     /// A comparator reading of 100 more, for the blocks in tag `test:gauged`.
     struct TagGauge;
+    #[mod_api::horizon_part]
     impl BlockPart for TagGauge {
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
             event.output += 100;
@@ -4078,6 +4085,7 @@ pub(crate) mod tests {
     #[test]
     fn the_same_part_twice_on_one_block_is_refused() {
         struct Other;
+        #[mod_api::horizon_part]
         impl BlockPart for Other {}
         let mut r = Registrar::new("first");
         r.block_part("test:gauge", Gauge);

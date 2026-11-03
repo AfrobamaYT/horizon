@@ -2519,7 +2519,7 @@ pub use horizon_mod_api_macros::__subscriptions;
 /// #[mod_api::horizon_mod] impl Hooks for A {}
 /// #[mod_api::horizon_mod] impl Hooks for B {}
 /// ```
-pub use horizon_mod_api_macros::horizon_mod;
+pub use horizon_mod_api_macros::{horizon_mod, horizon_part};
 
 #[cfg(test)]
 pub(crate) use part_table::tests as part_tests;
