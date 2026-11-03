@@ -729,8 +729,7 @@
 //!
 //! API 43 adds the server level's random (`native_level_random`).
 //!
-//! API 42 adds the item entities near a block (`native_item_entities`,
-//! `native_set_item_entity`).
+//! API 42 adds the item entities near a block (`native_item_entities`).
 //!
 //! API 41 adds bundles' data files: `horizon_client::native_data!` compiles a file of a
 //! bundle's `data/` folder in, and `native_built_data` is the folder its post-build step wrote.
@@ -10917,7 +10916,7 @@ fn finite(v: f32, lo: f32, hi: f32) -> f32 {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(super) struct NativeItemEntity {
-    /// The entity's ID, for `native_set_item_entity`.
+    /// The entity's ID.
     pub id: u32,
     pub position: [f64; 3],
     pub stack: ItemStack,

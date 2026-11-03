@@ -253,10 +253,6 @@
       "target": "horizon_client::game::native_claimed_items::Game<'_>::native_poll"
     },
     {
-      "name": "set_item_entity",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_item_entity"
-    },
-    {
       "name": "update_output_neighbors",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_update_output_neighbors"
     },
