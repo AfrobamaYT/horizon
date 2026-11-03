@@ -920,21 +920,34 @@ impl Game<'_> {
         let game = self.native_container_size(at).is_some();
         providers.ask(self, game)
     }
-    /// Offers `stack` to a capability part, in a transaction of its own: how many it took. A part
-    /// answering more than it was offered is a mod bug, and its move is undone (none taken).
-    pub(super) fn insert_into_part(
+    /// Offers `stack` to a capability part and, in the same transaction, `take`s what it took
+    /// from where it came, after the part's own writes, so a part handing it on back into the
+    /// source loses nothing: how many went. A part taking none, a part answering more than it
+    /// was offered (a mod bug) and a failed `take` undo the move (none went).
+    pub(super) fn put_into_part(
         &mut self,
         part: &Capability<dyn ResourceHandler<ItemResource>>,
-        stack: &ItemStack,
         at: [i32; 3],
+        stack: &ItemStack,
+        take: impl FnOnce(&mut Self, u32) -> Option<()>,
     ) -> u32 {
         let resource = ItemResource::of(stack);
         mod_api::run_transaction(self, |game, tx| {
             let host: &mut dyn Host = game;
             let went = part.insert_any(host, tx, &resource, stack.count);
-            part.checked(went, stack.count, &at).ok_or(())
+            match part.checked(went, stack.count, &at) {
+                Some(0) | None => Err(()),
+                Some(went) => take(game, went).map(|()| went).ok_or(()),
+            }
         })
         .unwrap_or(0)
+    }
+    /// Takes one item from `slot` of `view`, as it is now, journaled for the transaction.
+    fn take_one_journaled(&mut self, view: &View, slot: usize) -> Option<()> {
+        for &(pos, _) in &view.parts {
+            self.journal_block_entity(pos);
+        }
+        self.take_one(view, slot).map(drop)
     }
     /// `InventoryMoveItemEvent` for `item` going from `source` to `destination`, where one end
     /// is a capability part: whether a mod canceled the move.
@@ -960,19 +973,11 @@ impl Game<'_> {
             if self.part_move_canceled(from, at, &stack.item) {
                 continue;
             }
-            let one = ItemResource::of(&stack);
-            let moved = mod_api::run_transaction(self, |game, tx| {
-                let host: &mut dyn Host = game;
-                let went = part.insert_any(host, tx, &one, 1);
-                if part.checked(went, 1, &at).ok_or(())? == 0 {
-                    return Err(());
-                }
-                for &(pos, _) in &hopper.parts {
-                    game.journal_block_entity(pos);
-                }
-                game.take_one(hopper, slot).map(drop).ok_or(())
-            });
-            if moved.is_ok() {
+            let one = ItemStack { count: 1, ..stack };
+            if self.put_into_part(part, at, &one, |game, _| {
+                game.take_one_journaled(hopper, slot)
+            }) == 1
+            {
                 return true;
             }
         }
@@ -1498,26 +1503,19 @@ impl Game<'_> {
             return Ok(());
         };
         let target = offset(key, facing);
-        let into_part = dropper
-            .then(|| self.item_part_at(target, facing.opposite()))
-            .flatten();
-        let remaining = if let Some(part) = into_part {
+        if dropper && let Some(part) = self.item_part_at(target, facing.opposite()) {
             // NeoForge's `dropperInsertHook`: a part in front is offered one item in the
-            // container's place, and what it refuses stays.
-            let one = ItemStack {
-                count: 1,
-                ..stack.clone()
-            };
+            // container's place, taken from the slot as it is once the part took it; what it
+            // refuses stays.
+            let one = ItemStack { count: 1, ..stack };
             let at = [target.0, target.1, target.2];
-            match self.insert_into_part(&part, &one, at) {
-                1 => Some(ItemStack {
-                    count: stack.count - 1,
-                    ..stack
-                })
-                .filter(|s| s.count > 0),
-                _ => Some(stack),
-            }
-        } else if dropper {
+            self.put_into_part(&part, at, &one, |game, _| {
+                game.take_one_journaled(&view, slot)
+            });
+            self.container_changed(key);
+            return Ok(());
+        }
+        let remaining = if dropper {
             match self.containers().view(target, false) {
                 None => self.dispense_default(key, facing, stack),
                 Some(into) => {
@@ -1981,6 +1979,113 @@ mod part_front_tests {
             damage: 0,
             extra: None,
         }
+    }
+
+    /// A crafter facing west into a pipe that hands on east, back into the crafter: the four
+    /// sticks land in its grid, and using up the planks takes none of them.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_part_handing_a_crafters_output_back_into_its_grid_loses_none() {
+        with_game(|game| {
+            let _mods = horizon_client::mod_api::part_tests::game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let state = horizon_world::chunk::BlockState {
+                name: "minecraft:crafter".into(),
+                properties: [("orientation".into(), "west_up".into())]
+                    .into_iter()
+                    .collect(),
+            };
+            let crafter = game.pack.assets.registry.resolve(&state).unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [2, 64, 8],
+                crafter,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            game.world.block_entities.insert(
+                (1, 64, 8),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(ModBlockEntityFields {
+                    id: "test:pipe".into(),
+                    ..Default::default()
+                }))),
+            );
+            if let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(2, 64, 8)) {
+                c.items[3] = Some(stack("minecraft:oak_planks", 1));
+                c.items[6] = Some(stack("minecraft:oak_planks", 1));
+            }
+            let dropped = game.dropped.len();
+            game.dispense_from(BlockPos::new(2, 64, 8), crafter)
+                .unwrap();
+            let held = match game.world.block_entities.get(&(2, 64, 8)) {
+                Some(BlockEntity::Crafter(c)) => c
+                    .items
+                    .iter()
+                    .flatten()
+                    .map(|s| (s.item.clone(), s.count))
+                    .collect::<Vec<_>>(),
+                _ => panic!("no crafter"),
+            };
+            assert_eq!(
+                (held, game.dropped.len() - dropped),
+                (vec![("minecraft:stick".into(), 4)], 0),
+                "a pipe routing output back into the grid must conserve four crafted sticks"
+            );
+        });
+    }
+
+    /// A dropper facing west into a pipe that hands on east, back into the dropper: the item
+    /// goes round, and taking it from its slot as it is then keeps both.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_part_handing_a_droppers_item_back_into_it_loses_none() {
+        with_game(|game| {
+            let _mods = horizon_client::mod_api::part_tests::game_thread();
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.native_level("minecraft:overworld").unwrap();
+            let state = horizon_world::chunk::BlockState {
+                name: "minecraft:dropper".into(),
+                properties: [("facing".into(), "west".into())].into_iter().collect(),
+            };
+            let dropper = game.pack.assets.registry.resolve(&state).unwrap();
+            assert!(game.native_level_set_block(
+                level,
+                [2, 64, 8],
+                dropper,
+                NativeBlockUpdateFlags::NEIGHBORS
+            ));
+            game.world.block_entities.insert(
+                (1, 64, 8),
+                BlockEntity::Mod(Box::new(ModBlockEntity::new(ModBlockEntityFields {
+                    id: "test:pipe".into(),
+                    ..Default::default()
+                }))),
+            );
+            if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(2, 64, 8))
+            {
+                items[0] = Some(stack("minecraft:stick", 2));
+            }
+            let dropped = game.dropped.len();
+            game.dispense_from(BlockPos::new(2, 64, 8), dropper)
+                .unwrap();
+            let held = match game.world.block_entities.get(&(2, 64, 8)) {
+                Some(BlockEntity::Chest(items)) => {
+                    items.iter().flatten().map(|s| s.count).sum::<u32>()
+                }
+                _ => panic!("no dropper"),
+            };
+            assert_eq!(
+                (held, game.dropped.len() - dropped),
+                (2, 0),
+                "a pipe routing back into the source must conserve its items"
+            );
+        });
     }
 
     /// A dropper and a crafter facing a mod's item part (NeoForge's `dropperInsertHook` and

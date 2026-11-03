@@ -126,8 +126,15 @@ impl Game<'_> {
         for rest in remainders.into_iter().flatten() {
             self.crafter_eject(key, facing, rest, &recipe);
         }
+        // One of each input used, from the slots that held one: a part in front may have handed
+        // the output on into an empty slot of this grid.
         if let Some(BlockEntity::Crafter(c)) = self.world.block_entities.get_mut(&key) {
-            for slot in c.items.iter_mut() {
+            for (slot, _) in c
+                .items
+                .iter_mut()
+                .zip(&grid)
+                .filter(|(_, used)| used.is_some())
+            {
                 if let Some(s) = slot {
                     s.count -= 1;
                     if s.count == 0 {
@@ -148,7 +155,7 @@ impl Game<'_> {
             // NeoForge's `insertCrafterOutput`: a part in front takes what it will in the
             // container's place, and the rest is dispensed.
             let at = [target.0, target.1, target.2];
-            rest.count -= self.insert_into_part(&part, &rest, at);
+            rest.count -= self.put_into_part(&part, at, &rest, |_, _| Some(()));
         } else if let Some(into) = self.containers().view(target, false) {
             let one_by_one = self.crafter_at(target).is_some()
                 || rest.count > self.containers().max_stack(&rest);
