@@ -312,11 +312,11 @@ pub(crate) fn answered<T: ?Sized>(
 /// The providers mods registered for capability `name` (an item capability's with `items`) and
 /// the id `id` works out, in registration order. With none registered for `name`, `id` isn't
 /// asked.
-pub(crate) fn providers(
+pub(crate) fn providers<'h>(
     items: bool,
     name: &str,
-    host: &mut dyn Host,
-    id: impl FnOnce(&mut dyn Host) -> Option<String>,
+    host: &'h dyn Host,
+    id: impl FnOnce(&'h dyn Host) -> Option<&'h str>,
 ) -> &'static [CapabilityPart] {
     let table = INSTALLED.get().map(|installed| match items {
         true => &installed.keys.item_capabilities,
@@ -326,7 +326,7 @@ pub(crate) fn providers(
         .and_then(|table| table.get(name))
         .filter(|by_id| !by_id.is_empty());
     by_id
-        .and_then(|by_id| by_id.get(id(host)?.as_str()))
+        .and_then(|by_id| by_id.get(id(host)?))
         .map_or(&[][..], Vec::as_slice)
 }
 
@@ -914,6 +914,9 @@ pub(crate) mod tests {
         }
     }
     impl Host for PipeWorld {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
@@ -926,8 +929,8 @@ pub(crate) mod tests {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<String> {
-            (pos == PIPE).then(|| "test:pipe".into())
+        ) -> Option<&str> {
+            (pos == PIPE).then_some("test:pipe")
         }
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos == CHEST).then_some(1)
@@ -1196,6 +1199,9 @@ pub(crate) mod tests {
         }
     }
     impl Host for Player {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
@@ -1322,6 +1328,13 @@ pub(crate) mod tests {
         }
     }
     impl Host for Shelf {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
+        fn item_has_component(&self, item: &str, component: &str) -> bool {
+            item == "minecraft:iron_sword"
+                && ["minecraft:max_damage", "minecraft:damage"].contains(&component)
+        }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
@@ -1331,8 +1344,8 @@ pub(crate) mod tests {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<String> {
-            self.overstates.then(|| "test:item_overstates".into())
+        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<&str> {
+            self.overstates.then_some("test:item_overstates")
         }
         fn container_capacity(&self, _: BlockSide, slot: usize, _: &ItemStack) -> u32 {
             if self.output == Some(slot) {
@@ -1577,6 +1590,18 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_level_not_in_place_asks_no_provider() {
+        game_thread();
+        let mut world = PipeWorld::default();
+        let host: &mut dyn Host = &mut world;
+        // The pipe's type has a provider, which answers in the level in place; parked while
+        // the server ticks another, the same block entity's level gives none.
+        let parked = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether");
+        assert!(here().capability(host, &ITEMS, PIPE, None).is_some());
+        assert!(parked.capability(host, &ITEMS, PIPE, None).is_none());
+    }
+
+    #[test]
     fn a_capability_part_answers_by_side_and_forwards_to_its_neighbours_capability() {
         game_thread();
         let mut world = PipeWorld::default();
@@ -1736,6 +1761,9 @@ pub(crate) mod tests {
         }
     }
     impl Host for TwoChests {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
@@ -1917,10 +1945,10 @@ pub(crate) mod tests {
         let host: &mut dyn Host = &mut shelf_;
         let place = shelf_slot(0);
         let plain = place.resource(host).unwrap();
-        assert_eq!(plain.component("minecraft:damage"), None);
-        let worn = plain.with_component("minecraft:damage", Tag::Int(5));
-        assert_eq!(worn.component("minecraft:damage"), Some(Tag::Int(5)));
-        assert_eq!(worn.without_component("minecraft:damage"), plain);
+        let damage = ComponentId::new("minecraft:damage").unwrap();
+        assert_eq!(plain.component(&damage), None);
+        let worn = plain.with_component(&damage, Tag::Int(5));
+        assert_eq!(worn.component(&damage), Some(Tag::Int(5)));
         // Aborted, nothing changed; committed, one sword of the two is worn and splits off.
         let aborted = host.transaction(|host, tx| {
             assert_eq!(place.exchange(host, tx, &worn, 1), 1);
@@ -1931,6 +1959,61 @@ pub(crate) mod tests {
         let host: &mut dyn Host = &mut shelf_;
         assert_eq!(exchange(host, &place, sword(1, 5)), 1);
         assert_eq!(shelf_.slots, [Some(sword(1, 0)), Some(sword(1, 5)), None]);
+    }
+
+    #[test]
+    fn a_removed_default_component_is_recorded_in_the_patch_and_a_set_one_drops_the_removal() {
+        game_thread();
+        let shelf_ = shelf([None, None, None]);
+        let host: &dyn Host = &shelf_;
+        let sword = ItemResource::of(&stack("minecraft:iron_sword", 1, 0));
+        let patch = |resource: &ItemResource| {
+            let Some(Tag::Compound(patch)) =
+                crate::item_data::encode_components(&resource.to_stack(1))
+            else {
+                return Vec::new();
+            };
+            patch
+                .keys()
+                .map(|key| key.to_string_lossy())
+                .collect::<Vec<_>>()
+        };
+        // An iron sword has `max_damage` by default: removing it is a removal in its patch,
+        // so the sword is no longer the plain one.
+        let max_damage = ComponentId::new("minecraft:max_damage").unwrap();
+        let unbreakable = sword.without_component(host, &max_damage);
+        assert_eq!(patch(&unbreakable), ["!minecraft:max_damage"]);
+        assert_ne!(unbreakable, sword);
+        assert_eq!(unbreakable.component(&max_damage), None);
+        // Set again, the removal goes and the value is the patch's own.
+        let set = unbreakable.with_component(&max_damage, Tag::Int(10));
+        assert_eq!(patch(&set), ["minecraft:max_damage"]);
+        assert_eq!(set.component(&max_damage), Some(Tag::Int(10)));
+        // A component the item hasn't by default only loses the stack's own value.
+        let data = ComponentId::new("minecraft:custom_data").unwrap();
+        let tagged = sword.with_component(&data, Tag::Compound(Compound::new()));
+        assert_ne!(tagged, sword);
+        assert_eq!(tagged.without_component(host, &data), sword);
+    }
+
+    #[test]
+    fn a_component_id_is_a_namespaced_identifier() {
+        for id in ["minecraft:damage", "mymod:charge/level"] {
+            assert_eq!(
+                ComponentId::new(id).map(|id| id.as_str().to_owned()),
+                Some(id.into())
+            );
+        }
+        for id in [
+            "damage",
+            "!minecraft:food",
+            "not a namespaced id!",
+            "Mymod:charge",
+            ":path",
+            "mymod:",
+        ] {
+            assert!(ComponentId::new(id).is_none(), "{id}");
+        }
     }
 
     #[test]
@@ -2357,11 +2440,14 @@ pub(crate) mod tests {
     /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
     struct Ordered;
     impl Host for Ordered {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<String> {
-            Some("test:ordered".into())
+        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<&str> {
+            Some("test:ordered")
         }
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos[0] >= 8).then_some(27)
@@ -2436,8 +2522,8 @@ pub(crate) mod tests {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<String> {
-            self.0.map(str::to_owned)
+        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<&str> {
+            self.0
         }
     }
 
@@ -2667,14 +2753,17 @@ pub(crate) mod tests {
         }
     }
     impl Host for TankWorld {
+        fn level_in_place(&self, level: LevelRef) -> bool {
+            level == here()
+        }
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<String> {
-            self.types.get(&pos).map(|kind| kind.to_string())
+        ) -> Option<&str> {
+            self.types.get(&pos).copied()
         }
         fn fluid_tank_count(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             self.tanks.contains_key(&pos).then_some(1)

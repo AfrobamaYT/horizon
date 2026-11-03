@@ -130,8 +130,8 @@ impl LevelRef {
     /// `key`'s handler for the block entity at `pos` in this level, reached through `side`
     /// (`Level.getCapability`): the first provider to answer, of those mods registered for its
     /// type `before_game`, the game's own, and the mods' others, each in registration order. None
-    /// for a stale handle, and for a level not in place, whose block entities the game doesn't
-    /// write.
+    /// for a stale handle, and for a level not in place ([`LevelRef::in_place`]), whose block
+    /// entities the game doesn't write: no provider is asked for one.
     pub fn capability<T: ?Sized + 'static>(
         self,
         host: &mut dyn Host,
@@ -139,6 +139,9 @@ impl LevelRef {
         pos: [i32; 3],
         side: Option<Direction>,
     ) -> Option<Capability<T>> {
+        if !self.in_place(host) {
+            return None;
+        }
         let at = BlockSide {
             level: self,
             pos,
@@ -164,7 +167,7 @@ impl LevelRef {
 impl BlockSide {
     /// The type of the block entity here (`minecraft:chest`, `mymod:press`), which capability
     /// providers are registered by.
-    pub(super) fn kind(self, host: &mut dyn Host) -> Option<String> {
+    pub(super) fn kind(self, host: &dyn Host) -> Option<&str> {
         let entity = host.block_entity(self.level, self.pos)?;
         host.block_entity_kind(entity)
     }

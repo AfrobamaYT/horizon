@@ -1,0 +1,15 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "item_has_component",
+      "side": "both",
+      "target": "horizon_client::game::native_components::Game<'_>::native_item_has_component"
+    }
+  ],
+  "rust_summary": "an item's default components on `Host` (`native_item_has_component`), which `ItemResource::without_component` reads to record a removal.",
+  "doc_summary": "`item_has_component(item, component)` is whether an item has a data component by default (`Item.components().has`), with data packs' and mods' changes; `ItemResource::without_component(host, &id)` uses it to record a removal (`!id`) in a stack's patch, as vanilla's `PatchedDataComponentMap.remove` does. Bundles need \"hooks\": @API:item_components@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_components.rs"
+  ]
+}

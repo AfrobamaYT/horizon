@@ -19,6 +19,17 @@ impl std::fmt::Display for NativeComponentError {
 }
 impl std::error::Error for NativeComponentError {}
 
+impl Game<'_> {
+    /// Whether item `item` has component `component` by default, in its prototype
+    /// (`Item.components().has`): `minecraft:max_damage` on an iron sword, data packs' and
+    /// native mods' changes included. False for an unknown item. API @API:item_components@.
+    pub(super) fn native_item_has_component(&self, item: &str, component: &str) -> bool {
+        self.items()
+            .get(item)
+            .is_some_and(|item| item.components.iter().any(|id| id == component))
+    }
+}
+
 // Native mods use these helpers.
 #[allow(dead_code)]
 impl Game<'_> {

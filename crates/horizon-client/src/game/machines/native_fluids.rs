@@ -288,7 +288,7 @@ impl Game<'_> {
     }
     /// The tanks the game's own fluid capability reaches at `at`: in the level in place only.
     fn capability_tanks(&self, at: BlockSide) -> Option<FluidAt> {
-        if !self.native_in_place(at.level) {
+        if !self.native_level_in_place(at.level) {
             return None;
         }
         self.native_fluid_at(self.dim.id(), at.pos)

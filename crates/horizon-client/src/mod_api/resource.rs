@@ -5,6 +5,26 @@ use super::{Capability, Compound, Host, ItemStack, Tag, Transaction};
 use horizon_world::nbt::JavaString;
 use std::fmt;
 
+/// A data component's id, `namespace:path` (`minecraft:damage`, `mymod:charge`), checked once
+/// where a mod names it: what [`ItemResource`]'s component methods take, as NeoForge's take a
+/// `DataComponentType`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ComponentId(Box<str>);
+
+impl ComponentId {
+    /// `id` as a component id, or None where it isn't a namespaced identifier
+    /// (`Identifier.parse`'s characters, a namespace and a path): `Damage`, `!minecraft:food`
+    /// and `my mod:charge` aren't.
+    pub fn new(id: &str) -> Option<Self> {
+        horizon_world::identifier::Identifier::parse_namespaced(id)?;
+        Some(Self(id.into()))
+    }
+    /// The id, as saved (`minecraft:damage`).
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// An item and its components, without a count, as NeoForge's `ItemResource`: what a slot holds.
 /// An empty slot holds none.
 #[derive(Clone)]
@@ -33,33 +53,44 @@ impl ItemResource {
     pub fn matches(&self, stack: &ItemStack) -> bool {
         self.0.same_item_same_components(stack)
     }
-    /// This item's own value of component `id` (`minecraft:damage`, `minecraft:custom_data`), as
-    /// saved (`ItemResource.get`); none where it keeps the item's default.
-    pub fn component(&self, id: &str) -> Option<Tag> {
+    /// This item's own value of component `id` in its patch, as saved (`minecraft:damage` on a
+    /// worn sword); none where it keeps the item's default or has the component removed.
+    pub fn component(&self, id: &ComponentId) -> Option<Tag> {
         crate::item_data::encode_components(&self.0)?
-            .get(id)
+            .get(id.as_str())
             .cloned()
     }
-    /// This item with component `id` set to `value` (`ItemResource.with`). A stack changes where
-    /// it lives by an exchange of one of it for this: `place.exchange(host, tx, &changed, 1)`,
-    /// which splits it off a bigger stack, in the transaction.
-    pub fn with_component(&self, id: &str, value: Tag) -> Self {
-        self.patched(id, Some(value))
+    /// This item with component `id` set to `value` (`ItemResource.with`), a removal of it
+    /// dropped. A stack changes where it lives by an exchange of one of it for this:
+    /// `place.exchange(host, tx, &changed, 1)`, which splits it off a bigger stack, in the
+    /// transaction.
+    pub fn with_component(&self, id: &ComponentId, value: Tag) -> Self {
+        self.patched(id, Some((JavaString::from(id.as_str()), value)))
     }
-    /// This item with its own value of component `id` dropped, back to the item's default.
-    pub fn without_component(&self, id: &str) -> Self {
-        self.patched(id, None)
+    /// This item without component `id` (`ItemResource.without`, as vanilla's
+    /// `PatchedDataComponentMap.remove`): its own value dropped and, where the item has the
+    /// component by default (`host.item_has_component`), a removal recorded in its patch
+    /// (`"!minecraft:max_damage": {}`), saved and sent as vanilla's are.
+    pub fn without_component(&self, host: &dyn Host, id: &ComponentId) -> Self {
+        let removal = host.item_has_component(self.item(), id.as_str()).then(|| {
+            (
+                JavaString::from(format!("!{}", id.as_str()).as_str()),
+                Tag::Compound(Compound::new()),
+            )
+        });
+        self.patched(id, removal)
     }
-    /// This item with its own components, as saved, changed at `id`.
-    fn patched(&self, id: &str, value: Option<Tag>) -> Self {
+    /// This item with its patch's entries for `id`, a value or a removal, replaced by `entry`.
+    fn patched(&self, id: &ComponentId, entry: Option<(JavaString, Tag)>) -> Self {
         let mut components = match crate::item_data::encode_components(&self.0) {
             Some(Tag::Compound(components)) => components,
             _ => Compound::new(),
         };
-        match value {
-            Some(value) => components.insert(JavaString::from(id), value),
-            None => components.remove(&JavaString::from(id)),
-        };
+        components.remove(&JavaString::from(id.as_str()));
+        components.remove(&JavaString::from(format!("!{}", id.as_str()).as_str()));
+        if let Some((key, value)) = entry {
+            components.insert(key, value);
+        }
         let (damage, extra) = crate::item_data::decode_components(Some(&Tag::Compound(components)));
         Self(ItemStack {
             item: self.0.item.clone(),

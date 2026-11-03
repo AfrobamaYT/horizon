@@ -33,11 +33,6 @@ impl Game<'_> {
         self.native_simulates()
             .then(|| LevelRef::new(epoch, self.dim.id()))
     }
-    /// Whether `level` is the level in place of this world's open, where the game's own
-    /// capabilities read and write: a parked level's block entities aren't written.
-    pub(super) fn native_in_place(&self, level: LevelRef) -> bool {
-        self.native_level_here() == Some(level)
-    }
     /// Up to `count` out of slot `slot` of `view`, without `setChanged`.
     fn take_up_to(&mut self, view: &View, slot: usize, count: u32) -> Option<ItemStack> {
         let target = self.slot_mut_at(view, slot)?;
@@ -57,7 +52,7 @@ impl Game<'_> {
     /// level in place. Not a composter, which has no block entity, nor a block entity without
     /// slots (a sign, a banner, a mod's without a container).
     fn capability_view(&self, at: BlockSide) -> Option<View> {
-        if !self.native_in_place(at.level) {
+        if !self.native_level_in_place(at.level) {
             return None;
         }
         let view = self
