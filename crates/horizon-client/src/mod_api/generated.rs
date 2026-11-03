@@ -746,6 +746,13 @@ pub trait Hooks: Send + Sync {
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
     /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
+    /// `attacker` is the attacking entity's network id (the recorded attack scope, or `causing`),
+    /// `weapon` what it holds in its main hand (a player's selected stack, a mob's main hand; none
+    /// when unknown, recorded only while a native mod is loaded) with its enchantment levels, and
+    /// `source_position`, `victim_position` and `victim_view` the hit's position, a mob victim's
+    /// position and look vector (none when not known, always for a player or the dragon), so an
+    /// enchantment can tell a blow from behind. There is no host here: read the world from a
+    /// tick hook.
     /// No `self`: the game is in the middle of the hit. API 50.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
@@ -4548,11 +4555,44 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// `CanContinueSleepingEvent`: a sleeping living entity's check that it may go on
+    /// sleeping, run each tick for a server player the dead and health checks would not
+    /// already wake, and for a sleeping villager or wandering trader. `entity` is its UUID,
+    /// `name` a player's name (empty for a mob) and `kind` its type (`minecraft:player`).
+    /// `problem` is what vanilla found (`getProblem`): `NotPossibleHere` when the bed at `pos`
+    /// is gone, `NotPossibleNow` when a player's bed rule no longer lets them sleep (daytime),
+    /// none when nothing is wrong. `may_continue` starts empty, meaning `problem.is_none()` (`mayContinueSleeping`);
+    /// set it `Some(true)` to keep them asleep, `Some(false)` to wake them. The player's state is not swapped in
+    /// on a guest tick. @API:can_continue_sleeping@.
+    ///
+    /// Return `Some` to set `may_continue`; the first mod returning `Some` wins.
+    fn can_continue_sleeping(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CanContinueSleepingEvent<'_>,
+    ) -> Option<bool> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// Before a new server level selects its initial world spawn
+    /// (NeoForge's `LevelEvent.CreateSpawnPosition`). @API:create_spawn_position@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn create_spawn_position(
+        &self,
+        host: &mut dyn Host,
+        event: &mut CreateSpawnPositionEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
     /// `entity` (None for a player, whom `native_acting_player` names):
@@ -4641,6 +4681,23 @@ pub trait Hooks: Send + Sync {
     /// Every mod gets `event.displayname` in order and may add, change or remove displayname.
     fn player_name_format(&self, event: &mut PlayerNameFormatEvent<'_>) {
         let _ = event;
+    }
+    /// `PlayerSpawnPhantomsEvent`: the phantom spawner is about to decide whether to try a
+    /// spawn near a non-spectator server player, before its difficulty and rest rolls.
+    /// `result` starts empty, meaning `Default` (skylight and sea level check); `Allow` skips
+    /// that check and `Deny` stops the attempt. `phantoms` starts with a randomly drawn
+    /// group size; set it to override the count. Without mods the original draw order is kept.
+    /// @API:player_spawn_phantoms@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn player_spawn_phantoms(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerSpawnPhantomsEvent<'_>,
+    ) -> Option<PhantomSpawnResult> {
+        let _ = host;
+        let _ = event;
+        None
     }
     /// ServerPlayer.getTabListDisplayName: the name the Tab list shows for
     /// `player`, None to let the client choose it. Replace `display_name` to
@@ -6943,6 +7000,11 @@ pub struct LivingIncomingDamageEvent<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
+    pub attacker: i32,
+    pub weapon: Option<&'a ItemStack>,
+    pub source_position: Option<[f64; 3]>,
+    pub victim_position: Option<[f64; 3]>,
+    pub victim_view: Option<[f64; 3]>,
     pub amount: f32,
 }
 pub fn dispatch_living_incoming_damage(
@@ -6952,6 +7014,11 @@ pub fn dispatch_living_incoming_damage(
     damage_type: &str,
     causing: i32,
     direct: i32,
+    attacker: i32,
+    weapon: Option<&ItemStack>,
+    source_position: Option<[f64; 3]>,
+    victim_position: Option<[f64; 3]>,
+    victim_view: Option<[f64; 3]>,
     amount: &mut f32,
     canceled: &mut bool,
 ) {
@@ -6964,6 +7031,11 @@ pub fn dispatch_living_incoming_damage(
         damage_type,
         causing,
         direct,
+        attacker,
+        weapon,
+        source_position,
+        victim_position,
+        victim_view,
         amount: *amount,
     };
     for mod_hook in super::entered(mods, "living_incoming_damage") {
@@ -15001,6 +15073,42 @@ pub fn dispatch_block_grow_feature(
         }
     }
 }
+/// What [`Hooks::can_continue_sleeping`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CanContinueSleepingEvent<'a> {
+    pub entity: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub problem: Option<SleepProblem>,
+}
+pub fn dispatch_can_continue_sleeping(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u128,
+    name: &str,
+    kind: &str,
+    pos: [i32; 3],
+    problem: Option<SleepProblem>,
+    may_continue: &mut Option<bool>,
+) {
+    if may_continue.is_some() {
+        return;
+    }
+    let mut event = CanContinueSleepingEvent {
+        entity,
+        name,
+        kind,
+        pos,
+        problem,
+    };
+    for mod_hook in super::entered(mods, "can_continue_sleeping") {
+        if let Some(replacement) = mod_hook.can_continue_sleeping(host, &mut event) {
+            *may_continue = Some(replacement);
+            break;
+        }
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -15024,6 +15132,33 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::create_spawn_position`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreateSpawnPositionEvent<'a> {
+    pub position: &'a mut [i32; 3],
+    pub rotation: &'a mut [f32; 2],
+}
+pub fn dispatch_create_spawn_position(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    position: &mut [i32; 3],
+    rotation: &mut [f32; 2],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CreateSpawnPositionEvent { position, rotation };
+    for mod_hook in super::entered(mods, "create_spawn_position") {
+        if matches!(
+            mod_hook.create_spawn_position(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -15240,6 +15375,39 @@ pub fn dispatch_player_name_format(
     };
     for mod_hook in super::entered(mods, "player_name_format") {
         mod_hook.player_name_format(&mut event);
+    }
+}
+/// What [`Hooks::player_spawn_phantoms`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSpawnPhantomsEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub phantoms: &'a mut Option<i32>,
+}
+pub fn dispatch_player_spawn_phantoms(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    phantoms: &mut Option<i32>,
+    result: &mut Option<PhantomSpawnResult>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PlayerSpawnPhantomsEvent {
+        player,
+        name,
+        pos,
+        phantoms,
+    };
+    for mod_hook in super::entered(mods, "player_spawn_phantoms") {
+        if let Some(replacement) = mod_hook.player_spawn_phantoms(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
     }
 }
 /// What [`Hooks::player_tab_list_name_format`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
