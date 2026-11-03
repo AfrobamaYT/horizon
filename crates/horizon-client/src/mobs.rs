@@ -2794,11 +2794,12 @@ pub struct MobWorld<'a> {
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
     /// A server with native mods, which the game asks before a tame or a
-    /// baby (`AnimalTameEvent`, `BabyEntitySpawnEvent`): the goals then
-    /// leave what a cancel would undo to the game (a horse's `tame`, a
-    /// llama's breeding experience). Ravagers also use it to defer their jump
+    /// tame (`AnimalTameEvent`): the goals defer a horse's tame to the game.
+    /// Ravagers also use it to defer their jump
     /// when `BreakBlock` leaves may be kept by a mod (`IfBroke`).
     pub ask_mods: bool,
+    /// Whether a server listener can cancel baby spawning.
+    pub asks_baby_spawn: bool,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,

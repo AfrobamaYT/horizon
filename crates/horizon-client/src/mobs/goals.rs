@@ -2237,10 +2237,11 @@ impl Goal for Breed {
         if self.love_time >= reduced(60) && m.distance_sqr(p.position) < 9.0 {
             let llama = super::llama::is_llama(m.species())
                 .then(|| Box::new(super::llama::breed_offspring(m, &p)));
-            let parent_variant = (!cx.w.ask_mods && super::draws_parent_variant(m.species()))
-                .then(|| m.random.next_boolean());
+            let parent_variant = (!cx.w.asks_baby_spawn
+                && super::draws_parent_variant(m.species()))
+            .then(|| m.random.next_boolean());
             let experience = if (llama.is_some() || parent_variant.is_some())
-                && !cx.w.ask_mods
+                && !cx.w.asks_baby_spawn
                 && !super::orb_after_child(m.species())
             {
                 super::BreedExperience::Drawn(super::breeding_experience(m, cx.w.mob_drops))
@@ -2869,7 +2870,7 @@ mod breeding_variant_tests {
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
                     let world = MobWorld {
-                        ask_mods,
+                        asks_baby_spawn: ask_mods,
                         mob_drops,
                         others: &partner,
                         ..world.clone()

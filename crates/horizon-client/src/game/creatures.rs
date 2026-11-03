@@ -980,6 +980,8 @@ impl Game<'_> {
                 None
             },
             ask_mods: self.asks_mods(),
+            asks_baby_spawn: self.remote.is_none()
+                && crate::mod_api::listened(crate::mod_api::HookId::BabyEntitySpawn),
             border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
@@ -8253,6 +8255,7 @@ mod pearl_tests {
             lid_openers: &lid_openers,
             mod_effects: None,
             ask_mods: false,
+            asks_baby_spawn: false,
             border: None,
         };
         let pw = ProjWorld {
