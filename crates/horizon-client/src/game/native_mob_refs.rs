@@ -22,6 +22,12 @@ fn brain_target(mob: &Mob) -> Option<Option<Who>> {
     })
 }
 
+#[derive(Clone, Copy)]
+enum MobFlag {
+    Aggressive,
+    Persistent,
+}
+
 impl Game<'_> {
     /// `Mob.asValidTarget` and the modeled `canAttack` overrides.
     fn native_mob_valid_target(&self, mob: &Mob, target: Target) -> bool {
@@ -146,13 +152,12 @@ impl Game<'_> {
             )
     }
 
-    /// The entity as a vanilla Mob. Players, armor stands, stale handles and
-    /// clients are rejected. The dragon is a vanilla Mob, but is not yet
-    /// supported (a #29 follow-up). Mobs taken out for ticking are unavailable
-    /// (also a #29 follow-up). API @API:mob_refs@.
+    /// The entity as a vanilla Mob: a mob or the ender dragon. Players, armor
+    /// stands, stale handles and clients are rejected. Mobs taken out for
+    /// ticking are unavailable (a #29 follow-up). API @API:mob_refs@.
     pub(super) fn native_mob_ref(&self, entity: EntityRef) -> Option<MobRef> {
         match self.native_entity_target(entity)? {
-            Target::Mob(_) => Some(MobRef::new(entity)),
+            Target::Mob(_) | Target::Dragon(_) => Some(MobRef::new(entity)),
             _ => None,
         }
     }
@@ -160,11 +165,12 @@ impl Game<'_> {
     /// `Mob.getTarget`. Brain-backed mobs read their attack memory; piglins
     /// and hoglins use Horizon's `ai.target` stand-in. Invalid targets, an
     /// unavailable mob or player binding, or a target without a living handle
-    /// read as None.
+    /// read as None. The dragon reads what a mod set, while it stays a valid
+    /// target (`EnderDragon.canAttack`); its flight never sets one.
     /// API @API:mob_refs@.
     pub(super) fn native_mob_target(&self, mob: MobRef) -> Option<LivingRef> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
-            return None;
+            return self.native_dragon_target(mob.entity());
         };
         let mob = self.mobs.iter().find(|m| m.id == id)?;
         let target = brain_target(mob).unwrap_or(mob.ai.target)?;
@@ -182,8 +188,9 @@ impl Game<'_> {
     }
 
     /// `Mob.setTarget`; None clears it. Only mobs and players whose binding
-    /// can be stored in the current level are supported; armor stands and the
-    /// dragon are refused. Brain-backed mobs refuse writes: vanilla's setter
+    /// can be stored in the current level are supported; armor stands are
+    /// refused. The dragon stores a mob or a player, which its flight ignores
+    /// and its save does not keep (vanilla keeps no target either). Brain-backed mobs refuse writes: vanilla's setter
     /// does not update their brain memory. Foxes, endermen and zombified
     /// piglins also refuse writes until their setter side effects are modeled.
     /// Invalid targets are refused (false, mob unchanged); vanilla instead
@@ -192,7 +199,7 @@ impl Game<'_> {
     /// API @API:mob_refs@.
     pub(super) fn native_mob_set_target(&mut self, mob: MobRef, target: Option<LivingRef>) -> bool {
         let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
-            return false;
+            return self.native_dragon_set_target(mob.entity(), target);
         };
         let Some(mob_state) = self.mobs.iter().find(|m| m.id == id) else {
             return false;
@@ -249,48 +256,68 @@ impl Game<'_> {
         true
     }
 
-    /// `Mob.isAggressive`, the synced mob flag. API @API:mob_refs@.
-    pub(super) fn native_mob_is_aggressive(&self, mob: MobRef) -> Option<bool> {
-        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
-            return None;
+    /// The mob flag a handle names: a mob's, or the dragon's own.
+    fn native_mob_flag(&self, mob: MobRef, flag: MobFlag) -> Option<bool> {
+        match self.native_entity_target(mob.entity())? {
+            Target::Mob(id) => {
+                let mob = self.mobs.iter().find(|m| m.id == id)?;
+                Some(match flag {
+                    MobFlag::Aggressive => mob.ai.aggressive,
+                    MobFlag::Persistent => mob.persistent,
+                })
+            }
+            Target::Dragon(_) => {
+                let dragon = self.native_dragon(mob.entity())?;
+                Some(match flag {
+                    MobFlag::Aggressive => dragon.aggressive,
+                    MobFlag::Persistent => dragon.persistent,
+                })
+            }
+            _ => None,
+        }
+    }
+    fn native_mob_set_flag(&mut self, mob: MobRef, flag: MobFlag, value: bool) -> bool {
+        let slot = match self.native_entity_target(mob.entity()) {
+            Some(Target::Mob(id)) => {
+                self.mobs
+                    .iter_mut()
+                    .find(|m| m.id == id)
+                    .map(|mob| match flag {
+                        MobFlag::Aggressive => &mut mob.ai.aggressive,
+                        MobFlag::Persistent => &mut mob.persistent,
+                    })
+            }
+            Some(Target::Dragon(_)) => self.native_dragon_mut(mob.entity()).map(|d| match flag {
+                MobFlag::Aggressive => &mut d.aggressive,
+                MobFlag::Persistent => &mut d.persistent,
+            }),
+            _ => None,
         };
-        Some(self.mobs.iter().find(|m| m.id == id)?.ai.aggressive)
+        slot.map(|slot| *slot = value).is_some()
+    }
+
+    /// `Mob.isAggressive`, the synced mob flag (the dragon's reaches its
+    /// clients as `DATA_MOB_FLAGS_ID`). API @API:mob_refs@.
+    pub(super) fn native_mob_is_aggressive(&self, mob: MobRef) -> Option<bool> {
+        self.native_mob_flag(mob, MobFlag::Aggressive)
     }
 
     /// `Mob.setAggressive`. False for an unavailable mob. API @API:mob_refs@.
     pub(super) fn native_mob_set_aggressive(&mut self, mob: MobRef, value: bool) -> bool {
-        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
-            return false;
-        };
-        self.mobs
-            .iter_mut()
-            .find(|m| m.id == id)
-            .unwrap()
-            .ai
-            .aggressive = value;
-        true
+        self.native_mob_set_flag(mob, MobFlag::Aggressive, value)
     }
 
-    /// `Mob.isPersistenceRequired`. API @API:mob_refs@.
+    /// `Mob.isPersistenceRequired`. The dragon never despawns
+    /// (`EnderDragon.checkDespawn` is empty), but keeps and saves the flag
+    /// (`PersistenceRequired`). API @API:mob_refs@.
     pub(super) fn native_mob_persistence_required(&self, mob: MobRef) -> Option<bool> {
-        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
-            return None;
-        };
-        Some(self.mobs.iter().find(|m| m.id == id)?.persistent)
+        self.native_mob_flag(mob, MobFlag::Persistent)
     }
 
     /// `Mob.setPersistenceRequired`, which sets the flag and cannot clear it.
     /// False for an unavailable mob. API @API:mob_refs@.
     pub(super) fn native_mob_set_persistence_required(&mut self, mob: MobRef) -> bool {
-        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
-            return false;
-        };
-        self.mobs
-            .iter_mut()
-            .find(|m| m.id == id)
-            .unwrap()
-            .persistent = true;
-        true
+        self.native_mob_set_flag(mob, MobFlag::Persistent, true)
     }
 }
 
@@ -302,7 +329,7 @@ mod tests {
     use horizon_core::geometry::Vec3;
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn player_target_round_trips_through_the_mob_binding() {
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
         use horizon_protocol::packets::configuration::ClientInformation;
@@ -381,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources"]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mob_handles_read_write_and_refuse_unavailable_entities() {
         with_game(|game| {
             let zombie = game
@@ -399,7 +426,8 @@ mod tests {
             game.dragon = Some(dragon);
             assert!(
                 game.native_mob_ref(game.native_entity(15).unwrap())
-                    .is_none()
+                    .is_some(),
+                "the dragon is a Mob"
             );
             let entity = game.native_entity(12).unwrap();
             let mob = game.native_mob_ref(entity).unwrap();

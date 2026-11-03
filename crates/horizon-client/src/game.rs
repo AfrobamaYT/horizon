@@ -210,6 +210,7 @@ mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
+mod native_dragon_refs;
 mod native_entities;
 mod native_entity_data;
 mod native_entity_invulnerable;
