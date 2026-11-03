@@ -601,9 +601,6 @@ pub struct Streaming {
     /// The `/forceload`ed chunks, the ones saved in `chunk_tickets.dat`.
     commanded: HashSet<(i32, i32)>,
     mod_tickets: ModTickets,
-    /// The forced chunks that are only kept loaded: no `/forceload` and no
-    /// ticking mod ticket holds them. Part of `forced`.
-    pub non_ticking: HashSet<(i32, i32)>,
     /// No work is scheduled while paused (title screen).
     pub paused: bool,
     /// Dimension flags: sky light, Nether face shading.
@@ -1174,7 +1171,6 @@ impl Streaming {
             forced: HashSet::new(),
             commanded: HashSet::new(),
             mod_tickets: ModTickets::default(),
-            non_ticking: HashSet::new(),
             paused: false,
             sky_light: true,
             nether_shading: false,
@@ -2628,7 +2624,6 @@ impl Streaming {
         self.mod_tickets = ModTickets::from_saved(tickets, loaded);
         self.commanded = commanded;
         self.forced.clear();
-        self.non_ticking.clear();
         let held: Vec<_> = self
             .commanded
             .iter()
@@ -2648,9 +2643,8 @@ impl Streaming {
         &self.mod_tickets
     }
     /// Hold or release a mod's ticket: true when the ticket set changed. A
-    /// chunk stays forced while `/forceload` or any ticket holds it, and
-    /// ticks while `/forceload` or a ticking ticket does; one newly forced is
-    /// ranked for decoration as `/forceload add` does.
+    /// chunk stays forced while `/forceload` or any ticket holds it; one
+    /// newly forced is ranked for decoration as `/forceload add` does.
     pub fn set_mod_forced(&mut self, ticket: ModTicket, forced: bool) -> bool {
         let chunk = ticket.chunk;
         let changed = if forced {
@@ -2663,17 +2657,10 @@ impl Streaming {
         }
         changed
     }
-    /// Bring `forced` and `non_ticking` in line with who holds `chunk`: true
-    /// when it just became forced. The one writer of both sets.
+    /// Bring `forced` in line with who holds `chunk`: true when it just
+    /// became forced. The one writer of `forced`.
     fn settle(&mut self, chunk: (i32, i32)) -> bool {
-        let ticking = self.commanded.contains(&chunk) || self.mod_tickets.ticks(chunk);
-        let held = ticking || self.mod_tickets.holds(chunk);
-        if ticking || !held {
-            self.non_ticking.remove(&chunk);
-        } else {
-            self.non_ticking.insert(chunk);
-        }
-        if held {
+        if self.commanded.contains(&chunk) || self.mod_tickets.holds(chunk) {
             self.forced.insert(chunk)
         } else {
             self.forced.remove(&chunk);

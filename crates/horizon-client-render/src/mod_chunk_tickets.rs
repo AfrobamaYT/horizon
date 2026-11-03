@@ -20,16 +20,17 @@ pub struct ModTicket {
     pub mod_id: String,
     pub owner: TicketOwner,
     pub chunk: (i32, i32),
-    /// Whether the chunk ticks entities (`forceChunk`'s `ticking`) or is only
-    /// kept loaded. One owner holds the two kinds apart.
-    pub ticking: bool,
+    /// Whether natural spawning runs in the chunk with no player near
+    /// (`forceChunk`'s `forceNaturalSpawning`). One owner holds the two kinds
+    /// apart.
+    pub natural_spawning: bool,
 }
 
 /// The tickets of one level.
 #[derive(Debug, Default)]
 pub struct ModTickets {
     held: BTreeSet<ModTicket>,
-    /// Per chunk: how many tickets hold it, and how many of those tick.
+    /// Per chunk: how many tickets hold it, and how many of those force natural spawning.
     per_chunk: HashMap<(i32, i32), (u32, u32)>,
 }
 
@@ -48,12 +49,12 @@ impl ModTickets {
     }
     /// Hold `ticket`: true when it was new.
     pub fn insert(&mut self, ticket: ModTicket) -> bool {
-        let (chunk, ticking) = (ticket.chunk, ticket.ticking);
+        let (chunk, spawning) = (ticket.chunk, ticket.natural_spawning);
         let new = self.held.insert(ticket);
         if new {
             let counts = self.per_chunk.entry(chunk).or_default();
             counts.0 += 1;
-            counts.1 += u32::from(ticking);
+            counts.1 += u32::from(spawning);
         }
         new
     }
@@ -62,7 +63,7 @@ impl ModTickets {
         let held = self.held.remove(ticket);
         if held && let Some(counts) = self.per_chunk.get_mut(&ticket.chunk) {
             counts.0 -= 1;
-            counts.1 -= u32::from(ticket.ticking);
+            counts.1 -= u32::from(ticket.natural_spawning);
             if counts.0 == 0 {
                 self.per_chunk.remove(&ticket.chunk);
             }
@@ -73,8 +74,9 @@ impl ModTickets {
     pub fn holds(&self, chunk: (i32, i32)) -> bool {
         self.per_chunk.contains_key(&chunk)
     }
-    /// Whether a ticket that ticks holds `chunk`.
-    pub fn ticks(&self, chunk: (i32, i32)) -> bool {
+    /// Whether a ticket that forces natural spawning holds `chunk`
+    /// (`TicketStorage.shouldForceNaturalSpawning`).
+    pub fn forces_natural_spawning(&self, chunk: (i32, i32)) -> bool {
         self.per_chunk
             .get(&chunk)
             .is_some_and(|counts| counts.1 > 0)
@@ -189,7 +191,7 @@ mod tests {
             mod_id: mod_id.into(),
             owner,
             chunk,
-            ticking: true,
+            natural_spawning: false,
         }
     }
 
@@ -213,22 +215,20 @@ mod tests {
     }
 
     #[test]
-    fn a_ticking_ticket_makes_the_chunk_tick_while_any_holds_it() {
+    fn natural_spawning_is_forced_while_any_such_ticket_holds_the_chunk() {
         let mut tickets = ModTickets::default();
         let owner = TicketOwner::Entity(1);
-        let quiet = ModTicket {
-            ticking: false,
+        let spawning = ModTicket {
+            natural_spawning: true,
             ..ticket("m", owner, (2, 2))
         };
-        assert!(tickets.insert(quiet.clone()));
-        assert!(tickets.holds((2, 2)) && !tickets.ticks((2, 2)));
-        // The same owner holds both kinds apart.
         assert!(tickets.insert(ticket("m", owner, (2, 2))));
-        assert!(tickets.ticks((2, 2)));
-        assert!(tickets.remove(&ticket("m", owner, (2, 2))));
-        assert!(tickets.holds((2, 2)) && !tickets.ticks((2, 2)));
-        assert!(tickets.remove(&quiet));
-        assert!(!tickets.holds((2, 2)));
+        assert!(tickets.holds((2, 2)) && !tickets.forces_natural_spawning((2, 2)));
+        // The same owner holds both kinds apart.
+        assert!(tickets.insert(spawning.clone()));
+        assert!(tickets.forces_natural_spawning((2, 2)));
+        assert!(tickets.remove(&spawning));
+        assert!(tickets.holds((2, 2)) && !tickets.forces_natural_spawning((2, 2)));
     }
 
     #[test]
