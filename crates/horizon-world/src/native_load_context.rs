@@ -13,29 +13,39 @@ pub enum DataLoadOrigin {
     ClientPreload,
 }
 
-/// Engine inputs for one load. The mod API exposes a restricted borrowed view;
-/// this type contains no game, world handles or mutable registry access.
-pub struct LoadContext {
-    origin: DataLoadOrigin,
+/// Immutable metadata captured with the loaded item data. Later data loads
+/// borrow the same registry and mod views instead of scanning them again.
+pub struct LoadInputs {
     registries: BTreeMap<String, Vec<String>>,
     settings_root: PathBuf,
     mods: Vec<String>,
 }
 
-impl LoadContext {
-    /// Assemble the inputs once at the load boundary, never in a data reader.
+impl LoadInputs {
     pub fn new(
-        origin: DataLoadOrigin,
         registries: BTreeMap<String, Vec<String>>,
         settings_root: PathBuf,
         mods: Vec<String>,
     ) -> Self {
         Self {
-            origin,
             registries,
             settings_root,
             mods,
         }
+    }
+}
+
+/// Origin and borrowed engine inputs for one owning load. This contains no
+/// game, world handles or mutable registry access.
+pub struct LoadContext<'a> {
+    origin: DataLoadOrigin,
+    inputs: &'a LoadInputs,
+}
+
+impl<'a> LoadContext<'a> {
+    /// Called at a load boundary, never by a reader of already-loaded data.
+    pub fn new(origin: DataLoadOrigin, inputs: &'a LoadInputs) -> Self {
+        Self { origin, inputs }
     }
 
     pub fn origin(&self) -> DataLoadOrigin {
@@ -44,17 +54,17 @@ impl LoadContext {
 
     /// Names in registry ID order, from the load's registry snapshot.
     pub fn registry(&self, name: &str) -> Option<&[String]> {
-        self.registries.get(name).map(Vec::as_slice)
+        self.inputs.registries.get(name).map(Vec::as_slice)
     }
 
     /// A mod's setting, read only when the load hook requests that key.
     pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        read_setting(&self.settings_root.join(mod_id), key)
+        read_setting(&self.inputs.settings_root.join(mod_id), key)
     }
 
-    /// Native mod IDs in dispatch order, captured at the boundary.
+    /// Native mod IDs in dispatch order, captured with the loaded inputs.
     pub fn mods(&self) -> &[String] {
-        &self.mods
+        &self.inputs.mods
     }
 }
 
