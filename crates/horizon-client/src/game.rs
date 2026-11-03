@@ -4304,6 +4304,25 @@ impl Game<'_> {
             }
         }
     }
+    /// A native mod's `throw_from_eyes`, with vanilla's exact motion, or
+    /// scattered in any direction when `randomly`; the id of the item entity,
+    /// unless a native mod kept it out of the level (`native_entity_join_level`).
+    fn drop_from_eyes(
+        &mut self,
+        thrown: ItemStack,
+        eye: [f64; 3],
+        randomly: bool,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
+        let r = &mut self.world.random;
+        let v = horizon_client::entities::drop_motion(r, self.yaw, self.pitch, randomly);
+        let y = eye[1] - f64::from(0.3f32);
+        self.spawn_item(thrown, [eye[0], y, eye[2]], v, 40);
+        let uuid = thrown_from_hand.then(|| self.acting_player_uuid());
+        let item = self.just_spawned_item()?;
+        item.thrower = uuid;
+        Some(item.id)
+    }
     /// The UUID of the player acting: the guest whose turn it is, else the host.
     pub(super) fn acting_player_uuid(&mut self) -> [i32; 4] {
         match self.lan_acting_uuid {

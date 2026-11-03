@@ -29,6 +29,21 @@
       "name": "living_set_equipment", "side": "server",
       "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_set_equipment",
       "receiver": "living"
+    },
+    {
+      "name": "living_drop", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_drop",
+      "receiver": "living"
+    },
+    {
+      "name": "living_is_tamed", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_is_tamed",
+      "receiver": "living"
+    },
+    {
+      "name": "living_owner", "side": "server",
+      "target": "horizon_client::game::native_living_refs::Game<'_>::native_living_owner",
+      "receiver": "living"
     }
   ]
 }
