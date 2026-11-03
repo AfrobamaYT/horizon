@@ -176,7 +176,7 @@ pub(crate) fn has_part_hook(hook: HookId) -> bool {
 
 /// Whether a scoped hook has a part or a global listener.
 pub(crate) fn has_scoped_hook(hook: HookId) -> bool {
-    has_part_hook(hook) || super::listened(hook)
+    !super::mods().is_empty() && (has_part_hook(hook) || super::listened(hook))
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
